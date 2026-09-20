@@ -658,8 +658,8 @@
       "sha256": "a850a7d3a5a52f654cc60ef2ae3b0b7557e769cb35f0c309fa17d9d8e4f9bf96"
     },
     "src/desktop.py": {
-      "bytes": 3307,
-      "sha256": "3e88fc20922421d3a2297b3cb92e04e8cbd8a4499f0dcb419e40d59a7a9d80be"
+      "bytes": 3438,
+      "sha256": "2101114e83152718b6ec3290a2021cbe3e3af7620c911cf15953687833c64bad"
     },
     "src/device_profiles.py": {
       "bytes": 3764,
@@ -846,8 +846,8 @@
       "sha256": "cdca7df6761691a5ccdcab06fd81dfb61e9f4d89787cc1ebd37893a822df9074"
     },
     "src/web/app.js": {
-      "bytes": 6665,
-      "sha256": "79a87470a6d840763b6958a3fca948c4f37a471db39d7d71f4e28258a22c6aea"
+      "bytes": 6660,
+      "sha256": "eab3bef87bfd76076fbdaf036ffa920e7b0368080db90590d1d6c4296bf98e5a"
     },
     "src/web/brand.js": {
       "bytes": 886,
@@ -878,12 +878,12 @@
       "sha256": "8fe1caa3476e8a79d2fe124bcad64fd36851977ceff410d944e9d32b48cb96cc"
     },
     "src/web/index.html": {
-      "bytes": 4739,
-      "sha256": "92e6474f17a04842784d5d02e1f6005fca978accab5a8e8d75f320c86da275a4"
+      "bytes": 4745,
+      "sha256": "d882ee56c85736575f210d61e01c4a17163991045b9ae815efd5cf9e8eab3c5b"
     },
     "src/web/installation.js": {
-      "bytes": 3450,
-      "sha256": "ea56cde12fc1fe10f07a5e126a95db8c48fd6a11de9ca64f31df2aa220e703ef"
+      "bytes": 3452,
+      "sha256": "d2e4e283e33c225a7d71cc8a93e0d63c3007cb1aa8f40c651ab1a10e2dedc2de"
     },
     "src/web/locale.js": {
       "bytes": 5768,
@@ -894,28 +894,28 @@
       "sha256": "b57dd7a251f683b34dad1b2ae06180d9b1bde614e1e20385f6bd61d5ce2464a6"
     },
     "src/web/playback.js": {
-      "bytes": 24280,
-      "sha256": "9eb1b5f233c3837d6ec7f6c609f1dc7620ead72bb25a38115edb855a8b4c6526"
+      "bytes": 24277,
+      "sha256": "ed0abb17d2b933c78500c19a4a9e40f9b6af47ce96da87630a27ed19ed22b128"
     },
     "src/web/profiles.js": {
-      "bytes": 3986,
-      "sha256": "f72807088ea0d31fceb8205351991eaa03cf0929320bbd68f8f4d808b0c88b94"
+      "bytes": 3995,
+      "sha256": "433733e2ec37e9c66130b1ff9eac50fb325c68bb059aa02297d3fe500b369e1d"
     },
     "src/web/studio.css": {
       "bytes": 10505,
       "sha256": "be35bab0ce63b419862101ac6ce637474aecfa657a8b72cdbb47b1997d3aee83"
     },
     "src/web/studio.js": {
-      "bytes": 24625,
-      "sha256": "5a569ebfb2a948f38593a9a45654459b27a9558ff4b99764a43f52fbb8f84b9d"
+      "bytes": 24614,
+      "sha256": "2941dab764c227ef84d59d87274657313f98ed3678aa6120d33e2148e306db6a"
     },
     "src/web/style.css": {
       "bytes": 6912,
       "sha256": "2a51b43fc89c2f4ca3ec726ac56cfbb335eb7358f651848946cef4876e97e67f"
     },
     "src/web/viewer.html": {
-      "bytes": 1909,
-      "sha256": "7fd0425d9fc3e84ce472b927ec471d1c4eac1dfcc11792458278a15972d136b1"
+      "bytes": 1899,
+      "sha256": "780f9b1f300c58fdfca00ee5611a7a006c9dadacac6a80fce0f5ef7b6b82aa32"
     },
     "src/web/viewer.js": {
       "bytes": 3051,
@@ -927,7 +927,7 @@
     },
     "src/web/visual.js": {
       "bytes": 10485,
-      "sha256": "90fcdf14ecac66be2f9cd353bbcb39b7e916821cb0b3e6c129c694409163b4ea"
+      "sha256": "8da35119c59ca86a9f3357ce02c19adb4ca83725e8b4865d71303add8c013256"
     },
     "src/web/workspace.css": {
       "bytes": 21443,
@@ -935,7 +935,7 @@
     },
     "src/web/workspace.js": {
       "bytes": 9672,
-      "sha256": "3f3b9b82febc8ea58bae428f52ff4ac97ab4b47e8fec777afdec9a646ffa9841"
+      "sha256": "0b37bd5f139f68002795e4dde34452f103854689b59a8fd6c3e7612d126ba8b4"
     },
     "src/web/wuji-logo.png": {
       "bytes": 20679,

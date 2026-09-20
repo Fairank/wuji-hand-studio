@@ -32,10 +32,12 @@ def self_check():
     from gesture_library import catalog
     from bridge_config import validate,DEFAULT
     import numpy as np
-    m=load_left_model();assert m.nu==20
+    from device_profiles import PROFILES,load_native_model
+    for profile_id in PROFILES:
+        m=load_native_model(profile_id);assert m.nu==20
     validate(DEFAULT)
     assert len(catalog()['actions'])>=40
-    data=dict(ok=True,edition=EDITION['name'],joints=m.nu,actions=len(catalog()['actions']),hardware_connected=False)
+    data=dict(ok=True,edition=EDITION['name'],joints=m.nu,profiles=list(PROFILES),actions=len(catalog()['actions']),hardware_connected=False)
     if '--render-check' in sys.argv:
         import mujoco as mj
         d=mj.MjData(m);mj.mj_forward(m,d)

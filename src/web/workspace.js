@@ -1,7 +1,7 @@
 (() => {
   'use strict';
   const get=id=>document.getElementById(id),app=document.querySelector('.app');
-  const pages=[['motion','动作播放','选择动作、幅度与循环，画面跟随实际反馈。'],['parameters','参数调节','修改数值后保存，再同步到控制端。'],['feedback','实时反馈','查看左手姿态与每个关节的反馈。'],['capture','触碰采集','按手指标记采样；采集不驱动机械手。'],['records','运行记录','查看实机动作结果、采集报告与活动记录。'],['connection','连接与校准','连接设备，检查显示映射与单关节对应。']];
+  const pages=[['motion','动作播放','选择动作、幅度与循环，画面跟随实际反馈。'],['parameters','参数调节','修改数值后保存，再同步到控制端。'],['feedback','实时反馈','查看手部姿态与每个关节的反馈。'],['capture','触碰采集','按手指标记采样；采集不驱动机械手。'],['records','运行记录','查看实机动作结果、采集报告与活动记录。'],['connection','连接与校准','连接设备，检查显示映射与单关节对应。']];
   const paths={motion:'M9 6l9 6-9 6z M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0',parameters:'M5 3v5m0 4v9m7-18v10m0 4v4m7-18v3m0 4v11 M2 8h6v4H2z M9 13h6v4H9z M16 6h6v4h-6z',feedback:'M4 21V11h4v10m4 0V3h4v18m4 0v-7h3v7 M2 21h22',capture:'M6 3h10l3 3v15H6z M9 8h7 M9 12h7 M9 16h4',records:'M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0 M12 6v6l4 2',connection:'M9 15l6-6 M8 16l-1 1a4 4 0 0 1-6-6l4-4a4 4 0 0 1 6 0 M16 8l1-1a4 4 0 0 1 6 6l-4 4a4 4 0 0 1-6 0'};
   pages.splice(1,0,['library','动作库','官方示例、数字、报时与字母造型。'],['interaction','触碰互动','真实反馈、识别状态与反应流程。']);
   paths.library=paths.motion;paths.interaction=paths.feedback;

@@ -28,7 +28,7 @@
     el('duration').disabled=!!state?.recording.active;
   }
   function showError(text){el('service-error').textContent=text;el('service-error').hidden=!text;}
-  function offline(){service=false;state=null;controls();el('connection-state').textContent='本机服务未连接';el('connection-message').textContent='请通过“打开左手控制台”重新打开本机服务。';for(const id of ['joint-count','device-hz','host-hz','data-age'])el(id).textContent='—';el('record-progress').textContent='采集状态未知，请恢复连接后核对';window.dispatchEvent(new Event('console-offline'));}
+  function offline(){service=false;state=null;controls();el('connection-state').textContent='本机服务未连接';el('connection-message').textContent='请通过“打开手部工作台”重新打开本机服务。';for(const id of ['joint-count','device-hz','host-hz','data-age'])el(id).textContent='—';el('record-progress').textContent='采集状态未知，请恢复连接后核对';window.dispatchEvent(new Event('console-offline'));}
   function render(next){
     state=next;service=true;
     el('connection-state').textContent=({disconnected:'未连接',connecting:'连接中',connected:next.stale?'反馈过期':'设备已连接',error:'连接未完成'})[next.connection]||'状态未知';
@@ -43,7 +43,7 @@
     const lk=JSON.stringify(next.log);
     if(lk!==logsKey){logsKey=lk;const rows=next.log.slice().reverse().map(item=>{const li=document.createElement('li');li.textContent=`${item.time}　${item.text}`;return li;});el('activity').replaceChildren(...rows);}
     const sk=JSON.stringify(next.sessions);
-    if(sk!==sessionsKey){sessionsKey=sk;const rows=next.sessions.map(item=>{const row=document.createElement('div');row.className='session-row';const p=document.createElement('p');p.textContent=`${labels[item.label]||item.label} · ${item.frames} 帧 · ${fmt(item.seconds,1)} 秒 · ${reasons[item.reason]||item.reason}`;const a=document.createElement('a');a.href='/api/report?id='+encodeURIComponent(item.id);a.textContent='导出报告';a.download='left-hand-report.json';row.append(p,a);return row;});el('sessions').replaceChildren(...rows);if(!rows.length)el('sessions').textContent='尚无采集记录';}
+    if(sk!==sessionsKey){sessionsKey=sk;const rows=next.sessions.map(item=>{const row=document.createElement('div');row.className='session-row';const p=document.createElement('p');p.textContent=`${labels[item.label]||item.label} · ${item.frames} 帧 · ${fmt(item.seconds,1)} 秒 · ${reasons[item.reason]||item.reason}`;const a=document.createElement('a');a.href='/api/report?id='+encodeURIComponent(item.id);a.textContent='导出报告';a.download='hand-report.json';row.append(p,a);return row;});el('sessions').replaceChildren(...rows);if(!rows.length)el('sessions').textContent='尚无采集记录';}
     controls();window.dispatchEvent(new CustomEvent('console-state',{detail:next}));
   }
   function freshState(){return new Promise(resolve=>{waiter={after:pollId,resolve};if(!inFlight)poll();});}

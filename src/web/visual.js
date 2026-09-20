@@ -3,7 +3,7 @@
   const fingers = ['拇指','食指','中指','无名指','小指'];
   const host = document.createElement('section');
   host.id = 'pose-console';
-  host.innerHTML = `<div class="pose-heading"><div><h2>MuJoCo · 姿态同步</h2><p id="pose-message">正在载入原生左手模型</p></div><span id="render-rate">画面刷新 —</span></div>
+  host.innerHTML = `<div class="pose-heading"><div><h2>MuJoCo · 姿态同步</h2><p id="pose-message">正在载入原生手部模型</p></div><span id="render-rate">画面刷新 —</span></div>
     <div class="pose-screen"><img id="pose-image" alt="原生手部 MuJoCo 模型预览"><div id="pose-unavailable" hidden>画面连接中断</div><span id="pose-frame">未接收实机反馈</span></div>
     <div class="joint-legend"><strong>20个关节 · 点击定位</strong><span>灰：无反馈　橙：角度预览待核对　青：已核对同步</span></div>
     <div id="joint-grid"></div>

@@ -13,7 +13,7 @@
   ['拇指','食指','中指','无名指','小指'].forEach((finger,f)=>{for(let j=0;j<4;j++){const o=document.createElement('option');o.value=f*4+j;o.textContent=`${finger} S${j+1} · 节点${f*5+j+1}`;get('probe-joint').append(o);}});
   get('probe-joint').value='6';
   const trial=document.createElement('div');trial.className='hardware-controls';
-  trial.innerHTML=`<h3>低力度整套试运行</h3><p class="hint">候选姿态尚未完成实机验收。先从25%幅度开始；官方初调示例0.5 A、慢速运行，按SDK故障等级处理。电流不是已标定的接触力。</p><label for="trial-action">实机试运行动作</label><select id="trial-action"><option value="fist">张开与轻握</option><option value="opposition">拇指依次对指姿态</option><option value="sequence">整套低力度展示</option></select><label for="trial-amplitude">动作幅度</label><select id="trial-amplitude"><option value="0.25">25% · 首轮</option><option value="0.5">50%</option><option value="0.75">75%</option><option value="1">100%</option></select><label for="trial-cycles">实机试运行循环</label><select id="trial-cycles"><option value="1">1轮</option><option value="3">3轮</option></select><label class="hint"><input id="trial-clear" type="checkbox"> 底座固定，周围无人无物，开始低力度试运行</label><button id="trial-start" class="primary" disabled>开始实机低力度试运行</button><p id="trial-status" class="hint" role="status">等待左手连接</p><p id="trial-result" class="hint" role="status"></p><p class="hint">姿态到位不等于指尖实际接触。可用下方“停止实机”随时终止；不自动增幅或加力。</p>`;
+  trial.innerHTML=`<h3>低力度整套试运行</h3><p class="hint">候选姿态尚未完成实机验收。先从25%幅度开始；官方初调示例0.5 A、慢速运行，按SDK故障等级处理。电流不是已标定的接触力。</p><label for="trial-action">实机试运行动作</label><select id="trial-action"><option value="fist">张开与轻握</option><option value="opposition">拇指依次对指姿态</option><option value="sequence">整套低力度展示</option></select><label for="trial-amplitude">动作幅度</label><select id="trial-amplitude"><option value="0.25">25% · 首轮</option><option value="0.5">50%</option><option value="0.75">75%</option><option value="1">100%</option></select><label for="trial-cycles">实机试运行循环</label><select id="trial-cycles"><option value="1">1轮</option><option value="3">3轮</option></select><label class="hint"><input id="trial-clear" type="checkbox"> 底座固定，周围无人无物，开始低力度试运行</label><button id="trial-start" class="primary" disabled>开始实机低力度试运行</button><p id="trial-status" class="hint" role="status">等待设备连接</p><p id="trial-result" class="hint" role="status"></p><p class="hint">姿态到位不等于指尖实际接触。可用下方“停止实机”随时终止；不自动增幅或加力。</p>`;
   hardware.before(trial);
   const officialOption=new Option('官方二代对指 · 限速适配','official_opposition');
   get('trial-action').add(officialOption,0);get('trial-action').value='official_opposition';
@@ -25,7 +25,7 @@
   trial.append(history);let historyKey='';
   // Keep one real-device command path; preview controls are separate and folded.
   const motionPanel=document.createElement('section');motionPanel.className='panel motion-panel';
-  motionPanel.id='real-motion-panel';motionPanel.innerHTML='<h2>真实左手 · 动作播放</h2><p class="hint">网页随实际关节反馈同步。动作仍处于实机试运行阶段。</p>';
+  motionPanel.id='real-motion-panel';motionPanel.innerHTML='<h2>真实手 · 动作播放</h2><p class="hint">网页随实际关节反馈同步。动作仍处于实机试运行阶段。</p>';
   controls.insertBefore(motionPanel,controls.children[1]);motionPanel.append(trial);
   trial.querySelector('h3').remove();trial.querySelector('p').innerHTML='<span id="active-motion-parameters">尚未连接：连接后显示实际加载的Kp、Kd和电流设置。</span> 前往<a href="#parameters">参数调节</a>修改；<a href="https://docs.wuji.tech/docs/en/wuji-hand/latest/control-guide/" target="_blank" rel="noopener">官方参数说明</a>。电流A不等于接触力N。';
   get('trial-action').add(new Option('张开并返回','open'),1);
