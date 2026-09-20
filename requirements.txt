@@ -1,0 +1,5 @@
+mujoco==3.3.7
+numpy>=2.2,<3
+Pillow>=11.3,<13
+paramiko>=3.5,<5
+scipy>=1.14,<2
