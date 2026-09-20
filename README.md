@@ -8,7 +8,13 @@
 
 ## Windows 下载和启动
 
-在 [Releases](../../releases) 选择已发布的 Windows 安装包。源码当前为 0.1.8；已发布版本以 Releases 中实际上传的安装包为准。当前用户安装，无需另装 Python。安装器检查微软 WebView2 运行时，缺少时联网安装。包暂未进行发布者代码签名，附有 SHA-256 校验文件。
+在 [Releases](../../releases) 选择实际已上传的安装包。Windows 0.1.8 保持现有安装；源码 0.1.9 增加 Mac 移植。当前用户安装，无需另装 Python。Windows 安装器检查微软 WebView2 运行时，缺少时联网安装。包暂未进行发布者代码签名，附有 SHA-256 校验文件。
+
+## macOS 0.1.9 预览
+
+Apple Silicon 版使用原生 Cocoa 窗口和 WKWebView，沿用同一软件、动作库和右上角连接入口。`.app` 内附 Ubuntu ARM64 磁盘与 Lima；首次点击安装内置控制环境需联网准备官方 SDK，以后连接时自动启动。没有 VMware 窗口，无需用户填写 SSH 配置。详见 [Mac 安装与已知限制](docs/MACOS.md)。
+
+优先使用 macOS 26 的公开玻璃 API；旧系统回退原生通透材质，减少透明时使用实色。构建验证、视觉验收、真实设备验收分别记录，不能互相替代。此版为未公证的预览包，不宣称已完成 M4 Max 的 Linux 启动、实机或外部背景折射验收。内置 Linux 暂不透传一代 USB 手；二代以太网自动发现仍需真实 Mac 验证，自定义网段可手动填写，多设备需自行选择。
 
 ## 0.1.8 全局连接与界面更新
 
@@ -36,7 +42,7 @@ Windows 使用独立原生窗口和内嵌 WebView2，不依赖浏览器应用窗
 
 ## 设备与模型边界
 
-Windows 新增[内置轻量控制环境](docs/BUILT_IN_CONTROLLER.md)，随安装包附带约 132 MiB 的 WSL 2 用户空间，不需 VMware 或 SSH 配置；首次启用缺少的 Windows 组件可能需要管理员确认及重启。也可继续选择实体 Linux 控制端。Ubuntu 可本机运行 SDK。它仍在 Linux 中运行官方 SDK，不是原生 Windows SDK；一代 USB 自动转接与 macOS 内置控制端尚未实现。详见 [控制与诊断说明](controller/README.md)、[手套说明](docs/GLOVE.md)（如对应版本提供）。
+Windows 的[内置轻量控制环境](docs/BUILT_IN_CONTROLLER.md)随安装包附带约 132 MiB 的 WSL 2 用户空间，不需 VMware 或 SSH 配置；首次启用缺少的 Windows 组件可能需要管理员确认及重启。也可继续选择实体 Linux 控制端。Ubuntu 可本机运行 SDK。Windows/Mac 内置环境仍在 Linux 中运行官方 SDK，一代 USB 自动转接尚未实现。详见 [控制与诊断说明](controller/README.md)、[手套说明](docs/GLOVE.md)（如对应版本提供）。
 
 二代左右手使用各自官方录制；新型号路径及新增编排动作未逐项完成实机验收。一代目前只开放官方张开 / 握拳实机适配，其他动作只预览。软件的 1000 Hz 是目标发送节拍，实际发送与反馈频率分别显示，不等于画面帧率或逐帧执行保证。没有因桌面改版调整电机增益或轨迹参数。
 
@@ -50,7 +56,7 @@ Python 3.12：`python -m pip install -r requirements.txt`，然后 `python src/d
 
 Windows 构建需要先按 `src/runtime_manifest.json` 准备对应压缩镜像到 `runtime_payload/`（发布包附带镜像），不把运行环境提交到 Git。然后安装 `requirements-build.txt` 后运行 `python build.py`，再使用 `python build_installer.py --iscc PATH_TO_ISCC --webview-bootstrap PATH_TO_SIGNED_MICROSOFT_BOOTSTRAP --zh-language PATH_TO_CHINESE_ISL`。安装器使用 Inno Setup 6.4.3 和对应版本中文翻译。
 
-本次优先完成 Windows；Ubuntu 已有历史 0.1.3 包，macOS 源码入口见 [Mac 指南](docs/MACOS.md)，尚未在 Mac 验证新桌面版本。不把 Windows 文件改名当作其他系统安装包。
+Ubuntu 已有历史 0.1.3 包。macOS 的原生构建在 GitHub Mac runner 上进行，真实 Mac 与机械手验收仍待完成；不把 Windows 文件改名当作 Mac 安装包。
 
 本地 Claude `claude-fable-5-1 --effort max` 协助基础 CSS、安装脚本、常规统计和文档；输出经主维护者审核修正。代码检视代替桌面操作。控制决策、模型边界和真实结果由主维护者核验。来源和许可证见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
@@ -63,3 +69,5 @@ Features include Chinese/English, minimalist glass chrome, four native hand prof
 Use the [code-only maintenance interface](docs/DESKTOP_API.md) for inspecting the app, capturing its own WebView and applying a verified local installer. The maintenance interface never controls the computer's mouse/keyboard; its screenshots redact opt-in external refraction tiles. User data is preserved across upgrades. Packages are unsigned; check the trusted release and published SHA-256. Windows is the current release target; macOS validation remains pending.
 
 Version 0.1.8 adds an always-visible connection control, discovered-device selection, refreshed translucent navigation and compact action layout. It pairs with controller image 1.0.1; upgrading the owned 1.0.0 environment preserves user parameters and records. No motor gains or trajectory settings are changed by this UI update.
+
+Version 0.1.9 adds an Apple Silicon Cocoa/WKWebView preview and a bundled Ubuntu/Lima control runtime. Initial SDK setup requires internet; subsequent VM starts are managed by the app. macOS 26 native glass is requested when available; earlier systems use vibrancy. Packages are ad-hoc signed, not notarized. Physical Mac VM startup, device operation and visual glass acceptance remain unverified. Hand 1 USB passthrough is not implemented; an external Linux controller remains available. The Mac workflow publishes a clearly marked prerelease only after a successful native build and bundle verification.

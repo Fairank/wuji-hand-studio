@@ -38,6 +38,9 @@ def image_manifest():
     return json.loads(path.read_text(encoding='utf-8')) if path.is_file() else None
 
 def status():
+    if sys.platform=='darwin':
+        from macos_runtime import status as mac_status
+        return mac_status()
     result=dict(_state,supported=sys.platform=='win32',installed=False,ready=False,distribution=NAME,uses_ssh=False,starts_motors=False)
     if sys.platform!='win32':return result
     try:
@@ -50,6 +53,9 @@ def status():
     return result
 
 def args(command,user='workbench'):
+    if sys.platform=='darwin':
+        from macos_runtime import args as mac_args
+        return mac_args(command,user)
     if sys.platform!='win32':raise RuntimeError('Managed runtime requires Windows')
     if not isinstance(command,list) or not command or not all(isinstance(x,str) and '\0' not in x for x in command):raise ValueError('Invalid runtime command')
     return ['wsl.exe','--distribution',NAME,'--user',user,'--cd',AGENT,'--exec',*command]
@@ -73,6 +79,9 @@ def _image():
     return found,manifest
 
 def start_install():
+    if sys.platform=='darwin':
+        from macos_runtime import start_install as mac_install
+        return mac_install()
     if not _lock.acquire(blocking=False):raise ValueError('Control environment setup is already running')
     _state.update(busy=True,stage='checking',error=None)
     def work():
@@ -110,6 +119,9 @@ def start_install():
     threading.Thread(target=work,name='Workbench runtime setup',daemon=True).start();return status()
 
 def select():
+    if sys.platform=='darwin':
+        from macos_runtime import select as mac_select
+        return mac_select()
     check_ready()
     from bridge_config import DEFAULT,save_config
     from runtime_paths import DATA

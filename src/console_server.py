@@ -536,7 +536,7 @@ class Handler(BaseHTTPRequestHandler):
             runtime=runtime_status()
             required=('agent_directory','python')+(('host','username') if config['mode']=='ssh' else ())
             missing=[key for key in required if not config[key]]
-            return self.reply(200,dict(edition=EDITION,version=EDITION['version'],optional_model=model_status(),local_controller_supported=sys.platform.startswith('linux'),bridge=config,controller_configured=runtime['ready'] if config['mode']=='wsl' else not missing,missing_controller_fields=missing,credential=credential_status(config),runtime=runtime,profiles=list(PROFILES.values()),selected_profile=self.server.controller.state['device_profile']['id'],unofficial=True))
+            return self.reply(200,dict(edition=EDITION,version=EDITION['version'],optional_model=model_status(),local_controller_supported=sys.platform.startswith('linux'),bridge=config,controller_configured=runtime['ready'] if config['mode'] in ('wsl','macvm') else not missing,missing_controller_fields=missing,credential=credential_status(config),runtime=runtime,profiles=list(PROFILES.values()),selected_profile=self.server.controller.state['device_profile']['id'],unofficial=True))
         if url.path in ('/api/doctor','/api/doctor/report'):
             state=self.server.controller.doctor.snapshot()
             if url.path.endswith('/report'):

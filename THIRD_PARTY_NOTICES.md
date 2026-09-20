@@ -25,3 +25,9 @@ CSS material implementation and is not an Apple product or native Apple framewor
 ## Windows edge refraction and managed runtime (0.1.6)
 
 windows-capture 2.0.0 (MIT) and OpenCV Python are used only for the optional Windows edge effect. Dependency licenses are bundled under third-party-licenses. The optional WSL user-space image is based on Canonical Ubuntu Base 24.04.5 and preserves package copyright/license files under /usr/share/doc. Official Wuji SDK/CLI 2026.8.31 are included without modification. Microsoft WSL itself is obtained separately from Microsoft if missing. See docs/BUILT_IN_CONTROLLER.md for sources and scope. No private models, account credentials or personal device records are included.
+
+## macOS preview additions (0.1.9)
+
+The Cocoa host uses pywebview (BSD-3-Clause) and PyObjC (MIT), with public Apple AppKit/WebKit/Virtualization APIs supplied by macOS. macOS 26 glass and older-system vibrancy are distinct runtime paths; visual fidelity is not claimed from source inspection.
+
+The app bundles [Lima 2.2.0](https://github.com/lima-vm/lima/releases/tag/v2.2.0) (Apache-2.0; distribution notices retained), an unmodified [Canonical Ubuntu 24.04 ARM64 cloud image](https://cloud-images.ubuntu.com/releases/noble/release-20260705/), converted losslessly from QCOW2 to raw, and the official Wuji CLI 2026.8.31 ARM64 archive. Ubuntu component licenses remain in `/usr/share/doc` inside the disk; source packages are available through Ubuntu's package sources. First setup installs the official SDK and declared Python dependencies into that guest. The build-only qemu-img conversion tool is not redistributed. Pinned upstream and final file hashes are recorded in the bundled manifest. No personal VM, private weights, credentials or hardware identity is included.

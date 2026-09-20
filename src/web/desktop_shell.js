@@ -16,7 +16,7 @@
   const reduce=document.documentElement.dataset.reduceTransparency==='true'||matchMedia('(prefers-reduced-transparency: reduce)').matches||matchMedia('(forced-colors: active)').matches;
   const result=await native.set_window_material(!reduce);
   document.documentElement.dataset.externalBackdrop=String(result.external_backdrop===true);
-  if(info)info.material=result;
+  document.documentElement.dataset.nativeMaterial=result.mode||'solid';if(info)info.material=result;
  }
  function appearance(key,value){document.documentElement.dataset[key]=String(value);try{localStorage.setItem('wuji-'+key,String(value));}catch{}if(key==='reduceTransparency')applyMaterial().catch(()=>{});}
  for(const [key,id] of [['reduceTransparency','desktop-transparency'],['reduceMotion','desktop-motion']]){
@@ -30,7 +30,7 @@
   $('desktop-viewer').textContent=t('打开独立模型窗口','Open model window');$('desktop-folder').textContent=t('打开本机数据文件夹','Open local data folder');$('desktop-quit').textContent=t('退出工作台','Quit workbench');
   for(const id of ['desktop-viewer','desktop-folder','desktop-model','desktop-quit'])$(id).disabled=!native;
   $('desktop-model').textContent=t('导入私有模型包…','Import private model pack…');
-  $('desktop-about').textContent=info?`Hand Workbench ${info.version}\n${t('灵巧手工作台 · 非官方个人工具','Unofficial personal hand workbench')}`:t('界面预览 · 桌面菜单在 Windows 软件中可用','Interface preview · Desktop commands are available in the Windows app');
+  $('desktop-about').textContent=info?`Hand Workbench ${info.version}\n${t('灵巧手工作台 · 非官方个人工具','Unofficial personal hand workbench')}`:t('界面预览 · 桌面菜单在软件窗口中可用','Interface preview · Desktop commands are available in the app');
   $('desktop-close-title').textContent=t('结束会话并退出？','End session and quit?');$('desktop-close-note').textContent=t('将停止实机动作、保存正在采集的记录并断开设备。','Stops hand motion, saves the current recording and disconnects devices.');
   $('desktop-close-cancel').textContent=t('返回工作台','Back to workbench');$('desktop-close-confirm').textContent=t('停止并退出','Stop and quit');
  }
@@ -53,16 +53,16 @@
   setAppearance(key,value){if(key==='language'){window.WujiLocale.setLanguage(value);return;}appearance(key,value);$(key==='reduceMotion'?'desktop-motion':'desktop-transparency').checked=value;},
   setMenu(opened){if(opened&&!menu.open){labels();menu.showModal();}else if(!opened)menu.close();},
   confirmClose(){menu.close();labels();$('desktop-close-status').textContent='';if(!closeDialog.open)closeDialog.showModal();}};
- async function ready(){native=window.pywebview?.api;if(!native)return;info=await native.info();document.documentElement.dataset.desktop='true';if($('studio-desktop'))$('studio-desktop').hidden=true;await native.set_language(window.WujiLocale.lang);await applyMaterial();labels();}
+ async function ready(){native=window.pywebview?.api;if(!native)return;info=await native.info();document.documentElement.dataset.desktop='true';document.documentElement.dataset.platform=info.platform;if($('studio-desktop'))$('studio-desktop').hidden=true;await native.set_language(window.WujiLocale.lang);await applyMaterial();labels();}
  window.addEventListener('pywebviewready',()=>ready().catch(e=>{$('desktop-menu-status').textContent=e.message;}));
  if(window.pywebview?.api)ready().catch(()=>{});
  window.addEventListener('wuji-language',()=>{labels();if(native)native.set_language(window.WujiLocale.lang).catch(()=>{});});
  window.addEventListener('console-state',e=>{state=e.detail;});
  for(const query of ['(prefers-reduced-transparency: reduce)','(forced-colors: active)'])matchMedia(query).addEventListener('change',()=>applyMaterial().catch(()=>{}));
  document.addEventListener('keydown',e=>{
-  if(e.ctrlKey&&e.key===','){e.preventDefault();button.click();}
-  if(e.ctrlKey&&e.shiftKey&&e.code==='KeyV'&&native){e.preventDefault();native.open_viewer();}
-  if(native&&(e.key==='F5'||e.ctrlKey&&e.code==='KeyR')){e.preventDefault();}
+  if((e.ctrlKey||e.metaKey)&&e.key===','){e.preventDefault();button.click();}
+  if((e.ctrlKey||e.metaKey)&&e.shiftKey&&e.code==='KeyV'&&native){e.preventDefault();native.open_viewer();}
+  if(native&&(e.key==='F5'||(e.ctrlKey||e.metaKey)&&e.code==='KeyR')){e.preventDefault();}
  });
  labels();
 })();

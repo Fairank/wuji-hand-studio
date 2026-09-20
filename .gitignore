@@ -20,3 +20,4 @@ private/
 *.pem
 .env*
 runtime_payload/
+macos-validation.json

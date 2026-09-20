@@ -17,7 +17,7 @@
     check.disabled=busy;repair.disabled=busy||!current?.can_configure||!choice.value||current?.setup?.state==='pending';
     if(!current){message.textContent=errorText;return;}
     const stage=current.setup?.state;
-    message.textContent=errorText||(stage==='pending'?(en()?'Waiting for Windows setup…':'等待 Windows 完成配置…'):stage==='failed'?current.setup.error:text(current.code));
+    message.textContent=errorText||(stage==='pending'?(en()?'Waiting for system setup…':'等待系统完成配置…'):stage==='failed'?current.setup.error:text(current.code));
     detail.textContent=current.adapter?`${current.adapter.name} · ${current.adapter.addresses.join(', ')||'—'}`:(en()?'First setup may request administrator approval. Wi-Fi and the default gateway stay unchanged.':'首次配置可能需要系统管理员确认。无线网络和默认网关保持原样。');
     choice.hidden=repair.hidden=!current.can_configure;
   }
@@ -25,7 +25,7 @@
     if(!window.pywebview?.api?.network_status)return null;
     busy=true;errorText='';render();
     try{
-      const info=await(await fetch('/api/installation')).json();mode=info.bridge.mode;card.hidden=mode!=='wsl';if(mode!=='wsl')return null;
+      const info=await(await fetch('/api/installation')).json();mode=info.bridge.mode;card.hidden=!['wsl','macvm'].includes(mode);if(!['wsl','macvm'].includes(mode))return null;
       current=await window.pywebview.api.network_status(address());const selected=choice.value;choice.replaceChildren();
       for(const a of current.candidates||[])choice.add(new Option(a.name,a.id));
       if([...choice.options].some(o=>o.value===selected))choice.value=selected;
@@ -43,8 +43,12 @@
     }catch(e){errorText=e.message;}finally{busy=false;render();}
   };
   window.WujiNetwork={async prepare(value){
-    const result=await refresh();if(!result||mode!=='wsl'||result.code==='usb_device')return value;
-    if(result.setup?.state==='pending')throw Error(en()?'Windows network setup is still running.':'Windows 仍在配置网络，请稍候。');
+    const result=await refresh();if(!result||!['wsl','macvm'].includes(mode)||result.code==='usb_device')return value;
+    if(result.setup?.state==='pending')throw Error(en()?'System network setup is still running.':'系统仍在配置网络，请稍候。');
+    if(mode==='macvm'&&result.code==='subnet_mismatch'&&result.candidates?.length===1){
+      const configured=await window.pywebview.api.configure_device_network(result.candidates[0].id,address());
+      if(configured.code==='subnet_ready')return value;
+    }
     if(result.code!=='subnet_ready')throw Error(text(result.code));return value;
   }};
   window.addEventListener('pywebviewready',()=>refresh().catch(()=>{}));

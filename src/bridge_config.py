@@ -17,9 +17,10 @@ def validate(values):
         out[k]=v.strip() if isinstance(v,str) else v
     if out['host'] and not re.fullmatch(r'[A-Za-z0-9_.:\-]+',out['host']):raise ValueError('Invalid host')
     if out['username'] and not re.fullmatch(r'[A-Za-z0-9_.\-]+',out['username']):raise ValueError('Invalid username')
-    if out['mode'] not in ('local','ssh','wsl'):raise ValueError('Invalid controller mode')
+    if out['mode'] not in ('local','ssh','wsl','macvm'):raise ValueError('Invalid controller mode')
     if out['mode']=='local' and not sys.platform.startswith('linux'):raise ValueError('Local SDK control requires Linux')
     if out['mode']=='wsl' and sys.platform!='win32':raise ValueError('Built-in WSL controller requires Windows')
+    if out['mode']=='macvm' and sys.platform!='darwin':raise ValueError('Built-in Mac controller requires macOS')
     for k in ('agent_directory','python','cli'):
         if out[k] and (not re.fullmatch(r'[A-Za-z0-9_./\- ]+',out[k]) or '..' in out[k].split('/')):raise ValueError('Invalid controller path')
     if out['agent_directory'] and not out['agent_directory'].startswith('/'):raise ValueError('Controller directory must be absolute')
@@ -63,6 +64,10 @@ def ssh_client(c):
 
 def bridge_client():
     c=load_config()
+    if c['mode']=='macvm':
+        from macos_runtime import MacController
+        from device_profiles import selected_profile
+        return MacController(c,selected_profile()['id'])
     if c['mode']=='wsl':
         from managed_runtime import WslController
         from device_profiles import selected_profile

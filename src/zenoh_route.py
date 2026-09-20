@@ -12,7 +12,8 @@ import time
 
 
 def managed_wsl():
-    return os.environ.get('WSL_DISTRO_NAME') == 'HandWorkbenchControl'
+    return (os.environ.get('WSL_DISTRO_NAME') == 'HandWorkbenchControl'
+            or os.environ.get('WUJI_MANAGED_RUNTIME') == 'macvm')
 
 
 def endpoint(address, side):

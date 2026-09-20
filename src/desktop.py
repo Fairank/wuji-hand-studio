@@ -88,6 +88,9 @@ def main():
     if sys.platform=='win32':
         from native_desktop import main as native_main
         return native_main()
+    if sys.platform=='darwin':
+        from macos_desktop import main as mac_main
+        return mac_main()
     choose_port()
     if not ready():
         cmd=[sys.executable,'--serve'] if getattr(sys,'frozen',False) else [sys.executable,'-u',str(RESOURCE/'desktop.py'),'--serve']

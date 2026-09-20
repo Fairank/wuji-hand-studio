@@ -68,7 +68,11 @@ class Doctor:
         return self.snapshot()
     def work(self,config,args,operation):
         try:
-            if config['mode']=='wsl':
+            if config['mode']=='macvm':
+                from macos_runtime import args as runtime_args,ensure_running,env
+                ensure_running()
+                code,out,err=local_run(['/usr/bin/env','LIMA_HOME='+env()['LIMA_HOME'],*runtime_args(args)])
+            elif config['mode']=='wsl':
                 from managed_runtime import args as runtime_args,check_ready
                 check_ready();code,out,err=local_run(runtime_args(args))
             else:code,out,err=local_run(args) if config['mode']=='local' else remote_run(config,args)

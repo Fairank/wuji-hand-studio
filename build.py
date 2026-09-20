@@ -24,7 +24,15 @@ elif sys.platform=='darwin':
     from PIL import Image
     icon=ROOT/'build-icons/app.icns';icon.parent.mkdir(exist_ok=True)
     im=Image.open('src/web/app-icon.png').convert('RGBA').resize((1024,1024))
-    im.save(icon,format='ICNS');args+=['--windowed','--icon',str(icon),'--osx-bundle-identifier','io.github.fairank.handworkbench']
+    im.save(icon,format='ICNS');args+=['--windowed','--icon',str(icon),'--osx-bundle-identifier','io.github.fairank.handworkbench',
+        '--collect-all','webview','--hidden-import','webview.platforms.cocoa','--hidden-import','macos_desktop',
+        '--hidden-import','AppKit','--hidden-import','WebKit','--hidden-import','Foundation',
+        '--add-data','src/macos_provision.sh'+os.pathsep+'.']
+    controller_source=ROOT/'build/controller-source';controller_source.mkdir(parents=True,exist_ok=True)
+    for source in (ROOT/'src').iterdir():
+        if source.is_file() and source.suffix in ('.py','.json') and not source.name.startswith('test_'):
+            shutil.copy2(source,controller_source/source.name)
+    args+=['--add-data',str(controller_source)+os.pathsep+'controller-source']
 else:
     # PyOpenGL loads its backend by plugin name; static analysis cannot see it.
     args+=['--hidden-import','OpenGL.platform.egl','--hidden-import','OpenGL.platform.glx',
@@ -43,8 +51,30 @@ args+=['--add-data',str(licenses)+os.pathsep+'third-party-licenses','src/desktop
 if '--package-only' not in sys.argv:subprocess.run(args,check=True)
 binary=ROOT/'dist'/name/(name+('.exe' if sys.platform=='win32' else ''))
 if sys.platform=='darwin':binary=ROOT/'dist'/(name+'.app')/'Contents/MacOS'/name
+if sys.platform=='darwin':
+    app=ROOT/'dist'/(name+'.app')
+    mac_payload=ROOT/'runtime_payload/macos'
+    if not (mac_payload/'manifest.json').is_file():raise RuntimeError('Mac distribution must include Linux; run scripts/prepare_macos_payload.py first')
+    shutil.copytree(mac_payload,app/'Contents/Resources/mac-runtime',dirs_exist_ok=True,symlinks=True)
+    shutil.copytree(ROOT/'docs',app/'Contents/Resources/docs',dirs_exist_ok=True)
+    for document in ('README.md','LICENSE','THIRD_PARTY_NOTICES.md'):
+        shutil.copy2(ROOT/document,app/'Contents/Resources'/document)
+    import plistlib
+    plist=app/'Contents/Info.plist'
+    info=plistlib.loads(plist.read_bytes());info.update(CFBundleDisplayName='Hand Workbench',CFBundleShortVersionString=version,
+        NSLocalNetworkUsageDescription='Discover and communicate with your Wuji hand on the local network.',
+        LSMinimumSystemVersion='13.5')
+    plist.write_bytes(plistlib.dumps(info))
+    subprocess.run(['codesign','--force','--sign','-',str(app)],check=True)
 subprocess.run([str(binary),'--self-check'],check=True)
 if '--binary-only' in sys.argv:raise SystemExit(0)
+if sys.platform=='darwin':
+    archive=ROOT/'dist'/f'{name}-{version}-macos-arm64.zip'
+    subprocess.run(['ditto','-c','-k','--sequesterRsrc','--keepParent',str(app),str(archive)],check=True)
+    with archive.open('rb') as stream:digest=hashlib.file_digest(stream,'sha256').hexdigest()
+    archive.with_name(archive.name+'.sha256').write_text(digest+'  '+archive.name+'\n')
+    print(archive)
+    raise SystemExit(0)
 # Include documentation/controller sources alongside each executable.
 platform_name={'win32':'windows','darwin':'macos'}.get(sys.platform,'ubuntu')
 arch='arm64' if platform.machine().lower() in ('arm64','aarch64') else 'x64'

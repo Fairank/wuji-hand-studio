@@ -1,72 +1,52 @@
-# macOS 源码版 / macOS source edition
+# Hand Workbench on Mac / Mac 预览版
 
-Mac 适配及启动入口已准备，**尚未在真实 Mac 上验证启动、渲染或生成安装包**。
-Windows 和 Ubuntu 的通过结果不能代表 macOS 通过。当前没有可下载的 macOS `.app`。
+0.1.9 是同一个非官方个人展示软件的 Apple Silicon 原生 Cocoa / WKWebView 版本，沿用中英文、动作库、参数页面、右上角连接入口及独立 MuJoCo 小窗。
 
-## 克隆后运行
+## 安装
 
-准备 Python 3.10–3.13（建议原生架构 Python 3.12）、Git，然后：
+仅下载 Releases 中实际存在的 `HandWorkbench-0.1.9-macos-arm64.zip`，核对 SHA-256，解压后把 `HandWorkbench.app` 放入“应用程序”。不需另装 Python、Homebrew、VMware 或填写 SSH。需要 macOS 13.5+ 和 Apple Silicon；Intel Mac 暂无此内置环境安装包。
+
+包采用本地临时签名，尚未获得 Apple Developer ID 签名和公证。首次可能被 Gatekeeper 阻止；核对来源后使用系统“隐私与安全性”中的明确允许操作，不要关闭系统检查或批量删除隔离属性。
+
+第一次在连接页点“安装内置控制环境”：校验附带 Ubuntu ARM64 磁盘、Lima 和官方诊断 CLI，在软件自己的目录创建 Linux，联网安装固定版本 SDK。需要能访问 Ubuntu 软件源和 PyPI，准备进度和错误直接显示。默认 2 CPU、2 GiB 内存、最大 12 GiB 虚拟磁盘；实际磁盘占用随使用增长。之后连接时自动启动，无需另开虚拟机。
+
+Lima 管理自己的内部密钥和本地传输，不导入个人 SSH 密钥、不转发 SSH agent。只共享软件自己的控制目录，不共享个人文件夹。安装、启动和连接均不自动播放动作。
+
+## 插手和换手
+
+二代手使用专用以太网或 USB 网卡。右上角“连接”会检查当前网卡；唯一专用网卡缺少设备子网时，请求 macOS 管理员授权添加局部地址，不改 Wi-Fi、默认网关及正在使用的其他网段。多个候选网卡在软件内选择。系统重启后临时地址可能需要再次授权。
+
+每次重新调用官方 SDK 发现设备，验证型号和真实左右手身份，然后同步模型和反馈；不把上一次序列号当成新发现。多只手由用户选择。内置模式尝试二代左右手出厂地址；自定义地址可填写，未知任意网段和其他厂商不在自动兼容承诺中。
+
+**一代 USB 透传尚未实现。** 四类原生模型及 SDK 适配不等于 Mac 内置 Linux 已能获取全部 USB 设备。一代 USB 手请使用外部 Linux 控制端，不能把二代以太网测试当作一代通过。
+
+## 玻璃与代码检视
+
+macOS 26 动态检查公开 `NSGlassEffectView`；旧系统使用 `NSVisualEffectView` 原生通透材质，减少透明时回退实色。保留系统标题栏、窗口按钮与调整大小行为，工作区保持易读。没有抓取其他窗口或屏幕。系统玻璃及外部图案折射的实际观感需真机验收，源码接入不等于视觉通过。
+
+代码检视接口可以查看软件状态和自身 WKWebView 截图，不控制电脑鼠标键盘。自身截图不能证明其他窗口背景的折射效果。
+
+## 构建和验收
+
+在 Apple Silicon Mac 安装 Python 3.12、requirements.txt、PyInstaller；构建机另需 qemu-img（例如 Homebrew qemu），仅转换构建磁盘，用户安装不用。
 
 ```sh
-git clone https://github.com/Fairank/wuji-hand-studio.git
-cd wuji-hand-studio
-bash scripts/run-macos.command
+python scripts/prepare_macos_payload.py
+python build.py
+python scripts/verify_macos_bundle.py
+open -n dist/HandWorkbench.app
 ```
 
-首次会在项目的 `.venv-macos` 安装依赖；后续检查依赖指纹，无变化直接启动。
-脚本也可在 Finder 中双击。路径支持空格、中文；不会安装 Homebrew、修改系统 Python、
-设置 SSH 或自动连接机械手。界面优先打开 Chrome/Edge 应用窗口，否则使用默认浏览器。
-**界面和 MuJoCo 预览不用虚拟机。控制真实手仍需已配置的 Linux SDK 控制端。**
+构建脚本从官方固定版本下载并校验摘要，不能导出个人 VM 作为镜像。Linux 和助手在 `.app` 内，单独拖动应用不会丢失组件。首次准备 SDK 仍需网络，不能称完全离线安装。
 
-现在只有一个 Hand Workbench 应用；私有仓库仅保存模型数据包，获取时需要自己的 GitHub 权限。
-公开安装包不附带私有权重；可选模型仅用于二代左手仿真离线识别。
+`.github/workflows/macos.yml` 在 GitHub Mac ARM64 runner 原生构建；通过后上传包和 `macos-validation.json`。`macos-v*` 标签发布预览 Release。架构、签名完整性和文件哈希不等于 VM 启动、实机连接或玻璃视觉验收。
 
-## 自检和打包
+Linux 独立目录为 ~/.hand-workbench-runtime，不改个人 ~/.lima。使用短路径避免 macOS 本地套接字路径长度限制。
 
-```sh
-bash scripts/run-macos.command --self-check --render-check
-.venv-macos/bin/python -m unittest discover -s src
-.venv-macos/bin/python -m pip install -r requirements-build.txt
-.venv-macos/bin/python build.py
-```
+数据路径沿用 `~/Library/Application Support/WujiStudio`，保留已有参数；日志 `desktop.log`。源码克隆可运行 `bash scripts/run-macos.command`，会创建项目内 `.venv-macos`。未准备 Linux 组件时仍可看界面、MuJoCo 或使用自行选择的外部 Linux。
 
-打包必须在 Mac 执行；输出架构跟随所用 Python。Apple Silicon 应用原生 arm64 Python，
-Intel 用 x64 Python。本项目使用 MuJoCo 离屏 CGL 渲染，没有调用交互式 `mujoco.viewer`，
-因此启动脚本不替换成 `mjpython`。实际 CGL 兼容性仍待 Mac 检查。
-
-本地构建没有 Developer ID 签名或 Apple 公证。没有实际 `.app` 时不能宣称通过
-Gatekeeper 或可供所有 Mac 直接安装。普通源码自检不要求 Apple 开发者证书。
-
-## 配置与排错
-
-- 运行数据：`~/Library/Application Support/WujiStudio`（保留旧路径用于配置兼容）。
-- 日志：上述目录中的 `console.log`。启动不会覆盖已调好的参数。
-- 本机端口默认 8781，普通启动遇到占用会选择空闲端口；也可固定端口运行 `WUJI_STUDIO_PORT=8782 bash scripts/run-macos.command`。
-- Python 不在常见位置：首次创建环境时指定 `WUJI_PYTHON=/absolute/path/python3.12`。
-- 无效或外部链接的 `.venv-macos` 会被拒绝并保留。自行重命名后重试；脚本不会递归删除环境。
-- 只准备环境而不启动：`WUJI_DRY_RUN=1 bash scripts/run-macos.command`（首次仍会下载依赖）。
-- 已安装环境的离线启动：`WUJI_SKIP_INSTALL=1 bash scripts/run-macos.command`。
-- 强制重新检查依赖：`WUJI_FORCE_INSTALL=1 bash scripts/run-macos.command`。
-- `WUJI_ALLOW_NON_DARWIN=1` 仅用于在 Linux 验证脚本逻辑，不代表 Mac 验收。
-
-脚本由本地 Claude **claude-opus-5 / effort max** 协助编写，维护者审核后调整；
-移除了自动递归删除，修正了解释器指定、环境路径检查和不适用于本应用的 viewer 建议。
+历史源码启动脚本由本地 Claude Opus 5 max 协助，主维护者审核。此次原生材质基础工作另交给 Fable 5.1 max；仅已审核完成的输出才会采用，构建及真实结果由主维护者核验。
 
 ## English
 
-The macOS source launcher is ready for testing. **No native Mac startup, rendering,
-`.app`, signing or notarization has been validated yet.** Use Python 3.10–3.13
-(prefer native-architecture 3.12), clone this repository and run
-`bash scripts/run-macos.command`. The commands above also cover offline checks and
-native packaging on a Mac.
-
-The launcher creates only a project-local `.venv-macos`, caches the requirements
-hash and interpreter identity, and forwards application arguments. It never
-installs a system Python, changes SSH access, connects a hand or starts motors.
-Invalid or symlinked environments are preserved and rejected. Existing venvs are
-reused; `WUJI_PYTHON` chooses the interpreter when creating a new environment.
-
-The UI and preview need no virtual machine. Hardware still requires a configured
-Linux controller; see [controller setup](../controller/README.md). Preview uses
-MuJoCo's offscreen CGL backend, not the interactive viewer. Keep the actual Mac
-render check separate from the Linux shell-regression results.
+Same unofficial app, native Cocoa/WKWebView on Apple Silicon macOS 13.5+. Ubuntu disk and Lima are bundled; initial SDK preparation needs internet. Later VM starts are app-managed. No VMware UI or user-managed SSH credentials. Dedicated Ethernet setup requests macOS approval and excludes default-route or already-configured networks. Every connection discovers and verifies the current hand; multiple hands require selection. Hand 1 USB passthrough is not implemented. macOS 26 glass falls back to native vibrancy on older systems. Ad-hoc signed, not notarized. Real VM/device and visual acceptance are separate from package checks.
