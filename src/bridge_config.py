@@ -26,7 +26,11 @@ def validate(values):
 
 def load_config():
     p=DATA/'connection.json'
-    return validate({**DEFAULT,**json.loads(p.read_text(encoding='utf-8'))}) if p.exists() else dict(DEFAULT)
+    if not p.exists():return dict(DEFAULT)
+    values=json.loads(p.read_text(encoding='utf-8'))
+    if not isinstance(values,dict):raise ValueError('Invalid connection configuration')
+    # v0.1.0 had SSH only. Upgrading it on Linux must not silently switch host.
+    return validate({**DEFAULT,'mode':'ssh',**values})
 
 def save_config(values):
     out=validate(values);DATA.mkdir(parents=True,exist_ok=True)

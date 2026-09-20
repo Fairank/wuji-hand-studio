@@ -13,6 +13,7 @@ class TransportTests(unittest.TestCase):
             p=Path(d)/'connection.json';p.write_text('{"host":"controller.invalid","username":"user"}')
             before=p.read_bytes();c=load_config()
             self.assertEqual(c['cli'],'wuji');self.assertEqual(c['host'],'controller.invalid')
+            self.assertEqual(c['mode'],'ssh')
             self.assertEqual(p.read_bytes(),before)
 
     def test_local_rejected_on_non_linux(self):

@@ -650,8 +650,8 @@
       "sha256": "e494a2146be523006c640750fe1bcf97732362adf5fefbb09537b550052b0d22"
     },
     "src/bridge_config.py": {
-      "bytes": 3821,
-      "sha256": "52f03d2e4851f22363cb5cfc84b28ecc3582eb0527f17698c411f640eff7c120"
+      "bytes": 4028,
+      "sha256": "a3a5766a9627a5ac30495fa8216fc2d246e06e41fb85bbeceac594517a81de98"
     },
     "src/capture.py": {
       "bytes": 5207,
@@ -782,8 +782,8 @@
       "sha256": "61ec96bba2f6eabd4b0bdacda814ad17b77110e31e19537907f33e491303c4e9"
     },
     "src/test_controller_transport.py": {
-      "bytes": 5345,
-      "sha256": "dba6bb343be0ab0d9e5034dfece8b916461d57ad785ba825adc6da38eaca33c7"
+      "bytes": 5391,
+      "sha256": "525d6fa6193b46f374496947cf3daabcf3ce455e6365f528a601e7530e97f869"
     },
     "src/test_desktop_port.py": {
       "bytes": 1633,
