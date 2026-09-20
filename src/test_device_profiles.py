@@ -1,4 +1,5 @@
 import math,os,tempfile,unittest
+import queue,sys
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -9,6 +10,39 @@ from official_replay import load_replay
 from bridge_config import validate,DEFAULT
 
 class ProfilesTests(unittest.TestCase):
+    def sdk_fixture(self,side='left',fail_enable=False):
+        calls=[]
+        frames=iter([SimpleNamespace(position=[.1]*20),None])
+        subscription=SimpleNamespace(recv=lambda:next(frames,None),close=lambda:calls.append('sub.close'))
+        def enable():
+            calls.append('enable')
+            if fail_enable:raise RuntimeError('synthetic enable fault')
+        hand=SimpleNamespace(serial_number='TEST',handedness_name=lambda:side,
+            joint_states=lambda:SimpleNamespace(subscribe=lambda:subscription),
+            set_all_effort_limit=lambda value:calls.append('limit'),enable=enable,
+            disable=lambda:calls.append('disable'))
+        manager=SimpleNamespace(scan=lambda:[SimpleNamespace(device_type='Hand1',address='127.0.0.1',sn='TEST')],
+            connect=lambda **kwargs:hand,disconnect_all=lambda:calls.append('disconnect'))
+        sdk=SimpleNamespace(SdkManager=SimpleNamespace(instance=lambda:manager),DeviceType=SimpleNamespace(WujiHand='Hand1'),JointCommand=object,LowPass=object)
+        return sdk,calls
+
+    def test_hand1_side_mismatch_never_enables(self):
+        from first_generation import worker_first
+        sdk,calls=self.sdk_fixture(side='right')
+        with patch.dict(sys.modules,{'wuji_sdk':sdk}),patch.dict(os.environ,{'WUJI_HAND_PROFILE':'hand1_left'}):
+            worker_first('',queue.Queue(),queue.Queue())
+        self.assertNotIn('enable',calls);self.assertIn('disconnect',calls)
+
+    def test_hand1_partial_enable_failure_is_disabled(self):
+        from first_generation import worker_first
+        sdk,calls=self.sdk_fixture(fail_enable=True);requests=queue.Queue()
+        requests.put(dict(name='hardware_trial',action='fist',workspace_clear=True,lease='a'*32,amplitude=.25,speed=.5,cycles=1))
+        requests.put(dict(name='disconnect'))
+        with patch.dict(sys.modules,{'wuji_sdk':sdk}),patch.dict(os.environ,{'WUJI_HAND_PROFILE':'hand1_left'}):
+            worker_first('',requests,queue.Queue())
+        self.assertEqual(calls.count('enable'),1);self.assertEqual(calls.count('disable'),1)
+        self.assertIn('sub.close',calls);self.assertIn('disconnect',calls)
+
     def test_four_native_models_and_all_pose_ranges(self):
         import numpy as np
         for name in PROFILES:

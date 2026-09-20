@@ -23,6 +23,11 @@ elif sys.platform=='darwin':
     icon=ROOT/'build-icons/app.icns';icon.parent.mkdir(exist_ok=True)
     im=Image.open('src/web/app-icon.png').convert('RGBA').resize((1024,1024))
     im.save(icon,format='ICNS');args+=['--windowed','--icon',str(icon),'--osx-bundle-identifier','io.github.fairank.wujistudio']
+else:
+    # PyOpenGL loads its backend by plugin name; static analysis cannot see it.
+    args+=['--hidden-import','OpenGL.platform.egl','--hidden-import','OpenGL.platform.glx',
+           '--hidden-import','OpenGL.platform.osmesa','--hidden-import','OpenGL.EGL',
+           '--hidden-import','OpenGL.GL','--hidden-import','OpenGL.osmesa']
 import importlib.metadata as metadata
 licenses=ROOT/'build-notices';licenses.mkdir(exist_ok=True)
 for distribution in metadata.distributions():

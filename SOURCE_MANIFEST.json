@@ -18,8 +18,8 @@
       "sha256": "b9ce7a101d9c5a9eaf0b938e4a79bd4356afb8ede84950f3386b1e8f33e42771"
     },
     "build.py": {
-      "bytes": 4097,
-      "sha256": "08bca806d252e2f8840ea8a3422d8c825dae7b52d25607e6acaba59509753cff"
+      "bytes": 4435,
+      "sha256": "3f1cf6f6f62a926957ce5fc70438cf6f19ad9223ca63236d82b46287026538b3"
     },
     "ci/build.yml.example": {
       "bytes": 1713,
@@ -758,8 +758,8 @@
       "sha256": "61ec96bba2f6eabd4b0bdacda814ad17b77110e31e19537907f33e491303c4e9"
     },
     "src/test_device_profiles.py": {
-      "bytes": 3754,
-      "sha256": "ecc77c41d12b600ab7d921ab94cdcc4c743a03338fe2323c174ba0e680b96e80"
+      "bytes": 5925,
+      "sha256": "cc8b0ea66be565209a48f88f76b1b8b1b9dc8bb1e33e7fe2c61b3b2b50f4a736"
     },
     "src/test_feedback_stream.py": {
       "bytes": 1858,
