@@ -79,7 +79,7 @@ class GestureTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             c=Controller(reports=Path(tmp)/'reports');c.stdin=io.StringIO()
             c.state.update(connection='connected',metrics=dict(age_ms=0.))
-            c.last_update=time.monotonic();c.state['hardware'].update(active=False,trial_ready=True,trial_controls_version=3,gesture_library_version=1)
+            c.last_update=time.monotonic();c.state['hardware'].update(active=False,trial_ready=True,trial_controls_version=3,gesture_library_version=4)
             c.action(dict(name='hardware_trial',action='clock',amplitude=.25,speed=1.,cycles=1,workspace_clear=True,clock_at='invalid browser time'))
             sent=json.loads(c.stdin.getvalue())
             self.assertLess(abs(datetime.fromisoformat(sent['clock_at']).timestamp()-time.time()),2.)

@@ -43,6 +43,7 @@ class NativeDesktop:
         self.title='灵巧手工作台 · Hand Workbench'
         self.data_dir=DATA;self.edition=EDITION;self.inspect_lock=threading.Lock()
         self.material=dict(mode='opaque',external_backdrop=False,refraction=False,desktop_capture=False)
+        self.refraction=None
 
     def start_service(self):
         from console_server import ConsoleHTTPServer,Handler,Controller
@@ -76,10 +77,37 @@ class NativeDesktop:
         from desktop_tools import OPERATIONS
         return dict(native=True,platform='windows',engine='WebView2',edition=EDITION['name'],version=EDITION['version'],
                     api_version=1,operations=OPERATIONS,data_dir=str(DATA),pid=os.getpid(),
-                    material=self.material,ready=bool(self.window and self.window.events.loaded.is_set()))
+                    material=self.material,refraction=self.refraction.status() if self.refraction else dict(enabled=False,active=False),ready=bool(self.window and self.window.events.loaded.is_set()))
+
+    def set_external_refraction(self,enabled):
+        if type(enabled) is not bool:raise ValueError('Expected boolean refraction setting')
+        if not enabled:return self.refraction.stop() if self.refraction else dict(enabled=False,active=False)
+        if self.refraction is None:
+            from System import Action
+            from external_refraction import Refraction
+            def create():self.refraction=Refraction(int(self.window.native.Handle.ToInt64()),int(self.window.native.webview.Handle.ToInt64()))
+            self.window.native.Invoke(Action(create))
+        return self.refraction.start()
+
+    def refraction_frame(self,last_seq):
+        if type(last_seq) is not int or last_seq<0:raise ValueError('Invalid frame sequence')
+        return self.refraction.read(last_seq) if self.refraction else dict(enabled=False,tiles=[],seq=0)
+
+    def install_runtime_components(self):
+        from desktop_tools import idle
+        if not idle(self.server.controller.snapshot(),self.server.controller.doctor.snapshot()):raise ValueError('Disconnect the hand before system setup')
+        # Invoked only by the user's installation button. Windows owns the UAC
+        # prompt. Do not reboot or touch existing distributions/default settings.
+        shell=ctypes.WinDLL('shell32',use_last_error=True)
+        shell.ShellExecuteW.argtypes=[ctypes.c_void_p,ctypes.c_wchar_p,ctypes.c_wchar_p,ctypes.c_wchar_p,ctypes.c_wchar_p,ctypes.c_int]
+        shell.ShellExecuteW.restype=ctypes.c_void_p
+        code=shell.ShellExecuteW(None,'runas',str(Path(os.environ['SystemRoot'])/'System32/wsl.exe'),'--install --no-distribution --web-download',None,0)
+        if not code or int(code)<=32:raise RuntimeError('System component setup was cancelled or unavailable')
+        return dict(requested=True,restart_may_be_required=True,no_automatic_restart=True)
 
     def set_window_material(self,enabled):
         if type(enabled) is not bool:raise ValueError('Expected boolean material preference')
+        if not enabled and self.refraction:self.refraction.stop()
         from System import Action
         from native_material import apply
         def update():
@@ -119,6 +147,9 @@ class NativeDesktop:
         from System.IO import MemoryStream
         from Microsoft.Web.WebView2.Core import CoreWebView2CapturePreviewImageFormat
         with self.inspect_lock:
+            # The developer inspection API may only capture our own UI. Real
+            # background tiles are always redacted, even if the user enabled them.
+            self.window.evaluate_js('window.WujiRefraction?.redact(true)')
             stream=MemoryStream();tasks=[]
             try:
                 def begin():
@@ -136,6 +167,7 @@ class NativeDesktop:
                 return dict(ok=True,mime='image/png',scope='application_webview',image=base64.b64encode(bytes(stream.ToArray())).decode('ascii'))
             finally:
                 if stream is not None:stream.Dispose()
+                self.window.evaluate_js('window.WujiRefraction?.redact(false)')
 
     def open_viewer(self):
         import webview
@@ -242,6 +274,7 @@ class NativeDesktop:
         self.window.events.loaded+=lambda:self.secure_window(self.window)
         self.window.events.resized+=self.save_bounds
         def closed():
+            if self.refraction:self.refraction.stop()
             if self.viewer is not None:self.viewer.destroy()
             self.server.shutdown()
         self.window.events.closed+=closed
@@ -263,6 +296,9 @@ class DesktopAPI:
     def select_key_file(self):return self._host.select_key_file()
     def set_language(self,lang):return self._host.set_language(lang)
     def set_window_material(self,enabled):return self._host.set_window_material(enabled)
+    def set_external_refraction(self,enabled):return self._host.set_external_refraction(enabled)
+    def refraction_frame(self,last_seq):return self._host.refraction_frame(last_seq)
+    def install_runtime_components(self):return self._host.install_runtime_components()
     def import_model_dialog(self):return self._host.import_model_dialog()
     def request_close(self):return self._host.request_close()
     def stop_and_close(self):return self._host.stop_and_close()

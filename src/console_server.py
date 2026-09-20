@@ -22,7 +22,7 @@ from motion_history import summarize as summarize_motion
 from view_camera import DEFAULT as DEFAULT_CAMERA, validate_camera
 from parameter_store import ParameterStore
 from gesture_library import catalog,CATALOG,CUSTOM_IDS
-from performance_program import PROGRAM_IDS, NEW_DANCE_IDS
+from performance_program import PROGRAM_IDS, NEW_DANCE_IDS, DANCES
 from playback_rates import PLAYBACK_SPEEDS
 
 from runtime_paths import RESOURCE, DATA, initialize
@@ -156,6 +156,17 @@ class Controller:
         self.stdin.flush()
 
     def action(self, command):
+        if isinstance(command,dict) and command.get('name') in {'connect','runtime_select','bridge_config_save','bridge_password_save','bridge_password_forget','parameters_sync','doctor_version','doctor_run','device_profile_select','glove_connect'}:
+            from managed_runtime import status as runtime_status
+            if runtime_status()['busy']:
+                raise ValueError('内置控制环境正在安装，请等待完成 / Wait for controller setup to finish')
+        if isinstance(command,dict) and command.get('name') in {'runtime_install','runtime_select'}:
+            from managed_runtime import start_install,select,status
+            with self.lock:
+                if self.state['connection']!='disconnected' or self.state['hardware'].get('active') is not False or self.glove.busy or self.doctor.snapshot()['running'] or self.parameters.sync_status['busy']:
+                    raise ValueError('Disconnect devices before setting up the control environment / 请先断开设备再配置控制环境')
+                if command['name']=='runtime_select':select();return dict(runtime=status())
+                return dict(runtime=start_install())
         # Serialize starts and configuration changes with diagnostics. RLock
         # also covers existing command branches that take the same lock.
         with self.lock:return self._action(command)
@@ -192,11 +203,17 @@ class Controller:
                 self.state['device_profile']=save_profile(command.get('profile'))
                 self.state['mapping']=[];self.state['mapping_device_id']=None
                 return dict(device_profile=self.state['device_profile'])
-        if isinstance(command,dict) and command.get('name') == 'bridge_config_save':
+        if isinstance(command,dict) and command.get('name') in {'bridge_config_save','bridge_password_save','bridge_password_forget'}:
             if self.state['connection'] != 'disconnected' or self.state['hardware'].get('active') is not False:
                 raise ValueError('Disconnect before editing controller settings / 先断开再修改控制端')
-            from bridge_config import save_config
-            save_config(command.get('values'))
+            if self.glove.busy or self.doctor.snapshot()['running'] or self.parameters.sync_status['busy']:
+                raise ValueError('Wait for the controller session to finish / 请先结束控制端会话')
+            from bridge_config import save_config,load_config
+            if command['name']=='bridge_config_save':save_config(command.get('values'))
+            else:
+                from controller_credentials import save,forget
+                if command['name']=='bridge_password_save':save(load_config(),command.get('password'))
+                else:forget(load_config())
             return dict(saved=True)
         if isinstance(command,dict) and command.get('name') in {'desktop_viewer','desktop_open'}:
             from desktop import open_app
@@ -248,7 +265,9 @@ class Controller:
                         fast=type(command.get('speed',1.)) in {int,float} and command.get('speed',1.)>1
                         if fast and self.state['device_profile']['generation']=='hand1':
                             raise ValueError('一代实机暂不支持超过1倍；可用画面预览 / Hand 1 supports up to 1x on hardware')
-                        required=3 if fast or command.get('action') in NEW_DANCE_IDS else 2 if command.get('action') in PROGRAM_IDS else 1
+                        action_id=command.get('action','')
+                        revised=action_id in DANCES or action_id in {'count_digits','clock','text_sequence','splay'} or str(action_id).startswith('digit_')
+                        required=4 if revised else 3 if fast else 2 if action_id in PROGRAM_IDS else 1
                         version=hardware.get('gesture_library_version',0)
                         if (fast or command.get('action') in CUSTOM_IDS) and (type(version) is not int or version<required):
                             raise ValueError('控制端需升级到对应动作库版本，再重新连接 / Update the controller gesture library, then reconnect')
@@ -488,10 +507,16 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(200,host.info() if host else dict(native=False,api_version=1,operations=[]))
         if url.path == '/api/installation':
             from bridge_config import load_config
+            from controller_credentials import status as credential_status
             from device_profiles import PROFILES
             from runtime_paths import EDITION
             from model_pack import status as model_status
-            return self.reply(200,dict(edition=EDITION,version=EDITION['version'],optional_model=model_status(),local_controller_supported=sys.platform.startswith('linux'),bridge=load_config(),profiles=list(PROFILES.values()),selected_profile=self.server.controller.state['device_profile']['id'],unofficial=True))
+            config=load_config()
+            from managed_runtime import status as runtime_status
+            runtime=runtime_status()
+            required=('agent_directory','python')+(('host','username') if config['mode']=='ssh' else ())
+            missing=[key for key in required if not config[key]]
+            return self.reply(200,dict(edition=EDITION,version=EDITION['version'],optional_model=model_status(),local_controller_supported=sys.platform.startswith('linux'),bridge=config,controller_configured=runtime['ready'] if config['mode']=='wsl' else not missing,missing_controller_fields=missing,credential=credential_status(config),runtime=runtime,profiles=list(PROFILES.values()),selected_profile=self.server.controller.state['device_profile']['id'],unofficial=True))
         if url.path in ('/api/doctor','/api/doctor/report'):
             state=self.server.controller.doctor.snapshot()
             if url.path.endswith('/report'):
@@ -535,9 +560,9 @@ class Handler(BaseHTTPRequestHandler):
         assets.update({'/workspace.js':('workspace.js','text/javascript; charset=utf-8'),
             '/workspace.css':('workspace.css','text/css; charset=utf-8'),
             '/parameters.js':('parameters.js','text/javascript; charset=utf-8')})
-        for name in ('studio.js','locale.js','floating_panel.js','viewer.js','action_picker.js','brand.js','installation.js','profiles.js','doctor.js','glove.js','desktop_shell.js'):
+        for name in ('studio.js','locale.js','floating_panel.js','viewer.js','action_picker.js','brand.js','installation.js','profiles.js','doctor.js','glove.js','desktop_shell.js','external_refraction.js'):
             assets['/'+name]=(name,'text/javascript; charset=utf-8')
-        for name in ('studio.css','floating_panel.css','glass.css','glove.css','desktop_glass.css'):
+        for name in ('studio.css','floating_panel.css','glass.css','glove.css','desktop_glass.css','desktop_refinement.css'):
             assets['/'+name]=(name,'text/css; charset=utf-8')
         assets['/viewer']=('viewer.html','text/html; charset=utf-8')
         assets['/favicon.ico']=('favicon.ico','image/x-icon')

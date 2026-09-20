@@ -13,7 +13,7 @@ def export_program(action,text,profile_id,format='json'):
         return performance_preview_pose(q,profile_id)
     result=dict(data,device_profile=profile_id,units=dict(time='s',position='rad',velocity='rad/s'),
         joints=LABELS,basis='nominal_authored_kinematic_targets_not_measured_feedback',
-        hardware_requires='Hand2 controller v2, measured-start rebasing, amplitude and configured-speed retiming',
+        hardware_requires='Hand2 controller gesture library v4, measured-start rebasing, amplitude and configured-speed retiming',
         hand1_preview_only=p['generation']=='hand1',
         points=[dict(k,q=adapted(k['q']),**({'v':[(-v if i==1 and k['q'][1]<0 and p['generation']=='hand1' else v) for i,v in enumerate(k['v'])]} if 'v' in k else {})) for k in data['points']])
     if p['generation']=='hand1':

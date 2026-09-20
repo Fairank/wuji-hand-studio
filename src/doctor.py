@@ -17,7 +17,7 @@ def doctor_args(config,operation,serial=''):
 def local_run(args):
     if args[0]=='wuji':args[0]=shutil.which('wuji') or str(Path.home()/'.local/bin/wuji')
     p=subprocess.Popen(args,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,
-        env={**os.environ,'WUJI_NO_UPDATE_CHECK':'1'})
+        env={**os.environ,'WUJI_NO_UPDATE_CHECK':'1'},creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
     chunks=queue.Queue();output=[bytearray(),bytearray()];closed=0;deadline=time.monotonic()+45
     def read(stream,index):
         try:
@@ -68,7 +68,10 @@ class Doctor:
         return self.snapshot()
     def work(self,config,args,operation):
         try:
-            code,out,err=local_run(args) if config['mode']=='local' else remote_run(config,args)
+            if config['mode']=='wsl':
+                from managed_runtime import args as runtime_args,check_ready
+                check_ready();code,out,err=local_run(runtime_args(args))
+            else:code,out,err=local_run(args) if config['mode']=='local' else remote_run(config,args)
             report=dict(operation=operation,command=args,exit_code=code,stdout=out,stderr=err,finished=time.time(),motor_commands_sent=False,cli_result_unmodified=True)
             if operation=='diagnose':
                 from doctor_report import flatten_report

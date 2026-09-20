@@ -1,0 +1,27 @@
+import base64,io,unittest
+import numpy as np
+from PIL import Image
+from external_refraction import crop_tiles
+
+class EdgeCropTests(unittest.TestCase):
+    def test_retains_only_bounded_border_tiles(self):
+        frame=np.zeros((900,1600,4),dtype=np.uint8);frame[:]=[220,220,220,255]
+        frame[350:550,500:1000,:3]=[0,0,255] # Sensitive center must never reach returned tiles.
+        tiles=crop_tiles(frame,(100,100,1300,700),1.25)
+        self.assertEqual({t['side'] for t in tiles},{'top','left','right','bottom'})
+        count=0
+        for tile in tiles:
+            image=np.array(Image.open(io.BytesIO(base64.b64decode(tile['url'].split(',')[1]))))
+            self.assertFalse(np.any(image[:,:,0]>image[:,:,1]+10))
+            count+=image.shape[0]*image.shape[1]
+            self.assertTrue(min(tile['texture_size'])<=64)
+        self.assertLess(count,1300*700*.3)
+    def test_off_screen_edges_do_not_wrap_to_other_side(self):
+        frame=np.zeros((400,400,4),dtype=np.uint8);frame[:,:,2]=255
+        tiles=crop_tiles(frame,(-15,-10,300,300))
+        image=np.array(Image.open(io.BytesIO(base64.b64decode(tiles[0]['url'].split(',')[1]))))
+        self.assertGreater(int(image[2,2,1]),230) # padded white, not wrapped red
+    def test_rejects_implausible_geometry(self):
+        self.assertEqual(crop_tiles(np.zeros((2,2,4),dtype=np.uint8),(0,0,10,10)),[])
+
+if __name__=='__main__':unittest.main()

@@ -45,7 +45,7 @@ class ExpansionTests(unittest.TestCase):
                 command=dict(name='hardware_trial',action=action,speed=speed,amplitude=.25,cycles=1,workspace_clear=True)
                 with self.assertRaisesRegex(ValueError,'动作库版本'):c.action(command)
                 self.assertEqual(c.stdin.getvalue(),'');self.assertIsNone(c.hardware_lease)
-                c.state['hardware']['gesture_library_version']=3;c.action(command)
+                c.state['hardware']['gesture_library_version']=4;c.action(command)
                 self.assertEqual(json.loads(c.stdin.getvalue())['speed'],speed)
 
     def test_code_preview_never_controls_active_hardware_or_accepts_raw_values(self):

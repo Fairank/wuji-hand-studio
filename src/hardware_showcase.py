@@ -105,7 +105,7 @@ class HardwareShowcase:
             probe_ready=self.probe_ready and not self.owned,probe_reason=self.probe_reason,
             probe_result=self.probe_result,probe_index=self.probe['index'] if self.probe else None,
             warnings=self.warnings,comm_stable=self.comm_healthy,
-            trial_controls_version=3,gesture_library_version=3,warning_policy='official_sdk_severity',
+            trial_controls_version=3,gesture_library_version=4,warning_policy='official_sdk_severity',
             commissioning_policy=settings(),
             execution_version=EXECUTION_VERSION,command_timing=dict(self.publish_timing.snapshot(),
                 missed_deadlines=getattr(getattr(self,'cadence',None),'missed',0)),

@@ -1,0 +1,121 @@
+"""Opt-in Windows background capture, cropped immediately to four narrow edge tiles.
+
+No image files, network transport, replay buffer or automatic startup. The full WGC
+frame exists only in its callback. DesktopAPI exposes tiles only to our own WebView.
+"""
+import base64,ctypes,io,os,threading,time
+from ctypes import wintypes as W
+from PIL import Image
+
+def crop_tiles(frame,rect,scale=1.):
+    """rect is WebView's physical-pixel bounds relative to the capture source."""
+    x,y,w,h=rect;scale=max(.75,min(4.,float(scale)))
+    edge=max(10,round(20*scale));pad=round(14*scale)
+    if w<200 or h<200 or w>12000 or h>8000:return []
+    specs=[('top',0,0,w,edge),('bottom',0,h-edge,w,edge),
+           ('left',0,edge,edge,h-2*edge),('right',w-edge,edge,edge,h-2*edge)]
+    rows=[];fh,fw=frame.shape[:2]
+    for name,left,top,width,height in specs:
+        a,b,c,d=left-pad,top-pad,left+width+pad,top+height+pad
+        sx0,sy0,sx1,sy1=max(0,x+a),max(0,y+b),min(fw,x+c),min(fh,y+d)
+        if sx1<=sx0 or sy1<=sy0:continue
+        # Copy only the edge, then release the WGC frame after this callback.
+        import numpy as np
+        tile=np.empty((d-b,c-a,3),dtype=np.uint8);tile[:]=245
+        tile[sy0-y-b:sy1-y-b,sx0-x-a:sx1-x-a]=frame[sy0:sy1,sx0:sx1,2::-1]
+        image=Image.fromarray(tile);buf=io.BytesIO();image.save(buf,format='JPEG',quality=83)
+        rows.append(dict(side=name,rect=[left/scale,top/scale,width/scale,height/scale],
+            texture_size=[c-a,d-b],pad=pad,url='data:image/jpeg;base64,'+base64.b64encode(buf.getvalue()).decode('ascii')))
+    return rows
+
+class Geometry:
+    def __init__(self,hwnd,web_hwnd):
+        self.hwnd,self.web_hwnd=hwnd,web_hwnd;self.u=ctypes.WinDLL('user32',use_last_error=True)
+        self.u.GetClientRect.argtypes=[W.HWND,ctypes.POINTER(W.RECT)];self.u.ClientToScreen.argtypes=[W.HWND,ctypes.POINTER(W.POINT)]
+        self.u.IsIconic.argtypes=[W.HWND];self.u.GetDpiForWindow.argtypes=[W.HWND];self.u.GetDpiForWindow.restype=W.UINT
+        self.u.GetWindowDisplayAffinity.argtypes=[W.HWND,ctypes.POINTER(W.DWORD)]
+        self.u.SetWindowDisplayAffinity.argtypes=[W.HWND,W.DWORD]
+        self.u.GetWindowThreadProcessId.argtypes=[W.HWND,ctypes.POINTER(W.DWORD)]
+        pid=W.DWORD();self.u.GetWindowThreadProcessId(hwnd,ctypes.byref(pid))
+        if pid.value!=os.getpid():raise ValueError('Refraction requires the owned workbench window')
+        self.old_affinity=None
+    def exclude(self):
+        old=W.DWORD()
+        if not self.u.GetWindowDisplayAffinity(self.hwnd,ctypes.byref(old)):raise RuntimeError('Cannot read capture exclusion')
+        self.old_affinity=old.value
+        if not self.u.SetWindowDisplayAffinity(self.hwnd,0x11):raise RuntimeError('Cannot exclude workbench from background capture')
+    def restore(self):
+        if self.old_affinity is not None:self.u.SetWindowDisplayAffinity(self.hwnd,self.old_affinity);self.old_affinity=None
+    def bounds(self):
+        if self.u.IsIconic(self.hwnd):return None
+        point=W.POINT();rect=W.RECT()
+        if not self.u.GetClientRect(self.web_hwnd,ctypes.byref(rect)) or not self.u.ClientToScreen(self.web_hwnd,ctypes.byref(point)):return None
+        monitors=[];CB=ctypes.WINFUNCTYPE(W.BOOL,W.HANDLE,W.HDC,ctypes.POINTER(W.RECT),W.LPARAM)
+        def collect(handle,dc,area,data):
+            r=area.contents;monitors.append((r.left,r.top,r.right,r.bottom));return True
+        self.u.EnumDisplayMonitors.argtypes=[W.HDC,ctypes.c_void_p,CB,W.LPARAM]
+        self.u.EnumDisplayMonitors(None,None,CB(collect),0)
+        # The WGC library uses the same EnumDisplayMonitors enumeration (1-based).
+        for index,(l,t,r,b) in enumerate(monitors,1):
+            if l<=point.x and t<=point.y and point.x+rect.right<=r and point.y+rect.bottom<=b:
+                return (index,l,t,r-l,b-t,point.x-l,point.y-t,rect.right,rect.bottom,max(1,self.u.GetDpiForWindow(self.hwnd))/96.)
+        return None # A straddling window uses Acrylic; no wrong-monitor pixels.
+
+class Refraction:
+    def __init__(self,hwnd,web_hwnd):
+        self.geometry=Geometry(hwnd,web_hwnd);self.lock=threading.Lock();self.stop_event=threading.Event()
+        self.thread=None;self.control=None;self.tiles=[];self.seq=0;self.reason='off';self.frame_at=0.;self.generation=0
+        self.enabled=False;self.last_request=time.monotonic()
+    def status(self):
+        with self.lock:return dict(enabled=self.enabled,active=bool(self.tiles),reason=self.reason,frames=self.seq,
+            desktop_capture=self.enabled,storage='memory_only_edge_tiles',frame_age_s=round(time.monotonic()-self.frame_at,2) if self.frame_at else None)
+    def start(self):
+        if self.enabled:return self.status()
+        self.geometry.exclude();self.enabled=True;self.stop_event.clear();self.reason='starting';self.last_request=time.monotonic()
+        self.thread=threading.Thread(target=self._run,name='Workbench edge backdrop',daemon=True);self.thread.start();return self.status()
+    def _halt_capture(self):
+        if self.control is not None:
+            control,self.control=self.control,None
+            control.stop()
+    def _run(self):
+        try:
+            from windows_capture import WindowsCapture
+            bounds=None
+            while not self.stop_event.wait(.08):
+                if time.monotonic()-self.last_request>3:break # Hidden/closed WebView no longer asks for pixels.
+                current=self.geometry.bounds()
+                if current!=bounds:
+                    self.generation+=1;generation=self.generation;self._halt_capture();bounds=current
+                    with self.lock:self.tiles=[];self.reason='window_outside_single_display' if not bounds else 'starting'
+                    if bounds:
+                        index,l,t,fw,fh,x,y,w,h,scale=bounds
+                        capture=WindowsCapture(cursor_capture=False,draw_border=True,minimum_update_interval=50,monitor_index=index)
+                        captured_bounds=bounds
+                        def on_frame_arrived(frame,control,epoch=generation,b=captured_bounds):
+                            if self.stop_event.is_set() or epoch!=self.generation:control.stop();return
+                            if (frame.width,frame.height)!=(b[3],b[4]):return
+                            tiles=crop_tiles(frame.frame_buffer,(b[5],b[6],b[7],b[8]),b[9])
+                            with self.lock:
+                                if epoch!=self.generation:return
+                                self.tiles=tiles;self.seq+=1;self.frame_at=time.monotonic();self.reason='active'
+                        def on_closed():pass
+                        capture.event(on_frame_arrived);capture.event(on_closed)
+                        self.control=capture.start_free_threaded()
+                elif self.control is not None and self.control.is_finished():
+                    self.reason='capture_ended';break
+        except Exception as error:self.reason='capture_unavailable:'+type(error).__name__
+        finally:
+            try:self._halt_capture()
+            finally:
+                self.geometry.restore()
+                with self.lock:self.tiles=[];self.enabled=False
+    def read(self,last_seq=0):
+        self.last_request=time.monotonic()
+        with self.lock:return dict(enabled=self.enabled,reason=self.reason,seq=self.seq,
+            tiles=self.tiles if self.enabled and last_seq!=self.seq else [])
+    def stop(self):
+        self.stop_event.set()
+        if self.thread is not None:self.thread.join(timeout=2)
+        with self.lock:self.tiles=[];self.enabled=False;self.reason='off'
+        self.geometry.restore()
+        return self.status()

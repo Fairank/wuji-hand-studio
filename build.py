@@ -14,6 +14,7 @@ args=[sys.executable,'-m','PyInstaller','--noconfirm','--clean','--onedir','--na
     '--add-data','src/official_data'+os.pathsep+'official_data',
     '--add-data','src/trial_sdk_poses.json'+os.pathsep+'.','--add-data','src/motion_parameters.py'+os.pathsep+'.',
     '--add-data','src/edition.json'+os.pathsep+'.','--add-data','LICENSE'+os.pathsep+'.',
+    '--add-data','src/runtime_manifest.json'+os.pathsep+'.',
     '--add-data','THIRD_PARTY_NOTICES.md'+os.pathsep+'.']
 if (ROOT/'src/private_models').exists():raise RuntimeError('Private models are optional local data and must not be bundled')
 if sys.platform=='win32':args+=['--windowed','--icon','src/WujiStudio.ico','--collect-all','webview','--collect-all','pythonnet','--collect-all','clr_loader','--hidden-import','webview.platforms.winforms','--hidden-import','webview.platforms.edgechromium']
@@ -53,7 +54,9 @@ for f in ('README.md','LICENSE','THIRD_PARTY_NOTICES.md'):shutil.copy2(ROOT/f,re
 if (ROOT/'docs').is_dir():shutil.copytree(ROOT/'docs',release/'docs')
 shutil.copytree(ROOT/'scripts',release/'scripts',ignore=shutil.ignore_patterns('__pycache__'))
 shutil.copytree(ROOT/'controller',release/'controller',dirs_exist_ok=True)
-shutil.copytree(ROOT/'src',release/'controller/source',ignore=shutil.ignore_patterns('__pycache__','private_models','test_*','desktop.py','web','assets'),dirs_exist_ok=True)
+shutil.copytree(ROOT/'src',release/'controller/source',ignore=shutil.ignore_patterns('__pycache__','private_models','test_*','desktop.py','web'),dirs_exist_ok=True)
+if sys.platform=='win32' and (ROOT/'runtime_payload').is_dir():
+    shutil.copytree(ROOT/'runtime_payload',release/item.name/'runtime',dirs_exist_ok=True)
 if sys.platform=='darwin':
     archive=ROOT/'dist'/(release.name+'.zip')
     subprocess.run(['ditto','-c','-k','--sequesterRsrc','--keepParent',str(release),str(archive)],check=True)

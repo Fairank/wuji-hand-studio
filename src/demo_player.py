@@ -156,9 +156,9 @@ class PoseLibrary:
         q=self.open.copy()
         if action=='fist':q=(1-pulse)*q+pulse*self.fist
         elif action=='open':
-            q[1::4]+=np.array([.1,.22,.08,-.1,-.22])*pulse
+            q[1::4]+=np.array([.1,-.22,-.08,.1,.22])*pulse
             q[0::4]*=1-.8*pulse;q[2::4]*=1-.8*pulse;q[3::4]*=1-.8*pulse
-        elif action=='splay':q[1::4]+=np.array([.15,.25,.12,-.12,-.25])*math.sin(2*math.pi*phase)
+        elif action=='splay':q[1::4]+=np.array([.15,-.30,-.12,.12,.30])*math.sin(2*math.pi*phase)
         elif action=='opposition':
             p=phase*4;index=min(3,int(p));blend=math.sin(math.pi*(p-index))**2
             q=(1-blend)*q+blend*self.pairs[index]

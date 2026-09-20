@@ -6,7 +6,7 @@ from pathlib import Path
 PAGES = ('library', 'feedback', 'parameters', 'connection', 'glove', 'doctor',
          'interaction', 'capture', 'records')
 OPERATIONS = ('inspect', 'capture', 'page', 'resize', 'appearance', 'menu',
-              'viewer', 'close_idle', 'prepare_update', 'import_model', 'preview', 'picker')
+              'viewer', 'close_idle', 'prepare_update', 'import_model', 'preview', 'picker', 'refraction_check')
 
 
 def idle(state, doctor):
@@ -61,6 +61,10 @@ def dispatch(host, payload):
         return host.inspect()
     if op == 'capture':
         return host.capture()
+    if op == 'refraction_check':
+        if not idle(host.server.controller.snapshot(),host.server.controller.doctor.snapshot()):
+            raise ValueError('Visual check requires an idle, disconnected workbench')
+        return host.window.evaluate_js('window.WujiRefraction.selfTest()')
     if op == 'page':
         if payload.get('page') not in PAGES:
             raise ValueError('Unsupported page')

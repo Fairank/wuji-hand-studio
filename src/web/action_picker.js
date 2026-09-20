@@ -16,6 +16,10 @@
       const value=valid();$('symbol-apply').disabled=!value||busy;
       $('symbol-error').textContent=input.value.trim()&&!value?text(kind==='letters'?'请输入 A–Z、0–9 和空格，最多 48 个字符':'请输入一位数字 0–9',kind==='letters'?'Use A–Z, 0–9 and spaces; up to 48 characters.':'Enter one digit, 0–9.'):'\u00a0';
       for(const b of $('symbol-options').children)b.setAttribute('aria-pressed',String(b.textContent===value));
+      if(kind==='numbers'){
+        const item=catalog.find(x=>x.id==='digit_'+value);
+        $('symbol-help').textContent=(item?text(item.description_zh||'',item.description_en||'')+'。 ':'')+text('采用中国大陆常用比数方式；各地有不同习惯。选择后点击播放。','Uses a common mainland Chinese convention; regional variants exist. Press play after selecting.');
+      }
     }
     function dialogLabels(){
       $('symbol-title').textContent=text(kind==='letters'?'让手说一段话':'选择数字',kind==='letters'?'Say it with the hand':'Choose a digit');
@@ -53,6 +57,7 @@
       [select,$('choose-letter'),$('choose-digit')].forEach(x=>x.disabled=busy||!catalog.length);
       if(selected==='text_sequence')$('action-selection-note').textContent=text('依次展示：','Sequence: ')+phrase;
       if(item?.group==='dance')$('action-selection-note').textContent=text('真人教程启发 · 连续关节曲线 · 固定底座改编','Inspired by human tutorials · continuous curves · fixed-base adaptation');
+      if(item?.id.startsWith('digit_'))$('action-selection-note').textContent=text(item.description_zh,item.description_en);
       const exportable=selected==='text_sequence'||selected==='letter_J'||selected==='letter_Z'||item?.group==='dance';
       const link=$('performance-export');link.hidden=!exportable;link.textContent=text('下载关节轨迹 · 1000 Hz CSV','Download joint trajectory · 1000 Hz CSV');
       link.href='/api/performance?action='+encodeURIComponent(selected)+'&text='+encodeURIComponent(phrase)+'&format=csv';

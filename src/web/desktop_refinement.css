@@ -1,0 +1,42 @@
+/* Internal controls: quieter desktop hierarchy. External material remains native. */
+:root{--hw-fast:140ms;--hw-normal:190ms;--hw-modal:220ms;--dg-line-strong:rgba(0,0,0,.14)}
+body{font-size:14px;letter-spacing:0}
+.page-heading h2{font-size:27px;line-height:1.25;font-weight:650;letter-spacing:-.5px}
+.page-heading{margin-bottom:24px}
+.directory a[aria-current=page]{background:rgba(0,106,220,.085);box-shadow:none;font-weight:600}
+.directory a{border-radius:9px;min-height:38px}
+body :is(button,.button):where(:not([class*=handle i],[class*=resize i])){min-height:40px;border-radius:10px;box-shadow:0 1px 1px rgba(0,0,0,.035),inset 0 1px 0 rgba(255,255,255,.65);transition:background-color 140ms ease,border-color 140ms ease,box-shadow 140ms ease,color 140ms ease}
+body :is(button,.button):where(:active:not(:disabled,[class*=handle i],[class*=resize i])){transform:none;background:#ededf0;box-shadow:inset 0 1px 2px rgba(0,0,0,.07)}
+body :is(button,.button):is(.primary,.btn-primary,[data-primary],[type=submit]){border-radius:10px;box-shadow:inset 0 1px 0 rgba(255,255,255,.22);font-weight:600}
+body :is(select,textarea,input):not([type=checkbox],[type=radio],[type=range],[type=color],[type=file],[type=button],[type=submit],[type=reset]){min-height:40px;border-radius:10px;padding:8px 11px;font-size:14px;border-color:var(--dg-line-strong)}
+#page-library .motion-field label{font-size:13px;font-weight:500;color:var(--dg-label);margin-bottom:7px}
+#page-library .motion-fields{gap:18px 16px}
+#page-library #studio-action{font-size:15px;min-height:46px;padding:10px 12px}
+.symbol-shortcuts{gap:8px}
+.symbol-shortcuts button{font-size:13px!important}
+.playback-modes,.symbol-kinds{padding:3px;border-radius:11px;background:rgba(0,0,0,.045);border:1px solid rgba(0,0,0,.025);box-shadow:inset 0 1px 2px rgba(0,0,0,.035)}
+body .playback-modes button,body .symbol-kinds button{border:0;min-height:36px;background:transparent;border-radius:8px;box-shadow:none;color:var(--dg-text-2)}
+body .playback-modes button[aria-pressed=true],body .symbol-kinds button[aria-pressed=true]{background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.13);color:var(--dg-blue);border:0}
+#motion-amplitude-note{font-size:12px;line-height:1.65;min-height:36px;margin:10px 0 14px;color:var(--dg-text-2)}
+.symbol-dialog{box-sizing:border-box;width:min(560px,calc(100vw - 32px));max-width:calc(100vw - 32px);padding:24px;border-radius:20px;border:1px solid rgba(0,0,0,.12);box-shadow:0 18px 64px rgba(0,0,0,.16)}
+.symbol-dialog header{align-items:center;margin-bottom:20px}
+.symbol-dialog h2{font-size:23px;letter-spacing:-.3px}
+.symbol-dialog footer{display:flex;justify-content:flex-end;gap:10px;margin-top:22px}
+.symbol-dialog::backdrop{background:rgba(20,20,25,.16)}
+.symbol-dialog .symbol-options{gap:8px;margin-top:16px}
+.symbol-dialog .symbol-options button{min-width:40px;min-height:40px;border-radius:9px;font-variant-numeric:tabular-nums}
+body .symbol-dialog .symbol-options button[aria-pressed=true]{background:rgba(0,106,220,.09);box-shadow:inset 0 0 0 1px var(--dg-blue);border-color:transparent}
+.library-reference{border-top:1px solid var(--dg-line);padding-top:12px}
+.library-reference summary{font-size:13px;color:var(--dg-text-2)}
+@media(pointer:coarse){body :is(button,select,input):not([type=checkbox],[type=radio],[type=range]){min-height:44px}}
+@media(max-width:900px){.page-heading h2{font-size:25px}.symbol-dialog{padding:20px}.motion-layout{row-gap:24px}}
+html[data-reduce-motion=true] *,html[data-reduce-motion=true] *::before,html[data-reduce-motion=true] *::after{animation:none!important;transition:none!important}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
+html[data-reduce-transparency=true] .playback-modes,html[data-reduce-transparency=true] .symbol-kinds{background:#f0f0f3}
+@media(prefers-reduced-transparency:reduce){.playback-modes,.symbol-kinds{background:#f0f0f3}}
+@media(forced-colors:active){body button,.symbol-dialog,body select{border:1px solid ButtonText;box-shadow:none!important}.directory a[aria-current=page]{outline:1px solid Highlight}.playback-modes button[aria-pressed=true],.symbol-kinds button[aria-pressed=true]{outline:2px solid Highlight}}
+/* Real edge textures sit behind controls and never intercept input. */
+.external-glass-canvas{position:fixed;z-index:10;pointer-events:none;display:block}
+html[data-redact-external=true] .external-glass-canvas{visibility:hidden!important}
+html[data-external-refraction=true] .glass-edge{visibility:hidden}
+@media(forced-colors:active),(prefers-reduced-transparency:reduce){.external-glass-canvas{display:none!important}}

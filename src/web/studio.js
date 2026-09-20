@@ -27,6 +27,19 @@
   const modeBar=document.createElement('div');modeBar.className='playback-modes';modeBar.setAttribute('role','group');modeBar.setAttribute('aria-label','播放对象 / Playback target');
   modeBar.innerHTML='<button type="button" id="mode-hardware"></button><button type="button" id="mode-preview"></button>';
   chooser.after(modeBar);
+  let amplitudeEdited=false;
+  const amplitudeNote=document.createElement('p');amplitudeNote.id='motion-amplitude-note';amplitudeNote.className='hint';
+  $('trial-amplitude').closest('.motion-fields').after(amplitudeNote);
+  function amplitudeLabels(){
+    const group=catalog?.actions.find(x=>x.id===picker.selected)?.group;
+    const full=['dance','numbers','letters'].includes(group);
+    amplitudeNote.textContent=full?Number($('trial-amplitude').value)<1?
+      text('当前为缩小幅度：数字可能不成形，舞蹈侧摆也会同步缩小。100% 表示完整编排。','Reduced amplitude can make digits unreadable and lateral movement smaller. 100% uses the complete choreography.'):
+      text('完整编排幅度 · 包含屈伸与侧摆；力度由参数页设置。','Full choreography, including bending and lateral joints. Effort is set on the Parameters page.'):
+      text('幅度从当前姿态按比例缩放；不改变 Kp、Kd 或电流设置。','Amplitude scales from the current posture; Kp, Kd and current settings remain unchanged.');
+  }
+  $('trial-amplitude').addEventListener('change',()=>{amplitudeEdited=true;amplitudeLabels();});
+  window.addEventListener('wuji-language',amplitudeLabels);
   const previewFold=$('playback-panel').closest('details');previewFold.open=true;previewFold.classList.add('preview-mode-panel');
   const realAction=$('trial-action').closest('.motion-field');realAction.hidden=true;
   $('play-action').hidden=true;document.querySelector('label[for="play-action"]').hidden=true;
@@ -62,6 +75,11 @@
   function notice(error){$('service-error').hidden=false;$('service-error').textContent=error.message;}
   function selectMotion(id){
     for(const key of ['trial-action','play-action']){const control=$(key);if([...control.options].some(o=>o.value===id)){control.value=id;control.dispatchEvent(new Event('change'));}}
+    if(!amplitudeEdited&&!state?.hardware?.active){
+      const group=catalog?.actions.find(x=>x.id===id)?.group;
+      $('trial-amplitude').value=['numbers','dance','letters'].includes(group)?'1':'0.25';
+    }
+    amplitudeLabels();
   }
   function restorePlayback(){
     if(restored||!catalog||!state)return;restored=true;
@@ -214,5 +232,5 @@
   window.addEventListener('console-state',e=>{state=e.detail;restorePlayback();picker.setBusy($('trial-action').disabled);picker.update(state);$('warning-policy').dataset.hasWarnings=String(state.connection==='connected'&&!!state.hardware?.warnings?.length);if(location.hash==='#interaction')touchState();staticEnglish();});
   window.addEventListener('console-offline',()=>{state=null;touchState();});
   fetch('/api/catalog').then(r=>{if(!r.ok)throw Error('Action catalog unavailable');return r.json();}).then(data=>{catalog=data;render();restorePlayback();}).catch(notice);
-  render();viewerLabels();speedSummary();ws.showPage();
+  render();viewerLabels();amplitudeLabels();speedSummary();ws.showPage();
 })();

@@ -68,6 +68,11 @@ def make_trial(q,action,amplitude,cycles,path=POSES,*,speed=1.,clock_at=None,tex
         from datetime import datetime
         stamp=datetime.fromisoformat(clock_at) if clock_at else None
         steps=gesture_route(action,at=stamp)
+        if action.startswith('digit_') or action in {'count_digits','clock'}:
+            # Use a clear open transition before/after number sequences. In the
+            # native model, a direct folded zero -> three-tip seven can intersect.
+            opened=p['poses']['open'][:]
+            steps=[('数字准备 / Digit ready',opened,.15)]+steps+[('数字展开 / Digit release',opened,.15)]
         points=[dict(t=0.,q=q[:],label='实际起始姿态 / Measured start')]
         for index,(label,pose,hold) in enumerate(steps+[('返回原姿态 / Return',q[:],POSE_HOLD_S)]):
             if not valid(pose) or any(not a<=x<=b for x,a,b in zip(pose,lo,hi)):

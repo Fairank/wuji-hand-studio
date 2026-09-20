@@ -8,6 +8,7 @@ import json
 import math
 from pathlib import Path
 from performance_program import DANCES, PROGRAM_IDS, DANCE_REFERENCES, SIGN_REFERENCE
+from chinese_digits import digit, DESCRIPTIONS as DIGIT_DESCRIPTIONS, REFERENCE as DIGIT_REFERENCE, CONVENTION
 
 LETTERS = 'ABCDEFGHIKLMNOPQRSTUVWXY'
 COMMIT = 'b0e48652dd94f4bc33df61cdc23a6d5dc598f93d'
@@ -27,7 +28,8 @@ CATALOG += [entry(k,z,e,'basic') for k,z,e in [
     ('open','张开并返回','Open and return'),('fist','张开与握拳','Open and fist'),
     ('opposition','依次对指','Finger opposition'),('sequence','组合展示','Combined demo'),
     ('splay','左右侧摆','Finger spread'),('wave','逐指屈伸','Finger wave')]]
-CATALOG += [entry('digit_'+str(i),'数字 '+str(i),'Digit '+str(i),'numbers') for i in range(10)]
+CATALOG += [dict(entry('digit_'+str(i),'数字 '+str(i)+' · 中国常用手势','Digit '+str(i)+' · Chinese convention','numbers',note=DIGIT_REFERENCE),
+                 description_zh=DIGIT_DESCRIPTIONS[i][0],description_en=DIGIT_DESCRIPTIONS[i][1]) for i in range(10)]
 CATALOG += [entry('count_digits','依次报数 0–9','Count 0–9','numbers'),
     entry('clock','当前时间 · HH:MM','Current time · HH:MM','numbers')]
 CATALOG += [entry('letter_'+c,'字母 '+c+' · 近似造型','Letter '+c+' · approximate','letters') for c in LETTERS]
@@ -62,28 +64,18 @@ def shape(extended=(), thumb=False):
     return q
 
 
-def digit(number):
-    if number==0:
-        q=shape(range(1,5));q[:4]=[.50,-.45,.6,.45]
-        for f in range(1,5):q[4*f:4*f+4]=[.42,0,.70,.40]
-        return q
-    if number<=5:return shape(range(1,number+1) if number<4 else range(1,5),thumb=number in {3,5}) if number!=3 else shape((1,2),thumb=True)
-    paired={6:'pinky',7:'ring',8:'middle',9:'index'}[number]
-    q=poses()['pair_'+paired][:]
-    f={'index':1,'middle':2,'ring':3,'pinky':4}[paired]
-    for other in range(1,5):
-        if other!=f:q[other*4:other*4+4]=poses()['open'][other*4:other*4+4]
-    return q
-
-
 def letter(c):
     open_fingers={'A':(), 'B':(1,2,3,4),'C':(1,2,3,4),'D':(1,), 'E':(), 'F':(2,3,4),
         'G':(1,), 'H':(1,2), 'I':(4,), 'K':(1,2), 'L':(1,), 'M':(), 'N':(), 'O':(),
         'P':(1,2),'Q':(1,),'R':(1,2),'S':(),'T':(),'U':(1,2),'V':(1,2),
         'W':(1,2,3),'X':(1,),'Y':(4,)}[c]
     q=shape(open_fingers,thumb=c in 'AKLY')
-    if c=='F':return digit(9)
-    if c=='O':return digit(0)
+    # Letters must not change meaning when the number convention changes.
+    if c=='F':return poses()['pair_index'][:]
+    if c=='O':
+        q=shape(range(1,5));q[:4]=[.50,-.45,.6,.45]
+        for f in range(1,5):q[4*f:4*f+4]=[.42,0,.70,.40]
+        return q
     if c=='C':
         for f in range(1,5):q[4*f:4*f+4]=[.40,0,.60,.35]
         q[:4]=[.15,-.45,.40,.25]
@@ -129,7 +121,7 @@ def route(action, *, at=None):
         out=[]
         for sign in (1,-1,0):
             q=p['open'][:]
-            for f,x in enumerate((.15,.25,.12,-.12,-.25)):q[f*4+1]+=sign*x
+            for f,x in enumerate((.15,-.30,-.12,.12,.30)):q[f*4+1]+=sign*x
             out.append(('侧摆 / Spread',q,.15))
         return out
     if action=='wave':
@@ -147,6 +139,8 @@ def route(action, *, at=None):
 
 def catalog():
     return dict(actions=CATALOG,official_inventory=OFFICIAL_INVENTORY,
+        digits_convention=CONVENTION,digits_source=DIGIT_REFERENCE,
+        digits_note='Mainland-common Chinese counting gestures; regional variants exist. Authored Hand 2 joint poses, not official WUJI recordings. Reduced amplitude may not form a readable digit.',
         letters_note='Project-authored shapes inspired by ASL fingerspelling, not official Wuji actions or a universal sign language. 24 static letters exclude moving J/Z. Fixed-base approximations do not reproduce wrist/palm orientation.',
         choreography_note='Human-inspired authored joint curves, not motion capture. Nominal preview timing; hardware uses configured speed and amplitude. Hand 1: preview only.',
         clock_note='Local server time captured once at start, HH:MM, 24-hour format.',

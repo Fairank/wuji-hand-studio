@@ -62,7 +62,7 @@ class PerformanceTests(unittest.TestCase):
             command=dict(name='hardware_trial',action='text_sequence',text=' wuji  tech ',speed=1,amplitude=.25,cycles=1,workspace_clear=True)
             with self.assertRaises(ValueError):c.action(command)
             self.assertEqual(c.stdin.getvalue(),'')
-            c.state['hardware']['gesture_library_version']=2;c.action(command)
+            c.state['hardware']['gesture_library_version']=4;c.action(command)
             self.assertEqual(json.loads(c.stdin.getvalue())['text'],'WUJI TECH')
 
     def test_export_never_claims_measured_data_or_hardware_validation(self):

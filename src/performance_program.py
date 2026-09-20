@@ -40,38 +40,44 @@ def _dance(action, t):
     omega = 2*math.pi/4.
     for f in range(5):
         # Keep the thumb outside the palm; non-thumb flexion is more pronounced.
-        for j, amount in ((0,.48),(2,.75),(3,.52)):
+        for j, amount in ((0,.80),(2,1.10),(3,.85)):
             delay = .13*f+.30*j if action=='dance_jellyfish' else .8*f+.13*j if action=='dance_wave' else .25*f+.8*j
             power=1
             if action=='dance_reverse': delay=.8*(4-f)+.13*j
             elif action=='dance_piano':
-                delay=1.25*f;amount={0:.28,2:.38,3:.22}[j];power=4
+                delay=1.25*f;amount={0:.50,2:.78,3:.52}[j];power=4
             elif action=='dance_alternate':
                 delay=math.pi*(f%2)+.10*j;amount*=.8
-            elif action=='dance_fan': delay=.55*f;amount*=.5
+            elif action=='dance_fan': delay=.55*f;amount*=.75
             elif action=='dance_bloom': delay=.35*j
             elif action=='dance_tutting':
-                delay=.7*f+.9*j;amount={0:.12,2:.70,3:.25}[j];power=3
-            if f == 0: amount *= .25
+                delay=.7*f+.9*j;amount={0:.22,2:1.15,3:.62}[j];power=3
+            if f == 0: amount *= .30 if action=='dance_reverse' else .45
             a = omega*t-delay
             base = .5-.5*math.cos(a)
             pulse=base**power
             derivative=power*base**(power-1)*.5*omega*math.sin(a)
             q[4*f+j] += amount*env*pulse
             v[4*f+j] = amount*(denv*pulse+env*derivative)
-        spread = (0.,.13,.04,-.04,-.13)[f]
-        pulse = .5+.5*math.cos(omega*t)
-        if action in {'dance_jellyfish', 'dance_fan', 'dance_bloom'}:
-            if action=='dance_fan': spread*=1.4
-            q[4*f+1] += spread*env*pulse
-            v[4*f+1] = spread*(denv*pulse-env*.5*omega*math.sin(omega*t))
+        # S2 is active in EVERY routine. Index negative / little positive opens
+        # the fan in the native models; the previous sign closed fingers inward.
+        spread = (.24,-.40,-.14,.16,.43)[f]
+        phase = {'dance_wave':.50*f,'dance_reverse':.50*(4-f),
+                 'dance_ripple':.32*f,'dance_piano':.60*f,
+                 'dance_alternate':math.pi*(f%2),'dance_tutting':.65*f}.get(action,0.)
+        if action=='dance_fan':spread*=1.2
+        elif action=='dance_piano':spread*=.8
+        a=omega*t-phase
+        pulse = .5+.5*math.cos(a)
+        q[4*f+1] += spread*env*pulse
+        v[4*f+1] = spread*(denv*pulse-env*.5*omega*math.sin(a))
     return q,v
 
 
 def _symbol(c):
     from gesture_library import poses, letter, digit
     if c==' ':return [('单词停顿 / Word pause',poses()['open'][:],.8)]
-    if c.isdigit():return [(c,digit(int(c)),.8)]
+    if c.isdigit():return [('数字过渡 / Digit transition',poses()['open'][:],.12),(c,digit(int(c)),.8)]
     if c not in 'JZ':return [(c,letter(c),.8)]
     # No wrist/forearm exists: explicitly named finger-only suggestions, NOT ASL.
     q=letter('I' if c=='J' else 'D')

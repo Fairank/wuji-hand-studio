@@ -20,3 +20,8 @@ source repository, `Files/Languages/Unofficial/ChineseSimplified.isl`.
 The original Wuji logo and the existing attribution below are retained.
 Liquid Glass is an Apple design concept; this software uses its own Windows/WebView2
 CSS material implementation and is not an Apple product or native Apple framework.
+
+
+## Windows edge refraction and managed runtime (0.1.6)
+
+windows-capture 2.0.0 (MIT) and OpenCV Python are used only for the optional Windows edge effect. Dependency licenses are bundled under third-party-licenses. The optional WSL user-space image is based on Canonical Ubuntu Base 24.04.5 and preserves package copyright/license files under /usr/share/doc. Official Wuji SDK/CLI 2026.8.31 are included without modification. Microsoft WSL itself is obtained separately from Microsoft if missing. See docs/BUILT_IN_CONTROLLER.md for sources and scope. No private models, account credentials or personal device records are included.

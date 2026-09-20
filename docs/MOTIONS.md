@@ -35,3 +35,10 @@
 ## Implementation notes
 
 One app only: Hand Workbench. The public package contains no private model weights. Claude `claude-fable-5-1 --effort max` supplied bounded CSS suggestions; the main assistant reviewed DOM compatibility, accessibility and integration. Choreography and command retiming were reviewed by the main assistant. No hardware motion is implied by software tests or preview captures.
+
+
+## 0.1.6 中国数字与侧摆
+
+数字采用中国大陆常见单手比法，地区表达可能不同，并非全球通用手语或 WUJI 官方数字录制。4 收拇指；6 伸拇指/小指；7 拇指/食指/中指指尖聚拢；8 拇指/食指展开；9 食指成钩。参考 [Open University 数字手势课程](https://www.open.edu/openlearn/mod/oucontent/view.php?id=106502&section=6)。姿态是本项目对机械手的适配。数字间增加张开过渡，避免直接从收拢的 0 插值到 7。
+
+九种舞蹈提高屈伸幅度并加入所有手指的 S2 侧摆。原生左右二代模型检查通过，不是实机动力学或接触力验收。保持用户电流、Kp、Kd 与速率参数；完整编排仍受用户选择幅度和速度影响。控制端动作库版本要求为 4。
