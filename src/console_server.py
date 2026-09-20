@@ -22,6 +22,7 @@ from motion_history import summarize as summarize_motion
 from view_camera import DEFAULT as DEFAULT_CAMERA, validate_camera
 from parameter_store import ParameterStore
 from gesture_library import catalog,CATALOG,CUSTOM_IDS
+from performance_program import PROGRAM_IDS
 
 from runtime_paths import RESOURCE, DATA, initialize
 HERE = RESOURCE
@@ -226,8 +227,10 @@ class Controller:
                         if not hardware.get('trial_ready'):raise ValueError(hardware.get('probe_reason','等待完整反馈与诊断'))
                         if self.state['device_profile']['generation']=='hand1' and command.get('action') not in {'open','fist'}:
                             raise ValueError('一代实机当前支持官方张开/握拳适配，其余动作仅预览')
-                        if command.get('action') in CUSTOM_IDS and hardware.get('gesture_library_version')!=1:
-                            raise ValueError('控制端尚未加载新动作库，请停止并断开后重新连接 / Reconnect to load the new gesture library')
+                        required=2 if command.get('action') in PROGRAM_IDS else 1
+                        version=hardware.get('gesture_library_version',0)
+                        if command.get('action') in CUSTOM_IDS and (type(version) is not int or version<required):
+                            raise ValueError('控制端需升级到对应动作库版本，再重新连接 / Update the controller gesture library, then reconnect')
                         if (command.get('action') not in {x['id'] for x in CATALOG} or
                             type(command.get('amplitude')) not in {int,float} or command['amplitude'] not in {.25,.5,.75,1.} or
                             type(command.get('speed',1.)) not in {int,float} or command.get('speed',1.) not in {.25,.5,1.} or
@@ -235,6 +238,9 @@ class Controller:
                             command.get('workspace_clear') is not True):raise ValueError('选择试运行幅度和1/3轮，并确认周围清空')
                         outgoing={k:command.get(k) for k in ('name','action','amplitude','cycles','workspace_clear')}
                         outgoing['speed']=command.get('speed',1.)
+                        if command.get('action')=='text_sequence':
+                            from phrase_text import normalize_phrase
+                            outgoing['text']=normalize_phrase(command.get('text'))
                         if command.get('action')=='clock':outgoing['clock_at']=datetime.now().astimezone().isoformat()
                     self.hardware_lease=secrets.token_hex(16)
                     outgoing['lease']=self.hardware_lease
@@ -472,6 +478,15 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(200,self.server.controller.parameter_snapshot())
         if url.path == '/api/catalog':
             return self.reply(200,catalog())
+        if url.path == '/api/performance':
+            from performance_export import export_program
+            query=parse_qs(url.query)
+            try:
+                action=query.get('action',[''])[0];text=query.get('text',['WUJI TECH'])[0];fmt=query.get('format',['json'])[0]
+                profile_id=self.server.controller.state['device_profile']['id']
+                body=export_program(action,text,profile_id,fmt)
+                return self.reply(200,body,'text/csv; charset=utf-8' if fmt=='csv' else 'application/json; charset=utf-8',filename=f'{profile_id}-{action}-nominal.{fmt}')
+            except (ValueError,TypeError) as error:return self.reply(400,dict(error=str(error)))
         if url.path == '/api/view':
             jpeg, meta = self.server.pose.get()
             return self.reply(200, dict(meta=meta, image='data:image/jpeg;base64,'+base64.b64encode(jpeg).decode('ascii') if jpeg else None))

@@ -105,13 +105,15 @@ class HardwareShowcase:
             probe_ready=self.probe_ready and not self.owned,probe_reason=self.probe_reason,
             probe_result=self.probe_result,probe_index=self.probe['index'] if self.probe else None,
             warnings=self.warnings,comm_stable=self.comm_healthy,
-            trial_controls_version=3,gesture_library_version=1,warning_policy='official_sdk_severity',
+            trial_controls_version=3,gesture_library_version=2,warning_policy='official_sdk_severity',
             commissioning_policy=settings(),
             execution_version=EXECUTION_VERSION,command_timing=dict(self.publish_timing.snapshot(),
                 missed_deadlines=getattr(getattr(self,'cadence',None),'missed',0)),
             speed_factor=self.run_profile.get('speed_factor',1.) if self.run_profile else None,
             trial_ready=self.probe_ready and not self.owned,trial_result=self.trial_result,
             trial_phase=self.trial['label'] if self.trial else None,
+            text=self.run_profile.get('text','') if self.run_profile else '',
+            token_index=self.trial.get('token_index',-1) if self.trial else -1,
             trial_amplitude=self.trial['amplitude'] if self.trial else None,
             action_source=self.run_profile.get('source') if self.run_profile else None,
             planned_duration_s=self.period*self.cycles if self.trial else None,
@@ -128,7 +130,7 @@ class HardwareShowcase:
         if [j.label for j in sorted(self.hand.joints(),key=lambda j:j.index)]!=LABELS:
             raise ValueError('设备SDK关节标签与候选姿态不符')
         q=self.raw_position(row,now)
-        plan=make_trial(q,command.get('action'),command.get('amplitude'),command.get('cycles'),speed=command.get('speed',1.),clock_at=command.get('clock_at'))
+        plan=make_trial(q,command.get('action'),command.get('amplitude'),command.get('cycles'),speed=command.get('speed',1.),clock_at=command.get('clock_at'),text=command.get('text','WUJI TECH'))
         self.probe=None;self.trial_result=None
         self.run_profile=plan;self.points=plan['points'];self.enabled_indices=list(range(20))
         self.action=plan['action'];self.speed=1.;self.cycles=plan['cycles'];self.lease=lease
@@ -259,7 +261,7 @@ class HardwareShowcase:
         if self.trial:
             from hardware_trial import make_trial
             self.run_profile=make_trial(q,self.action,self.trial['amplitude'],self.cycles,
-                speed=self.run_profile['speed_factor'],clock_at=self.run_profile.get('clock_at'))
+                speed=self.run_profile['speed_factor'],clock_at=self.run_profile.get('clock_at'),text=self.run_profile.get('text','WUJI TECH'))
             self.points=self.run_profile['points']
             self.trial.update(baseline=q[:],last=q[:],started=now,
                 deadline=now+self.points[-1]['t']*self.cycles*1.5+30)
@@ -420,7 +422,7 @@ class HardwareShowcase:
                 index=min(len(self.points)-2,max(0,bisect_right(self.point_times,t)-1))
                 a,b=self.points[index:index+2]
                 desired=segment_position(a,b,t)
-                if self.trial:self.trial['label']=b['label']
+                if self.trial:self.trial.update(label=b['label'],token_index=b.get('token_index',-1))
             step=self.run_profile['max_velocity_rad_s']*dt
             self.target=[x+max(-step,min(step,y-x)) for x,y in zip(self.target,desired)]
             self.publish(self.target)

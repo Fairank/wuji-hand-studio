@@ -12,6 +12,10 @@ EXECUTION_VERSION = 'smooth-cadence-v1'
 
 def segment_position(a, b, t):
     r = min(1., max(0., (t-a['t'])/(b['t']-a['t'])))
+    if b.get('interpolation') == 'cubic_hermite':
+        dt=b['t']-a['t'];va=a.get('v',[0.]*20);vb=b.get('v',[0.]*20)
+        return [(2*r**3-3*r*r+1)*x+(r**3-2*r*r+r)*dt*u+(-2*r**3+3*r*r)*y+(r**3-r*r)*dt*v
+                for x,y,u,v in zip(a['q'],b['q'],va,vb)]
     if b.get('interpolation') == 'minimum_jerk':
         # Zero first and second derivatives at both ends; convex/no overshoot.
         r = r*r*r*(10.+r*(-15.+6.*r))

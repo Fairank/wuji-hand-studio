@@ -40,3 +40,35 @@ html,body{background:#fff;color:var(--ink);font-family:-apple-system,BlinkMacSys
 .doctor-badge[data-status="fail"]{background:#ffe9e7;color:#a52a26}
 .doctor-body #doctor-status{min-height:24px}
 .workspace-page[hidden] .viewer-dock:after{content:none!important}
+
+/* Clear glass: a neutral canvas, transparent lenses, crisp reflected edges.
+   No decorative page imagery; blur is most visible over the live MuJoCo view. */
+:root{--glass-fill:linear-gradient(145deg,#ffffffa8 0%,#ffffff38 45%,#ffffff75 100%);--glass-rim:inset 0 1px 1px #fff,inset 1px 0 1px #ffffffd9,inset 0 -1px 1px #a7adb44d,0 0 0 .5px #9298a32a;--glass-depth:0 6px 22px #2c354317}
+body{background:#f7f7f8}.page-area{background:#fff;border-radius:22px 0 0 0}
+.directory{margin:12px 9px;top:var(--header);bottom:10px;width:calc(var(--rail) - 18px);border:1px solid #ffffffdb;border-radius:22px;background:var(--glass-fill);box-shadow:var(--glass-rim),var(--glass-depth);backdrop-filter:blur(24px) saturate(1.3);-webkit-backdrop-filter:blur(24px) saturate(1.3)}
+.directory a{border-radius:13px}.directory a[aria-current=page]{background:linear-gradient(150deg,#ffffffee,#ffffff70);border-color:#fff9;border-radius:13px;box-shadow:var(--glass-rim),0 4px 12px #28364a17}
+.playback-modes{padding:4px;border-radius:20px;background:#eaecef8a;border:1px solid #ffffffd1;box-shadow:inset 0 2px 5px #1f2c4212,0 0 0 .5px #b3b8c34a}
+.playback-modes button{border-radius:16px;transition:background .18s,box-shadow .18s}
+.playback-modes button[aria-pressed=true]{border-radius:16px;background:var(--glass-fill);border:1px solid #fff;box-shadow:var(--glass-rim),0 3px 10px #202c4026;backdrop-filter:blur(22px);-webkit-backdrop-filter:blur(22px)}
+.action-select-row button,.viewer-actions button,.view-toolbar button,.top-actions button:not(.danger),.studio-tools select{background:var(--glass-fill);border-color:#fff;border-radius:13px;box-shadow:var(--glass-rim),0 3px 10px #26334412;backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px)}
+.action-select-row button:not(:disabled):hover,.viewer-actions button:hover{background:#ffffffde;box-shadow:var(--glass-rim),0 5px 16px #26334422}
+.symbol-dialog{border-radius:28px;background:linear-gradient(140deg,#ffffffb8,#f9fafc80);box-shadow:var(--glass-rim),0 24px 80px #202c4933;backdrop-filter:blur(34px) saturate(1.35);-webkit-backdrop-filter:blur(34px) saturate(1.35);padding:28px}
+.symbol-dialog input{font-size:22px;letter-spacing:.02em;padding:14px;border-radius:14px;background:#ffffffae;box-shadow:inset 0 1px 4px #1728440d}
+.symbol-dialog::backdrop{background:#303a4c16;backdrop-filter:blur(5px)}
+.symbol-options{gap:6px}.symbol-options button{border-radius:10px;min-height:34px;background:#ffffffa3}
+.phrase-strip{display:flex;gap:4px;flex-wrap:wrap;margin:8px 0}.phrase-strip:empty{display:none}
+.phrase-strip span{font-size:15px;font-weight:600;min-width:25px;text-align:center;padding:5px 6px;border-radius:9px;background:#f0f1f4;color:#69717d;transition:background .15s,color .15s}
+.phrase-strip span[data-space=true]{background:none;min-width:12px;padding:5px 2px}
+.phrase-strip span[aria-current=true]{background:#0969db;color:#fff;box-shadow:0 3px 9px #1265d131}
+.performance-status{font-size:12px;color:#555e6d;line-height:1.65;margin:6px 0}.performance-status:empty{display:none}
+.performance-export{font-size:11px;display:inline-block;margin:4px 0;text-underline-offset:3px}
+.pose-screen{border-radius:24px!important;box-shadow:0 10px 32px #1a243c12,inset 0 1px 0 #fff;border:1px solid #c7cbd166;position:relative}
+.pose-screen .camera-lens{position:absolute;z-index:3;bottom:14px;left:50%;transform:translateX(-50%);width:max-content;max-width:calc(100% - 24px);padding:5px 7px;margin:0;border-radius:22px;background:linear-gradient(135deg,#ffffffa0,#ffffff40);border:1px solid #ffffffc9;box-shadow:var(--glass-rim),0 5px 18px #0002;backdrop-filter:blur(22px) saturate(1.3);-webkit-backdrop-filter:blur(22px) saturate(1.3)}
+.pose-screen .camera-lens button{color:#172238;background:transparent;border-color:transparent;box-shadow:none;border-radius:16px;padding:6px 10px}
+.pose-screen .camera-lens button:hover{background:#ffffffb3}
+#pose-console[data-floating=true]{border-radius:25px;background:linear-gradient(140deg,#ffffffce,#f7f8fb94);box-shadow:var(--glass-rim),0 22px 65px #17203940;backdrop-filter:blur(36px);-webkit-backdrop-filter:blur(36px)}
+@media(max-width:700px){.directory{margin:7px 9px;left:0;bottom:auto;width:calc(100% - 18px);height:47px;border-radius:18px;padding:3px}.directory a{border-radius:13px}.page-area{margin-top:118px;border-radius:22px 22px 0 0;padding-top:16px}.symbol-dialog{padding:22px}.action-select-row{grid-template-columns:minmax(0,1fr) auto auto}.action-select-row button{font-size:12px}.pose-screen .camera-lens{bottom:10px}.pose-screen .camera-lens button{font-size:11px;padding:5px 8px}}
+@media(prefers-reduced-transparency:reduce){.directory,.playback-modes button[aria-pressed=true],.symbol-dialog,.pose-screen .camera-lens,#pose-console[data-floating=true]{background:#f3f4f6;backdrop-filter:none;-webkit-backdrop-filter:none}}
+@media(prefers-reduced-motion:reduce){.playback-modes button,.phrase-strip span{transition:none}}
+.symbol-dialog{clip-path:inset(0 round 28px)}
+.pose-screen .camera-lens{clip-path:inset(0 round 22px)}

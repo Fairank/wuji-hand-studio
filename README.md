@@ -63,3 +63,14 @@ Download the Windows x64 or Ubuntu x64 package under Releases. For macOS, use th
 The public Basic edition contains no trained weights, training code, device recordings or credentials. The Research edition is distributed through a separate private repository with the owner's experimental left-hand recognition model. Including a model does not validate automatic real-hand grasping; that function remains unavailable pending calibration and acceptance.
 
 Sources: [official SDK examples](https://github.com/wuji-technology/wuji-sdk), [official hand geometry](https://github.com/wuji-technology/wuji-description). Only three Hand 2 examples are adapted here; glove teleoperation and first-generation examples are not presented as directly compatible motions. Local modifications and third-party licenses are described in THIRD_PARTY_NOTICES.md.
+
+
+## 0.1.2 · 文字与手指舞
+
+输入 `wuji tech` 即可依次编排文字动作，含空格停顿、重复字母分隔、当前字符高亮及J/Z固定腕运动近似。新增水母舒展、逐指波浪和指节涟漪，支持循环预览与1000Hz目标轨迹CSV导出。二代实机通道按当前姿态、幅度和用户速度设置编译；控制端也需更新至本版（动作库v2）。一代新动作仅预览。
+
+界面加强透明玻璃边缘、悬浮导航、文字弹窗及覆盖三维画面的视角工具条，保持白灰底色。详见[动作说明、参考来源与验证范围](docs/PERFORMANCES.md)。没有为本版本连接电机验收。
+
+Claude Fable 5.1（`claude-fable-5-1 --effort max`）提供基础文字输入回归测试，主维护者审核筛选后采用；动作曲线、实际执行路径与验收由主维护者负责。调用不包含私有训练数据。
+
+Text sequences, three authored finger dances, stronger clear-glass materials and1000Hz nominal trajectory export. Fixed-wrist approximations, not certified signs or captured human motion. Hand2 controller must also be updated; Hand1 new motions remain preview-only. See [performance notes](docs/PERFORMANCES.md). No new hardware validation.

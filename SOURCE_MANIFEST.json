@@ -14,8 +14,8 @@
       "sha256": "acdb36c7418edb32341dc5fbc7e66abf3012bfe457f499e29f1a0bb8e5582a26"
     },
     "README.md": {
-      "bytes": 7382,
-      "sha256": "2747f8862f5b7e5bd1c548a3f07d256fe7bf4d64af416608d3cdcc38dd3e37e2"
+      "bytes": 8631,
+      "sha256": "9aa1aae73ed22caf2bd0395cdf0279771bb8dca837d294130c660d18b203333e"
     },
     "THIRD_PARTY_NOTICES.md": {
       "bytes": 1755,
@@ -36,6 +36,10 @@
     "docs/MACOS.md": {
       "bytes": 4180,
       "sha256": "ec0ad888ae47dd5369295020ce97bb05cf2fb850117cb2fabfd990475fb28bd3"
+    },
+    "docs/PERFORMANCES.md": {
+      "bytes": 4249,
+      "sha256": "c9868ab3187d983d4d8b0688d87b3eeb2b34ecfbffbf4348e6b252322440529a"
     },
     "requirements-build.txt": {
       "bytes": 41,
@@ -662,20 +666,20 @@
       "sha256": "254fa1d4e88668acb717dd1bfe844b1d166a21705f6d0297bc2e25bdb175540d"
     },
     "src/console_server.py": {
-      "bytes": 33456,
-      "sha256": "c5149ec842cf1dd6ccf9784ab4812be31498590c9e109498da753d3c41d6cb24"
+      "bytes": 34572,
+      "sha256": "6a2bf74fa6308e411f592639065e1c8b046956f96d031f488c0b09856a1e3852"
     },
     "src/demo_player.py": {
-      "bytes": 8058,
-      "sha256": "a850a7d3a5a52f654cc60ef2ae3b0b7557e769cb35f0c309fa17d9d8e4f9bf96"
+      "bytes": 8906,
+      "sha256": "c68479ad9cb9c897683c0f1ef9bbfc4240d130af86b591852e3ee451a277f21d"
     },
     "src/desktop.py": {
       "bytes": 4614,
       "sha256": "65d413078b8f80ebbd7d0d4f665b68108024e82f286d463946a930a34e92ca42"
     },
     "src/device_profiles.py": {
-      "bytes": 3764,
-      "sha256": "c3a3149908f1efed54691e66ebe25b1c65e807cf19007249c4bbc75a7b61d52c"
+      "bytes": 4667,
+      "sha256": "2cd9de07bb133977fa0f20a8609d5ee116f6670849c6c41639496c085e87473a"
     },
     "src/doctor.py": {
       "bytes": 4777,
@@ -686,8 +690,8 @@
       "sha256": "f5a584fb40e773b89224130cca438c1cb4644a6e0f26ef42cbf841d9a21fb6b7"
     },
     "src/edition.json": {
-      "bytes": 62,
-      "sha256": "fbe973fdc4d861d32908e9d9efa148c436ebef484e8ba009336c36ced6293a33"
+      "bytes": 65,
+      "sha256": "eabe08814b8423e56214b3c3212aaead04d84b8e2b6b0251692939f8845a5d06"
     },
     "src/feedback_stream.py": {
       "bytes": 664,
@@ -698,16 +702,16 @@
       "sha256": "5f32207822f9c538c4e27d1e95c261872fde08f8ef49e84099bc87d765e0f207"
     },
     "src/gesture_library.py": {
-      "bytes": 7700,
-      "sha256": "4806f3bf944c151c8c62284957d51f5fdcbdaa4eb781e37eff02f41103f46ca0"
+      "bytes": 8443,
+      "sha256": "4bee7672f0ab21380e98a0d18d5413178d23982b61bc6144671f7ea180ff0db2"
     },
     "src/hardware_showcase.py": {
-      "bytes": 33844,
-      "sha256": "f4ee44c437326f54063712b52425a0f16178c27060d03e5ac9e71cf5da350594"
+      "bytes": 34126,
+      "sha256": "61fb39a900f6b73b6167da5d2bfd596be0b2e3c3116ea22e743736c786a46996"
     },
     "src/hardware_trial.py": {
-      "bytes": 6954,
-      "sha256": "d075f39d5ff0241da0db4e5730a24ad38b27fb33ea5a402c11eb53864a70ecbb"
+      "bytes": 7944,
+      "sha256": "227dafe9901a92ac48cb49cb34090cb575078a2c366acdf82ec2cfe52221f43e"
     },
     "src/interval_summary.py": {
       "bytes": 4883,
@@ -730,8 +734,8 @@
       "sha256": "938bbb99ae22f9f822d9c850559924281ee235ab470e6ca34997542e8566638e"
     },
     "src/motion_timing.py": {
-      "bytes": 3092,
-      "sha256": "a7d6a665fcf00f3ee98b8566a360b8d6849cf694ad82f7215e584cc2d9ccc0a5"
+      "bytes": 3357,
+      "sha256": "fdaecc1b237e025605e018a89248fd698f5749b83869004a5643ad7d4def8954"
     },
     "src/official_data/LICENSE-wuji-sdk.txt": {
       "bytes": 1093,
@@ -761,9 +765,21 @@
       "bytes": 6573,
       "sha256": "8d8724b95acd70b8dce658248ffbf5c06dcd2e9fd41807df886272f0d91ea418"
     },
+    "src/performance_export.py": {
+      "bytes": 2134,
+      "sha256": "a7c8e7988b91711eee55cc6bc7e2b53665074425f3d49dc4249ace4a12cedc2e"
+    },
+    "src/performance_program.py": {
+      "bytes": 7192,
+      "sha256": "51e47effd1cb25e7d5698fe9945b0ea3b6d6bd8eecb1d38ee8880d72ebf5f84e"
+    },
+    "src/phrase_text.py": {
+      "bytes": 568,
+      "sha256": "a8351e1d08399136e1b84bb2256c2c0cfebdbc2b5b84e52cafa5ea0b605ab65d"
+    },
     "src/pose_view.py": {
-      "bytes": 11313,
-      "sha256": "237e7d6e0770688e32948a0e7fb5da2488bfbba26fbb060b923e4d29cbb8d0a3"
+      "bytes": 11348,
+      "sha256": "dcf101de93370787747c614f25e6dd34b6a1db114b129bd532d08206c12b573e"
     },
     "src/runtime_paths.py": {
       "bytes": 972,
@@ -802,8 +818,8 @@
       "sha256": "5f5288b8b1d1b7d150227d492cb3a3291e6c080c56bba5d07bab91140934840b"
     },
     "src/test_gesture_library.py": {
-      "bytes": 5423,
-      "sha256": "d6cd9a82a83fbc7176f4a03da5b2aaa8218459de8bae4bea30dbdac16b6afb80"
+      "bytes": 5422,
+      "sha256": "c2d6c824d135250ec34ddedd1e55f39fd5fa2a0cdf2c3c5558aa8fd0837f3ee9"
     },
     "src/test_hardware_official_startup.py": {
       "bytes": 6577,
@@ -845,6 +861,14 @@
       "bytes": 15470,
       "sha256": "4de8e4611c3f3e484e36225f5823605122adf05c156a740c14ce792d99fd18ae"
     },
+    "src/test_performance_program.py": {
+      "bytes": 4746,
+      "sha256": "45c285ff6ccc9faacb98c80ad7ab126902c3187755d0e62884d2ae0c138a112c"
+    },
+    "src/test_phrase_text.py": {
+      "bytes": 2133,
+      "sha256": "7d092877b879fb89462e1d89f1256ae7dee1540e682dd833d21b328562992c11"
+    },
     "src/test_pose_playback.py": {
       "bytes": 4683,
       "sha256": "c82413e8aa345416194f1a3c824d5e8c671aa2928a0973f0d350676ce8f73e71"
@@ -874,8 +898,8 @@
       "sha256": "dd64b6b10daf1655eae6270e4ceb460cf561a97c638e382dd8b9c2ed0693d122"
     },
     "src/web/action_picker.js": {
-      "bytes": 7761,
-      "sha256": "f2734e8c3660419f6577f95b903aa577f9854f4f4aaaac11109e19d540e7fecd"
+      "bytes": 10236,
+      "sha256": "6b14b9fd0cb4cd20e7c86f8d2ef14ff37cae8c2178cfdc1b09cfec0541ed2f33"
     },
     "src/web/app-icon.png": {
       "bytes": 4937,
@@ -890,8 +914,8 @@
       "sha256": "02b110880453a2bfeb3b77cb30463224765a09fbec823f5c4ce029c7b3fdc774"
     },
     "src/web/camera.js": {
-      "bytes": 5616,
-      "sha256": "c57dfef92c6c22a853a76f02cba67256d042145dd7e7c5001021da7578b04e37"
+      "bytes": 5796,
+      "sha256": "a40c479d254aae9af2989ec86d64a26f71f4e0ff8704e507657a38f24a2c619b"
     },
     "src/web/camera_gesture.mjs": {
       "bytes": 1408,
@@ -914,8 +938,8 @@
       "sha256": "21c5443f7b00714589c6d6bc6fca3c41ca825659b47b913b3a903e9fc8c3e824"
     },
     "src/web/glass.css": {
-      "bytes": 11718,
-      "sha256": "f57480fd620c2638f4f3a4dc2abdad1489838b75e40f2386591b11dd6f0c4852"
+      "bytes": 16762,
+      "sha256": "59ea5ddd880c9e5d5a966f35ac403d0ed55a7c863468783fc0b814e35dd6d23e"
     },
     "src/web/index.html": {
       "bytes": 4785,
@@ -934,8 +958,8 @@
       "sha256": "b57dd7a251f683b34dad1b2ae06180d9b1bde614e1e20385f6bd61d5ce2464a6"
     },
     "src/web/playback.js": {
-      "bytes": 24277,
-      "sha256": "ed0abb17d2b933c78500c19a4a9e40f9b6af47ce96da87630a27ed19ed22b128"
+      "bytes": 24356,
+      "sha256": "489c0c5bb8cce4cd67927decd471bb29c9548fd9c55efbcd4f644d056773ff81"
     },
     "src/web/profiles.js": {
       "bytes": 3995,
@@ -946,8 +970,8 @@
       "sha256": "be35bab0ce63b419862101ac6ce637474aecfa657a8b72cdbb47b1997d3aee83"
     },
     "src/web/studio.js": {
-      "bytes": 24614,
-      "sha256": "2941dab764c227ef84d59d87274657313f98ed3678aa6120d33e2148e306db6a"
+      "bytes": 26852,
+      "sha256": "a872989948622a419f4198eeaba1acb39adaeb0954b13e7b762f908789d01d12"
     },
     "src/web/style.css": {
       "bytes": 6912,

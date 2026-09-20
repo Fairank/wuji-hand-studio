@@ -7,6 +7,7 @@ from datetime import datetime
 import json
 import math
 from pathlib import Path
+from performance_program import DANCES, PROGRAM_IDS, REFERENCE
 
 LETTERS = 'ABCDEFGHIKLMNOPQRSTUVWXY'
 COMMIT = 'b0e48652dd94f4bc33df61cdc23a6d5dc598f93d'
@@ -31,6 +32,10 @@ CATALOG += [entry('count_digits','依次报数 0–9','Count 0–9','numbers'),
     entry('clock','当前时间 · HH:MM','Current time · HH:MM','numbers')]
 CATALOG += [entry('letter_'+c,'字母 '+c+' · 近似造型','Letter '+c+' · approximate','letters') for c in LETTERS]
 CATALOG += [entry('alphabet','24个静态字母 · 近似造型','24 static letters · approximate','letters')]
+CATALOG += [entry('text_sequence','文字顺序展示','Text sequence','letters'),
+    entry('letter_J','字母 J · 动态近似','Letter J · motion approximation','letters'),
+    entry('letter_Z','字母 Z · 动态近似','Letter Z · motion approximation','letters')]
+CATALOG += [entry(k,z,e,'dance',note=REFERENCE) for k,(z,e,_) in DANCES.items()]
 CUSTOM_IDS = {x['id'] for x in CATALOG} - {'open','fist','opposition','sequence','official_opposition'}
 
 OFFICIAL_INVENTORY = [
@@ -106,6 +111,9 @@ def letter(c):
 def route(action, *, at=None):
     """(label, target, minimum hold seconds) pairs; timestamp frozen per run."""
     p=poses()
+    if action in PROGRAM_IDS:
+        from performance_program import program
+        return [(p['label'],p['q'][:],0.) for p in program(action)['points']]
     if action.startswith('digit_') and action in CUSTOM_IDS:return [(action[6:],digit(int(action[6:])),1.)]
     if action.startswith('letter_') and action in CUSTOM_IDS:return [(action[7:],letter(action[7:]),1.)]
     if action=='count_digits':return [(str(i),digit(i),1.) for i in range(10)]
@@ -139,7 +147,8 @@ def route(action, *, at=None):
 
 def catalog():
     return dict(actions=CATALOG,official_inventory=OFFICIAL_INVENTORY,
-        letters_note='Approximate fixed-wrist finger shapes, not certified sign language. J/Z require motion and are excluded.',
+        letters_note='A-Z/0-9 text sequences. Fixed-wrist approximations, including J/Z; not certified sign language.',
+        choreography_note='Human-inspired authored joint curves, not motion capture. Nominal preview timing; hardware uses configured speed and amplitude. Hand 1: preview only.',
         clock_note='Local server time captured once at start, HH:MM, 24-hour format.',
         interaction=dict(recognition_ready=False,hardware_grasp_ready=False,
             reason='Real-device current-to-load calibration and withdrawal validation have not passed. No real grasp is enabled.'))

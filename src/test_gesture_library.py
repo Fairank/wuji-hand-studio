@@ -60,7 +60,7 @@ class GestureTests(unittest.TestCase):
         b=make_trial([0.]*20,'digit_1',.25,1,speed=.5)
         self.assertAlmostEqual(b['points'][-1]['t'],a['points'][-1]['t']*2)
         self.assertEqual([x['q'] for x in a['points']],[x['q'] for x in b['points']])
-        for bad in ('letter_J','digit_99','touch_flow','../../foo'):
+        for bad in ('letter_?','digit_99','touch_flow','../../foo'):
             with self.assertRaises(ValueError):make_trial([0.]*20,bad,.25,1)
 
     def test_preview_clock_freezes_time_per_start(self):

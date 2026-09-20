@@ -4,6 +4,7 @@ import threading
 import time
 from datetime import datetime
 from gesture_library import CATALOG as GESTURES,CUSTOM_IDS,route
+from performance_program import PROGRAM_IDS, program, sample
 
 CATALOG = {
     'all':'整套展示', 'open':'张开', 'fist':'握拳', 'opposition':'依次对指',
@@ -18,7 +19,7 @@ CATALOG['sequence']='组合展示'
 PERIOD = {key:6. for key in CATALOG}
 PERIOD.update(opposition=20., wave=15., joints=60., all=53.)
 PERIOD['official_opposition']=30.999
-for _key in CUSTOM_IDS:PERIOD[_key]=max(6.,len(route(_key))*3.)
+for _key in CUSTOM_IDS-PROGRAM_IDS:PERIOD[_key]=max(6.,len(route(_key))*3.)
 PERIOD['touch_flow']=8.
 PERIOD['sequence']=53.
 PERIOD['official_sweep']=6.
@@ -35,13 +36,15 @@ class DemoPlayer:
         self.elapsed=0.
         self.tick=time.monotonic()
         self.clock_at=None
+        self.text='WUJI TECH'
+        self.duration=PERIOD[self.action]
 
     def advance(self):
         now=time.monotonic()
         if self.active and self.running:self.elapsed+=(now-self.tick)*self.speed
         self.tick=now
-        if self.cycles and self.elapsed>=PERIOD[self.action]*self.cycles:
-            self.elapsed=PERIOD[self.action]*self.cycles
+        if self.cycles and self.elapsed>=self.duration*self.cycles:
+            self.elapsed=self.duration*self.cycles
             self.running=False
 
     def command(self, data):
@@ -54,12 +57,16 @@ class DemoPlayer:
                     raise ValueError('无效动作或速度')
                 if type(cycles) is not int or cycles not in {0,1,3,10}:
                     raise ValueError('播放次数只能选择1、3、10或循环')
+                from phrase_text import normalize_phrase
+                text=normalize_phrase(data.get('text')) if action=='text_sequence' else 'WUJI TECH'
+                duration=program(action,text)['duration_s'] if action in PROGRAM_IDS else PERIOD[action]
                 self.action,self.speed,self.cycles=action,speed,cycles
+                self.text,self.duration=text,duration
                 self.clock_at=datetime.now().astimezone().isoformat()
                 self.active=self.running=True;self.elapsed=0.;self.tick=time.monotonic()
             elif name=='demo_pause':self.running=False
             elif name=='demo_resume':
-                if self.cycles and self.elapsed>=PERIOD[self.action]*self.cycles:self.elapsed=0.
+                if self.cycles and self.elapsed>=self.duration*self.cycles:self.elapsed=0.
                 self.running=self.active
             elif name=='demo_stop':self.active=self.running=False
             else:raise ValueError('Unknown preview command')
@@ -68,17 +75,22 @@ class DemoPlayer:
         with self.lock:
             self.advance()
             display_elapsed=self.elapsed
-            if self.cycles and self.elapsed>=PERIOD[self.action]*self.cycles:
+            if self.cycles and self.elapsed>=self.duration*self.cycles:
                 display_elapsed=max(0.,self.elapsed-1e-6)
             phase_label=CATALOG[self.action]
-            if self.action in CUSTOM_IDS:
+            token_index=-1
+            if self.action in PROGRAM_IDS:
+                phase=sample(self.action,display_elapsed,self.text)
+                phase_label=phase['label'];token_index=phase['token_index']
+            elif self.action in CUSTOM_IDS:
                 steps=route(self.action,at=datetime.fromisoformat(self.clock_at) if self.clock_at else None)
                 phase_label=steps[min(len(steps)-1,int((display_elapsed%PERIOD[self.action])/3.))][0]
             return dict(active=self.active,running=self.running,action=self.action,
                 label=CATALOG[self.action]+' · '+phase_label if self.action in CUSTOM_IDS else phase_label,speed=self.speed,cycles=self.cycles,
                 clock_at=self.clock_at,
+                text=self.text if self.action=='text_sequence' else '',token_index=token_index,duration_s=self.duration,
                 pose_elapsed_s=display_elapsed,
-                elapsed_s=self.elapsed,cycle=min(int(self.elapsed/PERIOD[self.action])+1,self.cycles) if self.cycles else int(self.elapsed/PERIOD[self.action])+1,
+                elapsed_s=self.elapsed,cycle=min(int(self.elapsed/self.duration)+1,self.cycles) if self.cycles else int(self.elapsed/self.duration)+1,
                 source='official_left_recording_model_preview' if self.action=='official_opposition' else 'scripted_mujoco_pose_preview',hardware_motion=False)
 
 
@@ -108,8 +120,9 @@ class PoseLibrary:
                               bounds=(self.lo[active]+.01,self.hi[active]-.01),max_nfev=120)
             q=self.open.copy();q[active]=fit.x;self.pairs.append(q)
 
-    def pose(self, action, elapsed,clock_at=None):
+    def pose(self, action, elapsed,clock_at=None,text='WUJI TECH'):
         np=self.np
+        if action in PROGRAM_IDS:return np.array(sample(action,elapsed,text)['q'])
         if action=='sequence':action='all'
         if action=='official_sweep':
             t=elapsed%6.

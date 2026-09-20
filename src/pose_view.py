@@ -147,7 +147,7 @@ class PoseView:
                 playback=state.get('playback', {})
                 show_preview = preview_selected(state)
                 if show_preview:
-                    d.qpos[:20]=library.pose(playback['action'],playback.get('pose_elapsed_s',playback['elapsed_s']),playback.get('clock_at'))
+                    d.qpos[:20]=library.pose(playback['action'],playback.get('pose_elapsed_s',playback['elapsed_s']),playback.get('clock_at'),playback.get('text') or 'WUJI TECH')
                     active=0
                     for marker in markers:marker.update(status='demo',hz=None)
                 elif state.get('view_source')=='preview':

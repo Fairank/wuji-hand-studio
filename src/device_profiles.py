@@ -1,6 +1,7 @@
 """Native geometry and explicit generation/side identity, never image mirroring."""
 import json,os
 from pathlib import Path
+from functools import lru_cache
 
 PROFILES={f'{generation}_{side}':dict(id=f'{generation}_{side}',generation=generation,side=side,
     zh=f'舞肌{1 if generation=="hand1" else 2}代 · {"左" if side=="left" else "右"}手',
@@ -43,17 +44,38 @@ def load_native_model(name):
     if model.nu!=20 or model.nq!=20:raise ValueError('Expected 20 native axes')
     return model
 
+
+@lru_cache(maxsize=4)
+def native_ranges(name):
+    import xml.etree.ElementTree as ET
+    p=profile(name)
+    root=ET.parse(Path(__file__).resolve().parent/p['model']).getroot()
+    return tuple(tuple(map(float,x.get('ctrlrange').split())) for x in root.findall('./actuator/position'))
+
+
+def performance_preview_pose(q,name):
+    # Hand 1 remains a geometric approximation, never a hardware command.
+    q=list(q)
+    if name.startswith('hand1'):
+        q[1]=abs(q[1])
+        q=[min(hi,max(lo,x)) for x,(lo,hi) in zip(q,native_ranges(name))]
+    return q
+
 class FirstGenerationPreview:
     """Preview poses use first-generation joint ranges; no actuator API."""
     def __init__(self,model):
         import numpy as np
         self.np=np;self.lo,self.hi=model.actuator_ctrlrange.T.copy()
         self.open=np.clip(np.zeros(20),self.lo,self.hi)
-    def pose(self,action,elapsed,clock_at=None):
+        self.profile_id='hand1_left' if model.joint(0).name.startswith('left') else 'hand1_right'
+    def pose(self,action,elapsed,clock_at=None,text='WUJI TECH'):
         import math
         from gesture_library import route,CUSTOM_IDS
         from datetime import datetime
         np=self.np;q=self.open.copy();pulse=.5-.5*math.cos(math.pi*(elapsed%2.))
+        from performance_program import PROGRAM_IDS,sample
+        if action in PROGRAM_IDS:
+            return np.array(performance_preview_pose(sample(action,elapsed,text)['q'],self.profile_id))
         if action in {'fist','sequence','all'}:
             for f in range(1,5):q[[f*4,f*4+2,f*4+3]]=1.6*pulse
         elif action in {'wave','thumb','index','middle','ring','little','joints'}:

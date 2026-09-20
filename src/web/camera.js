@@ -4,6 +4,8 @@ const screen=document.querySelector('.pose-screen');
 const toolbar=document.createElement('div');toolbar.className='view-toolbar';
 toolbar.innerHTML=`<div class="view-sources" role="group" aria-label="画面来源"><button data-source="feedback" aria-pressed="true">跟随实机</button><button data-source="preview" aria-pressed="false">动作预览</button></div><div class="camera-presets" role="group" aria-label="观看角度"><button data-view="front">正面</button><button data-view="back">背面</button><button data-view="side">侧面</button><button data-view="reset">复位</button></div><p>拖动旋转 · 滚轮/双指缩放 · 右键或 Shift 拖动平移</p><p id="camera-notice" role="status"></p>`;
 screen.before(toolbar);
+const lens=document.createElement('div');lens.className='camera-lens';
+lens.append(toolbar.querySelector('.camera-presets'));screen.append(lens);
 const stageStop=document.createElement('button');stageStop.textContent='停止实机并停用电机';stageStop.className='stage-stop';stageStop.hidden=true;toolbar.append(stageStop);
 stageStop.addEventListener('click',async()=>{try{await post({name:'hardware_stop'});notice.textContent='已请求停止，等待实机状态';}catch(e){notice.textContent=e.message;}});
 screen.tabIndex=0;screen.setAttribute('role','group');screen.setAttribute('aria-label','三维视角，拖动旋转，滚轮缩放，方向键旋转，加减键缩放，R复位');
@@ -34,13 +36,14 @@ function preset(view){
   camera=defaults();if(view==='back')camera.azimuth=270;if(view==='side')camera.azimuth=0;
   lastGesture=performance.now();schedule();
 }
-for(const b of toolbar.querySelectorAll('[data-view]'))b.addEventListener('click',()=>preset(b.dataset.view));
+for(const b of lens.querySelectorAll('[data-view]'))b.addEventListener('click',()=>preset(b.dataset.view));
 for(const b of toolbar.querySelectorAll('[data-source]'))b.addEventListener('click',async()=>{
   try{await post({name:'view_source',source:b.dataset.source});notice.textContent='';}
   catch(e){notice.textContent=e.message;}
 });
 screen.addEventListener('contextmenu',e=>e.preventDefault());
 screen.addEventListener('pointerdown',e=>{
+  if(e.target.closest('button'))return;
   if(!state)return;e.preventDefault();screen.focus({preventScroll:true});
   screen.setPointerCapture(e.pointerId);pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
 });

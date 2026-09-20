@@ -2,7 +2,7 @@
   'use strict';
   const $=id=>document.getElementById(id), L=window.WujiLocale, ws=window.WujiWorkspace;
   const text=(zh,en)=>L.lang==='en'?en:zh;
-  let catalog=null,state=null,mode='hardware';
+  let catalog=null,state=null,mode='hardware',restored=false;
   const tools=document.createElement('div');tools.className='studio-tools';
   const language=document.createElement('select');language.setAttribute('aria-label','语言 / Language');
   language.add(new Option('中文','zh'));language.add(new Option('English','en'));language.value=L.lang;
@@ -16,9 +16,14 @@
   for(const [id,key] of Object.entries(captions))$(id).dataset.i18n=key;
   const library=ws.views.library,interaction=ws.views.interaction;
   library.innerHTML='<div id="compact-library"></div><details class="studio-info library-reference"><summary id="official-summary"></summary><ol class="official-list" id="official-list"></ol></details>';
+  const choreographyInfo=document.createElement('details');choreographyInfo.className='studio-info library-reference';
+  const choreographySummary=document.createElement('summary'),choreographyBody=document.createElement('p');
+  const danceReference=document.createElement('a');danceReference.href='https://www.brambilabong.com/blogs/popping/learn-3-finger-tutting-dance-moves-tutorial';danceReference.target='_blank';danceReference.rel='noopener';danceReference.textContent='El Tiro · Finger Tutting Tutorial ↗';
+  choreographyInfo.append(choreographySummary,choreographyBody,danceReference);library.append(choreographyInfo);
   const motionLayout=document.querySelector('.motion-layout');library.prepend(motionLayout);
   const chooser=document.createElement('div');motionLayout.querySelector('.motion-controls').prepend(chooser);
   const picker=window.WujiActionPicker.create({root:chooser,text,onSelect:id=>selectMotion(id)});
+  window.WujiPerformancePayload=()=>picker.payload;
   const modeBar=document.createElement('div');modeBar.className='playback-modes';modeBar.setAttribute('role','group');modeBar.setAttribute('aria-label','播放对象 / Playback target');
   modeBar.innerHTML='<button type="button" id="mode-hardware"></button><button type="button" id="mode-preview"></button>';
   chooser.after(modeBar);
@@ -49,6 +54,15 @@
   function selectMotion(id){
     for(const key of ['trial-action','play-action']){const control=$(key);if([...control.options].some(o=>o.value===id)){control.value=id;control.dispatchEvent(new Event('change'));}}
   }
+  function restorePlayback(){
+    if(restored||!catalog||!state)return;restored=true;
+    const running=state.hardware?.active?state.hardware:state.playback?.active?state.playback:null;
+    if(running&&catalog.actions.some(x=>x.id===running.action)){
+      picker.restore(running.action,running.text);selectMotion(running.action);
+      setMode(state.hardware?.active?'hardware':'preview');
+      if(!state.hardware?.active){$('play-speed').value=String(running.speed);$('play-cycles').value=String(running.cycles);}
+    }
+  }
   function touchState(){
     const grid=$('touch-grid');grid.replaceChildren();
     const names=L.lang==='en'?['Thumb','Index','Middle','Ring','Little']:['拇指','食指','中指','无名指','小指'];
@@ -65,6 +79,8 @@
     document.documentElement.lang=L.lang==='en'?'en':'zh-CN';language.value=L.lang;L.apply();
     document.title=L.text(document.body.dataset.page||'library')+' · Wuji Hand Studio';
     $('official-summary').textContent=text('官方资源兼容性与来源','Official resources and compatibility');
+    choreographySummary.textContent=text('文字与手指舞 · 参考和轨迹','Text and dance · references and trajectories');
+    choreographyBody.textContent=text('水母舒展、逐指波浪和指节涟漪参考真人教程的节奏重新编排，不含手腕或手臂位移。字母是固定腕近似造型，J/Z 使用指尖运动近似。预览与 CSV 是标称编排时间；二代实机从当前姿态进入，再按你设置的幅度和速度调整用时。一代新动作仅供预览。CSV 是目标关节角，不是实测反馈或力控记录。','Jellyfish, finger wave and knuckle ripple are authored adaptations of tutorial rhythms, without wrist or arm translation. Letters are fixed-wrist approximations, including moving J/Z. Preview and CSV use nominal timing. Hand 2 enters from measured posture and retimes to your amplitude/speed. New Hand 1 motions are preview-only. CSV contains target angles, not measured feedback or force records.');
     desktop.textContent=text('打开桌面软件','Open desktop app');
     $('touch-heading').textContent=text('触碰识别与轻扣：实机尚未验收','Touch recognition and gentle grasp: not validated on hardware');
     $('touch-description').textContent=text('目标流程：感知被碰的手指 → 选择配合指 → 轻扣0.5秒 → 松开恢复；提前抽离则取消。','Target flow: detect the touched finger → select a partner → hold gently for 0.5 s → release and resume; cancel on early withdrawal.');
@@ -186,8 +202,8 @@
   async function speedSummary(){try{const p=await(await fetch('/api/parameters',{cache:'no-store'})).json();const v=p.values;const peak=Math.min(v.PATH_SPEED_RAD_S,v.COMMAND_SPEED_RAD_S);speedSummaryLabel.textContent=text('当前速度与频率说明','Current speed and rate');speedBody.textContent=text(`当前轨迹峰值设定 ${peak} rad/s ≈ ${(peak*180/Math.PI).toFixed(1)}°/s（1×档）。规划速度与指令变化速率取较小者；还受最短过渡 ${v.MIN_TRANSITION_S}s 和停留影响。数值框没有额外速度上限，但这不代表电机可达到任意速度；官方未在控制指南给出最高关节速度。1000Hz是发送频率。`,`Configured trajectory peak ${peak} rad/s ≈ ${(peak*180/Math.PI).toFixed(1)}°/s at 1×. The lower of planning/command speed applies, with ${v.MIN_TRANSITION_S}s minimum transition and pose holds. There is no additional speed cap in the input, but this is not an achievable motor-speed guarantee. The control guide does not specify a maximum joint speed. 1000 Hz is the command rate.`);}catch{speedBody.textContent=text('速度设置读取失败','Could not read speed settings');}}
   window.addEventListener('wuji-language',()=>{render();viewerLabels();speedSummary();});
   window.addEventListener('workspace-page',()=>{L.apply();staticEnglish();if(location.hash==='#parameters')speedSummary();});
-  window.addEventListener('console-state',e=>{state=e.detail;picker.setBusy($('trial-action').disabled);$('warning-policy').dataset.hasWarnings=String(state.connection==='connected'&&!!state.hardware?.warnings?.length);if(location.hash==='#interaction')touchState();staticEnglish();});
+  window.addEventListener('console-state',e=>{state=e.detail;restorePlayback();picker.setBusy($('trial-action').disabled);picker.update(state);$('warning-policy').dataset.hasWarnings=String(state.connection==='connected'&&!!state.hardware?.warnings?.length);if(location.hash==='#interaction')touchState();staticEnglish();});
   window.addEventListener('console-offline',()=>{state=null;touchState();});
-  fetch('/api/catalog').then(r=>{if(!r.ok)throw Error('Action catalog unavailable');return r.json();}).then(data=>{catalog=data;render();}).catch(notice);
+  fetch('/api/catalog').then(r=>{if(!r.ok)throw Error('Action catalog unavailable');return r.json();}).then(data=>{catalog=data;render();restorePlayback();}).catch(notice);
   render();viewerLabels();speedSummary();ws.showPage();
 })();

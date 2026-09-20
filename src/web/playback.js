@@ -134,7 +134,7 @@
     const body={name,lease:ownedLease};
     if(name==='hardware_start')Object.assign(body,{action:get('play-action').value,speed:Number(get('play-speed').value),cycles:Number(get('play-cycles').value)});
     if(name==='hardware_probe')Object.assign(body,{index:Number(get('probe-joint').value),direction:Number(get('probe-direction').value),workspace_clear:get('probe-clear').checked});
-    if(name==='hardware_trial')Object.assign(body,{action:get('trial-action').value,amplitude:Number(get('trial-amplitude').value),speed:Number(get('trial-speed').value),cycles:Number(get('trial-cycles').value),workspace_clear:get('trial-clear').checked});
+    if(name==='hardware_trial')Object.assign(body,{action:get('trial-action').value,amplitude:Number(get('trial-amplitude').value),speed:Number(get('trial-speed').value),cycles:Number(get('trial-cycles').value),workspace_clear:get('trial-clear').checked},window.WujiPerformancePayload?.()||{});
     try{
       const result=await hardwarePost(body);
       if(generation!==hardwareGeneration){if(result.lease)await hardwarePost({name:'hardware_stop'});return;}
@@ -160,7 +160,7 @@
   beat();
   function render(){const p=state?.playback;get('play-start').disabled=!state||pending;get('play-pause').disabled=!p?.active||pending;get('play-stop').disabled=!p?.active||pending;get('play-pause').textContent=p?.running?'暂停':'继续';get('play-status').textContent=p?.active?`${p.label} · 第${p.cycle}${p.cycles?'/'+p.cycles:''}轮 · ${p.running?'播放中':'暂停或完成'} · ${p.elapsed_s.toFixed(1)}秒`:'当前显示实机反馈或静态预览';}
   async function send(body){if(!state||pending)return;pending=true;render();let error='';try{const r=await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json','X-Console-Token':state.csrf},body:JSON.stringify(body),signal:AbortSignal.timeout(4000)});const d=await r.json();if(!r.ok||!d.ok)throw Error(d.error||'播放操作失败');}catch(e){error=e.message;}finally{pending=false;render();if(error)document.getElementById('service-error').textContent=error;document.getElementById('service-error').hidden=!error;}}
-  get('play-start').addEventListener('click',()=>send({name:'demo_start',action:get('play-action').value,speed:Number(get('play-speed').value),cycles:Number(get('play-cycles').value)}));
+  get('play-start').addEventListener('click',()=>send({name:'demo_start',action:get('play-action').value,speed:Number(get('play-speed').value),cycles:Number(get('play-cycles').value),...(window.WujiPerformancePayload?.()||{})}));
   get('play-pause').addEventListener('click',()=>send({name:state.playback.running?'demo_pause':'demo_resume'}));
   get('play-stop').addEventListener('click',()=>send({name:'demo_stop'}));
   window.addEventListener('console-state',e=>{state=e.detail;if(state.hardware?.active)leaseSeenActive=true;else if(ownedLease&&(leaseSeenActive||performance.now()>leaseDeadline))ownedLease=null;render();renderHardware();});

@@ -19,14 +19,16 @@ NAMES={'open':'张开并返回','fist':'张开与轻握','opposition':'拇指依
 NAMES.update({x['id']:x['zh'] for x in CATALOG if x['id'] in CUSTOM_IDS})
 
 
-def make_trial(q,action,amplitude,cycles,path=POSES,*,speed=1.,clock_at=None):
+def make_trial(q,action,amplitude,cycles,path=POSES,*,speed=1.,clock_at=None,text='WUJI TECH'):
     if action not in NAMES or type(amplitude) not in {int,float} or amplitude not in {.25,.5,.75,1.}:
         raise ValueError('请选择试运行动作和25/50/75/100%幅度')
     if type(cycles) is not int or cycles not in {1,3}:raise ValueError('试运行支持1或3轮')
     if type(speed) not in {int,float} or speed not in {.25,.5,1.}:
         raise ValueError('试运行速度仅支持0.25/0.5/1倍限速')
     def retime(plan):
-        for point in plan['points']:point['t']/=speed
+        for point in plan['points']:
+            point['t']/=speed
+            if 'v' in point:point['v']=[v*speed for v in point['v']]
         if plan['points'][-1]['t']*cycles>MAX_TRIAL_DURATION_S:
             raise ValueError(f'所选速度、幅度与循环超过{MAX_TRIAL_DURATION_S/60:g}分钟播放设置，请调整循环、幅度或配置')
         plan['speed_factor']=speed
@@ -43,6 +45,16 @@ def make_trial(q,action,amplitude,cycles,path=POSES,*,speed=1.,clock_at=None):
         return (isinstance(values,list) and len(values)==20 and all(type(x) in {int,float} and math.isfinite(x) for x in values))
     if not valid(lo) or not valid(hi) or not valid(q) or any(not a<=x<=b for x,a,b in zip(q,lo,hi)):
         raise ValueError('当前姿态超出候选试运行边界')
+    from performance_program import PROGRAM_IDS,real_points,program
+    if action in PROGRAM_IDS:
+        data=program(action,text)
+        points,scale=real_points(action,text,q,amplitude,min(PATH_SPEED_RAD_S,COMMAND_SPEED_RAD_S),MIN_TRANSITION_S,POSE_HOLD_S)
+        if any(not valid(p['q']) or any(not a<=x<=b for x,a,b in zip(p['q'],lo,hi)) for p in points):
+            raise ValueError('动作数据超出关节行程')
+        return retime(dict(points=points,lower_rad=lo,upper_rad=hi,current_limit_A=CURRENT_LIMIT_A,
+            max_velocity_rad_s=COMMAND_SPEED_RAD_S,cycles=cycles,action=action,label=NAMES[action],amplitude=amplitude,
+            text=data['text'],source=data['source'],source_url=data['source_url'],choreography_schema=data['schema'],
+            nominal_duration_s=data['duration_s'],time_scale=scale,physical_contact_verified=False,sign_language_certified=False))
     if action=='official_opposition':
         from official_replay import build_points,SOURCE_URL,COMMIT,LEFT_SHA256
         points=build_points(q,amplitude,lo,hi)
