@@ -65,7 +65,7 @@
     for(const key of Object.keys(views)){get('page-'+key).hidden=key!==current;const a=nav.querySelector(`[data-page="${key}"]`);if(key===current)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current');}
     document.body.dataset.page=current;const more=nav.querySelector('details');if(more){const tool=['capture','interaction','records'].includes(current);more.classList.toggle('is-current',tool);if(window.innerWidth>700&&tool)more.open=true;else if(window.innerWidth<=700)more.open=false;}
     if(!window.wujiFloating?.isFloating())(['motion','library'].includes(current)?motionDock:current==='feedback'?feedbackDock:current==='glove'?get('glove-viewer-dock'):parking).append(pose);
-    document.title=(window.WujiLocale?window.WujiLocale.text(current):pages.find(x=>x[0]===current)[1])+' · Wuji Hand Studio';
+    document.title=(window.WujiLocale?window.WujiLocale.text(current):pages.find(x=>x[0]===current)[1])+' · Hand Workbench';
     window.dispatchEvent(new CustomEvent('workspace-page',{detail:current}));
     window.scrollTo({top:0,behavior:'instant'});
   }

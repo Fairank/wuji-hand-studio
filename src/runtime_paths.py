@@ -7,7 +7,7 @@ RESOURCE=Path(__file__).resolve().parent
 EDITION=json.loads((RESOURCE/'edition.json').read_text(encoding='utf-8'))
 PORT=int(os.environ.get('WUJI_STUDIO_PORT','8781'))
 if not 1024 <= PORT <= 65535:raise ValueError('Invalid local port')
-DATA=Path(os.environ['WUJI_STUDIO_DATA']).expanduser().resolve() if os.environ.get('WUJI_STUDIO_DATA') else user_data_dir('WujiStudioResearch' if EDITION['name']=='research' else 'WujiStudio')
+DATA=Path(os.environ['WUJI_STUDIO_DATA']).expanduser().resolve() if os.environ.get('WUJI_STUDIO_DATA') else user_data_dir('WujiStudio')
 
 def initialize():
     DATA.mkdir(parents=True,exist_ok=True)

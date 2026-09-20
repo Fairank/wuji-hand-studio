@@ -162,6 +162,8 @@ class Controller:
     def _action(self, command):
         if not isinstance(command,dict):raise ValueError('Invalid request')
         name=command.get('name','')
+        if getattr(self,'desktop_closing',False) and name not in {'disconnect','hardware_stop','glove_stop','glove_disconnect','glove_keepalive','hardware_keepalive','demo_stop'}:
+            raise ValueError('工作台正在退出 / Workbench is closing')
         if name=='hardware_stop' and self.glove.busy:
             return self.glove.action(dict(name='glove_stop'))
         if isinstance(name,str) and name.startswith('glove_'):
@@ -477,11 +479,15 @@ class Handler(BaseHTTPRequestHandler):
         if not self.allowed_host():
             return self.reply(403, dict(error='Local host required'))
         url = urlsplit(self.path)
+        if url.path == '/api/desktop':
+            host=getattr(self.server,'desktop',None)
+            return self.reply(200,host.info() if host else dict(native=False,api_version=1,operations=[]))
         if url.path == '/api/installation':
             from bridge_config import load_config
             from device_profiles import PROFILES
             from runtime_paths import EDITION
-            return self.reply(200,dict(edition=EDITION,version=EDITION['version'],local_controller_supported=sys.platform.startswith('linux'),bridge=load_config(),profiles=list(PROFILES.values()),selected_profile=self.server.controller.state['device_profile']['id'],unofficial=True))
+            from model_pack import status as model_status
+            return self.reply(200,dict(edition=EDITION,version=EDITION['version'],optional_model=model_status(),local_controller_supported=sys.platform.startswith('linux'),bridge=load_config(),profiles=list(PROFILES.values()),selected_profile=self.server.controller.state['device_profile']['id'],unofficial=True))
         if url.path in ('/api/doctor','/api/doctor/report'):
             state=self.server.controller.doctor.snapshot()
             if url.path.endswith('/report'):
@@ -525,9 +531,9 @@ class Handler(BaseHTTPRequestHandler):
         assets.update({'/workspace.js':('workspace.js','text/javascript; charset=utf-8'),
             '/workspace.css':('workspace.css','text/css; charset=utf-8'),
             '/parameters.js':('parameters.js','text/javascript; charset=utf-8')})
-        for name in ('studio.js','locale.js','floating_panel.js','viewer.js','action_picker.js','brand.js','installation.js','profiles.js','doctor.js','glove.js'):
+        for name in ('studio.js','locale.js','floating_panel.js','viewer.js','action_picker.js','brand.js','installation.js','profiles.js','doctor.js','glove.js','desktop_shell.js'):
             assets['/'+name]=(name,'text/javascript; charset=utf-8')
-        for name in ('studio.css','floating_panel.css','glass.css','glove.css'):
+        for name in ('studio.css','floating_panel.css','glass.css','glove.css','desktop_glass.css'):
             assets['/'+name]=(name,'text/css; charset=utf-8')
         assets['/viewer']=('viewer.html','text/html; charset=utf-8')
         assets['/favicon.ico']=('favicon.ico','image/x-icon')
@@ -543,7 +549,7 @@ class Handler(BaseHTTPRequestHandler):
         if (not self.allowed_host() or origin not in {None, ORIGIN, f'http://localhost:{PORT}'}
                 or not secrets.compare_digest(self.headers.get('X-Console-Token', ''), self.server.controller.csrf)):
             return self.reply(403, dict(ok=False, error='本机控制会话校验失败，请刷新页面'))
-        if self.path != '/api/action':
+        if self.path not in ('/api/action','/api/desktop'):
             return self.reply(404, dict(ok=False, error='Unsupported endpoint'))
         try:
             length = int(self.headers.get('Content-Length', '0'))
@@ -551,11 +557,24 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError('Invalid request length')
             if self.headers.get('Content-Type', '').split(';')[0] != 'application/json':
                 raise ValueError('JSON required')
-            result = self.server.controller.action(json.loads(self.rfile.read(length)))
-            self.reply(200, dict(ok=True, **(result or {})))
+            payload=json.loads(self.rfile.read(length))
+            if not isinstance(payload,dict):raise ValueError('JSON object required')
+            if self.path == '/api/desktop':
+                from desktop_tools import dispatch
+                host=getattr(self.server,'desktop',None)
+                if not host:return self.reply(409,dict(ok=False,error='Open the Windows desktop application to use this interface'))
+                result=dispatch(host,payload)
+            elif payload.get('name') in ('desktop_open','desktop_viewer') and getattr(self.server,'desktop',None):
+                result=self.server.desktop.open_viewer() if payload['name']=='desktop_viewer' else dict(ok=True,native_opened=True)
+            else:result = self.server.controller.action(payload)
+            self.reply(200, {'ok':True, **(result or {})})
         except (ValueError, TypeError) as error:
             self.reply(400, dict(ok=False, error=str(error)))
         except Exception:
+            if self.path == '/api/desktop':
+                import logging
+                logging.exception('Desktop code interface failed')
+                return self.reply(503,dict(ok=False,error='Desktop operation unavailable; check desktop.log'))
             self.reply(503, dict(ok=False, error='反馈通道暂不可用，请检查连接状态'))
 
 

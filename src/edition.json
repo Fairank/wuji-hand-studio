@@ -1,5 +1,8 @@
 {
-  "name": "basic",
-  "version": "0.1.3",
-  "models": []
+  "name": "workbench",
+  "version": "0.1.4",
+  "models": [],
+  "product_id": "hand-workbench",
+  "name_zh": "灵巧手工作台",
+  "name_en": "Hand Workbench"
 }

@@ -1,83 +1,51 @@
-# Wuji Hand Studio · 非官方展示工作台
+# 灵巧手工作台 / Hand Workbench
 
 [English](#english)
 
-**这是为个人方便展示而制作的非官方工具，不是舞肌科技发布、维护或背书的产品。** 基础版欢迎自行下载使用。硬件名称、官方示例与标识仅用于说明兼容对象和来源。
+**非官方个人展示工具，不是舞肌科技发布、维护或背书的产品。** 官方名称、示例和标识仅说明兼容对象和来源。
 
-简洁的白色/浅灰界面，侧栏、选中控件和浮动窗口采用半透明玻璃材质；没有背景图片。支持中文 / English、一代/二代 × 左手/右手四种原生MuJoCo模型预览、相机调整、拖动小窗、动作循环、数字、当前时间HH:MM及24个近似静态字母。字母通过小弹窗选择，不铺满主界面；J/Z未包含，不属于认证手语。
+一个软件、一个图标、一个安装包。公开展示与自用模型共用同一套程序；私有模型通过菜单导入为本机数据，不再提供独立“基础版 / 研究版”软件。
 
-## 下载与启动
+## Windows 下载和启动
 
-在 [Releases](../../releases) 下载 Windows 或 Ubuntu 包并完整解压。Mac 源码启动方法见 [Mac 指南](docs/MACOS.md)；目前没有经过验证的 Mac 安装包。预览无需安装Python或连接机械手。首次启动不自动连接、不启动电机。
+在 [Releases](../../releases) 下载 `HandWorkbench-0.1.4-windows-x64-setup.exe`。当前用户安装，无需另装 Python。安装器检查微软 WebView2 运行时，缺少时联网安装。包暂未进行发布者代码签名，附有 SHA-256 校验文件。
 
-| 平台 | 启动入口 | 实机连接 |
-|---|---|---|
-| Windows x64 | `WujiStudio/WujiStudio.exe` | 配置Linux SDK控制端 |
-| Ubuntu 22.04+ x64 | `WujiStudio/WujiStudio` | 本机SDK，无需SSH或虚拟机 |
-| macOS Apple Silicon / Intel | [源码启动脚本](docs/MACOS.md)，安装包待Mac验证 | 配置Linux SDK控制端 |
+Windows 使用独立原生窗口和内嵌 WebView2，不依赖浏览器应用窗口。只运行一个主实例；模型小窗由用户选择打开。退出时正常结束设备会话、保存采集记录并关闭所属本机服务。启动不自动连接设备或启用电机。
 
-首次构建产物没有代码签名或Apple公证；如果系统阻止打开，先核对来源与SHA256，再按系统界面的提示处理。Ubuntu需要图形会话与系统OpenGL库。界面优先用Chrome/Edge/Chromium应用窗口；没有这些浏览器则使用默认浏览器。它是本地软件加本地网页界面，不是云端控制服务。
+原有用户数据目录 `%LOCALAPPDATA%/WujiStudio` 保持不变，仅为升级兼容的内部路径，不代表另一款软件。`WUJI_STUDIO_DATA` 可指定独立数据目录。升级保留参数、连接配置和记录。端口在 8781–8800 中选空闲值，写入数据目录的 `native-window.json`。
 
-下载包包含独立运行环境；关闭网页后本机服务保留供再次打开。端口默认8781；旧服务占用时双击启动会在8781–8800自动选择空闲端口，也可用环境变量 `WUJI_STUDIO_PORT` 固定端口。停止网页采集不等于硬件急停。
+## 功能
 
-实机接入步骤见 [Linux控制端说明](controller/README.md)。控制链路沿用明确开始、暂停、停止和官方故障处理；没有为这次美化调整电机参数。软件设定的1000Hz是上位机发送目标节拍，实际频率单独报告，不是网页帧率或保证设备逐帧执行。
+- 中文 / English；简洁白灰界面，导航、分段控件、工具条和弹窗使用玻璃材质；可减少透明及动态效果。Windows 的自有实现，不是调用苹果 Liquid Glass 系统 API。
+- 一代 / 二代 × 左手 / 右手四种原生 MuJoCo 模型，实测关节同步、视角调整、浮动模型小窗。
+- 动作选择和循环、整句文字（例如 `wuji tech`）、数字、启动时刻 HH:MM、三套编排手指舞。字母为固定手腕近似，不是认证手语或完整人体动作捕捉。
+- 参数调节、发送频率与真实反馈统计、采集和记录、官方诊断、手套映射预览及显式启动跟随。
+- [代码检视与升级接口](docs/DESKTOP_API.md)：读取软件状态、界面布局、导出自身画面、检查和应用安装包。不发送桌面鼠标键盘输入，不截取其他软件。
 
-## 官方诊断
+## 设备与模型边界
 
-“官方诊断”页面提供CLI版本检查、官方诊断、分项结果和原始报告导出。先在控制端安装官方CLI；配置可留待实际使用的电脑完成。检查不自动驱动电机，跳过不计通过。详见[连接与诊断说明](controller/README.md)。
+Windows 实机控制仍需已配置的 Linux SDK 控制端，可以是独立 Linux 电脑，不必限定 Ubuntu 虚拟机。Ubuntu 可在本机运行 SDK。完整原生 Windows/macOS 手套控制端尚未实现。详见 [控制与诊断说明](controller/README.md)、[手套说明](docs/GLOVE.md)（如对应版本提供）。
 
-## 两个版本
+二代左右手使用各自官方录制；新型号路径及新增编排动作未逐项完成实机验收。一代目前只开放官方张开 / 握拳实机适配，其他动作只预览。软件的 1000 Hz 是目标发送节拍，实际发送与反馈频率分别显示，不等于画面帧率或逐帧执行保证。没有因桌面改版调整电机增益或轨迹参数。
 
-| 内容 | 公开基础版 | 私有自用研究版 |
-|---|---|---|
-| 基础展示、官方示例适配、参数、反馈与3D查看 | 有 | 有 |
-| 自行训练的识别权重 | **无** | 单独私有仓库与私有下载包 |
-| 实机自动触碰反抓 | 未开放 | 仍需实机标定与验收，不因附带模型就自动开放 |
+公开仓库及安装器不含自训权重、训练记录、设备记录或凭据。私有数据包从用户自己的私有仓库获取，再导入同一程序。当前二代左手识别器只支持离线仿真反馈；电流 A 不能直接当作仿真力矩或接触力 N。导入模型不会开放实机自主轻扣；仍需标定和独立验收。
 
-公开版不包含训练源码、训练记录、检查点、设备采集记录或SSH配置。私有仓库不通过公开发布流程构建或上传。各版本的本机数据目录相互独立。
+## 源码和构建
 
-新增设备支持：四种原生模型均可切换预览。二代左右手分别使用对应官方录制；新右手运行路径尚未实机验收。一代实机使用独立LowPass适配，仅开放官方张开/握拳，其他动作候选仅预览。此接口不提供的电流、设备时间戳频率显示为—，不虚构为1000Hz；一代不使用二代Kp/Kd设置。
+Python 3.12：`python -m pip install -r requirements.txt`，然后 `python src/desktop.py`。
 
-官方资源适配：二代左手对指录制、归零及余弦扫动示例；并非声称已集成所有WUJI仓库中的所有动作。手套遥操作、第一代手动作不当作直接兼容的二代动作。新增字母等动作仅经过离线检查，不冒称全部通过实机验收。触碰流程预览是编排动作，不是已经学会抓取。
+离线检查：`python src/desktop.py --self-check --render-check`。测试：`python -m unittest discover -s src`。
 
-## 源码运行与构建
+Windows 构建：安装 `requirements-build.txt` 后运行 `python build.py`，再使用 `python build_installer.py --iscc PATH_TO_ISCC --webview-bootstrap PATH_TO_SIGNED_MICROSOFT_BOOTSTRAP --zh-language PATH_TO_CHINESE_ISL`。安装器使用 Inno Setup 6.4.3 和对应版本中文翻译。
 
-Python 3.12：`python -m pip install -r requirements.txt`，随后 `python src/desktop.py`。离线检查：`python src/desktop.py --self-check`；渲染检查加 `--render-check`。单元检查：`python -m unittest discover -s src`。
+本次优先完成 Windows；Ubuntu 已有历史 0.1.3 包，macOS 源码入口见 [Mac 指南](docs/MACOS.md)，尚未在 Mac 验证新桌面版本。不把 Windows 文件改名当作其他系统安装包。
 
-在目标平台安装 `requirements-build.txt` 后运行 `python build.py`。各平台在原生系统构建并自检。仓库提供`ci/build.yml.example`自动构建模板；当前发布账户未授权workflow权限，因此本次采用Windows与Ubuntu原生构建；Mac构建入口已准备，等待Mac验证。需要启用Actions时由仓库维护者将模板放入`.github/workflows/build.yml`。不是在Windows上把同一个可执行文件改名给三个平台。
-
-用户配置位于Windows `%LOCALAPPDATA%/WujiStudio`、macOS `~/Library/Application Support/WujiStudio`、Linux `$XDG_DATA_HOME/WujiStudio`（缺省 `~/.local/share/WujiStudio`）。`WUJI_STUDIO_DATA`可指定独立数据目录。升级不覆盖现有参数。
-
-本项目基础路径、官方诊断格式化、常规测试由Claude Fable 5.1（max）辅助；Mac启动脚本按用户指定由Claude Opus 5（max）辅助。均由主维护者审核调整，控制逻辑与发布内容由主维护者核验。详见 [第三方来源与许可证](THIRD_PARTY_NOTICES.md)。
+本地 Claude `claude-fable-5-1 --effort max` 协助基础 CSS、安装脚本、常规统计和文档；输出经主维护者审核修正。代码检视代替桌面操作。控制决策、模型边界和真实结果由主维护者核验。来源和许可证见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
 ## English
 
-**Unofficial personal demonstration tool. Not published, maintained, sponsored, or endorsed by Wuji Technology.** Download the Basic edition for personal demonstrations. Vendor names and logos identify compatibility and sources; they do not imply endorsement.
+**Hand Workbench is one unofficial personal hand demonstration application. It is not published, maintained or endorsed by Wuji Technology.** Windows uses an independent native window with embedded WebView2. One installer serves both demonstrations and optional local model packs; there is no separate Research application. Private weights are excluded from the public build.
 
-Features: Chinese/English UI, a neutral minimal interface with frosted translucent controls, native Hand 1/Hand 2 left/right MuJoCo previews, camera controls, a movable/resizable viewer, loop playback, numbers, startup-time HH:MM and 24 approximate static letters (not certified sign language). No automatic connection or motor start.
+Features include Chinese/English, minimalist glass chrome, four native hand profiles, text sequences, numbers, clock poses, authored finger dances, configurable parameters, feedback, recording, diagnostics and glove integration. Hardware control still requires a configured Linux SDK controller. New UI tests and synthetic mapping checks are not real hardware acceptance. The optional left-hand model is for offline simulation feedback only and cannot enable real-device grasping.
 
-Download the Windows x64 or Ubuntu x64 package under Releases. For macOS, use the [source launcher](docs/MACOS.md); no native macOS package has been validated or published yet. Extract the whole archive. The Python runtime is bundled. Packages are unsigned; macOS builds are not notarized. The UI opens as a Chrome/Edge/Chromium app window when available, otherwise in your default browser. Linux needs a graphical session and OpenGL libraries.
-
-**Hardware requires a Linux SDK controller: local on Ubuntu, remote over SSH on Windows/macOS**; see [controller setup](controller/README.md). This does not promise native Windows/macOS SDK support. UI/render tests do not constitute hardware acceptance. Existing gains and motion/fault handling are not changed by the visual redesign.
-
-The public Basic edition contains no trained weights, training code, device recordings or credentials. The Research edition is distributed through a separate private repository with the owner's experimental left-hand recognition model. Including a model does not validate automatic real-hand grasping; that function remains unavailable pending calibration and acceptance.
-
-Sources: [official SDK examples](https://github.com/wuji-technology/wuji-sdk), [official hand geometry](https://github.com/wuji-technology/wuji-description). Only three Hand 2 examples are adapted here; glove teleoperation and first-generation examples are not presented as directly compatible motions. Local modifications and third-party licenses are described in THIRD_PARTY_NOTICES.md.
-
-
-## 0.1.2 · 文字与手指舞
-
-输入 `wuji tech` 即可依次编排文字动作，含空格停顿、重复字母分隔、当前字符高亮及J/Z固定腕运动近似。新增水母舒展、逐指波浪和指节涟漪，支持循环预览与1000Hz目标轨迹CSV导出。二代实机通道按当前姿态、幅度和用户速度设置编译；控制端也需更新至本版（动作库v2）。一代新动作仅预览。
-
-界面加强透明玻璃边缘、悬浮导航、文字弹窗及覆盖三维画面的视角工具条，保持白灰底色。详见[动作说明、参考来源与验证范围](docs/PERFORMANCES.md)。没有为本版本连接电机验收。
-
-Claude Fable 5.1（`claude-fable-5-1 --effort max`）提供基础文字输入回归测试，主维护者审核筛选后采用；动作曲线、实际执行路径与验收由主维护者负责。调用不包含私有训练数据。
-
-Text sequences, three authored finger dances, stronger clear-glass materials and1000Hz nominal trajectory export. Fixed-wrist approximations, not certified signs or captured human motion. Hand2 controller must also be updated; Hand1 new motions remain preview-only. See [performance notes](docs/PERFORMANCES.md). No new hardware validation.
-
-
-## 0.1.3 · 手套遥操作
-
-新增独立手套页：官方 SDK 扫描、用户选择、左右手核对、实时映射预览、二代机械手只读准备及手动跟随。Windows/Mac 可配合同网段独立 Linux 小主机，无需在本机开虚拟机；纯 Windows/Mac 完整遥操作未实现。一代映射暂仅预览。没有自动启用或恢复电机，新增路径尚未实机验收。详见[手套连接与平台说明](docs/GLOVE.md)。
-
-Glove teleoperation uses the official Linux SDK on the same controller as the hand. A separate Linux PC can replace a VM. Basic statistics/tests assisted by Claude Fable 5.1 max and reviewed; no private data shared. Hardware acceptance remains pending.
+Use the [code-only maintenance interface](docs/DESKTOP_API.md) for inspecting the app, capturing its own WebView and applying a verified local installer. It never controls the computer's mouse/keyboard or captures other apps. User data is preserved across upgrades. Packages are unsigned; check the trusted release and published SHA-256. Windows is the current release target; macOS validation remains pending.

@@ -41,7 +41,10 @@ def open_app(viewer=False):
     url=URL+('viewer' if viewer else '#library')
     candidates=[]
     if sys.platform=='win32':
-        candidates=[Path(os.environ.get('PROGRAMFILES(X86)','C:/Program Files (x86)'))/'Microsoft/Edge/Application/msedge.exe',Path(os.environ.get('PROGRAMFILES','C:/Program Files'))/'Google/Chrome/Application/chrome.exe']
+        if viewer:return False
+        cmd=[sys.executable] if getattr(sys,'frozen',False) else [sys.executable,str(RESOURCE/'desktop.py')]
+        subprocess.Popen(cmd,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
+        return True
     elif sys.platform=='darwin':
         candidates=[Path('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'),Path('/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge')]
     else:
@@ -72,11 +75,19 @@ def self_check():
     print(json.dumps(data));return 0
 
 def main():
+    if '--recognizer-input' in sys.argv:
+        parser=argparse.ArgumentParser();parser.add_argument('--recognizer-input',required=True);parser.add_argument('--recognizer-output',required=True)
+        args=parser.parse_args()
+        from model_pack import run_file
+        run_file(args.recognizer_input,args.recognizer_output);return
     if '--self-check' in sys.argv:return self_check()
     initialize()
     if '--serve' in sys.argv:
         from console_server import main as serve
         serve();return
+    if sys.platform=='win32':
+        from native_desktop import main as native_main
+        return native_main()
     choose_port()
     if not ready():
         cmd=[sys.executable,'--serve'] if getattr(sys,'frozen',False) else [sys.executable,'-u',str(RESOURCE/'desktop.py'),'--serve']

@@ -51,5 +51,25 @@ class HTTPTests(unittest.TestCase):
         code,_=self.request('GET','/api/report?id=../../capture.py')
         self.assertEqual(code,400)
 
+    def test_desktop_inspection_is_authenticated_and_app_scoped(self):
+        from unittest.mock import Mock
+        self.assertFalse(self.request('GET','/api/desktop')[1]['native'])
+        payload=json.dumps({'operation':'inspect'})
+        headers={'Content-Type':'application/json','X-Console-Token':self.server.controller.csrf}
+        self.assertEqual(self.request('POST','/api/desktop',payload)[0],403)
+        self.assertEqual(self.request('POST','/api/desktop',payload,headers)[0],409)
+        host=Mock();host.inspect.return_value=dict(ok=True,ui=dict(page='library'))
+        self.server.desktop=host
+        code,result=self.request('POST','/api/desktop',payload,headers)
+        self.assertEqual(code,200);self.assertTrue(result['ok'])
+        self.assertEqual(self.request('POST','/api/desktop',payload,dict(headers,Origin='https://foreign.invalid'))[0],403)
+        self.assertEqual(self.request('POST','/api/desktop',json.dumps({'operation':'exec'}),headers)[0],400)
+
+    def test_shutdown_cannot_race_a_new_connection(self):
+        self.server.controller.desktop_closing=True
+        with self.assertRaisesRegex(ValueError,'closing'):
+            self.server.controller.action(dict(name='connect'))
+        self.server.controller.action(dict(name='disconnect'))
+
 
 if __name__=='__main__':unittest.main()

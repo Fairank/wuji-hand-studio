@@ -8,7 +8,7 @@
   var hasOwn = Object.prototype.hasOwnProperty;
 
   var ZH = {
-    appTitle: 'Wuji 手部工作台', motion: '动作播放', parameters: '参数调节', feedback: '实时反馈', capture: '触碰采集',
+    appTitle: '灵巧手工作台', motion: '动作播放', parameters: '参数调节', feedback: '实时反馈', capture: '触碰采集',
     records: '运行记录', connection: '连接与校准', library: '动作展示', interaction: '触碰互动', glove: '手套遥操作', doctor: '官方诊断', connect: '连接设备',
     disconnect: '断开连接', start: '开始', pause: '暂停', resume: '继续', stop: '停止', preview: '预览',
     hardware: '硬件', source: '来源', official: '官方', project: '项目', unverified: '未验证',
@@ -20,7 +20,7 @@
     copy: '复制', save: '保存', close: '关闭', search: '搜索', noResults: '未找到与“{query}”匹配的结果'
   };
   var EN = {
-    appTitle: 'Wuji Hand Studio', motion: 'Motion', parameters: 'Parameters', feedback: 'Feedback', capture: 'Capture',
+    appTitle: 'Hand Workbench', motion: 'Motion', parameters: 'Parameters', feedback: 'Feedback', capture: 'Capture',
     records: 'Records', connection: 'Connection', library: 'Actions', interaction: 'Interaction', glove: 'Glove teleop', doctor: 'Diagnostics', connect: 'Connect',
     disconnect: 'Disconnect', start: 'Start', pause: 'Pause', resume: 'Resume', stop: 'Stop', preview: 'Preview',
     hardware: 'Hardware', source: 'Source', official: 'Official', project: 'Project', unverified: 'Unverified',

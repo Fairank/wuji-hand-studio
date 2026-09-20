@@ -6,7 +6,7 @@ ROOT=Path(__file__).resolve().parent
 os.chdir(ROOT)
 config=json.loads((ROOT/'src/edition.json').read_text())
 edition=config['name'];version=config['version']
-name='WujiStudioResearch' if edition=='research' else 'WujiStudio'
+name='HandWorkbench'
 args=[sys.executable,'-m','PyInstaller','--noconfirm','--clean','--onedir','--name',name,'--paths','src',
     '--collect-all','mujoco','--collect-all','glfw','--collect-all','paramiko','--collect-all','scipy','--hidden-import','console_server','--hidden-import','PIL.Image',
     '--hidden-import','PIL.JpegImagePlugin','--hidden-import','bridge_config',
@@ -15,15 +15,13 @@ args=[sys.executable,'-m','PyInstaller','--noconfirm','--clean','--onedir','--na
     '--add-data','src/trial_sdk_poses.json'+os.pathsep+'.','--add-data','src/motion_parameters.py'+os.pathsep+'.',
     '--add-data','src/edition.json'+os.pathsep+'.','--add-data','LICENSE'+os.pathsep+'.',
     '--add-data','THIRD_PARTY_NOTICES.md'+os.pathsep+'.']
-if (ROOT/'src/private_models').is_dir():
-    if edition!='research':raise RuntimeError('Private weights in basic build')
-    args+=['--add-data','src/private_models'+os.pathsep+'private_models']
-if sys.platform=='win32':args+=['--icon','src/WujiStudio.ico']
+if (ROOT/'src/private_models').exists():raise RuntimeError('Private models are optional local data and must not be bundled')
+if sys.platform=='win32':args+=['--windowed','--icon','src/WujiStudio.ico','--collect-all','webview','--collect-all','pythonnet','--collect-all','clr_loader','--hidden-import','webview.platforms.winforms','--hidden-import','webview.platforms.edgechromium']
 elif sys.platform=='darwin':
     from PIL import Image
     icon=ROOT/'build-icons/app.icns';icon.parent.mkdir(exist_ok=True)
     im=Image.open('src/web/app-icon.png').convert('RGBA').resize((1024,1024))
-    im.save(icon,format='ICNS');args+=['--windowed','--icon',str(icon),'--osx-bundle-identifier','io.github.fairank.wujistudio']
+    im.save(icon,format='ICNS');args+=['--windowed','--icon',str(icon),'--osx-bundle-identifier','io.github.fairank.handworkbench']
 else:
     # PyOpenGL loads its backend by plugin name; static analysis cannot see it.
     args+=['--hidden-import','OpenGL.platform.egl','--hidden-import','OpenGL.platform.glx',
@@ -53,9 +51,9 @@ item=ROOT/'dist'/(name+'.app' if sys.platform=='darwin' else name)
 shutil.copytree(item,release/item.name,dirs_exist_ok=True,symlinks=True)
 for f in ('README.md','LICENSE','THIRD_PARTY_NOTICES.md'):shutil.copy2(ROOT/f,release/f)
 if (ROOT/'docs').is_dir():shutil.copytree(ROOT/'docs',release/'docs')
+shutil.copytree(ROOT/'scripts',release/'scripts',ignore=shutil.ignore_patterns('__pycache__'))
 shutil.copytree(ROOT/'controller',release/'controller',dirs_exist_ok=True)
 shutil.copytree(ROOT/'src',release/'controller/source',ignore=shutil.ignore_patterns('__pycache__','private_models','test_*','desktop.py','web','assets'),dirs_exist_ok=True)
-if edition=='research' and (ROOT/'research').exists():shutil.copytree(ROOT/'research',release/'research',dirs_exist_ok=True)
 if sys.platform=='darwin':
     archive=ROOT/'dist'/(release.name+'.zip')
     subprocess.run(['ditto','-c','-k','--sequesterRsrc','--keepParent',str(release),str(archive)],check=True)

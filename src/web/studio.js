@@ -77,7 +77,7 @@
   }
   function render(){
     document.documentElement.lang=L.lang==='en'?'en':'zh-CN';language.value=L.lang;L.apply();
-    document.title=L.text(document.body.dataset.page||'library')+' · Wuji Hand Studio';
+    document.title=L.text(document.body.dataset.page||'library')+' · Hand Workbench';
     $('official-summary').textContent=text('官方资源兼容性与来源','Official resources and compatibility');
     choreographySummary.textContent=text('文字与手指舞 · 参考和轨迹','Text and dance · references and trajectories');
     choreographyBody.textContent=text('水母舒展、逐指波浪和指节涟漪参考真人教程的节奏重新编排，不含手腕或手臂位移。字母是固定腕近似造型，J/Z 使用指尖运动近似。预览与 CSV 是标称编排时间；二代实机从当前姿态进入，再按你设置的幅度和速度调整用时。一代新动作仅供预览。CSV 是目标关节角，不是实测反馈或力控记录。','Jellyfish, finger wave and knuckle ripple are authored adaptations of tutorial rhythms, without wrist or arm translation. Letters are fixed-wrist approximations, including moving J/Z. Preview and CSV use nominal timing. Hand 2 enters from measured posture and retimes to your amplitude/speed. New Hand 1 motions are preview-only. CSV contains target angles, not measured feedback or force records.');
@@ -101,7 +101,7 @@
   const float=node('button',''),pop=node('button','');actions.append(float,pop);pose.prepend(actions);
   window.wujiFloating=window.FloatingPanel.create({panel:pose,home:ws.viewerHome(),title:'MuJoCo · Hand Studio',storageKey:'wuji-viewer-layout-v12',initialRect:{x:20,y:150,width:440,height:360},minHeight:240,onChange:()=>{if(!window.wujiFloating?.isFloating())ws.showPage();}});
   float.addEventListener('click',()=>window.wujiFloating.toggle());
-  pop.addEventListener('click',async()=>{try{const result=await post({name:'desktop_viewer'});if(!result.native_opened){const w=window.open('/viewer','wuji-pose-viewer','popup=yes,width=780,height=650,resizable=yes,scrollbars=yes');if(!w)throw Error(text('请允许本机网站弹窗，或直接打开 /viewer 页面。','Allow localhost popups, or open the /viewer page.'));}}catch(e){notice(e);}});
+  pop.addEventListener('click',async()=>{try{if(window.pywebview?.api){await window.pywebview.api.open_viewer();return;}const result=await post({name:'desktop_viewer'});if(!result.native_opened){const w=window.open('/viewer','wuji-pose-viewer','popup=yes,width=780,height=650,resizable=yes,scrollbars=yes');if(!w)throw Error(text('请允许本机网站弹窗，或直接打开 /viewer 页面。','Allow localhost popups, or open the /viewer page.'));}}catch(e){notice(e);}});
   function viewerLabels(){float.textContent=text('悬浮 / 停靠','Float / dock');pop.textContent=text('独立小窗','Pop out');}
   // Translate stable visible controls only; preserve native diagnostic text.
   const translations={

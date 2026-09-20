@@ -1,0 +1,229 @@
+/* desktop_glass.css — Wuji Hand Studio (unofficial) · minimalist glass desktop skin · append-only, load LAST.
+   Glass = toolbar, rail, camera lens, parameter action bar, app menu. Content = matte, opaque, 1px boundaries.
+   No gradients / wallpaper / blobs / invented data, no pointer tracking, no looping animation. Never sets
+   `display` on state-toggled widgets, never reorders, and puts NO backdrop-filter / transform / filter on any
+   ancestor of #pose-console (would re-anchor its fixed drag box). 960x680 minimum is enforced by the window shell. */
+:root{
+  --dg-top:64px; --dg-rail:190px; --dg-gutter:28px;
+  --dg-bg:#f5f5f7; --dg-canvas:#fff; --dg-matte:#fafafc; --dg-text:#1d1d1f; --dg-label:#3a3a3c; --dg-text-2:#6e6e73;
+  --dg-blue:#006adc; --dg-blue-down:#005bbf; --dg-stop:#b3261e;
+  --dg-line:rgba(0,0,0,.09); --dg-line-strong:rgba(0,0,0,.16); --dg-fill:rgba(0,0,0,.05);
+  --dg-glass:rgba(255,255,255,.72); --dg-glass-strong:rgba(255,255,255,.9); --dg-blur:blur(24px) saturate(1.15);
+  --dg-rim:inset 1px 1px 0 rgba(255,255,255,.95),inset 0 -1px 0 rgba(0,0,0,.1);
+  --dg-shadow:0 1px 2px rgba(0,0,0,.05),0 10px 30px rgba(0,0,0,.08);
+  --dg-t:.18s ease;
+  --dg-font:"Segoe UI Variable Text","Segoe UI","Microsoft YaHei UI","Microsoft YaHei","PingFang SC","Noto Sans CJK SC",system-ui,sans-serif;
+  color-scheme:light; accent-color:var(--dg-blue);
+}
+
+/* ── Base ── */
+[hidden]{display:none!important}
+html,body{background:var(--dg-bg)}
+body{margin:0;color:var(--dg-text);font:400 14px/1.5 var(--dg-font);-webkit-font-smoothing:antialiased}
+small,figcaption,caption{font-size:12px;color:var(--dg-text-2)}
+::selection{background:rgba(0,106,220,.2)}
+:focus-visible{outline:2px solid var(--dg-blue);outline-offset:2px}
+
+/* ── Controls: matte, radius 12, height 36; blue only for selected / primary ── */
+body :is(button,.button):where(:not([class*=handle i],[class*=resize i])){box-sizing:border-box;min-height:36px;padding:6px 14px;border:1px solid var(--dg-line-strong);border-radius:12px;background:var(--dg-canvas);color:var(--dg-text);
+  font-family:var(--dg-font);font-weight:500;line-height:1.2;text-decoration:none;cursor:pointer;box-shadow:0 1px 1px rgba(0,0,0,.03);
+  transition:background-color var(--dg-t),border-color var(--dg-t),color var(--dg-t),box-shadow var(--dg-t),transform var(--dg-t)}
+body :is(button,.button):where(:not(.symbol-options *,[class*=handle i],[class*=resize i])){font-size:14px}
+body :is(button,.button):where(:hover:not(:disabled,[class*=handle i],[class*=resize i])){background:var(--dg-bg);border-color:rgba(0,0,0,.24)}
+body :is(button,.button):where(:active:not(:disabled,[class*=handle i],[class*=resize i])){background:#ececef;transform:scale(.99)}
+body :is(button,.button):is([aria-pressed=true],[aria-selected=true],[aria-checked=true]){border-color:var(--dg-blue);color:var(--dg-blue);box-shadow:0 0 0 1px var(--dg-blue)}
+body :is(button,.button):is(.primary,.btn-primary,[data-primary],[type=submit]){padding-inline:18px;border-color:transparent;border-radius:999px;background:var(--dg-blue);color:#fff;font-weight:600;box-shadow:inset 0 1px 0 rgba(255,255,255,.28),0 1px 2px rgba(0,0,0,.14)}
+body :is(button,.button):is(.primary,.btn-primary,[data-primary],[type=submit]):is(:hover,:active):not(:disabled){background:var(--dg-blue-down)}
+body :is(button,.button):is(.danger,[class*=stop i],[id*=stop i]){flex-shrink:0;border-color:rgba(179,38,30,.45);background:var(--dg-canvas);color:var(--dg-stop);font-weight:600} /* stop stays loud, never shrinks away */
+body :is(select,textarea,input):not([type=checkbox],[type=radio],[type=range],[type=color],[type=file],[type=button],[type=submit],[type=reset]){box-sizing:border-box;min-height:36px;padding:6px 10px;border:1px solid var(--dg-line-strong);border-radius:12px;background:var(--dg-canvas);color:var(--dg-text);font:400 14px/1.4 var(--dg-font);box-shadow:none;transition:border-color var(--dg-t),background-color var(--dg-t)}
+body :is(textarea,input)[readonly]{background:var(--dg-bg)}
+body :is(select,textarea,input):hover:not(:disabled){border-color:rgba(0,0,0,.3)}
+body :is(select,textarea,input):focus-visible:not(:disabled){border-color:var(--dg-blue);outline-offset:1px}
+body :is(button,.button,input,select,textarea):is(:disabled,[aria-disabled=true]){opacity:.45;cursor:not-allowed;transform:none;box-shadow:none}
+
+/* ── Top toolbar: glass navigation, 64px ── */
+.top{position:fixed;top:0;left:0;right:0;box-sizing:border-box;height:var(--dg-top);display:flex;align-items:center;justify-content:space-between;gap:16px;
+  padding:0 16px 0 20px;border:0;border-bottom:1px solid rgba(0,0,0,.1);background:var(--dg-glass);
+  -webkit-backdrop-filter:var(--dg-blur);backdrop-filter:var(--dg-blur);box-shadow:inset 1px 1px 0 rgba(255,255,255,.95),0 6px 24px rgba(0,0,0,.05)}
+.top h1{flex:0 1 auto;min-width:0;overflow:hidden;margin:0;display:flex;align-items:center;gap:10px;font-size:15px;font-weight:600;letter-spacing:0;color:var(--dg-text)}
+.studio-brand{display:inline-flex;align-items:center;gap:10px;min-width:0;color:inherit;text-decoration:none;white-space:nowrap}
+.studio-brand img{max-height:40px;width:auto} /* existing logo kept; only capped to the bar */
+.top-actions{flex:0 0 auto;display:flex;align-items:center;justify-content:flex-end;gap:8px;min-width:0;font-size:13px}
+.top-actions>*{flex:0 0 auto}
+.desktop-tools{display:inline-flex;align-items:center;gap:6px;margin-left:4px;padding-left:10px;border-left:1px solid var(--dg-line)}
+body .app-menu-button{flex:0 0 36px;width:36px;height:36px;padding:0;border-radius:12px}
+
+/* ── Directory: floating glass rail (190 column, inset 10, padding 12, radius 24) ── */
+.directory{position:fixed;top:calc(var(--dg-top) + 10px);left:10px;bottom:10px;box-sizing:border-box;width:calc(var(--dg-rail) - 20px);display:flex;flex-direction:column;gap:2px;
+  padding:12px;overflow:hidden auto;border:1px solid rgba(0,0,0,.06);
+
+border-radius:24px;background:var(--dg-glass);
+  -webkit-backdrop-filter:var(--dg-blur);backdrop-filter:var(--dg-blur);box-shadow:var(--dg-rim),var(--dg-shadow);scrollbar-width:thin;scrollbar-color:rgba(0,0,0,.22) transparent}
+.directory :is(nav,ul,ol){display:flex;flex-direction:column;gap:2px;margin:0;padding:0;list-style:none}
+.directory a{display:flex;align-items:center;gap:10px;box-sizing:border-box;min-height:36px;padding:6px 10px;border-radius:12px;color:var(--dg-text);font-size:14px;line-height:1.25;text-decoration:none;transition:background-color var(--dg-t),color var(--dg-t),box-shadow var(--dg-t)}
+.directory a:hover{background:var(--dg-fill)}
+.directory a:active{background:rgba(0,0,0,.08)}
+.directory a[aria-current=page]{background:var(--dg-canvas);color:var(--dg-blue);font-weight:600;box-shadow:0 1px 3px rgba(0,0,0,.1),0 0 0 1px rgba(0,0,0,.04)}
+.directory svg{flex:none;width:18px;height:18px;color:var(--dg-text-2)}
+.directory a[aria-current=page] svg{color:currentColor}
+.nav-advanced{margin-top:8px;padding-top:8px;border-top:1px solid var(--dg-line)}
+.nav-advanced>summary{padding:6px 10px;border-radius:10px;font-size:12px;font-weight:600;color:var(--dg-text-2);cursor:pointer}
+.nav-brand-note{margin-top:auto;padding:12px 10px 2px;font-size:12px;line-height:1.45;color:var(--dg-text-2)}
+
+/* ── Canvas & matte content ── */
+.page-area{box-sizing:border-box;min-height:calc(100vh - var(--dg-top));margin:var(--dg-top) 0 0 var(--dg-rail);padding:var(--dg-gutter);background:var(--dg-canvas);border-left:1px solid var(--dg-line)}
+.page-heading{margin:0 0 20px}
+.page-heading h2{margin:0;font-size:24px;line-height:1.25;font-weight:600;letter-spacing:-.01em;color:var(--dg-text)}
+.page-heading p{margin:6px 0 0;max-width:72ch;font-size:14px;color:var(--dg-text-2)}
+.panel{box-sizing:border-box;padding:20px;border:1px solid var(--dg-line);border-radius:16px;background:var(--dg-canvas);box-shadow:0 1px 2px rgba(0,0,0,.03);-webkit-backdrop-filter:none;backdrop-filter:none}
+.panel :is(h3,h4){margin:0 0 12px;font-size:15px;font-weight:600;color:var(--dg-text)}
+.panel label{font-size:13px;color:var(--dg-label)}
+.motion-layout,.glove-layout,.parameter-layout{gap:20px}
+#page-library .motion-layout{grid-template-columns:340px minmax(0,1fr)}
+.motion-controls{min-width:0}
+
+/* ── Viewer: skin only — #pose-console position / size / resize stay with the app ── */
+.viewer-dock{top:calc(var(--dg-top) + 16px);align-self:start;min-width:0}
+#pose-console{border-color:var(--dg-line);border-radius:18px;background:var(--dg-canvas);box-shadow:0 0 0 1px var(--dg-line),0 1px 2px rgba(0,0,0,.04)}
+#pose-console[data-floating=true]{box-shadow:0 0 0 1px var(--dg-line-strong),0 2px 6px rgba(0,0,0,.08),0 24px 60px rgba(0,0,0,.18)}
+.float-panel-bar{gap:6px;padding:4px 8px 4px 14px;border-bottom:1px solid var(--dg-line);border-radius:17px 17px 0 0;background:var(--dg-matte);font-size:12px;font-weight:600;color:var(--dg-label)}
+.float-panel-bar button{min-width:28px;min-height:28px;padding:0 8px;border-color:transparent;border-radius:9px;background:transparent;box-shadow:none}
+.float-panel-bar button:hover{background:var(--dg-fill)}
+.pose-screen{border-radius:16px;overflow:hidden;background:#ececef;outline:1px solid var(--dg-line);outline-offset:-1px}
+.camera-lens{gap:4px;padding:5px;border:1px solid rgba(255,255,255,.6);border-radius:999px;background:var(--dg-glass);-webkit-backdrop-filter:var(--dg-blur);backdrop-filter:var(--dg-blur);box-shadow:var(--dg-rim),0 6px 20px rgba(0,0,0,.16)} /* reveals the live hand image */
+.camera-lens button{min-width:34px;min-height:34px;padding:0 12px;border-color:transparent;border-radius:999px;background:transparent;box-shadow:none}
+.camera-lens button:hover{background:rgba(255,255,255,.75)}
+.camera-lens button[aria-pressed=true]{background:var(--dg-blue);color:#fff;box-shadow:none}
+
+/* ── Segmented controls & tabs ── */
+.playback-modes,.symbol-kinds,.parameter-tabs{gap:2px;padding:3px;border-radius:12px;background:var(--dg-fill)}
+:is(.playback-modes,.symbol-kinds,.parameter-tabs) button{min-height:30px;padding:4px 12px;border-color:transparent;border-radius:9px;background:transparent;box-shadow:none;color:var(--dg-label)}
+:is(.playback-modes,.symbol-kinds,.parameter-tabs) button:hover{background:rgba(255,255,255,.6)}
+:is(.playback-modes,.symbol-kinds,.parameter-tabs) button:is([aria-pressed=true],[aria-selected=true]){border-color:transparent;background:var(--dg-canvas);color:var(--dg-blue);font-weight:600;box-shadow:0 1px 3px rgba(0,0,0,.12),0 0 0 1px rgba(0,0,0,.04)}
+
+/* ── Dialogs: content dialogs matte; app menu is glass (one-shot opacity fade only) ── */
+@keyframes dg-fade{from{opacity:0}to{opacity:1}}
+dialog[open]{animation:dg-fade .18s ease-out}
+.symbol-dialog,#desktop-close-dialog{box-sizing:border-box;padding:24px;border:1px solid var(--dg-line);border-radius:20px;background:var(--dg-canvas);color:var(--dg-text);box-shadow:0 2px 8px rgba(0,0,0,.08),0 30px 80px rgba(0,0,0,.2)}
+:is(.symbol-dialog,#desktop-close-dialog)::backdrop{background:rgba(29,29,31,.22)}
+.symbol-dialog :is(h2,h3),#desktop-close-dialog :is(h2,h3){margin:0 0 10px;font-size:18px;font-weight:600}
+.symbol-options{gap:8px}
+.symbol-options button{min-height:44px;border-color:var(--dg-line);background:var(--dg-matte)}
+.symbol-options button:hover{border-color:var(--dg-line-strong);background:var(--dg-bg)}
+#desktop-menu{position:fixed;inset:calc(var(--dg-top) + 6px) 12px auto auto;box-sizing:border-box;width:min(320px,calc(100vw - 24px));max-height:calc(100vh - var(--dg-top) - 18px);margin:0;padding:14px;overflow:auto;
+  border:1px solid rgba(0,0,0,.08);border-radius:20px;background:var(--dg-glass-strong);color:var(--dg-text);-webkit-backdrop-filter:var(--dg-blur);backdrop-filter:var(--dg-blur);
+  box-shadow:var(--dg-rim),0 2px 8px rgba(0,0,0,.08),0 24px 60px rgba(0,0,0,.16);scrollbar-width:thin}
+#desktop-menu::backdrop{background:rgba(29,29,31,.06)}
+.desktop-menu-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 8px;padding:0 2px 0 6px;font-size:15px;font-weight:600}
+.desktop-menu-heading :is(h2,h3){margin:0;font:inherit}
+.desktop-menu-section{padding:10px 0;border-top:1px solid var(--dg-line)}
+.desktop-menu-section>:is(h3,h4){margin:0 6px 6px;font-size:12px;font-weight:600;color:var(--dg-text-2)}
+.desktop-menu-row{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:40px;padding:2px 6px;font-size:14px}
+.desktop-menu-row>label{flex:1 1 auto;min-width:0;color:var(--dg-text)}
+.desktop-menu-row>:is(select,input,button){flex:0 0 auto;max-width:58%}
+body .desktop-menu-close{width:30px;min-height:30px;padding:0;border-color:transparent;border-radius:999px;background:var(--dg-fill);box-shadow:none}
+body .desktop-menu-close:hover{background:rgba(0,0,0,.09)}
+.desktop-about{margin:8px 6px 2px;font-size:12px;line-height:1.5;color:var(--dg-text-2)}
+#desktop-close-dialog{width:min(420px,calc(100vw - 32px));max-width:420px}
+#desktop-close-dialog p{margin:0 0 4px;color:var(--dg-label)}
+.desktop-close-actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px;margin-top:20px}
+#desktop-close-dialog #desktop-close-status{min-height:18px;margin:10px 0 0;font-size:12px;color:var(--dg-text-2)}
+
+/* ── Page specifics: matte, real data only ── */
+.parameter-help{font-size:12px;line-height:1.5;color:var(--dg-text-2)}
+.parameter-input{font-variant-numeric:tabular-nums}
+.parameter-footer{bottom:12px;box-sizing:border-box;gap:10px;padding:10px 12px;border:1px solid rgba(0,0,0,.06);border-radius:18px;background:var(--dg-glass);-webkit-backdrop-filter:var(--dg-blur);backdrop-filter:var(--dg-blur);box-shadow:var(--dg-rim),var(--dg-shadow)}
+.glove-metrics{gap:10px;font-variant-numeric:tabular-nums}
+.glove-metrics>:not(dt,dd){box-sizing:border-box;padding:12px 14px;border:1px solid var(--dg-line);border-radius:12px;background:var(--dg-matte)}
+.glove-metrics :is(strong,b,output,dd){font-size:18px;font-weight:600;color:var(--dg-text)}
+.glove-metrics :is(small,dt){font-size:12px;color:var(--dg-text-2)}
+.doctor-body{box-sizing:border-box;padding:14px 16px;border:1px solid var(--dg-line);border-radius:12px;background:var(--dg-matte);color:var(--dg-text);font-size:13px;line-height:1.65;overflow-wrap:anywhere}
+.page-body :is(pre,code){font-family:"Cascadia Mono",Consolas,"Microsoft YaHei UI",monospace;font-size:12.5px}
+.studio-info,.motion-notes{padding:2px 12px;border:1px solid var(--dg-line);border-radius:12px;background:var(--dg-matte)}
+:is(.studio-info,.motion-notes)>summary{padding:8px 0;font-size:13px;font-weight:600;color:var(--dg-text);cursor:pointer}
+:is(.studio-info,.motion-notes)[open]>summary{margin-bottom:8px;border-bottom:1px solid var(--dg-line)}
+.page-body table{width:100%;border-collapse:collapse;font-size:13px;font-variant-numeric:tabular-nums}
+.page-body th{padding:8px 10px;border-bottom:1px solid var(--dg-line-strong);background:none;font-size:12px;font-weight:600;color:var(--dg-text-2);text-align:left}
+.page-body td{padding:8px 10px;border-bottom:1px solid var(--dg-line);background:none}
+.app>footer{margin:0 0 0 var(--dg-rail);padding:14px var(--dg-gutter) 18px;border-top:1px solid var(--dg-line);border-left:1px solid var(--dg-line);background:var(--dg-canvas);font-size:12px;color:var(--dg-text-2)}
+
+/* ── Responsive: 960 desktop first; narrower browser preview stays usable ── */
+@media (max-width:1199px){
+  :root{--dg-rail:168px;--dg-gutter:22px}
+  .top{gap:12px;padding:0 12px 0 16px}
+  .directory a{gap:8px;padding:6px 8px;font-size:13px}
+  #page-library .motion-layout{grid-template-columns:minmax(300px,34%) minmax(0,1fr)}
+  .motion-layout,.glove-layout,.parameter-layout{gap:16px}
+  .panel{padding:16px}
+}
+@media (max-width:900px){
+  :root{--dg-gutter:16px}
+  .top{position:sticky;height:auto;min-height:56px;flex-wrap:wrap;row-gap:6px;padding:8px 12px}
+  .top h1{font-size:14px}
+  .top-actions{flex:1 1 auto;flex-wrap:wrap;row-gap:6px;max-width:100%;font-size:12px} /* wrap, never clip: stop stays reachable */
+  .top-actions :is(button,.button):not(.app-menu-button){min-height:34px;padding:4px 10px;font-size:13px}
+  .directory{position:static;width:auto;margin:8px 12px;padding:6px;flex-direction:row;align-items:center;gap:4px;overflow:auto hidden;border-radius:18px}
+  .directory :is(nav,ul,ol){flex-direction:row;gap:4px}
+  .directory>*,.directory a{flex:0 0 auto;white-space:nowrap}
+  .nav-advanced{margin:0;padding:0 0 0 6px;border-top:0;border-left:1px solid var(--dg-line)}
+  .nav-advanced a{display:inline-flex}
+  .nav-brand-note{margin:0 0 0 auto;padding:0 8px}
+  .page-area,.app>footer{margin-left:0;border-left:0}
+  .page-area{margin-top:0;min-height:0}
+  .motion-layout,#page-library .motion-layout,.glove-layout,.parameter-layout{grid-template-columns:minmax(0,1fr)}
+  .motion-controls,.viewer-dock{order:0} /* DOM order kept: controls first, viewer after */
+  .viewer-dock{position:static}
+}
+@media (max-width:600px){
+  .top{min-height:52px;padding:6px 10px}
+  .top h1{gap:6px;font-size:13px}
+  .studio-brand{gap:6px}
+  .studio-brand img{max-height:28px}
+  .top-actions{justify-content:flex-start;gap:6px}
+  .desktop-tools{margin-left:auto;padding-left:6px}
+  .directory{margin:6px 8px;border-radius:16px}
+  .page-area{padding:14px 12px 20px}
+  .panel{padding:14px;border-radius:14px}
+  #desktop-menu{inset:8px 8px auto auto;width:calc(100vw - 16px)}
+  .desktop-close-actions>*{flex:1 1 auto}
+}
+
+/* ── Environment & accessibility: real media queries + html[data-*] hooks from the shell ── */
+@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){:root{--dg-glass:rgba(255,255,255,.95);--dg-glass-strong:#fff}}
+@media (prefers-reduced-transparency:reduce){:root{--dg-glass:#fbfbfd;--dg-glass-strong:#fff;--dg-blur:none}}
+html[data-reduce-transparency=true]{--dg-glass:#fbfbfd;--dg-glass-strong:#fff;--dg-blur:none}
+@media (prefers-contrast:more){:root{--dg-glass:#fff;--dg-glass-strong:#fff;--dg-blur:none;--dg-line:rgba(0,0,0,.4);--dg-line-strong:rgba(0,0,0,.6);--dg-text-2:#424245}}
+@media (prefers-reduced-motion:reduce){
+  :root{--dg-t:0s}
+  *,*::before,*::after,::backdrop{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important;scroll-behavior:auto!important}
+  body :is(button,.button):active{transform:none}
+}
+html[data-reduce-motion=true]{--dg-t:0s}
+html[data-reduce-motion=true] *,html[data-reduce-motion=true] *::before,html[data-reduce-motion=true] *::after,html[data-reduce-motion=true] ::backdrop{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important;scroll-behavior:auto!important}
+html[data-reduce-motion=true] body :is(button,.button):active{transform:none}
+@media (forced-colors:active){
+  :root{--dg-glass:Canvas;--dg-glass-strong:Canvas;--dg-canvas:Canvas;--dg-matte:Canvas;--dg-bg:Canvas;--dg-fill:Canvas;--dg-blur:none;--dg-line:CanvasText;--dg-line-strong:ButtonText;--dg-text:CanvasText;--dg-label:CanvasText;--dg-text-2:CanvasText;--dg-blue:Highlight;--dg-blue-down:Highlight;--dg-stop:CanvasText}
+  .top,.directory,.camera-lens,.parameter-footer,.panel,dialog{border:1px solid CanvasText;box-shadow:none}
+  #pose-console{outline:1px solid CanvasText;box-shadow:none}
+  .directory a[aria-current=page],body :is(button,.button):is([aria-pressed=true],[aria-selected=true],[aria-checked=true],.primary,.btn-primary,[data-primary],[type=submit]){forced-color-adjust:none;border-color:Highlight;background:Highlight;color:HighlightText;box-shadow:none}
+  .directory a[aria-current=page] svg{color:HighlightText}
+  body :is(button,.button,input,select,textarea):is(:disabled,[aria-disabled=true]){opacity:1;border-color:GrayText;color:GrayText}
+  :focus-visible{outline:2px solid Highlight;outline-offset:2px}
+}
+
+
+/* Integration with the existing workbench; keep fixed floating coordinates intact. */
+.directory{margin:0}
+.directory a{white-space:normal;overflow-wrap:anywhere}
+.nav-brand-note{position:static;margin-top:auto;padding:14px 2px 2px;font-size:10px}
+.top h1{font-size:17px!important;letter-spacing:-.3px}
+img.studio-brand{width:54px;height:auto;display:block}
+#page-library .page-heading h2{font-size:24px}
+#pose-console[data-floating=true]{background:var(--dg-glass);backdrop-filter:var(--dg-blur);-webkit-backdrop-filter:var(--dg-blur)}
+body #desktop-menu-close{width:30px;min-height:30px;padding:0;border:0;border-radius:50%;background:var(--dg-fill)}
+body button.desktop-menu-row{width:100%;justify-content:flex-start;border:0;box-shadow:none;background:transparent;margin:2px 0;text-align:left}
+.desktop-about{white-space:pre-line}
+.symbol-dialog{backdrop-filter:none;-webkit-backdrop-filter:none}
+.pose-screen .camera-lens{background:var(--dg-glass);backdrop-filter:var(--dg-blur);-webkit-backdrop-filter:var(--dg-blur);border-radius:20px}
+@media(max-width:900px){.directory{margin:8px 12px;height:auto;min-height:48px}.nav-brand-note{display:none}}
+@media(forced-colors:active){#pose-console[data-floating=true]{outline:1px solid CanvasText}}

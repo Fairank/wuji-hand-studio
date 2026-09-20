@@ -1,6 +1,67 @@
 {
-  "edition": "basic",
+  "edition": "workbench",
+  "version": "0.1.4",
   "files": {
+    "build_installer.py": {
+      "bytes": 2273,
+      "sha256": "995bd57bfc0f86587de06022ebcae439c9b0a1c14e8bd6967d238eb0a9508525"
+    },
+    "docs/DESKTOP_API.md": {
+      "bytes": 3678,
+      "sha256": "a2cff5f411c1fdc27466bb1387ab9c6b1fd6cbd100f62b9bf65bc235e817ccb7"
+    },
+    "installer/studio.iss": {
+      "bytes": 6262,
+      "sha256": "6da274d0e37490f1a120f1f1a90078be5e99a7365ab902df9a22519beda32478"
+    },
+    "scripts/workbenchctl.py": {
+      "bytes": 6510,
+      "sha256": "807f058c8b79bd5bc42b08f2d140b089f24b319f3ed4e85d9d84efe3033378e5"
+    },
+    "src/desktop_lifecycle.py": {
+      "bytes": 2016,
+      "sha256": "1f0abaedd32a253fdf392f5378f8f78c6511b018d8d7de4e3bba4b77d7bbb08b"
+    },
+    "src/desktop_tools.py": {
+      "bytes": 4958,
+      "sha256": "6df50868f14a452b3896c801409f984b5767c12860d801b4ba5f0b7f852986ca"
+    },
+    "src/model_pack.py": {
+      "bytes": 6117,
+      "sha256": "a15045ac52b7bbafb4228ee33ea6c01492223cb3cb983e6f68ab388e64eea99a"
+    },
+    "src/native_desktop.py": {
+      "bytes": 13252,
+      "sha256": "b8600d083a1bb5fdd0045795940ce09e77104c152c3f1e359bf07404ef9bb275"
+    },
+    "src/test_desktop_lifecycle.py": {
+      "bytes": 2383,
+      "sha256": "41aa443ae3d7df86eb4ac4cf4ae292ee5ae270617c93660e4f76b9e28b00a94c"
+    },
+    "src/test_desktop_tools.py": {
+      "bytes": 2563,
+      "sha256": "8c14b4a35ada0aa43f1b0714cad3045b060c97987685b2d900192c614c0ea1d7"
+    },
+    "src/test_model_pack.py": {
+      "bytes": 2654,
+      "sha256": "04540867648d23063783925cd2d021ad7befda89035cd9e297a0a05927cca25c"
+    },
+    "src/test_workbench_update.py": {
+      "bytes": 1972,
+      "sha256": "2d9f641ed50ddf9288d52d4650b2519e0eb42b0bff867ef8c18dd9d301108d64"
+    },
+    "src/web/desktop_glass.css": {
+      "bytes": 21272,
+      "sha256": "d204ef08f5d74a7dcea26ce413d77a54bfcd531014a1910a38cd9897ee89b92a"
+    },
+    "src/web/desktop_inspect.js": {
+      "bytes": 1551,
+      "sha256": "6f3a6c9947a8023019f60b7f944c9b7933559c99e00ae690c197b677a917af99"
+    },
+    "src/web/desktop_shell.js": {
+      "bytes": 7250,
+      "sha256": "79a4fa13c5f6f013df6b50978480d4899646faeae1e924fb89d028b7898898cf"
+    },
     ".gitattributes": {
       "bytes": 39,
       "sha256": "b34b22f783eb8cf6f0aae25b00600deff93fbf7a4a7c49d40894bdd64597cb2b"
@@ -14,28 +75,32 @@
       "sha256": "acdb36c7418edb32341dc5fbc7e66abf3012bfe457f499e29f1a0bb8e5582a26"
     },
     "README.md": {
-      "bytes": 8631,
-      "sha256": "9aa1aae73ed22caf2bd0395cdf0279771bb8dca837d294130c660d18b203333e"
+      "bytes": 5642,
+      "sha256": "45f4f515085b30f8760ffac782fb2a9466e2ca60f7d423521fd6e27e98e83d43"
     },
     "THIRD_PARTY_NOTICES.md": {
-      "bytes": 1755,
-      "sha256": "b9ce7a101d9c5a9eaf0b938e4a79bd4356afb8ede84950f3386b1e8f33e42771"
+      "bytes": 2679,
+      "sha256": "d04e4bd6e17cac476534c5fca0b0d191f8337fafe168e037f55463d83e222f07"
     },
     "build.py": {
-      "bytes": 4861,
-      "sha256": "27dbc4d915a39f5320624538cbcb8fc05f80da532281955d3cd61e1a697f0c1f"
+      "bytes": 4932,
+      "sha256": "d1570f29030311454a61fd4fea5e82ede13e117334b62c447441365c21770788"
     },
     "ci/build.yml.example": {
-      "bytes": 1713,
-      "sha256": "3719de4ad956a559785de174c1df1a6fbbf92676ff60eee7c8121467d5b4bef0"
+      "bytes": 1768,
+      "sha256": "7aa72a1474f168ca50b9794649c85814d39c4f3ed0286691c883d9c202611e3e"
     },
     "controller/README.md": {
       "bytes": 3929,
       "sha256": "455442d16076361636bba443eaf9384d65794a5f534a4a2440bacb3497eb0ee9"
     },
+    "docs/GLOVE.md": {
+      "bytes": 7064,
+      "sha256": "f1fea7c151ae694fa1c1ffc8807e2f516b6724defebf9b6881b803b2dae5d5d1"
+    },
     "docs/MACOS.md": {
-      "bytes": 4180,
-      "sha256": "ec0ad888ae47dd5369295020ce97bb05cf2fb850117cb2fabfd990475fb28bd3"
+      "bytes": 4183,
+      "sha256": "1f000ae6a78329fecc8378ab3779112e51babca9da6f8ace8b200122364d0d17"
     },
     "docs/PERFORMANCES.md": {
       "bytes": 4249,
@@ -46,8 +111,8 @@
       "sha256": "100c3564771b15b7b96746ed3c70407b1c1f4fb1976c49b2bd41795ecf90b6a2"
     },
     "requirements.txt": {
-      "bytes": 82,
-      "sha256": "761d6bbdc5e549ed362c22478e67dc78321ac079e9e8d2c38c3e827189dddb62"
+      "bytes": 127,
+      "sha256": "54b6c25ef50e049adce820fadb1733962313d67040ecb1394a1e2c358cf65535"
     },
     "scripts/run-macos.command": {
       "bytes": 14978,
@@ -662,20 +727,20 @@
       "sha256": "2b3c988452e6cd83556107c8fc0b48090427fc3340ba4dfc6b413ae21f90542f"
     },
     "src/console_agent.py": {
-      "bytes": 18128,
-      "sha256": "254fa1d4e88668acb717dd1bfe844b1d166a21705f6d0297bc2e25bdb175540d"
+      "bytes": 18779,
+      "sha256": "8a4348cd9c5016feb0fafc68f793cfb25d2b533e2793fd27a78285a7006913c7"
     },
     "src/console_server.py": {
-      "bytes": 34572,
-      "sha256": "6a2bf74fa6308e411f592639065e1c8b046956f96d031f488c0b09856a1e3852"
+      "bytes": 37626,
+      "sha256": "12ad6ad5d0893cff409a23911a2b05d5f2d56ec5731f267a103711c12cbce8a0"
     },
     "src/demo_player.py": {
       "bytes": 8906,
       "sha256": "c68479ad9cb9c897683c0f1ef9bbfc4240d130af86b591852e3ee451a277f21d"
     },
     "src/desktop.py": {
-      "bytes": 4614,
-      "sha256": "65d413078b8f80ebbd7d0d4f665b68108024e82f286d463946a930a34e92ca42"
+      "bytes": 5183,
+      "sha256": "7e876d4aa9a0b839cea39070b4722dc95fc86bae5f3dc96e35b4b39d9e1c87c8"
     },
     "src/device_profiles.py": {
       "bytes": 4667,
@@ -690,8 +755,8 @@
       "sha256": "f5a584fb40e773b89224130cca438c1cb4644a6e0f26ef42cbf841d9a21fb6b7"
     },
     "src/edition.json": {
-      "bytes": 65,
-      "sha256": "eabe08814b8423e56214b3c3212aaead04d84b8e2b6b0251692939f8845a5d06"
+      "bytes": 172,
+      "sha256": "d2909d25af383fb87b941ac0e73bd5304f02fb3ea5aa321b2a9337220cd2000c"
     },
     "src/feedback_stream.py": {
       "bytes": 664,
@@ -704,6 +769,26 @@
     "src/gesture_library.py": {
       "bytes": 8443,
       "sha256": "4bee7672f0ab21380e98a0d18d5413178d23982b61bc6144671f7ea180ff0db2"
+    },
+    "src/glove_agent.py": {
+      "bytes": 10831,
+      "sha256": "8ef854749486473b2bb50d259a456754397e2952fc8ef0840de4d1ad47408479"
+    },
+    "src/glove_bridge.py": {
+      "bytes": 6466,
+      "sha256": "bf4dc361d861e7bd7b7e5f900f16a6e5e25555732a718864f9c7e3ec03c6b6e3"
+    },
+    "src/glove_motion.py": {
+      "bytes": 4735,
+      "sha256": "a47f7265850fba964aea3fb5eab936ba3e5549d3d69b903c7579d753897a76f6"
+    },
+    "src/glove_protocol.py": {
+      "bytes": 1529,
+      "sha256": "950f63ba98deb6f8240b30cf03b5ce6bb8359f66db891a3c455784dc51ee9b88"
+    },
+    "src/glove_view.py": {
+      "bytes": 799,
+      "sha256": "4d43f165e240abea8ea34a829e5cca5dbb23323160e9c7275830e6d8537e86f9"
     },
     "src/hardware_showcase.py": {
       "bytes": 34126,
@@ -778,12 +863,16 @@
       "sha256": "a8351e1d08399136e1b84bb2256c2c0cfebdbc2b5b84e52cafa5ea0b605ab65d"
     },
     "src/pose_view.py": {
-      "bytes": 11348,
-      "sha256": "dcf101de93370787747c614f25e6dd34b6a1db114b129bd532d08206c12b573e"
+      "bytes": 12824,
+      "sha256": "6deee313cf2e1bca79f5eb4b11af80b4b440bb93510952e3865726aa9b9fe95e"
     },
     "src/runtime_paths.py": {
-      "bytes": 972,
-      "sha256": "3b84b79ec6fb845727ec7366334a9f3efda4ba7cbe7811b74e6c1dd08bdec355"
+      "bytes": 934,
+      "sha256": "542971a3d295cf6aeb01fd13acc6884c028e9bc3f45c54eb2f7a56343dce74f5"
+    },
+    "src/stream_rates.py": {
+      "bytes": 3314,
+      "sha256": "1e25c24fb094898ac0a00230973e80b65d042767f0f6bb8001d28be9724e4a11"
     },
     "src/test_capture.py": {
       "bytes": 1896,
@@ -794,8 +883,8 @@
       "sha256": "5eff869d06d05af835d15752d2fe87c5f6031fce86963c38734af8dacccaab41"
     },
     "src/test_console_http.py": {
-      "bytes": 2518,
-      "sha256": "61ec96bba2f6eabd4b0bdacda814ad17b77110e31e19537907f33e491303c4e9"
+      "bytes": 3798,
+      "sha256": "c6eb6a28757dcd4215a6c8c7ffb394619f6d007de564e7bd357bf577423af160"
     },
     "src/test_controller_transport.py": {
       "bytes": 5391,
@@ -820,6 +909,10 @@
     "src/test_gesture_library.py": {
       "bytes": 5422,
       "sha256": "c2d6c824d135250ec34ddedd1e55f39fd5fa2a0cdf2c3c5558aa8fd0837f3ee9"
+    },
+    "src/test_glove.py": {
+      "bytes": 9660,
+      "sha256": "76b973250c9cc75c35dfd84d36782c6c5769c3334de3dd0b5bedf7e575b49ede"
     },
     "src/test_hardware_official_startup.py": {
       "bytes": 6577,
@@ -873,6 +966,10 @@
       "bytes": 4683,
       "sha256": "c82413e8aa345416194f1a3c824d5e8c671aa2928a0973f0d350676ce8f73e71"
     },
+    "src/test_stream_rates.py": {
+      "bytes": 4739,
+      "sha256": "e893dbce7c89543cbd5c0ec4960359f4647a34f6c21a071ac710f66e27929790"
+    },
     "src/test_timing_stats.py": {
       "bytes": 7807,
       "sha256": "0475c695993e6b8c50f007471bf8039a605c5fd4d5db834171bea0172c1a0e82"
@@ -914,16 +1011,16 @@
       "sha256": "02b110880453a2bfeb3b77cb30463224765a09fbec823f5c4ce029c7b3fdc774"
     },
     "src/web/camera.js": {
-      "bytes": 5796,
-      "sha256": "a40c479d254aae9af2989ec86d64a26f71f4e0ff8704e507657a38f24a2c619b"
+      "bytes": 5824,
+      "sha256": "818788d12b55e145e10d9bfd5bcd0a4f35ccd042db0f3c6c43555d96a4e34e4b"
     },
     "src/web/camera_gesture.mjs": {
       "bytes": 1408,
       "sha256": "a6ccde81ea9bd4dc5d99c541400c839e8775db4aa13d82501bbf3a9f29ee5561"
     },
     "src/web/doctor.js": {
-      "bytes": 5322,
-      "sha256": "f80a3fc5e2d2106f861e6724deb7ffbc73787ae4913e7d063c940911c638c2ab"
+      "bytes": 5364,
+      "sha256": "4bcb4c9c2594154bd84e1eece7dc3affb9365b4301adb76985a1603392c57ca8"
     },
     "src/web/favicon.ico": {
       "bytes": 10974,
@@ -941,37 +1038,45 @@
       "bytes": 16762,
       "sha256": "59ea5ddd880c9e5d5a966f35ac403d0ed55a7c863468783fc0b814e35dd6d23e"
     },
+    "src/web/glove.css": {
+      "bytes": 2554,
+      "sha256": "ec0c61026c7b2fc8f0ec306dc0f6081c10863b146086fa4c65f0d1fade8644ae"
+    },
+    "src/web/glove.js": {
+      "bytes": 14184,
+      "sha256": "70321b2262f5193d28e3195222c1b5069c3345121ca2498b9eea087d89543083"
+    },
     "src/web/index.html": {
-      "bytes": 4785,
-      "sha256": "8a6ae4f4edc28d7fa39f0ce342050c8538f140e1d24db5b3120f89e6792f7d86"
+      "bytes": 4959,
+      "sha256": "930f21f42429d06dba6d13c8f745ec24735303454a5c3dcaa29de2952db5016b"
     },
     "src/web/installation.js": {
-      "bytes": 4189,
-      "sha256": "3fa4dadce4606854e2eb3ea8dcd9f3881ac29cc8649ec3d822763d7b9b48a815"
+      "bytes": 4512,
+      "sha256": "113e6aaf757214580326c39ada46f472aeaaf85352a5d3a09d307b73f6f62df9"
     },
     "src/web/locale.js": {
-      "bytes": 5813,
-      "sha256": "4af911c17e00737520916f816780879abe6e815964d62b5372688eeea46a14d0"
+      "bytes": 5860,
+      "sha256": "cb1407df7d42adc0a9bd5ff5556cd5905aa29a005d6acd4ada8a18bb7d5bca1d"
     },
     "src/web/parameters.js": {
       "bytes": 13927,
       "sha256": "b57dd7a251f683b34dad1b2ae06180d9b1bde614e1e20385f6bd61d5ce2464a6"
     },
     "src/web/playback.js": {
-      "bytes": 24356,
-      "sha256": "489c0c5bb8cce4cd67927decd471bb29c9548fd9c55efbcd4f644d056773ff81"
+      "bytes": 24379,
+      "sha256": "4ea144fb09c2ad174e145c09c9ae4c80b57fc177af9094620bde2df9a7e4b218"
     },
     "src/web/profiles.js": {
-      "bytes": 3995,
-      "sha256": "433733e2ec37e9c66130b1ff9eac50fb325c68bb059aa02297d3fe500b369e1d"
+      "bytes": 4010,
+      "sha256": "85f59181d2c88af15afa62ae9df5a5579309b664b645f07ff43b5f97580ca793"
     },
     "src/web/studio.css": {
       "bytes": 10505,
       "sha256": "be35bab0ce63b419862101ac6ce637474aecfa657a8b72cdbb47b1997d3aee83"
     },
     "src/web/studio.js": {
-      "bytes": 26852,
-      "sha256": "a872989948622a419f4198eeaba1acb39adaeb0954b13e7b762f908789d01d12"
+      "bytes": 26949,
+      "sha256": "8b3a492e621d181aa7770e2164bdbbbf8b91296f09a1d7c10915d1678c0c7842"
     },
     "src/web/style.css": {
       "bytes": 6912,
@@ -990,16 +1095,16 @@
       "sha256": "f718f0d66684bdcd4a83207b13adec59f9d18a2438a320d61b20e69fb9e993b0"
     },
     "src/web/visual.js": {
-      "bytes": 10485,
-      "sha256": "8da35119c59ca86a9f3357ce02c19adb4ca83725e8b4865d71303add8c013256"
+      "bytes": 11026,
+      "sha256": "40dd1f8ad650d71578f3ce3521e3abe057b235c004b90b5250201654991673f7"
     },
     "src/web/workspace.css": {
       "bytes": 21443,
       "sha256": "5ce9cd712b36086ef6024ae1e0d92ac11b9da3bb95b628b011f0ebf18fd308de"
     },
     "src/web/workspace.js": {
-      "bytes": 9682,
-      "sha256": "3e7db5b8cdd89d97316a9d3952d52b31a62bc1b4a1fc89734a185cab91808fd5"
+      "bytes": 9767,
+      "sha256": "474fecf89c0f2f5b5baf0c33b73d2605f18c5fee478d9500f4e6280c2664a596"
     },
     "src/web/wuji-logo.png": {
       "bytes": 20679,

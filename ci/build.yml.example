@@ -32,7 +32,7 @@ jobs:
         run: xvfb-run -a python src/desktop.py --self-check --render-check
       - uses: actions/upload-artifact@v4
         with:
-          name: WujiStudio-${{ runner.os }}
+          name: HandWorkbench-${{ runner.os }}
           path: |
             dist/*.zip
             dist/*.tar.gz

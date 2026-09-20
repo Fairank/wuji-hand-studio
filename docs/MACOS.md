@@ -18,8 +18,8 @@ bash scripts/run-macos.command
 设置 SSH 或自动连接机械手。界面优先打开 Chrome/Edge 应用窗口，否则使用默认浏览器。
 **界面和 MuJoCo 预览不用虚拟机。控制真实手仍需已配置的 Linux SDK 控制端。**
 
-私有 Research 仓库使用同一个启动脚本；克隆私有仓库时需要自己的 GitHub 访问权限。
-Basic 不附带我们训练的模型；Research 的模型目前仅用于二代左手仿真离线识别。
+现在只有一个 Hand Workbench 应用；私有仓库仅保存模型数据包，获取时需要自己的 GitHub 权限。
+公开安装包不附带私有权重；可选模型仅用于二代左手仿真离线识别。
 
 ## 自检和打包
 
@@ -39,7 +39,7 @@ Gatekeeper 或可供所有 Mac 直接安装。普通源码自检不要求 Apple 
 
 ## 配置与排错
 
-- 运行数据：`~/Library/Application Support/WujiStudio`；研究版为 `WujiStudioResearch`。
+- 运行数据：`~/Library/Application Support/WujiStudio`（保留旧路径用于配置兼容）。
 - 日志：上述目录中的 `console.log`。启动不会覆盖已调好的参数。
 - 本机端口默认 8781，普通启动遇到占用会选择空闲端口；也可固定端口运行 `WUJI_STUDIO_PORT=8782 bash scripts/run-macos.command`。
 - Python 不在常见位置：首次创建环境时指定 `WUJI_PYTHON=/absolute/path/python3.12`。
