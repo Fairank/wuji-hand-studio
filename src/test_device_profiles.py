@@ -52,4 +52,14 @@ class ProfilesTests(unittest.TestCase):
         for key,bad in [('host','localhost;shutdown'),('python','python;shutdown'),('agent_directory','/a/../x'),('username','a b')]:
             with self.subTest(key=key),self.assertRaises(ValueError):validate({**DEFAULT,key:bad})
 
+    def test_first_gen_recording_without_device_clock(self):
+        from console_agent import Recorder
+        with tempfile.TemporaryDirectory() as directory,patch.dict(os.environ,{'WUJI_HAND_PROFILE':'hand1_right'}):
+            r=Recorder(directory);r.start('baseline',10,1.)
+            r.add(serialize_first(SimpleNamespace(position=[0.]*20),1.01,1))
+            summary=r.finish('test',1.1)
+            self.assertEqual(summary['side'],'right')
+            self.assertEqual(summary['units']['effort'],'unavailable')
+            self.assertEqual(summary['device_timestamp_intervals']['n'],0)
+
 if __name__=='__main__':unittest.main()

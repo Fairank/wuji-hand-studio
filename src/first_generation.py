@@ -17,6 +17,8 @@ def serialize_first(frame,now,seq):
     # Array channels are display indices, not invented hardware CAN node IDs.
     header=getattr(frame,'header',None);stamp=getattr(header,'timestamp_us',None)
     velocity=getattr(frame,'velocity',None)
+    if velocity is not None and (len(velocity)!=20 or not all(math.isfinite(float(v)) for v in velocity)):
+        velocity=None
     return dict(seq=seq,device_timestamp_us=stamp if type(stamp) is int else None,host_s=now,
         frame_id='hand1-finger-major',channel_id_source='array_index',effort_unit='unavailable',
         joints=[dict(nid=i,position_rad=float(v),velocity_rad_s=float(velocity[i]) if velocity is not None and len(velocity)==20 else None,effort_A=None) for i,v in enumerate(values)])

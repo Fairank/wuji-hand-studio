@@ -1,4 +1,4 @@
-"""Native-left feedback capture only; no actuator command API is used.
+"""Hand 2 feedback capture only; no actuator command API is used.
 
 Raw effort is amperes. No simulated torque conversion or guessed command/context
 is fed to the recognizer. Hardware inference awaits an explicit input mapping
@@ -35,10 +35,13 @@ def require_left(hand):
 
 
 def capture(hand, output, seconds, annotation='unlabelled'):
+    from device_profiles import controller_profile
+    selected=controller_profile()
+    if selected['generation']!='hand2':raise ValueError('Use console recorder for Hand 1')
     require_left(hand)
     output=Path(output);output.mkdir(parents=True,exist_ok=False)
     (output/'session.json').write_text(json.dumps(dict(
-        side='left',started=time.time(),seconds=seconds,annotation=annotation,
+        side=selected['side'],generation='hand2',started=time.time(),seconds=seconds,annotation=annotation,
         online_joints=hand.online_joints_count().get(),read_only=True,
         sdk_version=importlib.metadata.version('wuji-sdk'),
         units=dict(position='rad',velocity='rad/s',effort='A'),
@@ -83,10 +86,13 @@ def main():
     args=parser.parse_args()
     if not math.isfinite(args.seconds) or not 1<=args.seconds<=300:parser.error('Duration must be 1..300 seconds')
     from wuji_sdk import SdkManager,Handedness
+    from device_profiles import controller_profile
+    selected=controller_profile()
+    if selected['generation']!='hand2':parser.error('Use console recorder for Hand 1')
     manager=SdkManager.instance()
     kwargs=dict(device_name='wuji_hand_2')
     if args.address:kwargs['address']=args.address
-    else:kwargs['handedness']=Handedness.Left
+    else:kwargs['handedness']=Handedness.Left if selected['side']=='left' else Handedness.Right
     hand=manager.connect(**kwargs)
     try:print(json.dumps(capture(hand,args.output,args.seconds,args.annotation),ensure_ascii=False))
     finally:hand.disconnect()

@@ -49,7 +49,7 @@ shutil.copytree(ROOT/'controller',release/'controller',dirs_exist_ok=True)
 shutil.copytree(ROOT/'src',release/'controller/source',ignore=shutil.ignore_patterns('__pycache__','private_models','test_*','desktop.py','web','assets'),dirs_exist_ok=True)
 if edition=='research' and (ROOT/'research').exists():shutil.copytree(ROOT/'research',release/'research',dirs_exist_ok=True)
 if sys.platform=='darwin':
-    archive=release.with_suffix('.zip')
+    archive=Path(str(release)+'.zip')
     subprocess.run(['ditto','-c','-k','--sequesterRsrc','--keepParent',str(release),str(archive)],check=True)
 elif sys.platform=='win32':archive=Path(shutil.make_archive(str(release),'zip',release.parent,release.name))
 else:archive=Path(shutil.make_archive(str(release),'gztar',release.parent,release.name))

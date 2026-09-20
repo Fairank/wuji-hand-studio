@@ -6,6 +6,7 @@ reviewed full-action profile. stdin EOF ends the session; no auto reconnect.
 import collections
 import ipaddress
 import json
+import math
 import multiprocessing as mp
 from pathlib import Path
 import queue
@@ -83,7 +84,9 @@ class Recorder:
             return
         self.file.write(json.dumps(row, separators=(',', ':'), allow_nan=False)+'\n')
         self.host.append(dict(seq=row['seq'], host_s=row['host_s']))
-        self.device.append(dict(seq=row['seq'], host_s=row['device_timestamp_us']/1e6))
+        stamp = row.get('device_timestamp_us')
+        if isinstance(stamp, (int, float)) and math.isfinite(stamp):
+            self.device.append(dict(seq=row['seq'], host_s=stamp/1e6))
         self.frames += 1
         self.elapsed_s = row['host_s']-self.started
 
@@ -93,11 +96,13 @@ class Recorder:
         self.file.close()
         self.active = False
         self.elapsed_s = now-self.started
+        from device_profiles import controller_profile
+        selected = controller_profile()
         result = dict(id=self.id, label=self.label, seconds=self.elapsed_s,
             requested_seconds=self.seconds, frames=self.frames, reason=reason,
-            side='left', read_only=True, recognition_enabled=False, motion_commands_sent=False,
+            side=selected['side'], generation=selected['generation'], read_only=True, recognition_enabled=False, motion_commands_sent=False,
             annotation_source='human_selection_not_model_prediction',
-            units=dict(position='rad', velocity='rad/s', effort='A'),
+            units=dict(position='rad', velocity='rad/s', effort='A' if selected['generation']=='hand2' else 'unavailable'),
             host_arrival=summarize_timing(self.host),
             device_timestamp_intervals=summarize_timing(self.device),
             raw_feedback_location=str(self.path/'feedback.jsonl'))
@@ -245,7 +250,7 @@ def worker(address, requests, events):
             if motion.pending_report:
                 report=motion.pending_report;motion.pending_report=None
                 if report.get('kind')=='low_current_showcase_trial':report['feedback_tail']=list(recent)[-300:]
-                report.update(id=uuid.uuid4().hex,device_id=device_id,side='left')
+                report.update(id=uuid.uuid4().hex,device_id=device_id,side=selected['side'],generation=selected['generation'])
                 report.setdefault('kind','single_joint_check')
                 report_dir=Path(__file__).resolve().parent/'motion_reports'
                 report_dir.mkdir(exist_ok=True)
@@ -258,7 +263,7 @@ def worker(address, requests, events):
             if now-last_emit >= .05:
                 if not motion.active:motion.check_probe_ready(recent[-1] if recent else None,diagnostic,now)
                 events.put(dict(type='state', connection='connected' if recent else 'connecting',
-                    message=('正在执行实机动作，画面跟随反馈' if motion.active else '已核对左手身份，正在接收反馈') if recent else '左手已连接，等待反馈',
+                    message=('正在执行实机动作，画面跟随反馈' if motion.active else '已核对设备身份，正在接收反馈') if recent else '已连接，等待反馈',
                     latest=recent[-1] if recent else None,
                     device_id=device_id, joint_rates=joint_rates.snapshot(now),
                     metrics=dict(host_hz=rate(recent, 'host_s'), device_hz=rate(recent, 'device_timestamp_us'), age_ms=(now-last)*1000 if recent else None),
