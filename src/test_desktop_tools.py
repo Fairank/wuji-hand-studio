@@ -19,9 +19,17 @@ class DesktopToolsTests(unittest.TestCase):
     def test_busy_never_closes_or_updates(self):
         host=Mock();host.server.controller.snapshot.return_value=dict(connection='connected')
         host.server.controller.doctor.snapshot.return_value={}
-        for op in ('close_idle','prepare_update'):
+        for op in ('close_idle','prepare_update','reload_ui'):
             with self.assertRaises(ValueError):dispatch(host,dict(operation=op))
         host.stop_and_close.assert_not_called()
+        host.reload_ui.assert_not_called()
+
+    def test_connection_popover_is_view_only_and_constrained(self):
+        host=Mock()
+        dispatch(host,dict(operation='connection_panel',state='open'))
+        host.connection_panel.assert_called_once_with('open')
+        with self.assertRaises(ValueError):dispatch(host,dict(operation='connection_panel',state='execute'))
+        host.server.controller.action.assert_not_called()
 
     def test_idle_rejects_unknown_hardware_or_unfinished_work(self):
         state=dict(connection='disconnected',hardware=dict(active=False))

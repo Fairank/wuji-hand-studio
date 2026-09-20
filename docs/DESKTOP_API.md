@@ -39,3 +39,7 @@ Windows installer packages are unsigned. Use trusted release assets and publishe
 ## 私有模型为可选数据
 
 同一软件的菜单提供“导入私有模型包”。也可使用 `python scripts/workbenchctl.py --port 8792 import-model PATH_TO_MODEL_ZIP`。模型只保存到本机数据目录 `models`；公开安装包没有私有权重。模型包仅接受固定格式的 JSON 与 NPZ 数据，不运行 Python 插件。导入会校验文件哈希、数组形状和参考输出。现有二代左手模型仅支持离线仿真反馈，不会因导入而启用真实手抓取。
+
+## 0.1.8 additions
+
+`connection_panel` accepts `state: "open"` or `"closed"` and only changes the app’s device popover. `reload_ui` reloads assets only while disconnected and idle. Neither sends motor commands. Inspection now includes toolbar state, button contrast and bounds.

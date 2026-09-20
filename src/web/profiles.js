@@ -3,7 +3,7 @@
  const control=document.createElement('div');control.className='device-profile-control';
  const label=document.createElement('label'),select=document.createElement('select'),note=document.createElement('p');
  select.id='device-profile';label.htmlFor=select.id;note.className='hint';note.setAttribute('role','status');control.append(label,select,note);
- document.querySelector('.page-area').prepend(control);let info=null,selected='hand2_left',busy=false,lastSideText='';
+ ws.views.connection.prepend(control);let info=null,selected='hand2_left',busy=false,lastSideText='';
  const text=(zh,en)=>document.documentElement.lang==='en'?en:zh;
  function render(){
   label.textContent=text('设备型号','Device');select.setAttribute('aria-label',label.textContent);

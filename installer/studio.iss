@@ -73,7 +73,7 @@ Source: "{#ProjectRoot}\README.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#ProjectRoot}\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#ProjectRoot}\THIRD_PARTY_NOTICES.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#ProjectRoot}\docs\*"; DestDir: "{app}\docs"; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "{#ProjectRoot}\runtime_payload\*"; DestDir: "{app}\runtime"; Flags: ignoreversion solidbreak
+Source: "{#ProjectRoot}\runtime_payload\{#RuntimeFile}"; DestDir: "{app}\runtime"; Flags: ignoreversion solidbreak
 Source: "{#ProjectRoot}\scripts\*"; DestDir: "{app}\scripts"; Excludes: "__pycache__\*"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 Source: "{#ProjectRoot}\src\*.py"; DestDir: "{app}\controller\source"; Excludes: "test_*"; Flags: ignoreversion

@@ -6,7 +6,7 @@ from pathlib import Path
 PAGES = ('library', 'feedback', 'parameters', 'connection', 'glove', 'doctor',
          'interaction', 'capture', 'records')
 OPERATIONS = ('inspect', 'capture', 'page', 'resize', 'appearance', 'menu',
-              'viewer', 'close_idle', 'prepare_update', 'import_model', 'preview', 'picker', 'refraction_check')
+              'viewer', 'close_idle', 'prepare_update', 'import_model', 'preview', 'picker', 'refraction_check', 'connection_panel', 'reload_ui')
 
 
 def idle(state, doctor):
@@ -59,6 +59,12 @@ def dispatch(host, payload):
         raise ValueError('Unsupported desktop operation')
     if op == 'inspect':
         return host.inspect()
+    if op == 'connection_panel':
+        if payload.get('state') not in ('open','closed'):raise ValueError('Expected open or closed')
+        return host.connection_panel(payload['state'])
+    if op == 'reload_ui':
+        if not idle(host.server.controller.snapshot(),host.server.controller.doctor.snapshot()):raise ValueError('UI reload requires an idle disconnected app')
+        return host.reload_ui()
     if op == 'capture':
         return host.capture()
     if op == 'refraction_check':

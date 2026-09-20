@@ -4,7 +4,7 @@ from pathlib import Path
 
 ROOT=Path(__file__).resolve().parent
 os.chdir(ROOT)
-config=json.loads((ROOT/'src/edition.json').read_text())
+config=json.loads((ROOT/'src/edition.json').read_text(encoding='utf-8'))
 edition=config['name'];version=config['version']
 name='HandWorkbench'
 args=[sys.executable,'-m','PyInstaller','--noconfirm','--clean','--onedir','--name',name,'--paths','src',
@@ -15,6 +15,7 @@ args=[sys.executable,'-m','PyInstaller','--noconfirm','--clean','--onedir','--na
     '--add-data','src/trial_sdk_poses.json'+os.pathsep+'.','--add-data','src/motion_parameters.py'+os.pathsep+'.',
     '--add-data','src/edition.json'+os.pathsep+'.','--add-data','LICENSE'+os.pathsep+'.',
     '--add-data','src/runtime_manifest.json'+os.pathsep+'.',
+    '--add-data','src/runtime_update.py'+os.pathsep+'.',
     '--add-data','src/network_setup_windows.ps1'+os.pathsep+'.',
     '--add-data','THIRD_PARTY_NOTICES.md'+os.pathsep+'.']
 if (ROOT/'src/private_models').exists():raise RuntimeError('Private models are optional local data and must not be bundled')
@@ -58,7 +59,8 @@ shutil.copytree(ROOT/'scripts',release/'scripts',ignore=shutil.ignore_patterns('
 shutil.copytree(ROOT/'controller',release/'controller',dirs_exist_ok=True)
 shutil.copytree(ROOT/'src',release/'controller/source',ignore=shutil.ignore_patterns('__pycache__','private_models','test_*','desktop.py','web'),dirs_exist_ok=True)
 if sys.platform=='win32' and (ROOT/'runtime_payload').is_dir():
-    shutil.copytree(ROOT/'runtime_payload',release/item.name/'runtime',dirs_exist_ok=True)
+    manifest=json.loads((ROOT/'src/runtime_manifest.json').read_text(encoding='utf-8'));folder=release/item.name/'runtime';folder.mkdir(exist_ok=True)
+    shutil.copy2(ROOT/'runtime_payload'/manifest['file'],folder/manifest['file'])
 if sys.platform=='darwin':
     archive=ROOT/'dist'/(release.name+'.zip')
     subprocess.run(['ditto','-c','-k','--sequesterRsrc','--keepParent',str(release),str(archive)],check=True)

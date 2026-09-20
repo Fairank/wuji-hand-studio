@@ -1,10 +1,10 @@
 {
-  "runtime_version": "1.0.0",
-  "file": "hand-workbench-control-1.0.0.tar.gz",
-  "sha256": "da7807d41ddba6b056fdcf8b2824aae3c7fdd8ba97090032118757043b70c126",
-  "bytes": 127938560,
+  "runtime_version": "1.0.1",
+  "file": "hand-workbench-control-1.0.1.tar.gz",
+  "sha256": "93d12a22244ad047f0d8d073bc878ffbf01860004b49096a9558c875cfa7ed05",
+  "bytes": 138266281,
   "sdk_version": "2026.8.31",
   "base": "Ubuntu Base 24.04.5 amd64",
   "source": "https://cdimage.ubuntu.com/ubuntu-base/releases/24.04/release/",
-  "controller_version": "0.1.6"
+  "controller_version": "0.1.8"
 }

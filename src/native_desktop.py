@@ -151,6 +151,14 @@ class NativeDesktop:
     def picker(self,kind):
         return self.window.evaluate_js('window.WujiWorkbench.picker('+json.dumps(kind)+')')
 
+    def connection_panel(self,state):
+        self.window.evaluate_js('window.WujiConnectionToolbar.'+('open' if state=='open' else 'close')+'()')
+        return dict(ok=True)
+
+    def reload_ui(self):
+        self.window.evaluate_js('location.reload()')
+        return dict(ok=True)
+
     def preview(self,action,speed):
         return self.window.evaluate_js('window.WujiWorkbench.preview('+json.dumps(action)+','+json.dumps(speed)+')')
 

@@ -29,10 +29,14 @@
   chooser.after(modeBar);
   let amplitudeEdited=false;
   const amplitudeNote=document.createElement('p');amplitudeNote.id='motion-amplitude-note';amplitudeNote.className='hint';
-  $('trial-amplitude').closest('.motion-fields').after(amplitudeNote);
+  const motionNotes=document.querySelector('#real-motion-panel .motion-notes');
+  motionNotes.append(amplitudeNote,$('playback-rate-summary'));
   function amplitudeLabels(){
     const group=catalog?.actions.find(x=>x.id===picker.selected)?.group;
     const full=['dance','numbers','letters'].includes(group);
+    // Reduced symbols need a visible explanation; ordinary parameter help stays folded.
+    if(full&&Number($('trial-amplitude').value)<1)$('trial-amplitude').closest('.motion-fields').after(amplitudeNote);
+    else motionNotes.append(amplitudeNote);
     amplitudeNote.textContent=full?Number($('trial-amplitude').value)<1?
       text('当前为缩小幅度：数字可能不成形，舞蹈侧摆也会同步缩小。100% 表示完整编排。','Reduced amplitude can make digits unreadable and lateral movement smaller. 100% uses the complete choreography.'):
       text('完整编排幅度 · 包含屈伸与侧摆；力度由参数页设置。','Full choreography, including bending and lateral joints. Effort is set on the Parameters page.'):

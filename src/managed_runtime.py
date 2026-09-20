@@ -84,7 +84,16 @@ def start_install():
             pending=ROOT/'pending-install.json'
             if existing and not status()['ready']:
                 previous=json.loads(pending.read_text(encoding='utf-8')) if pending.is_file() else {}
-                if previous.get('sha256')!=manifest['sha256']:raise RuntimeError('Existing runtime is a different version; it will not be replaced automatically')
+                marker=ROOT/'runtime-info.json'
+                saved=json.loads(marker.read_text(encoding='utf-8')) if marker.is_file() else {}
+                if saved.get('runtime_version')=='1.0.0' and manifest['runtime_version']=='1.0.1' and saved.get('sdk_version')==manifest['sdk_version']:
+                    _state['stage']='upgrading'
+                    with Files() as files:
+                        files.path(AGENT+'/runtime_update.py').write_bytes((RESOURCE/'runtime_update.py').read_bytes())
+                    converted=subprocess.run(args(['/usr/bin/wslpath','-a',str(image)]),capture_output=True,check=True,timeout=10,creationflags=subprocess.CREATE_NO_WINDOW)
+                    upgraded=subprocess.run(args(['/usr/bin/python3',AGENT+'/runtime_update.py',_decode(converted.stdout),manifest['sha256']],user='root'),capture_output=True,timeout=90,creationflags=subprocess.CREATE_NO_WINDOW)
+                    if upgraded.returncode:raise RuntimeError('Controller update failed: '+_decode(upgraded.stderr)[-400:])
+                elif previous.get('sha256')!=manifest['sha256']:raise RuntimeError('Existing runtime version is not supported for automatic upgrade')
             if not existing:
                 _state['stage']='importing';target=ROOT/NAME;target.mkdir(exist_ok=True)
                 pending.write_text(json.dumps(dict(sha256=manifest['sha256'])),encoding='utf-8')

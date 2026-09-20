@@ -8,19 +8,23 @@
 
 ## Windows 下载和启动
 
-在 [Releases](../../releases) 选择已发布的 Windows 安装包。源码当前为 0.1.7 连接修复候选版，不代表已有同版本安装包发布。当前用户安装，无需另装 Python。安装器检查微软 WebView2 运行时，缺少时联网安装。包暂未进行发布者代码签名，附有 SHA-256 校验文件。
+在 [Releases](../../releases) 选择已发布的 Windows 安装包。源码当前为 0.1.8；已发布版本以 Releases 中实际上传的安装包为准。当前用户安装，无需另装 Python。安装器检查微软 WebView2 运行时，缺少时联网安装。包暂未进行发布者代码签名，附有 SHA-256 校验文件。
 
-## 0.1.7 自动发现修复
+## 0.1.8 全局连接与界面更新
 
-点击“自动连接”时重新发现设备，读取设备自身的左右手身份，再同步型号、原生模型和反馈映射。留空地址时，内置 Windows 控制端尝试二代左右手的两个出厂地址；不会用上次序列号代替新发现结果。多只设备同时出现时提供选择框。自定义地址可手动填写。连接只接收反馈，不恢复上一轮动作。
+右上角常驻连接状态和连接 / 断开按钮，各页面都可使用。点击状态打开设备详情和多设备选择，复杂配置保留在连接页。动作执行中断开会先请求停止并等待确认。
 
-这项修复需要同时更新桌面端和 Linux 控制程序，以及 `eclipse-zenoh==1.9.0` 依赖。旧桌面端继续使用明确选择的型号连接，避免新控制程序自动换手后旧界面仍使用错误模型。USB 自动转接、未知自定义网段自动搜索及 macOS 内置控制端不在本次已验证范围。当前仓库中的旧控制镜像清单尚未更新为新安装镜像，请勿将旧镜像与新桌面源码打包后宣称完成升级。
+点击“连接”时重新发现设备，读取设备自身的左右手身份，再同步型号、原生模型和反馈映射。留空地址时，内置 Windows 控制端尝试二代左右手的两个出厂地址；不会用上次序列号代替新发现结果。多只设备同时出现时提供选择框。自定义地址可手动填写。连接只接收反馈，不恢复上一轮动作。
+
+这项修复需要同时更新桌面端和 Linux 控制程序，以及 `eclipse-zenoh==1.9.0` 依赖。旧桌面端继续使用明确选择的型号连接，避免新控制程序自动换手后旧界面仍使用错误模型。USB 自动转接、未知自定义网段自动搜索及 macOS 内置控制端不在本次已验证范围。本版使用配套控制镜像 1.0.1，已完成独立全新导入检查。从内置 1.0.0 升级会校验镜像哈希、备份旧控制文件并保留用户参数和记录；运行中的设备会话必须先结束。
 
 Windows 使用独立原生窗口和内嵌 WebView2，不依赖浏览器应用窗口。只运行一个主实例；模型小窗由用户选择打开。退出时正常结束设备会话、保存采集记录并关闭所属本机服务。启动不自动连接设备或启用电机。
 
 原有用户数据目录 `%LOCALAPPDATA%/WujiStudio` 保持不变，仅为升级兼容的内部路径，不代表另一款软件。`WUJI_STUDIO_DATA` 可指定独立数据目录。升级保留参数、连接配置和记录。端口在 8781–8800 中选空闲值，写入数据目录的 `native-window.json`。
 
 ## 功能
+
+0.1.8 整理了动作页布局：型号选择移到连接页，常规幅度和倍速说明收进“动作来源与参数说明”，缩小数字幅度的提示仍直接显示。顶栏、侧栏和连接浮层采用统一的半透明材质、边缘高光和短过渡；内容区域保持清晰，支持减少透明和动画。
 
 - 中文 / English；简洁白灰界面，导航、分段控件、工具条和弹窗使用玻璃材质；可减少透明及动态效果。Windows 的自有实现，不是调用苹果 Liquid Glass 系统 API。
 - 一代 / 二代 × 左手 / 右手四种原生 MuJoCo 模型，实测关节同步、视角调整、浮动模型小窗。
@@ -32,7 +36,7 @@ Windows 使用独立原生窗口和内嵌 WebView2，不依赖浏览器应用窗
 
 ## 设备与模型边界
 
-Windows 新增[内置轻量控制环境](docs/BUILT_IN_CONTROLLER.md)，随安装包附带约 128 MB 的 WSL 2 用户空间，不需 VMware 或 SSH 配置；首次启用缺少的 Windows 组件可能需要管理员确认及重启。也可继续选择实体 Linux 控制端。Ubuntu 可本机运行 SDK。它仍在 Linux 中运行官方 SDK，不是原生 Windows SDK；一代 USB 自动转接与 macOS 内置控制端尚未实现。详见 [控制与诊断说明](controller/README.md)、[手套说明](docs/GLOVE.md)（如对应版本提供）。
+Windows 新增[内置轻量控制环境](docs/BUILT_IN_CONTROLLER.md)，随安装包附带约 132 MiB 的 WSL 2 用户空间，不需 VMware 或 SSH 配置；首次启用缺少的 Windows 组件可能需要管理员确认及重启。也可继续选择实体 Linux 控制端。Ubuntu 可本机运行 SDK。它仍在 Linux 中运行官方 SDK，不是原生 Windows SDK；一代 USB 自动转接与 macOS 内置控制端尚未实现。详见 [控制与诊断说明](controller/README.md)、[手套说明](docs/GLOVE.md)（如对应版本提供）。
 
 二代左右手使用各自官方录制；新型号路径及新增编排动作未逐项完成实机验收。一代目前只开放官方张开 / 握拳实机适配，其他动作只预览。软件的 1000 Hz 是目标发送节拍，实际发送与反馈频率分别显示，不等于画面帧率或逐帧执行保证。没有因桌面改版调整电机增益或轨迹参数。
 
@@ -57,3 +61,5 @@ Windows 构建需要先按 `src/runtime_manifest.json` 准备对应压缩镜像�
 Features include Chinese/English, minimalist glass chrome, four native hand profiles, text sequences, numbers, clock poses, authored finger dances, configurable parameters, feedback, recording, diagnostics and glove integration. Windows now bundles an optional minimal WSL 2 controller (~128 MB compressed), removing VMware and SSH setup from everyday use. Windows component setup may require administrator approval and a reboot. An external Linux controller remains available; native Windows SDK control and automatic Hand 1 USB passthrough are not claimed. New UI tests and synthetic mapping checks are not real hardware acceptance. The optional left-hand model is for offline simulation feedback only and cannot enable real-device grasping.
 
 Use the [code-only maintenance interface](docs/DESKTOP_API.md) for inspecting the app, capturing its own WebView and applying a verified local installer. The maintenance interface never controls the computer's mouse/keyboard; its screenshots redact opt-in external refraction tiles. User data is preserved across upgrades. Packages are unsigned; check the trusted release and published SHA-256. Windows is the current release target; macOS validation remains pending.
+
+Version 0.1.8 adds an always-visible connection control, discovered-device selection, refreshed translucent navigation and compact action layout. It pairs with controller image 1.0.1; upgrading the owned 1.0.0 environment preserves user parameters and records. No motor gains or trajectory settings are changed by this UI update.

@@ -55,11 +55,24 @@
   }
   function freshState(){return new Promise(resolve=>{waiter={after:pollId,resolve};if(!inFlight)poll();});}
   async function action(body){
-    if(pending||!service)return;pending=true;controls();showError('');
-    try{if(body.name==='connect'&&window.WujiNetwork)body.address=await window.WujiNetwork.prepare(body.address);const response=await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json','X-Console-Token':state.csrf},body:JSON.stringify(body),signal:AbortSignal.timeout(4000)});const result=await response.json();if(!response.ok||!result.ok)throw new Error(result.error||'操作未完成');}
+    if(pending||!service)return false;pending=true;controls();showError('');let succeeded=false;
+    try{if(body.name==='connect'&&window.WujiNetwork)body.address=await window.WujiNetwork.prepare(body.address);const response=await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json','X-Console-Token':state.csrf},body:JSON.stringify(body),signal:AbortSignal.timeout(4000)});const result=await response.json();if(!response.ok||!result.ok)throw new Error(result.error||'操作未完成');succeeded=true;}
     catch(error){showError(error.message||'操作未完成');}
     finally{await freshState();pending=false;controls();}
+    return succeeded;
   }
+  // Shared by the connection page and the always-visible toolbar. No new motor API.
+  window.WujiConnection={state:()=>state,available:()=>service&&!pending,
+    connect:(address='',serial='')=>action({name:'connect',auto_detect:true,address,serial}),
+    async disconnect(){
+      if(state?.hardware?.active){
+        if(!await action({name:'hardware_stop'}))return false;
+        const deadline=Date.now()+6000;
+        while(Date.now()<deadline){await freshState();if(state?.hardware?.active===false&&state.hardware.stop_confirmed===true)break;await new Promise(r=>setTimeout(r,100));}
+        if(state?.hardware?.active!==false||state.hardware.stop_confirmed!==true){showError('停止尚未确认，请检查设备 / Stop not confirmed');return false;}
+      }
+      return action({name:'disconnect'});
+    }};
   el('connect').addEventListener('click',()=>{if(!deviceChoice.hidden&&!deviceChoice.value){showError('请选择一只机械手 / Select a hand');return;}action({name:'connect',auto_detect:true,serial:deviceChoice.hidden?'':deviceChoice.value,address:el('device-address').value.trim()});});
   el('disconnect').addEventListener('click',()=>action({name:'disconnect'}));
   el('record').addEventListener('click',()=>action({name:'record',label:el('annotation').value,seconds:Number(el('duration').value)}));

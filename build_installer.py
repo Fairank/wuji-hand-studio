@@ -18,7 +18,9 @@ def main():
     parser.add_argument('--webview-bootstrap',type=Path,required=True)
     parser.add_argument('--zh-language',type=Path,required=True)
     args=parser.parse_args()
-    config=json.loads((ROOT/'src/edition.json').read_text())
+    config=json.loads((ROOT/'src/edition.json').read_text(encoding='utf-8'))
+    runtime=json.loads((ROOT/'src/runtime_manifest.json').read_text(encoding='utf-8'))
+    if hashlib.sha256((ROOT/'runtime_payload'/runtime['file']).read_bytes()).hexdigest()!=runtime['sha256']:raise ValueError('Runtime image hash mismatch')
     name='HandWorkbench'
     guid='44DF38B2-39A0-491F-B154-E587231C83CE'
     env=dict(os.environ,WUJI_BUILD_BOOTSTRAP=str(args.webview_bootstrap.resolve()))
@@ -30,7 +32,7 @@ def main():
     output=f"{name}-{config['version']}-windows-x64-setup"
     defines=dict(ProjectRoot=ROOT,PayloadDir=ROOT/'dist'/name,AppExe=name+'.exe',AppName='Hand Workbench',
                  AppGuid=guid,AppVersion=config['version'],OutputDir=ROOT/'dist',OutputName=output,
-                 IconFile=ROOT/'src/WujiStudio.ico',LicenseFile=ROOT/'LICENSE',
+                 IconFile=ROOT/'src/WujiStudio.ico',LicenseFile=ROOT/'LICENSE',RuntimeFile=runtime['file'],
                  WebViewBootstrap=args.webview_bootstrap.resolve(),ZhIsl=args.zh_language.resolve(),MutexName='Local\\'+name)
     subprocess.run([str(args.iscc.resolve()),*[f'/D{k}={v}' for k,v in defines.items()],str(ROOT/'installer/studio.iss')],check=True)
     path=ROOT/'dist'/(output+'.exe')
