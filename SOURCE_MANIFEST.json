@@ -766,8 +766,8 @@
       "sha256": "8d8724b95acd70b8dce658248ffbf5c06dcd2e9fd41807df886272f0d91ea418"
     },
     "src/performance_export.py": {
-      "bytes": 2134,
-      "sha256": "a7c8e7988b91711eee55cc6bc7e2b53665074425f3d49dc4249ace4a12cedc2e"
+      "bytes": 2293,
+      "sha256": "1a0a9e27d67cd0486602cb653915644e69832fad123d6bee647b70744de93d9e"
     },
     "src/performance_program.py": {
       "bytes": 7192,
@@ -862,8 +862,8 @@
       "sha256": "4de8e4611c3f3e484e36225f5823605122adf05c156a740c14ce792d99fd18ae"
     },
     "src/test_performance_program.py": {
-      "bytes": 4746,
-      "sha256": "45c285ff6ccc9faacb98c80ad7ab126902c3187755d0e62884d2ae0c138a112c"
+      "bytes": 4865,
+      "sha256": "1d427b8fcb0b1ae6af0f0670eeaef5cf611c5d870146b20ae02c6427bbfbf2a7"
     },
     "src/test_phrase_text.py": {
       "bytes": 2133,

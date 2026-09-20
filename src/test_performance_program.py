@@ -73,6 +73,8 @@ class PerformanceTests(unittest.TestCase):
         self.assertEqual(rows[0][5],'thumb_S1')
         self.assertAlmostEqual(float(rows[2][0])-float(rows[1][0]),.001)
         self.assertEqual(len(rows[-1]),25)
+        stamps=[float(row[0]) for row in rows[1:]]
+        self.assertTrue(all(b>a for a,b in zip(stamps,stamps[1:])))
         data=export_program('dance_jellyfish','WUJI TECH','hand1_right')
         self.assertTrue(data['hand1_preview_only']);self.assertFalse(data['hardware_validated'])
 
