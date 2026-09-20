@@ -35,9 +35,12 @@ def validate_command(command):
     if name == 'connect':
         address = command.get('address', '')
         if not isinstance(address, str):
-            raise ValueError('Address must be IPv4')
+            raise ValueError('Address must be IPv4 with an optional port')
         if address:
-            ipaddress.IPv4Address(address)
+            host,separator,port=address.partition(':')
+            ipaddress.IPv4Address(host)
+            if separator and (not port.isascii() or not port.isdecimal() or not 1<=int(port)<=65535):
+                raise ValueError('Invalid device port')
     if name == 'record':
         seconds = command.get('seconds')
         if type(seconds) is not int or seconds not in {10, 30, 60}:

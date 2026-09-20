@@ -4,7 +4,8 @@ from pathlib import Path
 
 ROOT=Path(__file__).resolve().parent
 os.chdir(ROOT)
-edition=json.loads((ROOT/'src/edition.json').read_text())['name']
+config=json.loads((ROOT/'src/edition.json').read_text())
+edition=config['name'];version=config['version']
 name='WujiStudioResearch' if edition=='research' else 'WujiStudio'
 args=[sys.executable,'-m','PyInstaller','--noconfirm','--clean','--onedir','--name',name,'--paths','src',
     '--collect-all','mujoco','--collect-all','glfw','--collect-all','paramiko','--collect-all','scipy','--hidden-import','console_server','--hidden-import','PIL.Image',
@@ -46,11 +47,12 @@ subprocess.run([str(binary),'--self-check'],check=True)
 platform_name={'win32':'windows','darwin':'macos'}.get(sys.platform,'ubuntu')
 arch='arm64' if platform.machine().lower() in ('arm64','aarch64') else 'x64'
 staging=Path(tempfile.mkdtemp(prefix='package-',dir=ROOT/'build'))
-release=staging/f'{name}-0.1.0-{platform_name}-{arch}'
+release=staging/f'{name}-{version}-{platform_name}-{arch}'
 release.mkdir(exist_ok=True)
 item=ROOT/'dist'/(name+'.app' if sys.platform=='darwin' else name)
 shutil.copytree(item,release/item.name,dirs_exist_ok=True,symlinks=True)
 for f in ('README.md','LICENSE','THIRD_PARTY_NOTICES.md'):shutil.copy2(ROOT/f,release/f)
+if (ROOT/'docs').is_dir():shutil.copytree(ROOT/'docs',release/'docs')
 shutil.copytree(ROOT/'controller',release/'controller',dirs_exist_ok=True)
 shutil.copytree(ROOT/'src',release/'controller/source',ignore=shutil.ignore_patterns('__pycache__','private_models','test_*','desktop.py','web','assets'),dirs_exist_ok=True)
 if edition=='research' and (ROOT/'research').exists():shutil.copytree(ROOT/'research',release/'research',dirs_exist_ok=True)

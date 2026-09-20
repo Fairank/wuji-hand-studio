@@ -26,7 +26,7 @@ class ConsoleTests(unittest.TestCase):
                 validate_command(dict(name=name))
 
     def test_addresses_and_durations(self):
-        for address in ('x;command', 'localhost/evil', '192.168.1.110:1234'):
+        for address in ('x;command', 'localhost/evil', '192.0.2.1:70000'):
             with self.assertRaises(ValueError):
                 validate_command(dict(name='connect', address=address))
         for seconds in (-1, 30000, True, '30'):

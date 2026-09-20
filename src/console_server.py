@@ -44,6 +44,8 @@ class Controller:
         self.parameters=ParameterStore(parameter_path or self.reports.parent/'motion_parameters.py')
         self.parameter_worker=None
         self.player = DemoPlayer()
+        from doctor import Doctor
+        self.doctor=Doctor()
         self.client = self.stdin = None
         self.generation = 0
         self.last_update = 0.
@@ -149,6 +151,19 @@ class Controller:
         self.stdin.flush()
 
     def action(self, command):
+        # Serialize starts and configuration changes with diagnostics. RLock
+        # also covers existing command branches that take the same lock.
+        with self.lock:return self._action(command)
+
+    def _action(self, command):
+        if not isinstance(command,dict):raise ValueError('Invalid request')
+        if command.get('name') in {'doctor_version','doctor_run'}:
+            with self.lock:
+                if self.state['connection']!='disconnected' or self.state['hardware'].get('active') is not False or self.parameters.sync_status['busy']:
+                    raise ValueError('先断开设备连接，再运行独立诊断 / Disconnect the SDK session before diagnostics')
+                return self.doctor.start('version' if command['name']=='doctor_version' else 'diagnose',command.get('serial',''))
+        if self.doctor.snapshot()['running'] and command.get('name') in {'connect','bridge_config_save','parameters_sync','device_profile_select'}:
+            raise ValueError('官方诊断正在运行，请稍候 / Official diagnostic in progress')
         if isinstance(command,dict) and command.get('name') == 'device_profile_select':
             with self.lock:
                 if self.state['connection']!='disconnected' or self.state['hardware'].get('active') is not False:
@@ -293,9 +308,9 @@ class Controller:
                 self.generation += 1
                 generation = self.generation
                 self.state['connection'] = 'connecting'
-                self.state['message'] = '正在连接本机虚拟机并核对左手'
+                self.state['message'] = '正在连接控制端并核对所选机械手'
                 self.clear_live()
-                self.log('用户请求连接左手，仅接收反馈')
+                self.log('用户请求连接所选设备，仅接收反馈')
                 threading.Thread(target=self.read_session, args=(command, generation), daemon=True).start()
             elif name == 'disconnect':
                 self.generation += 1
@@ -404,7 +419,7 @@ class Controller:
         except Exception:
             # Never expose credential/configuration tracebacks through HTTP.
             (DATA/'bridge_error.log').write_text(traceback.format_exc(), encoding='utf-8')
-            self.event(dict(type='error', message='未建立稳定反馈连接，请检查机械手电源、网线、地址及本机虚拟机'), generation)
+            self.event(dict(type='error', message='未建立稳定反馈连接，请检查电源、设备地址及控制端设置'), generation)
         finally:
             if client:
                 client.close()
@@ -444,7 +459,13 @@ class Handler(BaseHTTPRequestHandler):
             from bridge_config import load_config
             from device_profiles import PROFILES
             from runtime_paths import EDITION
-            return self.reply(200,dict(edition=EDITION,version='0.1.0',bridge=load_config(),profiles=list(PROFILES.values()),selected_profile=self.server.controller.state['device_profile']['id'],unofficial=True))
+            return self.reply(200,dict(edition=EDITION,version=EDITION['version'],local_controller_supported=sys.platform.startswith('linux'),bridge=load_config(),profiles=list(PROFILES.values()),selected_profile=self.server.controller.state['device_profile']['id'],unofficial=True))
+        if url.path in ('/api/doctor','/api/doctor/report'):
+            state=self.server.controller.doctor.snapshot()
+            if url.path.endswith('/report'):
+                if not state.get('report'):return self.reply(404,dict(error='No completed diagnostic report'))
+                return self.reply(200,state['report'],filename='wuji-doctor-report.json')
+            return self.reply(200,state)
         if url.path == '/api/state':
             return self.reply(200, self.server.controller.snapshot())
         if url.path == '/api/parameters':
@@ -473,7 +494,7 @@ class Handler(BaseHTTPRequestHandler):
         assets.update({'/workspace.js':('workspace.js','text/javascript; charset=utf-8'),
             '/workspace.css':('workspace.css','text/css; charset=utf-8'),
             '/parameters.js':('parameters.js','text/javascript; charset=utf-8')})
-        for name in ('studio.js','locale.js','floating_panel.js','viewer.js','action_picker.js','brand.js','installation.js','profiles.js'):
+        for name in ('studio.js','locale.js','floating_panel.js','viewer.js','action_picker.js','brand.js','installation.js','profiles.js','doctor.js'):
             assets['/'+name]=(name,'text/javascript; charset=utf-8')
         for name in ('studio.css','floating_panel.css','glass.css'):
             assets['/'+name]=(name,'text/css; charset=utf-8')

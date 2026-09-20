@@ -62,7 +62,7 @@
   let current='library',beforePresentation='library';
   function showPage(){
     const requested=location.hash.slice(1);current=requested==='motion'?'library':views[requested]?requested:'library';
-    for(const [key] of pages){get('page-'+key).hidden=key!==current;const a=nav.querySelector(`[data-page="${key}"]`);if(key===current)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current');}
+    for(const key of Object.keys(views)){get('page-'+key).hidden=key!==current;const a=nav.querySelector(`[data-page="${key}"]`);if(key===current)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current');}
     document.body.dataset.page=current;const more=nav.querySelector('details');if(more){const tool=['capture','interaction','records'].includes(current);more.classList.toggle('is-current',tool);if(window.innerWidth>700&&tool)more.open=true;else if(window.innerWidth<=700)more.open=false;}
     if(!window.wujiFloating?.isFloating())(['motion','library'].includes(current)?motionDock:current==='feedback'?feedbackDock:parking).append(pose);
     document.title=(window.WujiLocale?window.WujiLocale.text(current):pages.find(x=>x[0]===current)[1])+' · Wuji Hand Studio';

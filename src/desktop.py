@@ -1,16 +1,41 @@
 """Cross-platform local desktop/browser entry. Never auto-connects hardware."""
-import argparse,json,os,shutil,subprocess,sys,time,webbrowser
+import argparse,json,os,shutil,socket,subprocess,sys,time,webbrowser
 from pathlib import Path
 from urllib.request import urlopen
 from runtime_paths import DATA,RESOURCE,PORT,EDITION,initialize
 
 URL=f'http://127.0.0.1:{PORT}/'
 
-def ready():
+def ready(port=None):
     try:
-        with urlopen(URL+'api/installation',timeout=1) as r:s=json.load(r)
-        return s.get('edition',{}).get('name')==EDITION['name'] and s.get('version')=='0.1.0'
+        with urlopen(f'http://127.0.0.1:{port or PORT}/api/installation',timeout=1) as r:s=json.load(r)
+        return s.get('edition',{}).get('name')==EDITION['name'] and s.get('version')==EDITION['version']
     except Exception:return False
+
+
+def choose_port():
+    """Keep explicit ports; a double-click coexists with an older workbench."""
+    global PORT,URL
+    if os.environ.get('WUJI_STUDIO_PORT'):return PORT
+    saved=DATA/'desktop-port.json';candidates=list(range(8781,8801))
+    try:
+        last=json.loads(saved.read_text())['port']
+        if type(last) is int and 8781<=last<=8800:candidates.remove(last);candidates.insert(0,last)
+    except (OSError,ValueError,KeyError,TypeError):pass
+    for candidate in candidates:
+        if ready(candidate):break
+        try:
+            with socket.socket() as probe:
+                if sys.platform=='win32':probe.setsockopt(socket.SOL_SOCKET,socket.SO_EXCLUSIVEADDRUSE,1)
+                probe.bind(('127.0.0.1',candidate))
+            break
+        except OSError:continue
+    else:raise RuntimeError('No free local port; set WUJI_STUDIO_PORT explicitly')
+    PORT=candidate;URL=f'http://127.0.0.1:{PORT}/'
+    import runtime_paths
+    runtime_paths.PORT=PORT;os.environ['WUJI_STUDIO_PORT']=str(PORT)
+    saved.write_text(json.dumps(dict(port=PORT)),encoding='utf-8')
+    return PORT
 
 def open_app(viewer=False):
     url=URL+('viewer' if viewer else '#library')
@@ -52,6 +77,7 @@ def main():
     if '--serve' in sys.argv:
         from console_server import main as serve
         serve();return
+    choose_port()
     if not ready():
         cmd=[sys.executable,'--serve'] if getattr(sys,'frozen',False) else [sys.executable,'-u',str(RESOURCE/'desktop.py'),'--serve']
         with (DATA/'console.log').open('ab') as log:
