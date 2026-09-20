@@ -73,7 +73,7 @@ window.addEventListener('console-state',e=>{
     camera=clone(state.camera);revision=state.camera_revision;
   }
   for(const b of toolbar.querySelectorAll('button'))b.disabled=false;
-  stageStop.hidden=state.hardware?.active===false||state.hardware?.active===undefined;
+  stageStop.hidden=!state.glove?.busy&&(state.hardware?.active===false||state.hardware?.active===undefined);
   for(const b of toolbar.querySelectorAll('[data-source]')){
     b.setAttribute('aria-pressed',String(b.dataset.source===state.view_source));
     b.disabled=!!state.hardware?.active&&b.dataset.source==='preview';

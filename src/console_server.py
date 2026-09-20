@@ -47,6 +47,8 @@ class Controller:
         self.player = DemoPlayer()
         from doctor import Doctor
         self.doctor=Doctor()
+        from glove_bridge import GloveBridge
+        self.glove=GloveBridge(factory)
         self.client = self.stdin = None
         self.generation = 0
         self.last_update = 0.
@@ -114,6 +116,7 @@ class Controller:
             result['csrf'] = self.csrf
             result['playback'] = self.player.snapshot()
             result['parameter_sync']=dict(self.parameters.sync_status)
+            result['glove']=self.glove.snapshot()
             return result
 
     def parameter_snapshot(self):
@@ -158,6 +161,18 @@ class Controller:
 
     def _action(self, command):
         if not isinstance(command,dict):raise ValueError('Invalid request')
+        name=command.get('name','')
+        if name=='hardware_stop' and self.glove.busy:
+            return self.glove.action(dict(name='glove_stop'))
+        if isinstance(name,str) and name.startswith('glove_'):
+            if name not in {'glove_stop','glove_disconnect','glove_keepalive'} and (self.state['connection']!='disconnected' or self.state['hardware'].get('active') is not False or self.doctor.snapshot()['running'] or self.parameters.sync_status['busy']):
+                raise ValueError('先结束其他设备会话或诊断 / Finish the other device session or diagnostics first')
+            result=self.glove.action(command)
+            if name in {'glove_scan','glove_open','glove_follow','glove_prepare'}:
+                self.player.command(dict(name='demo_stop'));self.state['view_source']='glove'
+            return result
+        if self.glove.busy and name in {'connect','device_profile_select','bridge_config_save','parameters_sync','doctor_version','doctor_run','demo_start','hardware_start','hardware_probe','hardware_trial'}:
+            raise ValueError('先断开手套遥操作会话 / Disconnect the glove session first')
         if command.get('name') in {'doctor_version','doctor_run'}:
             with self.lock:
                 if self.state['connection']!='disconnected' or self.state['hardware'].get('active') is not False or self.parameters.sync_status['busy']:
@@ -265,6 +280,7 @@ class Controller:
                 self.state['camera_revision'] += 1
                 return dict(camera=copy.deepcopy(camera),camera_revision=self.state['camera_revision'])
         if isinstance(command, dict) and command.get('name') == 'view_source':
+            if self.glove.busy:raise ValueError('手套会话期间显示映射或实际反馈 / Glove session owns the view source')
             source = command.get('source')
             if source not in {'feedback','preview'}:
                 raise ValueError('请选择实机反馈或动作预览')
@@ -509,9 +525,9 @@ class Handler(BaseHTTPRequestHandler):
         assets.update({'/workspace.js':('workspace.js','text/javascript; charset=utf-8'),
             '/workspace.css':('workspace.css','text/css; charset=utf-8'),
             '/parameters.js':('parameters.js','text/javascript; charset=utf-8')})
-        for name in ('studio.js','locale.js','floating_panel.js','viewer.js','action_picker.js','brand.js','installation.js','profiles.js','doctor.js'):
+        for name in ('studio.js','locale.js','floating_panel.js','viewer.js','action_picker.js','brand.js','installation.js','profiles.js','doctor.js','glove.js'):
             assets['/'+name]=(name,'text/javascript; charset=utf-8')
-        for name in ('studio.css','floating_panel.css','glass.css'):
+        for name in ('studio.css','floating_panel.css','glass.css','glove.css'):
             assets['/'+name]=(name,'text/css; charset=utf-8')
         assets['/viewer']=('viewer.html','text/html; charset=utf-8')
         assets['/favicon.ico']=('favicon.ico','image/x-icon')

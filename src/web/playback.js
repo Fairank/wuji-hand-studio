@@ -103,7 +103,7 @@
     get('hardware-start').disabled=!connected||!h?.ready||!supported||h.active||ownedLease||state?.recording?.active||hardwarePending;
     get('hardware-pause').disabled=!h?.active||!ownedLease||hardwarePending;
     get('hardware-pause').textContent=h?.paused?'继续实机':'暂停实机';
-    get('hardware-stop').disabled=!state||(h?.active===false&&!ownedLease&&!hardwarePending);
+    get('hardware-stop').disabled=!state||(h?.active===false&&!ownedLease&&!hardwarePending&&!state?.glove?.busy);
     get('probe-start').disabled=!connected||!h?.probe_ready||h?.active!==false||ownedLease||state?.recording?.active||hardwarePending||!get('probe-clear').checked;
     get('probe-status').textContent=!connected?'实机未连接':h?.active?`实机执行中 · ${h.reason}`:h?.probe_reason||'等待完整反馈与诊断';
     const r=h?.probe_result;

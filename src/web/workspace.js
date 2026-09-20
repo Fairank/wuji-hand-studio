@@ -64,7 +64,7 @@
     const requested=location.hash.slice(1);current=requested==='motion'?'library':views[requested]?requested:'library';
     for(const key of Object.keys(views)){get('page-'+key).hidden=key!==current;const a=nav.querySelector(`[data-page="${key}"]`);if(key===current)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current');}
     document.body.dataset.page=current;const more=nav.querySelector('details');if(more){const tool=['capture','interaction','records'].includes(current);more.classList.toggle('is-current',tool);if(window.innerWidth>700&&tool)more.open=true;else if(window.innerWidth<=700)more.open=false;}
-    if(!window.wujiFloating?.isFloating())(['motion','library'].includes(current)?motionDock:current==='feedback'?feedbackDock:parking).append(pose);
+    if(!window.wujiFloating?.isFloating())(['motion','library'].includes(current)?motionDock:current==='feedback'?feedbackDock:current==='glove'?get('glove-viewer-dock'):parking).append(pose);
     document.title=(window.WujiLocale?window.WujiLocale.text(current):pages.find(x=>x[0]===current)[1])+' · Wuji Hand Studio';
     window.dispatchEvent(new CustomEvent('workspace-page',{detail:current}));
     window.scrollTo({top:0,behavior:'instant'});
@@ -77,5 +77,5 @@
   status.addEventListener('click',()=>{if(document.body.classList.contains('presentation'))get('presentation').click();});
   window.addEventListener('console-state',e=>{const s=e.detail;status.textContent=({connected:s.stale?'反馈过期':'设备已连接',connecting:'连接中',disconnected:'未连接',error:'连接未完成'})[s.connection]||'状态未知';status.classList.toggle('is-connected',s.connection==='connected'&&!s.stale);});
   window.addEventListener('console-offline',()=>{status.textContent='服务未连接';status.classList.remove('is-connected');});
-  window.WujiWorkspace={views,showPage,viewerHome:()=>['motion','library'].includes(current)?motionDock:current==='feedback'?feedbackDock:parking};
+  window.WujiWorkspace={views,showPage,viewerHome:()=>['motion','library'].includes(current)?motionDock:current==='feedback'?feedbackDock:current==='glove'?get('glove-viewer-dock'):parking};
 })();

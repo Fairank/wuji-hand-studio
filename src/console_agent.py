@@ -30,6 +30,9 @@ def validate_command(command):
     if not isinstance(command, dict):
         raise ValueError('Invalid request')
     name = command.get('name')
+    if isinstance(name,str) and name.startswith('glove_'):
+        from glove_protocol import validate
+        return validate(command)
     if name not in {'connect', 'disconnect', 'record', 'stop'} | HARDWARE_COMMANDS:
         raise ValueError('Unsupported console operation')
     if name == 'connect':
@@ -118,7 +121,7 @@ class Recorder:
                     label=self.label, seconds=self.seconds)
 
 
-def worker(address, requests, events):
+def worker(address, requests, events, motion_factory=HardwareShowcase):
     from device_profiles import controller_profile
     if controller_profile()["generation"]=="hand1":
         from first_generation import worker_first
@@ -148,7 +151,7 @@ def worker(address, requests, events):
                 from wuji_sdk import JointCommand
                 command_type=JointCommand
             return command_type(**kwargs)
-        motion = HardwareShowcase(hand,device_id,make_command)
+        motion = motion_factory(hand,device_id,make_command)
         # Parse/validate public data before subscribing, not inside an active
         # 1000 Hz feedback loop where disk work could make diagnostics stale.
         try:
@@ -289,7 +292,7 @@ def worker(address, requests, events):
             sub.close()
         if hand is not None:
             hand.disconnect()
-        events.put(dict(type='closed'))
+        events.put(dict(type='closed',hardware=motion.status() if motion is not None else {}))
 
 
 def emit(event):
@@ -302,16 +305,17 @@ def main():
     process = None
     started = 0.
     received_feedback = False
+    glove_mode = False
     def halt():
         nonlocal process
         if process:
             requests.put(dict(name='disconnect'))
-            process.join(timeout=1.)
+            process.join(timeout=6. if glove_mode else 1.)
             if process.is_alive():
                 process.terminate()
                 process.join(timeout=2.)
             process = None
-    emit(dict(type='ready'))
+    emit(dict(type='ready',teleop_version=1))
     try:
         while True:
             if select.select([sys.stdin], [], [], .04)[0]:
@@ -321,7 +325,12 @@ def main():
                 try:
                     command = validate_command(json.loads(line))
                     name = command['name']
-                    if name == 'connect':
+                    if name == 'glove_session':
+                        if process:raise ValueError('Already connected')
+                        from glove_agent import worker_glove
+                        process=ctx.Process(target=worker_glove,args=(requests,events))
+                        process.start();received_feedback=True;started=time.monotonic();glove_mode=True
+                    elif name == 'connect':
                         if process:
                             raise ValueError('Already connecting or connected')
                         process = ctx.Process(target=worker, args=(command.get('address', ''), requests, events))

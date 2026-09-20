@@ -74,3 +74,10 @@ Sources: [official SDK examples](https://github.com/wuji-technology/wuji-sdk), [
 Claude Fable 5.1（`claude-fable-5-1 --effort max`）提供基础文字输入回归测试，主维护者审核筛选后采用；动作曲线、实际执行路径与验收由主维护者负责。调用不包含私有训练数据。
 
 Text sequences, three authored finger dances, stronger clear-glass materials and1000Hz nominal trajectory export. Fixed-wrist approximations, not certified signs or captured human motion. Hand2 controller must also be updated; Hand1 new motions remain preview-only. See [performance notes](docs/PERFORMANCES.md). No new hardware validation.
+
+
+## 0.1.3 · 手套遥操作
+
+新增独立手套页：官方 SDK 扫描、用户选择、左右手核对、实时映射预览、二代机械手只读准备及手动跟随。Windows/Mac 可配合同网段独立 Linux 小主机，无需在本机开虚拟机；纯 Windows/Mac 完整遥操作未实现。一代映射暂仅预览。没有自动启用或恢复电机，新增路径尚未实机验收。详见[手套连接与平台说明](docs/GLOVE.md)。
+
+Glove teleoperation uses the official Linux SDK on the same controller as the hand. A separate Linux PC can replace a VM. Basic statistics/tests assisted by Claude Fable 5.1 max and reviewed; no private data shared. Hardware acceptance remains pending.
