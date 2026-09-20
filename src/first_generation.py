@@ -39,7 +39,7 @@ def target_at(start,action,amplitude,speed,cycles,elapsed):
     blend=smooth(min(1,(elapsed-transition-cycles*cycle_time)/transition))
     return [v*blend for v in start],duration
 
-def worker_first(address,requests,events):
+def worker_first(address,requests,events,prepared_hand=None):
     from wuji_sdk import SdkManager,DeviceType,JointCommand,LowPass
     from console_agent import Recorder
     selected=controller_profile();manager=SdkManager.instance();hand=sub=publisher=lowpass=None
@@ -64,11 +64,13 @@ def worker_first(address,requests,events):
         report=recorder.finish(message,time.monotonic())
         if report:events.put(dict(type='report',report=report))
     try:
-        devices=[d for d in manager.scan() if d.device_type==DeviceType.WujiHand and (not address or str(d.address)==address)]
-        if not devices:raise RuntimeError('未发现一代手 / No first-generation hand found')
-        # Handedness is checked before subscribing or enabling anything.
-        if len(devices)>1 and not address:raise ValueError('检测到多个一代手，请填写设备地址')
-        hand=manager.connect(sn=devices[0].sn,device_name='wuji_hand');require_identity(hand,selected)
+        if prepared_hand is not None:hand=prepared_hand
+        else:
+            devices=[d for d in manager.scan() if d.device_type==DeviceType.WujiHand and (not address or str(d.address)==address)]
+            if not devices:raise RuntimeError('未发现一代手 / No first-generation hand found')
+            if len(devices)>1 and not address:raise ValueError('检测到多个一代手，请填写设备地址')
+            hand=manager.connect(sn=devices[0].sn,device_name='wuji_hand')
+        require_identity(hand,selected)
         device_id=str(hand.serial_number);sub=hand.joint_states().subscribe()
         while True:
             now=time.monotonic()

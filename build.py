@@ -15,6 +15,7 @@ args=[sys.executable,'-m','PyInstaller','--noconfirm','--clean','--onedir','--na
     '--add-data','src/trial_sdk_poses.json'+os.pathsep+'.','--add-data','src/motion_parameters.py'+os.pathsep+'.',
     '--add-data','src/edition.json'+os.pathsep+'.','--add-data','LICENSE'+os.pathsep+'.',
     '--add-data','src/runtime_manifest.json'+os.pathsep+'.',
+    '--add-data','src/network_setup_windows.ps1'+os.pathsep+'.',
     '--add-data','THIRD_PARTY_NOTICES.md'+os.pathsep+'.']
 if (ROOT/'src/private_models').exists():raise RuntimeError('Private models are optional local data and must not be bundled')
 if sys.platform=='win32':args+=['--windowed','--icon','src/WujiStudio.ico','--collect-all','webview','--collect-all','pythonnet','--collect-all','clr_loader','--hidden-import','webview.platforms.winforms','--hidden-import','webview.platforms.edgechromium']
@@ -42,6 +43,7 @@ if '--package-only' not in sys.argv:subprocess.run(args,check=True)
 binary=ROOT/'dist'/name/(name+('.exe' if sys.platform=='win32' else ''))
 if sys.platform=='darwin':binary=ROOT/'dist'/(name+'.app')/'Contents/MacOS'/name
 subprocess.run([str(binary),'--self-check'],check=True)
+if '--binary-only' in sys.argv:raise SystemExit(0)
 # Include documentation/controller sources alongside each executable.
 platform_name={'win32':'windows','darwin':'macos'}.get(sys.platform,'ubuntu')
 arch='arm64' if platform.machine().lower() in ('arm64','aarch64') else 'x64'

@@ -105,6 +105,20 @@ class NativeDesktop:
         if not code or int(code)<=32:raise RuntimeError('System component setup was cancelled or unavailable')
         return dict(requested=True,restart_may_be_required=True,no_automatic_restart=True)
 
+    def network_status(self,address=''):
+        from device_network import snapshot
+        selected=self.server.controller.snapshot()['device_profile']
+        if selected['generation']!='hand2':return dict(code='usb_device',can_configure=False)
+        return snapshot(address,selected['side'])
+
+    def configure_device_network(self,adapter_id,address=''):
+        from device_network import configure
+        state=self.server.controller.snapshot()
+        if state['connection'] not in ('disconnected','error') or state['hardware'].get('active') or self.server.controller.glove.busy:
+            raise ValueError('Disconnect the device before network setup / 先断开设备再配置网络')
+        if state['device_profile']['generation']!='hand2':raise ValueError('Hand 1 uses USB')
+        return configure(adapter_id,address,state['device_profile']['side'])
+
     def set_window_material(self,enabled):
         if type(enabled) is not bool:raise ValueError('Expected boolean material preference')
         if not enabled and self.refraction:self.refraction.stop()
@@ -299,6 +313,8 @@ class DesktopAPI:
     def set_external_refraction(self,enabled):return self._host.set_external_refraction(enabled)
     def refraction_frame(self,last_seq):return self._host.refraction_frame(last_seq)
     def install_runtime_components(self):return self._host.install_runtime_components()
+    def network_status(self,address=''):return self._host.network_status(address)
+    def configure_device_network(self,adapter_id,address=''):return self._host.configure_device_network(adapter_id,address)
     def import_model_dialog(self):return self._host.import_model_dialog()
     def request_close(self):return self._host.request_close()
     def stop_and_close(self):return self._host.stop_and_close()

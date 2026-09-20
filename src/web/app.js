@@ -1,6 +1,9 @@
 (() => {
   'use strict';
   const el=id=>document.getElementById(id);
+  const deviceChoice=document.createElement('select');deviceChoice.id='discovered-device';deviceChoice.hidden=true;
+  deviceChoice.setAttribute('aria-label','选择发现的机械手 / Select discovered hand');el('device-address').after(deviceChoice);
+  let deviceChoiceKey='';
   const labels={baseline:'无触碰基线',thumb:'拇指轻触',index:'食指轻触',middle:'中指轻触',ring:'无名指轻触',little:'小指轻触',withdrawal:'轻触后抽离'};
   const reasons={completed:'时长完成',user_stop:'手动停止',disconnected:'连接断开',feedback_error:'反馈中断'};
   let state=null,pending=false,service=false,logsKey='',sessionsKey='';
@@ -31,6 +34,10 @@
   function offline(){service=false;state=null;controls();el('connection-state').textContent='本机服务未连接';el('connection-message').textContent='请通过“打开手部工作台”重新打开本机服务。';for(const id of ['joint-count','device-hz','host-hz','data-age'])el(id).textContent='—';el('record-progress').textContent='采集状态未知，请恢复连接后核对';window.dispatchEvent(new Event('console-offline'));}
   function render(next){
     state=next;service=true;
+    const devices=next.devices||[],key=JSON.stringify(devices);
+    if(key!==deviceChoiceKey){deviceChoiceKey=key;deviceChoice.replaceChildren(new Option('选择设备 / Select device',''),...devices.map(d=>new Option(d.serial+' · '+d.generation+(d.side_hint?' · '+d.side_hint:''),d.serial)));}
+    deviceChoice.hidden=!devices.length;
+    deviceChoice.disabled=pending||next.connection==='connecting'||next.connection==='connected';
     el('connection-state').textContent=({disconnected:'未连接',connecting:'连接中',connected:next.stale?'反馈过期':'设备已连接',error:'连接未完成'})[next.connection]||'状态未知';
     el('connection-message').textContent=next.message;
     const fresh=next.connection==='connected'&&!next.stale;
@@ -49,11 +56,11 @@
   function freshState(){return new Promise(resolve=>{waiter={after:pollId,resolve};if(!inFlight)poll();});}
   async function action(body){
     if(pending||!service)return;pending=true;controls();showError('');
-    try{const response=await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json','X-Console-Token':state.csrf},body:JSON.stringify(body),signal:AbortSignal.timeout(4000)});const result=await response.json();if(!response.ok||!result.ok)throw new Error(result.error||'操作未完成');}
+    try{if(body.name==='connect'&&window.WujiNetwork)body.address=await window.WujiNetwork.prepare(body.address);const response=await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json','X-Console-Token':state.csrf},body:JSON.stringify(body),signal:AbortSignal.timeout(4000)});const result=await response.json();if(!response.ok||!result.ok)throw new Error(result.error||'操作未完成');}
     catch(error){showError(error.message||'操作未完成');}
     finally{await freshState();pending=false;controls();}
   }
-  el('connect').addEventListener('click',()=>action({name:'connect',address:el('device-address').value.trim()}));
+  el('connect').addEventListener('click',()=>{if(!deviceChoice.hidden&&!deviceChoice.value){showError('请选择一只机械手 / Select a hand');return;}action({name:'connect',auto_detect:true,serial:deviceChoice.hidden?'':deviceChoice.value,address:el('device-address').value.trim()});});
   el('disconnect').addEventListener('click',()=>action({name:'disconnect'}));
   el('record').addEventListener('click',()=>action({name:'record',label:el('annotation').value,seconds:Number(el('duration').value)}));
   el('stop').addEventListener('click',()=>action({name:'stop'}));

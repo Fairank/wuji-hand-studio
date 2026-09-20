@@ -8,6 +8,7 @@ import ipaddress
 import json
 import math
 import multiprocessing as mp
+import os
 from pathlib import Path
 import queue
 import select
@@ -36,6 +37,11 @@ def validate_command(command):
     if name not in {'connect', 'disconnect', 'record', 'stop'} | HARDWARE_COMMANDS:
         raise ValueError('Unsupported console operation')
     if name == 'connect':
+        if type(command.get('auto_detect', False)) is not bool:
+            raise ValueError('Invalid discovery mode')
+        serial = command.get('serial', '')
+        if not isinstance(serial, str) or len(serial)>80 or (serial and not all(c.isascii() and (c.isalnum() or c in '-_') for c in serial)):
+            raise ValueError('Invalid device serial')
         address = command.get('address', '')
         if not isinstance(address, str):
             raise ValueError('Address must be IPv4 with an optional port')
@@ -121,12 +127,36 @@ class Recorder:
                     label=self.label, seconds=self.seconds)
 
 
-def worker(address, requests, events, motion_factory=HardwareShowcase):
+def worker_auto(address, serial, requests, events):
+    from device_discovery import connect_discovered, SelectionRequired
+    hand = route = None
+    try:
+        from wuji_sdk import SdkManager
+        hand, route, selected = connect_discovered(SdkManager.instance(), address, serial)
+        os.environ['WUJI_HAND_PROFILE'] = selected['id']
+        events.put(dict(type='identity', profile=selected['id'], device_id=str(hand.serial_number)))
+        if selected['generation'] == 'hand1':
+            from first_generation import worker_first
+            owned_hand = hand; hand = None
+            worker_first(address, requests, events, prepared_hand=owned_hand)
+        else:
+            owned_hand, owned_route = hand, route;hand = route = None
+            worker(address, requests, events, prepared=(owned_hand, owned_route))
+    except SelectionRequired as error:
+        events.put(dict(type='selection', devices=error.devices, message=str(error)))
+    except Exception as error:
+        events.put(dict(type='error', message=str(error)))
+    finally:
+        if hand is not None:hand.disconnect()
+        if route is not None:route.close()
+
+
+def worker(address, requests, events, motion_factory=HardwareShowcase, prepared=None):
     from device_profiles import controller_profile
     if controller_profile()["generation"]=="hand1":
         from first_generation import worker_first
         return worker_first(address,requests,events)
-    hand = sub = diagnostics = motion = None
+    hand = sub = diagnostics = motion = protocol_route = None
     recorder = Recorder()
     def finish(reason):
         report = recorder.finish(reason, time.monotonic())
@@ -141,7 +171,13 @@ def worker(address, requests, events, motion_factory=HardwareShowcase):
             kwargs['address'] = address
         else:
             kwargs['handedness'] = Handedness.Left if selected['side']=='left' else Handedness.Right
-        hand = SdkManager.instance().connect(**kwargs)
+        from zenoh_route import managed_wsl, connect_managed_hand
+        if prepared is not None:
+            hand, protocol_route = prepared
+        elif managed_wsl():
+            hand, protocol_route = connect_managed_hand(SdkManager.instance(), address, selected['side'])
+        else:
+            hand = SdkManager.instance().connect(**kwargs)
         require_left(hand)
         device_id = str(hand.serial_number)
         command_type=None
@@ -290,8 +326,12 @@ def worker(address, requests, events, motion_factory=HardwareShowcase):
         if diagnostics is not None:diagnostics.close()
         if sub is not None:
             sub.close()
-        if hand is not None:
-            hand.disconnect()
+        try:
+            if hand is not None:
+                hand.disconnect()
+        finally:
+            if protocol_route is not None:
+                protocol_route.close()
         events.put(dict(type='closed',hardware=motion.status() if motion is not None else {}))
 
 
@@ -333,7 +373,10 @@ def main():
                     elif name == 'connect':
                         if process:
                             raise ValueError('Already connecting or connected')
-                        process = ctx.Process(target=worker, args=(command.get('address', ''), requests, events))
+                        if command.get('auto_detect', False):
+                            process = ctx.Process(target=worker_auto, args=(command.get('address', ''), command.get('serial', ''), requests, events))
+                        else:
+                            process = ctx.Process(target=worker, args=(command.get('address', ''), requests, events))
                         process.start()
                         started = time.monotonic()
                         received_feedback = False
@@ -365,7 +408,7 @@ def main():
                 break
             if process and not received_feedback and time.monotonic()-started > 15:
                 halt()
-                emit(dict(type='error', message='15秒内未收到左手反馈；请检查电源、网线和设备地址'))
+                emit(dict(type='error', message='15秒内未收到机械手反馈；请检查电源、网线和设备地址'))
                 break
     finally:
         halt()

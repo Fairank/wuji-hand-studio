@@ -54,7 +54,7 @@ class Controller:
         self.generation = 0
         self.last_update = 0.
         self.csrf = secrets.token_urlsafe(32)
-        self.state = dict(connection='disconnected', message='接好左手后，点击“连接左手”',
+        self.state = dict(connection='disconnected', message='接好机械手后，点击“自动连接”', devices=[],
             latest=None, metrics=dict(host_hz=None, device_hz=None, age_ms=None),
             device_id=None, joint_rates=[], mapping=[], mapping_device_id=None, display_selected=None,
             recording=dict(active=False, frames=0, elapsed_s=0, label='baseline', seconds=30),
@@ -349,14 +349,20 @@ class Controller:
         with self.lock:
             name = command['name']
             if name == 'connect':
+                command = dict(command)
+                command.setdefault('auto_detect', True)
                 if self.parameters.sync_status['busy']:raise ValueError('参数同步中，请完成后连接')
                 if self.state['connection'] in {'connected', 'connecting'}:
                     raise ValueError('已有连接正在进行')
                 self.generation += 1
                 generation = self.generation
                 self.state['connection'] = 'connecting'
-                self.state['message'] = '正在连接控制端并核对所选机械手'
+                self.state['message'] = '正在重新发现设备并核对型号、左右手'
                 self.clear_live()
+                self.state['device_id'] = None
+                self.state['devices'] = []
+                self.state['hardware'] = dict(ready=False, active=False, actions=[], probe_ready=False, reason='正在识别新设备')
+                self.hardware_lease = None
                 self.log('用户请求连接所选设备，仅接收反馈')
                 threading.Thread(target=self.read_session, args=(command, generation), daemon=True).start()
             elif name == 'disconnect':
@@ -418,7 +424,21 @@ class Controller:
                 self.log(f"采集已保存：{report['frames']}帧，结束原因 {report['reason']}")
             if generation != self.generation:
                 return
-            if kind == 'state':
+            if kind == 'identity':
+                from device_profiles import save_profile
+                self.state['device_profile'] = save_profile(event['profile'])
+                self.state['device_id'] = event['device_id']
+                self.state['mapping'] = []
+                self.state['mapping_device_id'] = None
+                self.state['display_selected'] = None
+                self.player.command(dict(name='demo_stop'))
+                self.log('自动识别：'+self.state['device_profile']['zh']+' · '+event['device_id'])
+            elif kind == 'selection':
+                self.state['devices'] = event['devices']
+                self.state['connection'] = 'error'
+                self.state['message'] = event['message']
+                self.clear_live()
+            elif kind == 'state':
                 self.last_update = time.monotonic()
                 for key in ('connection', 'message', 'latest', 'metrics', 'recording', 'device_id', 'joint_rates'):
                     self.state[key] = event[key]
@@ -560,7 +580,7 @@ class Handler(BaseHTTPRequestHandler):
         assets.update({'/workspace.js':('workspace.js','text/javascript; charset=utf-8'),
             '/workspace.css':('workspace.css','text/css; charset=utf-8'),
             '/parameters.js':('parameters.js','text/javascript; charset=utf-8')})
-        for name in ('studio.js','locale.js','floating_panel.js','viewer.js','action_picker.js','brand.js','installation.js','profiles.js','doctor.js','glove.js','desktop_shell.js','external_refraction.js'):
+        for name in ('studio.js','locale.js','floating_panel.js','viewer.js','action_picker.js','brand.js','installation.js','profiles.js','doctor.js','glove.js','desktop_shell.js','external_refraction.js','device_network.js'):
             assets['/'+name]=(name,'text/javascript; charset=utf-8')
         for name in ('studio.css','floating_panel.css','glass.css','glove.css','desktop_glass.css','desktop_refinement.css'):
             assets['/'+name]=(name,'text/css; charset=utf-8')

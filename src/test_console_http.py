@@ -32,6 +32,12 @@ class HTTPTests(unittest.TestCase):
         self.assertEqual(code,200);self.assertEqual(state['connection'],'disconnected')
         self.assertFalse(state['motion_enabled']);self.assertIsNone(state['latest'])
 
+    def test_network_preflight_script_is_served(self):
+        c=http.client.HTTPConnection('127.0.0.1',self.server.server_port,timeout=3)
+        c.request('GET','/device_network.js',headers={'Host':'127.0.0.1:8781'})
+        r=c.getresponse();body=r.read();c.close()
+        self.assertEqual(r.status,200);self.assertIn(b'WujiNetwork',body)
+
     def test_cross_origin_and_bad_host_rejected(self):
         code,_=self.request('GET','/api/state',headers={'Host':'external.invalid'})
         self.assertEqual(code,403)
