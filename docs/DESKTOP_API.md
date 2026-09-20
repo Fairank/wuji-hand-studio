@@ -18,6 +18,8 @@ python scripts/workbenchctl.py --port 8792 menu open
 
 所有操作通过 `POST /api/desktop`，JSON 中设置 `operation`。请求必须带有从本机 `/api/state` 读取的 `X-Console-Token`，Origin 必须匹配本机地址（无 Origin 的本机客户端也可使用）。工具自动处理校验。接口不启用跨域访问。
 
+0.1.5 增加两个限定的界面检查操作：`{"operation":"picker","kind":"letters"}`（也支持 `numbers`、`closed`）只打开/关闭选择窗；`{"operation":"preview","action":"dance_piano","speed":1.5}` 只播放模型预览，需要设备断开且工作台空闲。预览复用现有仿真命令，不发送电机命令。`inspect` 同时返回四边玻璃样式与页面滚动位置。
+
 ## 本地安装包升级
 
 先从可信的对应版本 Releases 下载安装包及 SHA-256 文件。只有一个软件和安装包：`HandWorkbench-版本-windows-x64-setup.exe`。不接受低于当前版本的安装包。SHA-256 只检查文件完整性，不能替代可信发布来源或代码签名。

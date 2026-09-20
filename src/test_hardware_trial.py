@@ -20,8 +20,8 @@ class TrialPlanTests(unittest.TestCase):
             self.assertEqual(slow['max_velocity_rad_s'],.04)
             for a,b in zip(normal['points'],slow['points']):self.assertEqual(b['t'],2*a['t'])
 
-    def test_speed_cannot_increase_existing_limit_or_bypass_duration(self):
-        for speed in (0,-1,True,1.5,float('nan'),'0.5'):
+    def test_invalid_speed_and_duration_still_rejected(self):
+        for speed in (0,-1,True,2.1,float('nan'),'0.5'):
             with self.assertRaises(ValueError):make_trial([0.]*20,'open',.25,1,speed=speed)
         with self.assertRaisesRegex(ValueError,'10分钟'):
             make_trial([0.]*20,'official_opposition',.25,3,speed=.25)

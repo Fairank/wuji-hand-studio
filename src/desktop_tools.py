@@ -6,7 +6,7 @@ from pathlib import Path
 PAGES = ('library', 'feedback', 'parameters', 'connection', 'glove', 'doctor',
          'interaction', 'capture', 'records')
 OPERATIONS = ('inspect', 'capture', 'page', 'resize', 'appearance', 'menu',
-              'viewer', 'close_idle', 'prepare_update', 'import_model')
+              'viewer', 'close_idle', 'prepare_update', 'import_model', 'preview', 'picker')
 
 
 def idle(state, doctor):
@@ -83,6 +83,20 @@ def dispatch(host, payload):
         return host.menu(payload['open'])
     if op == 'viewer':
         return host.open_viewer()
+    if op == 'picker':
+        if payload.get('kind') not in ('letters','numbers','closed'):
+            raise ValueError('Unsupported picker')
+        return host.picker(payload['kind'])
+    if op == 'preview':
+        from demo_player import CATALOG
+        from playback_rates import PLAYBACK_SPEEDS
+        action=payload.get('action');speed=payload.get('speed',1.)
+        if action not in CATALOG or type(speed) not in (int,float) or speed not in PLAYBACK_SPEEDS:
+            raise ValueError('Unsupported preview action or speed')
+        # Visual QA must never change or obscure an active hardware session.
+        if not idle(host.server.controller.snapshot(),host.server.controller.doctor.snapshot()):
+            raise ValueError('Code preview requires an idle, disconnected workbench')
+        return host.preview(action,speed)
     if op == 'import_model':
         from model_pack import install
         digest=payload.get('sha256')

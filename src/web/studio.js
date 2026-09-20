@@ -19,7 +19,7 @@
   const choreographyInfo=document.createElement('details');choreographyInfo.className='studio-info library-reference';
   const choreographySummary=document.createElement('summary'),choreographyBody=document.createElement('p');
   const danceReference=document.createElement('a');danceReference.href='https://www.brambilabong.com/blogs/popping/learn-3-finger-tutting-dance-moves-tutorial';danceReference.target='_blank';danceReference.rel='noopener';danceReference.textContent='El Tiro · Finger Tutting Tutorial ↗';
-  choreographyInfo.append(choreographySummary,choreographyBody,danceReference);library.append(choreographyInfo);
+  const waveReference=document.createElement('a');waveReference.href='https://howcast.com/videos/493866-how-to-do-waving-tutting/';waveReference.target='_blank';waveReference.rel='noopener';waveReference.textContent='Howcast · Waving in Tutting ↗';const signReference=document.createElement('a');signReference.href='https://www.lifeprint.com/asl101/pages-layout/fingerspelling.htm';signReference.target='_blank';signReference.rel='noopener';signReference.textContent='ASL University · Fingerspelling ↗';choreographyInfo.append(choreographySummary,choreographyBody,danceReference,document.createElement('br'),waveReference,document.createElement('br'),signReference);library.append(choreographyInfo);
   const motionLayout=document.querySelector('.motion-layout');library.prepend(motionLayout);
   const chooser=document.createElement('div');motionLayout.querySelector('.motion-controls').prepend(chooser);
   const picker=window.WujiActionPicker.create({root:chooser,text,onSelect:id=>selectMotion(id)});
@@ -38,6 +38,15 @@
     $('mode-hardware').setAttribute('aria-pressed',String(mode==='hardware'));$('mode-preview').setAttribute('aria-pressed',String(mode==='preview'));
     if(mode==='preview'){$('play-action').value=picker.selected;$('play-action').dispatchEvent(new Event('change'));}
   }
+  window.WujiWorkbench={
+    picker:kind=>picker.show(kind),
+    async preview(action,speed){
+      if(!catalog?.actions.some(x=>x.id===action))throw Error('Action is not available in this picker');
+      const result=await post({name:'demo_start',action,speed,cycles:0,...picker.payload});
+      picker.restore(action);selectMotion(action);setMode('preview');$('play-speed').value=String(speed);$('play-cycles').value='0';location.hash='library';
+      return {ok:true,hardware_motion:false,action,speed};
+    }
+  };
   $('mode-hardware').addEventListener('click',()=>setMode('hardware'));$('mode-preview').addEventListener('click',()=>setMode('preview'));
   function modeLabels(){
     $('mode-hardware').textContent=text('真实手','Real hand');$('mode-preview').textContent=text('画面预览','Preview only');
@@ -80,7 +89,7 @@
     document.title=L.text(document.body.dataset.page||'library')+' · Hand Workbench';
     $('official-summary').textContent=text('官方资源兼容性与来源','Official resources and compatibility');
     choreographySummary.textContent=text('文字与手指舞 · 参考和轨迹','Text and dance · references and trajectories');
-    choreographyBody.textContent=text('水母舒展、逐指波浪和指节涟漪参考真人教程的节奏重新编排，不含手腕或手臂位移。字母是固定腕近似造型，J/Z 使用指尖运动近似。预览与 CSV 是标称编排时间；二代实机从当前姿态进入，再按你设置的幅度和速度调整用时。一代新动作仅供预览。CSV 是目标关节角，不是实测反馈或力控记录。','Jellyfish, finger wave and knuckle ripple are authored adaptations of tutorial rhythms, without wrist or arm translation. Letters are fixed-wrist approximations, including moving J/Z. Preview and CSV use nominal timing. Hand 2 enters from measured posture and retimes to your amplitude/speed. New Hand 1 motions are preview-only. CSV contains target angles, not measured feedback or force records.');
+    choreographyBody.textContent=text('9 套手指舞：水母、正反波浪、涟漪、空中钢琴、交替律动、折扇、花苞、指节阶梯。参考教程中的波浪、顺序开合与关节分离，自编为固定底座轨迹，不是动作捕捉或 WUJI 官方动作。字母是参考 ASL 的近似造型，不是通用手语；24 个静态字母不含动态 J/Z，手腕和掌心朝向不能完整复现。预览与 CSV 是标称编排时间；二代实机从当前姿态进入，再按你设置的幅度和速度调整用时。一代新动作仅供预览。CSV 是目标关节角，不是实测反馈或力控记录。','Nine routines: jellyfish, forward/reverse wave, ripple, air piano, alternating rhythm, fan, bloom and knuckle staircase. Authored fixed-base adaptations inspired by tutorial waves, sequential opening and joint isolation; not motion capture or official WUJI motions. Letters approximate ASL, not universal signs. The 24 static letters exclude moving J/Z; wrist and palm orientation cannot be fully reproduced. Preview and CSV use nominal timing. Hand 2 enters from measured posture and retimes to your amplitude/speed. New Hand 1 motions are preview-only. CSV contains target angles, not measured feedback or force records.');
     desktop.textContent=text('打开桌面软件','Open desktop app');
     $('touch-heading').textContent=text('触碰识别与轻扣：实机尚未验收','Touch recognition and gentle grasp: not validated on hardware');
     $('touch-description').textContent=text('目标流程：感知被碰的手指 → 选择配合指 → 轻扣0.5秒 → 松开恢复；提前抽离则取消。','Target flow: detect the touched finger → select a partner → hold gently for 0.5 s → release and resume; cancel on early withdrawal.');
@@ -144,7 +153,7 @@
     '官方示例、数字、报时与字母造型。':'Official examples, digits, clock and letter shapes.',
     '真实反馈、识别状态与反应流程。':'Measured feedback, recognition status and reaction sequence.',
     '25% · 首轮':'25% · initial trial','1轮':'1 cycle','3轮':'3 cycles','1次':'Once','3次':'3 times','10次':'10 times','持续循环':'Repeat continuously',
-    '0.25 × · 更慢':'0.25 ×','0.5 × · 慢速':'0.5 ×','1 × · 原有限速':'1 × configured speed',
+    '0.25 × · 更慢':'0.25 ×','0.5 × · 慢速':'0.5 ×','1 × · 基准速度':'1 × base speed',
     '未连接；连接后由你选择启动':'Disconnected; connect and start manually','设备反馈未连接，先连接设备':'Connect the selected hand to receive feedback',
     '确认底座固定、周围清空后可启动':'Confirm the base is fixed and workspace clear to start','可以开始所选动作':'Ready to start the selected motion',
     '当前显示实机反馈或静态预览':'Showing measured feedback or static preview','尚未开始':'Not started',

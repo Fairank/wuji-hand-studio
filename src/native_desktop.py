@@ -42,6 +42,7 @@ class NativeDesktop:
         self.language='zh';self.session_lock=threading.Lock();self.origin='';self.bounds={}
         self.title='灵巧手工作台 · Hand Workbench'
         self.data_dir=DATA;self.edition=EDITION;self.inspect_lock=threading.Lock()
+        self.material=dict(mode='opaque',external_backdrop=False,refraction=False,desktop_capture=False)
 
     def start_service(self):
         from console_server import ConsoleHTTPServer,Handler,Controller
@@ -75,14 +76,26 @@ class NativeDesktop:
         from desktop_tools import OPERATIONS
         return dict(native=True,platform='windows',engine='WebView2',edition=EDITION['name'],version=EDITION['version'],
                     api_version=1,operations=OPERATIONS,data_dir=str(DATA),pid=os.getpid(),
-                    ready=bool(self.window and self.window.events.loaded.is_set()))
+                    material=self.material,ready=bool(self.window and self.window.events.loaded.is_set()))
+
+    def set_window_material(self,enabled):
+        if type(enabled) is not bool:raise ValueError('Expected boolean material preference')
+        from System import Action
+        from native_material import apply
+        def update():
+            try:self.material=apply(self.window.native,enabled)
+            except Exception as error:
+                logging.exception('System backdrop unavailable')
+                self.material=dict(mode='opaque',external_backdrop=False,refraction=False,desktop_capture=False,error=type(error).__name__)
+        self.window.native.Invoke(Action(update))
+        return dict(ok=True,**self.material)
 
     def inspect(self):
         if not self.info()['ready']:raise ValueError('Desktop window is still starting')
         return dict(ok=True,desktop=self.info(),ui=self.window.evaluate_js((RESOURCE/'web/desktop_inspect.js').read_text(encoding='utf-8')))
 
     def navigate(self,page):
-        self.window.evaluate_js('location.hash='+json.dumps('#'+page))
+        self.window.evaluate_js('location.hash='+json.dumps('#'+page)+';window.WujiWorkspace.showPage()')
         return dict(ok=True,page=page)
 
     def appearance(self,key,value):
@@ -92,6 +105,12 @@ class NativeDesktop:
     def menu(self,opened):
         self.window.evaluate_js('window.WujiDesktop.setMenu('+json.dumps(opened)+')')
         return dict(ok=True)
+
+    def picker(self,kind):
+        return self.window.evaluate_js('window.WujiWorkbench.picker('+json.dumps(kind)+')')
+
+    def preview(self,action,speed):
+        return self.window.evaluate_js('window.WujiWorkbench.preview('+json.dumps(action)+','+json.dumps(speed)+')')
 
     def capture(self):
         """Capture only this application's WebView, never the desktop."""
@@ -243,6 +262,7 @@ class DesktopAPI:
     def open_data_folder(self):return self._host.open_data_folder()
     def select_key_file(self):return self._host.select_key_file()
     def set_language(self,lang):return self._host.set_language(lang)
+    def set_window_material(self,enabled):return self._host.set_window_material(enabled)
     def import_model_dialog(self):return self._host.import_model_dialog()
     def request_close(self):return self._host.request_close()
     def stop_and_close(self):return self._host.stop_and_close()

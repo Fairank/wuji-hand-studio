@@ -31,8 +31,13 @@
   get('trial-action').add(new Option('张开并返回','open'),1);
   get('trial-start').textContent='开始真实手动作';
   get('trial-action').previousElementSibling.textContent='真实手动作';
-  const settings=document.createElement('div');settings.innerHTML='<label for="trial-speed">实机播放速度</label><select id="trial-speed"><option value="0.25">0.25 × · 更慢</option><option value="0.5">0.5 × · 慢速</option><option value="1" selected>1 × · 原有限速</option></select><p class="hint">1 × 仍为低速。参数只对下一次播放生效；单次总时长不超过10分钟。</p>';
+  const settings=document.createElement('div');settings.innerHTML='<label for="trial-speed">实机播放速度</label><select id="trial-speed"><option value="0.25">0.25 × · 更慢</option><option value="0.5">0.5 × · 慢速</option><option value="1" selected>1 × · 基准速度</option></select><p class="hint">1 × 仍为低速。参数只对下一次播放生效；单次总时长不超过10分钟。</p>';
   get('trial-cycles').after(settings);
+  for(const id of ['trial-speed','play-speed']){for(const rate of [1.25,1.5,2])get(id).add(new Option(rate+' ×',String(rate)));}
+  const rateSummary=document.createElement('p');rateSummary.id='playback-rate-summary';rateSummary.className='hint';settings.append(rateSummary);
+  const tr=(zh,en)=>window.WujiLocale?.lang==='en'?en:zh;
+  function updateRateSummary(){const s=Number(get('trial-speed').value),p=state?.hardware?.commissioning_policy?.editable_parameters;rateSummary.textContent=p?tr(`当前 ${s}×：轨迹峰值设定 ${(Math.min(p.PATH_SPEED_RAD_S,p.COMMAND_SPEED_RAD_S)*s).toFixed(3)} rad/s。`,`At ${s}×: configured trajectory peak ${(Math.min(p.PATH_SPEED_RAD_S,p.COMMAND_SPEED_RAD_S)*s).toFixed(3)} rad/s.`)+tr(' 倍速同时缩短过渡和停留，不改变力度或发送频率。',' Scales transitions and holds, not gains or command rate.'):tr('倍速按已加载的轨迹速度缩放；2× 用时约为 1× 的一半，不改变力度。','Playback scales loaded trajectory speeds; 2× takes about half the time, without changing gains.');}
+  get('trial-speed').addEventListener('change',updateRateSummary);window.addEventListener('wuji-language',updateRateSummary);updateRateSummary();
   const playButtons=document.createElement('div');playButtons.className='button-row';
   playButtons.append(get('trial-start'),get('hardware-pause'));settings.after(playButtons);
   const clearLabel=get('trial-clear').closest('label');playButtons.before(clearLabel);
@@ -65,6 +70,8 @@
       settings.querySelector('p').textContent='速度和最长时长取自参数文件；连接后显示已加载值。修改文件不会改变正在进行的动作。';
       probe.querySelector('p').textContent='只启用选定关节，3°往返。连接后显示实际加载的增益、电流和速度参数。';
     }
+    updateRateSummary();
+    const first=state?.device_profile?.generation==='hand1';for(const o of get('trial-speed').options){if(Number(o.value)>1)o.disabled=first;}if(first&&Number(get('trial-speed').value)>1)get('trial-speed').value='1';
     const busy=!!h?.active||!!ownedLease||hardwarePending;
     for(const id of ['trial-action','trial-speed','trial-amplitude','trial-cycles','trial-clear'])get(id).disabled=busy;
     globalStop.disabled=get('hardware-stop').disabled;

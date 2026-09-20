@@ -227,3 +227,81 @@ body button.desktop-menu-row{width:100%;justify-content:flex-start;border:0;box-
 .pose-screen .camera-lens{background:var(--dg-glass);backdrop-filter:var(--dg-blur);-webkit-backdrop-filter:var(--dg-blur);border-radius:20px}
 @media(max-width:900px){.directory{margin:8px 12px;height:auto;min-height:48px}.nav-brand-note{display:none}}
 @media(forced-colors:active){#pose-console[data-floating=true]{outline:1px solid CanvasText}}
+
+/* Workbench 0.1.5: breathing room for actions and an inset glass window surround.
+   Only the four noninteractive edge siblings filter; never the viewer's ancestors. */
+:root{--dg-frame:12px;--dg-glass:rgba(255,255,255,.64)}
+.glass-edge{position:fixed;z-index:10;pointer-events:none;background:rgba(245,245,247,.48);backdrop-filter:var(--dg-blur);-webkit-backdrop-filter:var(--dg-blur);box-shadow:inset 0 0 0 1px rgba(255,255,255,.86)}
+.glass-edge-top{inset:0 0 auto;height:10px;border-radius:16px 16px 0 0}
+.glass-edge-left{top:10px;left:0;bottom:10px;width:10px;border-right:1px solid rgba(255,255,255,.8)}
+.glass-edge-right{top:10px;right:0;bottom:10px;width:var(--dg-frame);border-left:1px solid rgba(255,255,255,.9);box-shadow:inset 2px 0 6px rgba(255,255,255,.7),-1px 0 10px rgba(0,0,0,.06)}
+.glass-edge-bottom{inset:auto 0 0;height:var(--dg-frame);border-radius:0 0 16px 16px;box-shadow:inset 0 2px 4px rgba(255,255,255,.95),0 -1px 8px rgba(0,0,0,.05)}
+.top{top:10px;left:10px;right:var(--dg-frame);border:1px solid rgba(255,255,255,.92);border-radius:20px;box-shadow:var(--dg-rim),0 5px 18px rgba(0,0,0,.055)}
+.directory{top:84px;bottom:var(--dg-frame)}
+.page-area{margin-top:84px;margin-right:var(--dg-frame);margin-bottom:var(--dg-frame);min-height:calc(100vh - 96px);border:1px solid rgba(0,0,0,.06);border-radius:22px;padding:28px}
+.viewer-dock{top:100px}
+#desktop-menu{top:84px}
+#page-library .motion-layout{grid-template-columns:minmax(360px,40%) minmax(0,1fr);gap:28px}
+#page-library .motion-controls{container-type:inline-size}
+#page-library .compact-picker{padding-bottom:20px;border:0}
+#page-library .compact-picker>label{font-size:13px;margin:0 0 10px}
+#page-library .action-select-row{display:grid;grid-template-columns:minmax(0,1fr);gap:10px}
+#page-library .action-select-row select{width:100%;min-height:44px;font-size:14px;padding:10px 12px}
+#page-library .symbol-shortcuts{display:flex;flex-wrap:wrap;gap:8px}
+#page-library .symbol-shortcuts button{min-height:36px;font-size:13px;padding:8px 12px;white-space:normal;line-height:1.4}
+#page-library .action-selection-note{margin:10px 0 0;font-size:12px;line-height:1.7}
+#page-library .playback-modes{margin:0 0 24px;padding:4px;border-radius:14px}
+#page-library .playback-modes button{min-height:38px;border-radius:11px}
+#page-library .motion-fields{grid-template-columns:repeat(2,minmax(0,1fr));gap:18px 16px;margin:0}
+#page-library .motion-field:has(#trial-speed){grid-column:1/-1}
+#page-library .motion-field label{display:block;font-size:13px;line-height:1.5;margin:0 0 8px}
+#page-library .motion-field select{width:100%;min-height:42px;font-size:14px;padding:9px 12px}
+#page-library #playback-rate-summary{margin:10px 0 22px;font-size:12px;line-height:1.7;color:var(--dg-text-2)}
+#page-library .workspace-confirmation{display:flex;align-items:flex-start;gap:8px;margin:16px 0!important;padding:12px;background:var(--dg-matte);border-radius:12px}
+#page-library .workspace-confirmation input{flex:none;margin:3px 0 0}
+#page-library .hardware-controls>.button-row{gap:10px;flex-wrap:wrap;margin:0 0 10px}
+#page-library #trial-start{min-height:42px;flex:1 1 180px}
+#page-library #hardware-stop{min-height:40px;margin-bottom:10px}
+#page-library .motion-notes{padding:8px 12px;margin-top:16px}
+#page-library #performance-status:empty,#phrase-strip:empty{display:none}
+.symbol-dialog #symbol-help{font-size:12px;line-height:1.75;max-width:62ch}
+@media(min-width:901px) and (max-width:1199px){
+  #page-library .motion-layout{grid-template-columns:minmax(310px,43%) minmax(0,1fr);gap:20px}
+  .page-area{padding:22px}
+}
+@media(max-width:900px){
+  .top{position:relative;inset:auto;margin:10px 12px 0;width:calc(100% - 24px)}
+  .page-area{margin:10px 12px 12px;padding:20px;min-height:0}
+  #page-library .motion-layout{grid-template-columns:minmax(0,1fr)}
+  .viewer-dock{position:static}
+}
+@media(max-width:420px){#page-library .motion-fields{grid-template-columns:minmax(0,1fr)}#page-library .motion-field{grid-column:1/-1}.page-area{padding:16px}}
+html[data-reduce-transparency=true] .glass-edge{background:var(--dg-bg);box-shadow:none}
+@media(prefers-reduced-transparency:reduce){.glass-edge{background:var(--dg-bg);box-shadow:none}}
+@media(forced-colors:active){.glass-edge{display:none}.top,.page-area{border:1px solid CanvasText;box-shadow:none}}
+
+/* Reviewed/adapted Claude Fable layout details: actual DOM, accessible labels and focus. */
+#page-library .motion-fields{align-items:end}
+#page-library .motion-field label,#page-library #action-selection-note{overflow-wrap:anywhere}
+#page-library :is(.symbol-shortcuts,.playback-modes,.button-row) button{min-width:0;height:auto;white-space:normal;overflow-wrap:anywhere;text-overflow:clip;scroll-margin:100px 0 28px}
+#page-library :is(#studio-action,.motion-field select){box-sizing:border-box;min-width:0;max-width:none;height:auto;min-height:44px}
+.glass-edge{box-sizing:border-box;margin:0}
+html{scroll-padding-top:100px;scroll-padding-bottom:28px}
+@supports not (backdrop-filter:blur(1px)){.glass-edge{background:#f5f5f7}}
+
+/* System Acrylic beneath the WebView: the real desktop participates in DWM compositing.
+   CSS never obtains external pixels; the opaque reading canvas stays legible. */
+html[data-external-backdrop=true],html[data-external-backdrop=true] body,html[data-external-backdrop=true] .app{background:transparent}
+html[data-external-backdrop=true] .glass-edge{background:transparent;backdrop-filter:none;-webkit-backdrop-filter:none;box-shadow:inset 0 0 0 1px rgba(255,255,255,.65)}
+html[data-external-backdrop=true] .top,html[data-external-backdrop=true] .directory{background:rgba(255,255,255,.38);backdrop-filter:none;-webkit-backdrop-filter:none}
+html[data-external-backdrop=true] .page-area{background:#fff}
+
+/* Consistent, short interface motion; no looping movement or delayed control commands. */
+:root{--hw-ease:cubic-bezier(.2,.8,.2,1);--hw-fast:140ms;--hw-normal:220ms;--hw-modal:260ms}
+.directory a,.symbol-shortcuts button,.playback-modes button{transition:background-color var(--hw-fast) var(--hw-ease),box-shadow var(--hw-normal) var(--hw-ease),color var(--hw-fast) ease}
+@keyframes hw-panel-in{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+@keyframes hw-dialog-in{from{opacity:0;transform:translateY(8px) scale(.975)}to{opacity:1;transform:translateY(0) scale(1)}}
+.workspace-page:not([hidden])>.page-heading{animation:hw-panel-in var(--hw-normal) var(--hw-ease)}
+dialog.symbol-dialog[open],#desktop-menu[open],#desktop-close-dialog[open]{animation:hw-dialog-in var(--hw-modal) var(--hw-ease)}
+html[data-reduce-motion=true] .workspace-page>.page-heading,html[data-reduce-motion=true] dialog[open]{animation:none!important}
+@media(prefers-reduced-motion:reduce){.workspace-page>.page-heading,dialog[open]{animation:none!important}}

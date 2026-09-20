@@ -7,7 +7,7 @@ from datetime import datetime
 import json
 import math
 from pathlib import Path
-from performance_program import DANCES, PROGRAM_IDS, REFERENCE
+from performance_program import DANCES, PROGRAM_IDS, DANCE_REFERENCES, SIGN_REFERENCE
 
 LETTERS = 'ABCDEFGHIKLMNOPQRSTUVWXY'
 COMMIT = 'b0e48652dd94f4bc33df61cdc23a6d5dc598f93d'
@@ -31,11 +31,11 @@ CATALOG += [entry('digit_'+str(i),'数字 '+str(i),'Digit '+str(i),'numbers') fo
 CATALOG += [entry('count_digits','依次报数 0–9','Count 0–9','numbers'),
     entry('clock','当前时间 · HH:MM','Current time · HH:MM','numbers')]
 CATALOG += [entry('letter_'+c,'字母 '+c+' · 近似造型','Letter '+c+' · approximate','letters') for c in LETTERS]
-CATALOG += [entry('alphabet','24个静态字母 · 近似造型','24 static letters · approximate','letters')]
+CATALOG += [entry('alphabet','静态字母串 · 不含 J / Z','Static letter sequence · except J / Z','letters',note=SIGN_REFERENCE)]
 CATALOG += [entry('text_sequence','文字顺序展示','Text sequence','letters'),
     entry('letter_J','字母 J · 动态近似','Letter J · motion approximation','letters'),
     entry('letter_Z','字母 Z · 动态近似','Letter Z · motion approximation','letters')]
-CATALOG += [entry(k,z,e,'dance',note=REFERENCE) for k,(z,e,_) in DANCES.items()]
+CATALOG += [entry(k,z,e,'dance',note=DANCE_REFERENCES[k]) for k,(z,e,_) in DANCES.items()]
 CUSTOM_IDS = {x['id'] for x in CATALOG} - {'open','fist','opposition','sequence','official_opposition'}
 
 OFFICIAL_INVENTORY = [
@@ -147,7 +147,7 @@ def route(action, *, at=None):
 
 def catalog():
     return dict(actions=CATALOG,official_inventory=OFFICIAL_INVENTORY,
-        letters_note='A-Z/0-9 text sequences. Fixed-wrist approximations, including J/Z; not certified sign language.',
+        letters_note='Project-authored shapes inspired by ASL fingerspelling, not official Wuji actions or a universal sign language. 24 static letters exclude moving J/Z. Fixed-base approximations do not reproduce wrist/palm orientation.',
         choreography_note='Human-inspired authored joint curves, not motion capture. Nominal preview timing; hardware uses configured speed and amplitude. Hand 1: preview only.',
         clock_note='Local server time captured once at start, HH:MM, 24-hour format.',
         interaction=dict(recognition_ready=False,hardware_grasp_ready=False,

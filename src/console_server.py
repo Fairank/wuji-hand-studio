@@ -22,7 +22,8 @@ from motion_history import summarize as summarize_motion
 from view_camera import DEFAULT as DEFAULT_CAMERA, validate_camera
 from parameter_store import ParameterStore
 from gesture_library import catalog,CATALOG,CUSTOM_IDS
-from performance_program import PROGRAM_IDS
+from performance_program import PROGRAM_IDS, NEW_DANCE_IDS
+from playback_rates import PLAYBACK_SPEEDS
 
 from runtime_paths import RESOURCE, DATA, initialize
 HERE = RESOURCE
@@ -244,13 +245,16 @@ class Controller:
                         if not hardware.get('trial_ready'):raise ValueError(hardware.get('probe_reason','等待完整反馈与诊断'))
                         if self.state['device_profile']['generation']=='hand1' and command.get('action') not in {'open','fist'}:
                             raise ValueError('一代实机当前支持官方张开/握拳适配，其余动作仅预览')
-                        required=2 if command.get('action') in PROGRAM_IDS else 1
+                        fast=type(command.get('speed',1.)) in {int,float} and command.get('speed',1.)>1
+                        if fast and self.state['device_profile']['generation']=='hand1':
+                            raise ValueError('一代实机暂不支持超过1倍；可用画面预览 / Hand 1 supports up to 1x on hardware')
+                        required=3 if fast or command.get('action') in NEW_DANCE_IDS else 2 if command.get('action') in PROGRAM_IDS else 1
                         version=hardware.get('gesture_library_version',0)
-                        if command.get('action') in CUSTOM_IDS and (type(version) is not int or version<required):
+                        if (fast or command.get('action') in CUSTOM_IDS) and (type(version) is not int or version<required):
                             raise ValueError('控制端需升级到对应动作库版本，再重新连接 / Update the controller gesture library, then reconnect')
                         if (command.get('action') not in {x['id'] for x in CATALOG} or
                             type(command.get('amplitude')) not in {int,float} or command['amplitude'] not in {.25,.5,.75,1.} or
-                            type(command.get('speed',1.)) not in {int,float} or command.get('speed',1.) not in {.25,.5,1.} or
+                            type(command.get('speed',1.)) not in {int,float} or command.get('speed',1.) not in PLAYBACK_SPEEDS or
                             type(command.get('cycles')) is not int or command['cycles'] not in {1,3} or
                             command.get('workspace_clear') is not True):raise ValueError('选择试运行幅度和1/3轮，并确认周围清空')
                         outgoing={k:command.get(k) for k in ('name','action','amplitude','cycles','workspace_clear')}

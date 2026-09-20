@@ -9,10 +9,19 @@ from functools import lru_cache
 
 DANCES = {'dance_jellyfish': ('水母舒展', 'Jellyfish', 16.),
           'dance_wave': ('逐指波浪', 'Finger wave', 16.),
-          'dance_ripple': ('指节涟漪', 'Knuckle ripple', 12.)}
+          'dance_ripple': ('指节涟漪', 'Knuckle ripple', 12.),
+          'dance_reverse': ('逆向卷浪', 'Reverse roll', 16.),
+          'dance_piano': ('空中钢琴', 'Air piano', 12.),
+          'dance_alternate': ('交替律动', 'Alternating rhythm', 12.),
+          'dance_fan': ('折扇开合', 'Folding fan', 16.),
+          'dance_bloom': ('花苞绽放', 'Bloom', 16.),
+          'dance_tutting': ('指节阶梯', 'Knuckle staircase', 12.)}
+NEW_DANCE_IDS = set(DANCES) - {'dance_jellyfish', 'dance_wave', 'dance_ripple'}
 PROGRAM_IDS = set(DANCES) | {'text_sequence', 'letter_J', 'letter_Z'}
 REFERENCE = 'https://www.brambilabong.com/blogs/popping/learn-3-finger-tutting-dance-moves-tutorial'
 SIGN_REFERENCE = 'https://www.lifeprint.com/asl101/pages-layout/fingerspelling.htm'
+WAVE_REFERENCE = 'https://howcast.com/videos/493866-how-to-do-waving-tutting/'
+DANCE_REFERENCES = {key: WAVE_REFERENCE if key in {'dance_bloom', 'dance_tutting'} else REFERENCE for key in DANCES}
 
 
 def smooth(x):
@@ -32,15 +41,28 @@ def _dance(action, t):
     for f in range(5):
         # Keep the thumb outside the palm; non-thumb flexion is more pronounced.
         for j, amount in ((0,.48),(2,.75),(3,.52)):
-            if f == 0: amount *= .25
             delay = .13*f+.30*j if action=='dance_jellyfish' else .8*f+.13*j if action=='dance_wave' else .25*f+.8*j
+            power=1
+            if action=='dance_reverse': delay=.8*(4-f)+.13*j
+            elif action=='dance_piano':
+                delay=1.25*f;amount={0:.28,2:.38,3:.22}[j];power=4
+            elif action=='dance_alternate':
+                delay=math.pi*(f%2)+.10*j;amount*=.8
+            elif action=='dance_fan': delay=.55*f;amount*=.5
+            elif action=='dance_bloom': delay=.35*j
+            elif action=='dance_tutting':
+                delay=.7*f+.9*j;amount={0:.12,2:.70,3:.25}[j];power=3
+            if f == 0: amount *= .25
             a = omega*t-delay
-            pulse = .5-.5*math.cos(a)
+            base = .5-.5*math.cos(a)
+            pulse=base**power
+            derivative=power*base**(power-1)*.5*omega*math.sin(a)
             q[4*f+j] += amount*env*pulse
-            v[4*f+j] = amount*(denv*pulse+env*.5*omega*math.sin(a))
+            v[4*f+j] = amount*(denv*pulse+env*derivative)
         spread = (0.,.13,.04,-.04,-.13)[f]
         pulse = .5+.5*math.cos(omega*t)
-        if action=='dance_jellyfish':
+        if action in {'dance_jellyfish', 'dance_fan', 'dance_bloom'}:
+            if action=='dance_fan': spread*=1.4
             q[4*f+1] += spread*env*pulse
             v[4*f+1] = spread*(denv*pulse-env*.5*omega*math.sin(omega*t))
     return q,v
@@ -94,7 +116,7 @@ def program(action, text='WUJI TECH'):
         points.append(dict(t=points[-1]['t']+.4,q=start[:],label='完成 / Complete',token_index=-1))
     return dict(schema='wuji-performance-v1',action=action,text=normalized,points=points,
         duration_s=points[-1]['t'],source='project_authored_human_inspired',
-        source_url=REFERENCE if action in DANCES else SIGN_REFERENCE,
+        source_url=DANCE_REFERENCES[action] if action in DANCES else SIGN_REFERENCE,
         fixed_base=True,hardware_validated=False,sign_language_certified=False)
 
 

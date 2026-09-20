@@ -10,6 +10,7 @@ from official_policy import CURRENT_LIMIT_A,LOWER_RAD,UPPER_RAD,settings
 from motion_parameters import (PATH_SPEED_RAD_S,COMMAND_SPEED_RAD_S,MIN_TRANSITION_S,
     POSE_HOLD_S,MAX_TRIAL_DURATION_S)
 from motion_timing import SMOOTH_PEAK_RATIO,EXECUTION_VERSION
+from playback_rates import PLAYBACK_SPEEDS
 from gesture_library import CATALOG,CUSTOM_IDS,route as gesture_route
 
 POSES=Path(__file__).with_name('trial_sdk_poses.json')
@@ -23,8 +24,8 @@ def make_trial(q,action,amplitude,cycles,path=POSES,*,speed=1.,clock_at=None,tex
     if action not in NAMES or type(amplitude) not in {int,float} or amplitude not in {.25,.5,.75,1.}:
         raise ValueError('请选择试运行动作和25/50/75/100%幅度')
     if type(cycles) is not int or cycles not in {1,3}:raise ValueError('试运行支持1或3轮')
-    if type(speed) not in {int,float} or speed not in {.25,.5,1.}:
-        raise ValueError('试运行速度仅支持0.25/0.5/1倍限速')
+    if type(speed) not in {int,float} or speed not in PLAYBACK_SPEEDS:
+        raise ValueError('播放速度支持0.25/0.5/1/1.25/1.5/2倍')
     def retime(plan):
         for point in plan['points']:
             point['t']/=speed

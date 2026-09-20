@@ -5,6 +5,7 @@ import time
 from datetime import datetime
 from gesture_library import CATALOG as GESTURES,CUSTOM_IDS,route
 from performance_program import PROGRAM_IDS, program, sample
+from playback_rates import PLAYBACK_SPEEDS
 
 CATALOG = {
     'all':'整套展示', 'open':'张开', 'fist':'握拳', 'opposition':'依次对指',
@@ -53,7 +54,7 @@ class DemoPlayer:
             name=data['name']
             if name=='demo_start':
                 action=data.get('action');speed=data.get('speed');cycles=data.get('cycles')
-                if action not in CATALOG or type(speed) not in {int,float} or speed not in {.25,.5,1.}:
+                if action not in CATALOG or type(speed) not in {int,float} or speed not in PLAYBACK_SPEEDS:
                     raise ValueError('无效动作或速度')
                 if type(cycles) is not int or cycles not in {0,1,3,10}:
                     raise ValueError('播放次数只能选择1、3、10或循环')

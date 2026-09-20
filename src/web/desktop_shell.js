@@ -1,6 +1,7 @@
 /* Desktop commands and appearance only. Motor commands stay in the existing controller. */
 (()=>{
  'use strict';
+ for(const side of ['top','left','right','bottom']){const edge=document.createElement('div');edge.className='glass-edge glass-edge-'+side;edge.setAttribute('aria-hidden','true');document.body.append(edge);}
  const $=id=>document.getElementById(id),t=(zh,en)=>window.WujiLocale?.lang==='en'?en:zh;
  let native=null,info=null,state=null;
  const button=document.createElement('button');button.className='app-menu-button';button.id='desktop-menu-button';button.type='button';button.textContent='⋯';button.setAttribute('aria-haspopup','dialog');
@@ -10,7 +11,14 @@
  document.body.append(menu);
  const closeDialog=document.createElement('dialog');closeDialog.id='desktop-close-dialog';
  closeDialog.innerHTML=`<h2 id="desktop-close-title"></h2><p id="desktop-close-note"></p><p id="desktop-close-status" role="status"></p><div class="desktop-close-actions"><button id="desktop-close-cancel"></button><button id="desktop-close-confirm" class="primary"></button></div>`;document.body.append(closeDialog);
- function appearance(key,value){document.documentElement.dataset[key]=String(value);try{localStorage.setItem('wuji-'+key,String(value));}catch{}}
+ async function applyMaterial(){
+  if(!native)return;
+  const reduce=document.documentElement.dataset.reduceTransparency==='true'||matchMedia('(prefers-reduced-transparency: reduce)').matches||matchMedia('(forced-colors: active)').matches;
+  const result=await native.set_window_material(!reduce);
+  document.documentElement.dataset.externalBackdrop=String(result.external_backdrop===true);
+  if(info)info.material=result;
+ }
+ function appearance(key,value){document.documentElement.dataset[key]=String(value);try{localStorage.setItem('wuji-'+key,String(value));}catch{}if(key==='reduceTransparency')applyMaterial().catch(()=>{});}
  for(const [key,id] of [['reduceTransparency','desktop-transparency'],['reduceMotion','desktop-motion']]){
   let saved=false;try{saved=localStorage.getItem('wuji-'+key)==='true';}catch{}
   appearance(key,saved);$(id).checked=saved;$(id).onchange=()=>appearance(key,$(id).checked);
@@ -45,11 +53,12 @@
   setAppearance(key,value){if(key==='language'){window.WujiLocale.setLanguage(value);return;}appearance(key,value);$(key==='reduceMotion'?'desktop-motion':'desktop-transparency').checked=value;},
   setMenu(opened){if(opened&&!menu.open){labels();menu.showModal();}else if(!opened)menu.close();},
   confirmClose(){menu.close();labels();$('desktop-close-status').textContent='';if(!closeDialog.open)closeDialog.showModal();}};
- async function ready(){native=window.pywebview?.api;if(!native)return;info=await native.info();document.documentElement.dataset.desktop='true';if($('studio-desktop'))$('studio-desktop').hidden=true;await native.set_language(window.WujiLocale.lang);labels();}
+ async function ready(){native=window.pywebview?.api;if(!native)return;info=await native.info();document.documentElement.dataset.desktop='true';if($('studio-desktop'))$('studio-desktop').hidden=true;await native.set_language(window.WujiLocale.lang);await applyMaterial();labels();}
  window.addEventListener('pywebviewready',()=>ready().catch(e=>{$('desktop-menu-status').textContent=e.message;}));
  if(window.pywebview?.api)ready().catch(()=>{});
  window.addEventListener('wuji-language',()=>{labels();if(native)native.set_language(window.WujiLocale.lang).catch(()=>{});});
  window.addEventListener('console-state',e=>{state=e.detail;});
+ for(const query of ['(prefers-reduced-transparency: reduce)','(forced-colors: active)'])matchMedia(query).addEventListener('change',()=>applyMaterial().catch(()=>{}));
  document.addEventListener('keydown',e=>{
   if(e.ctrlKey&&e.key===','){e.preventDefault();button.click();}
   if(e.ctrlKey&&e.shiftKey&&e.code==='KeyV'&&native){e.preventDefault();native.open_viewer();}

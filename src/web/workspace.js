@@ -40,6 +40,7 @@
   notes.append(real.querySelector(':scope > p'),get('active-motion-parameters').parentElement,sourceNote,speedContainer);
   get('trial-clear').closest('label').classList.add('workspace-confirmation');
   trial.append(notes);
+  const rateSummary=get('playback-rate-summary');if(rateSummary)motionFields.after(rateSummary);
   // Dynamic device warnings remain visible; only the long policy explanation folds.
   const policy=get('warning-policy'),policyNotes=document.createElement('details');policyNotes.className='motion-notes';policyNotes.innerHTML='<summary>告警等级与完成条件</summary>';
   policyNotes.append(policy.querySelector('p'),policy.querySelector('details'));policy.append(policyNotes);

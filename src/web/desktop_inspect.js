@@ -6,10 +6,10 @@
  const surface = s => {const e=document.querySelector(s);if(!e)return null;const c=getComputedStyle(e);return {bounds:bounds(e),background:c.backgroundColor,blur:c.backdropFilter,radius:c.borderRadius};};
  return {page:document.body.dataset.page,language:window.WujiLocale?.lang,
    native:document.documentElement.dataset.desktop === 'true',
-   viewport:{width:innerWidth,height:innerHeight},overflow:document.documentElement.scrollWidth>innerWidth,
+   viewport:{width:innerWidth,height:innerHeight},scroll:{x:scrollX,y:scrollY},overflow:document.documentElement.scrollWidth>innerWidth,
    appearance:{reduceTransparency:document.documentElement.dataset.reduceTransparency,reduceMotion:document.documentElement.dataset.reduceMotion},
    heading:document.querySelector('.workspace-page:not([hidden]) h2')?.textContent,
-   surfaces:{header:surface('.top'),navigation:surface('.directory'),content:surface('.page-area'),menu:surface('#desktop-menu')},
+   surfaces:{header:surface('.top'),navigation:surface('.directory'),content:surface('.page-area'),menu:surface('#desktop-menu'),edgeTop:surface('.glass-edge-top'),edgeLeft:surface('.glass-edge-left'),edgeRight:surface('.glass-edge-right'),edgeBottom:surface('.glass-edge-bottom')},
    controls:nodes.map(e=>({id:e.id,tag:e.tagName,label:e.getAttribute('aria-label')||e.getAttribute('title')||(e.tagName==='INPUT'?'':e.textContent.trim().slice(0,100)),disabled:!!e.disabled,bounds:bounds(e)})),
    errors:window.WujiDesktop?.errors||[]};
 })()
