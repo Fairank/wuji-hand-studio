@@ -1,5 +1,5 @@
 """Build on the target OS. This does not cross-compile or start hardware."""
-import hashlib,json,os,platform,shutil,subprocess,sys,zipfile
+import hashlib,json,os,platform,shutil,subprocess,sys,tempfile,zipfile
 from pathlib import Path
 
 ROOT=Path(__file__).resolve().parent
@@ -38,14 +38,15 @@ for distribution in metadata.distributions():
                 dest=licenses/distribution.metadata['Name']/str(item).replace('../','').replace('..\\','')
                 dest.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(f,dest)
 args+=['--add-data',str(licenses)+os.pathsep+'third-party-licenses','src/desktop.py']
-subprocess.run(args,check=True)
+if '--package-only' not in sys.argv:subprocess.run(args,check=True)
 binary=ROOT/'dist'/name/(name+('.exe' if sys.platform=='win32' else ''))
 if sys.platform=='darwin':binary=ROOT/'dist'/(name+'.app')/'Contents/MacOS'/name
 subprocess.run([str(binary),'--self-check'],check=True)
 # Include documentation/controller sources alongside each executable.
 platform_name={'win32':'windows','darwin':'macos'}.get(sys.platform,'ubuntu')
 arch='arm64' if platform.machine().lower() in ('arm64','aarch64') else 'x64'
-release=ROOT/'dist'/f'{name}-0.1.0-{platform_name}-{arch}'
+staging=Path(tempfile.mkdtemp(prefix='package-',dir=ROOT/'build'))
+release=staging/f'{name}-0.1.0-{platform_name}-{arch}'
 release.mkdir(exist_ok=True)
 item=ROOT/'dist'/(name+'.app' if sys.platform=='darwin' else name)
 shutil.copytree(item,release/item.name,dirs_exist_ok=True,symlinks=True)
@@ -54,9 +55,11 @@ shutil.copytree(ROOT/'controller',release/'controller',dirs_exist_ok=True)
 shutil.copytree(ROOT/'src',release/'controller/source',ignore=shutil.ignore_patterns('__pycache__','private_models','test_*','desktop.py','web','assets'),dirs_exist_ok=True)
 if edition=='research' and (ROOT/'research').exists():shutil.copytree(ROOT/'research',release/'research',dirs_exist_ok=True)
 if sys.platform=='darwin':
-    archive=Path(str(release)+'.zip')
+    archive=ROOT/'dist'/(release.name+'.zip')
     subprocess.run(['ditto','-c','-k','--sequesterRsrc','--keepParent',str(release),str(archive)],check=True)
-elif sys.platform=='win32':archive=Path(shutil.make_archive(str(release),'zip',release.parent,release.name))
-else:archive=Path(shutil.make_archive(str(release),'gztar',release.parent,release.name))
+elif sys.platform=='win32':archive=Path(shutil.make_archive(str(ROOT/'dist'/release.name),'zip',release.parent,release.name))
+else:archive=Path(shutil.make_archive(str(ROOT/'dist'/release.name),'gztar',release.parent,release.name))
 archive.with_name(archive.name+'.sha256').write_text(hashlib.sha256(archive.read_bytes()).hexdigest()+'  '+archive.name+'\n')
+if staging.resolve().parent!=(ROOT/'build').resolve() or not staging.name.startswith('package-'):raise RuntimeError('Unexpected staging directory')
+shutil.rmtree(staging)
 print(archive)

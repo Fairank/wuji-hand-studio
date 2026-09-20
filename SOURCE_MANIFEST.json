@@ -2,8 +2,8 @@
   "edition": "basic",
   "files": {
     ".gitignore": {
-      "bytes": 155,
-      "sha256": "7af11d5021f263a7d340e4f23e3ca3612f7ce7bf3eae2a18fd8c000c52963dd5"
+      "bytes": 182,
+      "sha256": "40253bf0c7177acf0f9af28b82dd462fa62a057441dd43e8106db342c2a0cc7a"
     },
     "LICENSE": {
       "bytes": 1064,
@@ -18,8 +18,8 @@
       "sha256": "b9ce7a101d9c5a9eaf0b938e4a79bd4356afb8ede84950f3386b1e8f33e42771"
     },
     "build.py": {
-      "bytes": 4435,
-      "sha256": "3f1cf6f6f62a926957ce5fc70438cf6f19ad9223ca63236d82b46287026538b3"
+      "bytes": 4749,
+      "sha256": "c10261a3669d05a75f160ec888f60e1c70a96c2556c92c220898e558becb40f9"
     },
     "ci/build.yml.example": {
       "bytes": 1713,

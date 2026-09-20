@@ -3,6 +3,8 @@ __pycache__/
 .venv/
 venv/
 build/
+build-notices/
+build-icons/
 dist/
 *.spec
 config.json
