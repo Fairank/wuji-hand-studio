@@ -39,13 +39,13 @@ open -n dist/HandWorkbench.app
 
 构建脚本从官方固定版本下载并校验摘要，不能导出个人 VM 作为镜像。Linux 和助手在 `.app` 内，单独拖动应用不会丢失组件。首次准备 SDK 仍需网络，不能称完全离线安装。
 
-`.github/workflows/macos.yml` 在 GitHub Mac ARM64 runner 原生构建；通过后上传包和 `macos-validation.json`。`macos-v*` 标签发布预览 Release。架构、签名完整性和文件哈希不等于 VM 启动、实机连接或玻璃视觉验收。
+构建流程已保存在 `ci/macos.yml.example`。当前 GitHub 登录缺少 `workflow` 权限，服务器拒绝创建正式工作流，因此尚未生成或上传 Mac 安装包。获得授权后可将模板放到 `.github/workflows/macos.yml`，在 Mac ARM64 runner 原生构建；通过后上传包和 `macos-validation.json`。架构、签名完整性和文件哈希不等于 VM 启动、实机连接或玻璃视觉验收。
 
 Linux 独立目录为 ~/.hand-workbench-runtime，不改个人 ~/.lima。使用短路径避免 macOS 本地套接字路径长度限制。
 
 数据路径沿用 `~/Library/Application Support/WujiStudio`，保留已有参数；日志 `desktop.log`。源码克隆可运行 `bash scripts/run-macos.command`，会创建项目内 `.venv-macos`。未准备 Linux 组件时仍可看界面、MuJoCo 或使用自行选择的外部 Linux。
 
-历史源码启动脚本由本地 Claude Opus 5 max 协助，主维护者审核。此次原生材质基础工作另交给 Fable 5.1 max；仅已审核完成的输出才会采用，构建及真实结果由主维护者核验。
+历史源码启动脚本由本地 Claude Opus 5 max 协助，主维护者审核。此次原生材质基础代码由本地 `claude-fable-5-1 --effort max` 完成，已审核并修正窗口生命周期和错误回退后采用；24 项 Mac 逻辑测试通过，尚未真实 Mac 视觉验收。
 
 ## English
 

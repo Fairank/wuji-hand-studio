@@ -5,9 +5,8 @@ import threading
 class WindowMaterial:
     def __init__(self, window):
         self.window = window
-        self.original = None
-        self.wrapper = None
         self.mode = 'solid'
+        self.core = None
         self.lock = threading.Lock()
 
     def apply(self, mode='glass'):
@@ -15,7 +14,7 @@ class WindowMaterial:
             raise ValueError('Unknown window material')
         try:
             import AppKit
-            from Foundation import NSThread, NSClassFromString
+            from Foundation import NSThread
             from PyObjCTools import AppHelper
         except ImportError:
             return dict(ok=False, mode='solid', external_backdrop=False, refraction=False,
@@ -26,49 +25,24 @@ class WindowMaterial:
                 return
             try:
                 with self.lock:
-                    if self.original is None:
-                        self.original = self.window.contentView()
-                    reduced = AppKit.NSWorkspace.sharedWorkspace().accessibilityDisplayShouldReduceTransparency()
-                    glass_class = NSClassFromString('NSGlassEffectView')
-                    selected = 'solid' if reduced or mode == 'solid' else 'liquid-glass' if glass_class else 'vibrancy'
-                    if selected != self.mode:
-                        # Restore before switching wrappers; repeated calls never nest them.
-                        self.original.removeFromSuperview()
-                        if self.wrapper is not None and self.mode == 'liquid-glass':
-                            self.wrapper.setContentView_(None)
-                        self.window.setContentView_(self.original)
-                        self.wrapper = None
-                        if selected != 'solid':
-                            wrapper = (glass_class if selected == 'liquid-glass' else AppKit.NSVisualEffectView).alloc().initWithFrame_(self.original.frame())
-                            wrapper.setAutoresizingMask_(AppKit.NSViewWidthSizable | AppKit.NSViewHeightSizable)
-                            if selected == 'liquid-glass':
-                                wrapper.setCornerRadius_(16.0)
-                                wrapper.setContentView_(self.original)
-                            else:
-                                wrapper.setMaterial_(AppKit.NSVisualEffectMaterialUnderWindowBackground)
-                                wrapper.setBlendingMode_(AppKit.NSVisualEffectBlendingModeBehindWindow)
-                                wrapper.setState_(AppKit.NSVisualEffectStateActive)
-                                wrapper.addSubview_(self.original)
-                            self.window.setContentView_(wrapper)
-                            self.wrapper = wrapper
-                        self.mode = selected
-                    self.window.setOpaque_(selected == 'solid')
-                    self.window.setBackgroundColor_(AppKit.NSColor.windowBackgroundColor() if selected == 'solid' else AppKit.NSColor.clearColor())
-                    self.window.setHasShadow_(True)
-                    result.update(ok=True, mode=selected, external_backdrop=selected != 'solid',
-                                  refraction=False, desktop_capture=False, reduced_transparency=bool(reduced),
-                                  visual_acceptance_pending=True)
+                    from macos_material_core import WindowMaterial as CoreMaterial
+                    if self.core is None:
+                        self.core = CoreMaterial(self.window)
+                    native = self.core.apply(mode)
+                    chosen = {'macos_glass':'liquid-glass','vibrancy':'vibrancy'}.get(native.get('material'), 'solid')
+                    self.mode = chosen
+                    result.update(native, mode=chosen, external_backdrop=chosen != 'solid',
+                                  refraction=False, desktop_capture=False, visual_acceptance_pending=True)
             except Exception as error:
                 # Leave the content attached even if a material API is unavailable.
-                if self.original is not None:
+                if self.core is not None:
                     try:
-                        self.original.removeFromSuperview()
-                        self.window.setContentView_(self.original)
+                        self.core._rollback()
                         self.window.setOpaque_(True)
                         self.window.setBackgroundColor_(AppKit.NSColor.windowBackgroundColor())
                     except Exception:
                         pass
-                self.wrapper, self.mode = None, 'solid'
+                self.mode = 'solid'
                 result.update(ok=False, mode='solid', external_backdrop=False, refraction=False,
                               desktop_capture=False, error=str(error))
             finally:
