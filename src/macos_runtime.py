@@ -227,8 +227,11 @@ class MacController:
         profile(profile_id)
         ensure_running()
         self.agent_directory, self.process = AGENT, None
-        self.agent_command = args(['/usr/bin/env', 'WUJI_HAND_PROFILE=' + profile_id,
-                                   'WUJI_MANAGED_RUNTIME=macvm', PYTHON, '-u', AGENT + '/console_agent.py'])
+        from controller_launch import parameter_environment
+        self.parameters_in_launch = True
+        self.agent_command = args(['/usr/bin/env', parameter_environment(), 'WUJI_HAND_PROFILE=' + profile_id,
+                                   'WUJI_SESSION_ID='+os.environ.get('WUJI_FLEET_ID',''),
+                                   'WUJI_MANAGED_RUNTIME=macvm', PYTHON, '-u', AGENT + '/agent_bootstrap.py'])
     def open_sftp(self): return Files()
     def exec_command(self, command_args, timeout=None):
         from local_controller import ReadStream

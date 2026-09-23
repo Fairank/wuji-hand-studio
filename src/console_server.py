@@ -1,6 +1,7 @@
 """Loopback left-hand console; explicit bounded commissioning and playback."""
 import collections
 import base64
+import os
 import copy
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -50,6 +51,8 @@ class Controller:
         self.doctor=Doctor()
         from glove_bridge import GloveBridge
         self.glove=GloveBridge(factory)
+        from program_runner import ProgramRunner
+        self.program=ProgramRunner(self)
         self.client = self.stdin = None
         self.generation = 0
         self.last_update = 0.
@@ -118,6 +121,7 @@ class Controller:
             result['playback'] = self.player.snapshot()
             result['parameter_sync']=dict(self.parameters.sync_status)
             result['glove']=self.glove.snapshot()
+            result['program']=self.program.snapshot()
             return result
 
     def parameter_snapshot(self):
@@ -174,6 +178,41 @@ class Controller:
     def _action(self, command):
         if not isinstance(command,dict):raise ValueError('Invalid request')
         name=command.get('name','')
+        if name=='session_keepalive':
+            if self.program.lease:self.program.keepalive(self.program.lease)
+            if self.hardware_lease and self.state['hardware'].get('active'):
+                self._action(dict(name='hardware_keepalive',lease=self.hardware_lease))
+            if self.glove.lease:
+                self._action(dict(name='glove_keepalive',lease=self.glove.lease))
+            return dict(kept=True)
+        if name=='program_start':return self.program.start(command)
+        if name=='program_keepalive':return self.program.keepalive(command.get('lease'))
+        if name=='program_stop':
+            self.program.stop()
+            if self.state['hardware'].get('active') is not False:self._action(dict(name='hardware_stop'))
+            return dict(stopping=True)
+        if name=='program_pause':return self.program.pause(True)
+        if name=='program_resume':return self.program.pause(False)
+        if self.program.snapshot()['active'] and threading.current_thread() is not self.program.thread:
+            if name in {'hardware_start','hardware_trial','hardware_probe','demo_start','glove_scan','glove_open','glove_prepare','glove_follow'}:
+                raise ValueError('请先停止节目单 / Stop the active playlist first')
+            if name in {'hardware_stop','disconnect','glove_stop','glove_disconnect'}:
+                self.program.stop()
+        if name=='session_close':
+            from desktop_lifecycle import close_sessions
+            if hasattr(self,'program'):self.program.stop()
+            return close_sessions(self)
+        if name=='retarget_save':
+            if self.glove.busy:raise ValueError('先断开手套再保存映射 / Disconnect glove before changing mapping')
+            from retarget_settings import validate
+            values=validate(command.get('values'))
+            path=self.reports.parent/'retargeting.json'
+            path.parent.mkdir(parents=True,exist_ok=True)
+            staged=path.with_suffix('.pending');staged.write_text(json.dumps(values),encoding='utf-8');staged.replace(path)
+            return dict(retarget=values)
+        if name=='glove_open':
+            from retarget_settings import load
+            command=dict(command,retarget=load(self.reports.parent/'retargeting.json'))
         if getattr(self,'desktop_closing',False) and name not in {'disconnect','hardware_stop','glove_stop','glove_disconnect','glove_keepalive','hardware_keepalive','demo_stop'}:
             raise ValueError('工作台正在退出 / Workbench is closing')
         if name=='hardware_stop' and self.glove.busy:
@@ -509,7 +548,9 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header('Content-Length', str(len(body)))
         self.send_header('Cache-Control', 'no-store')
         self.send_header('X-Content-Type-Options', 'nosniff')
-        self.send_header('Content-Security-Policy', "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
+        parent=os.environ.get('WUJI_FLEET_PARENT','')
+        ancestor=parent if re.fullmatch(r'http://127\.0\.0\.1:[0-9]{4,5}',parent) else "'none'"
+        self.send_header('Content-Security-Policy', "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src 'self'; frame-src http://127.0.0.1:*; frame-ancestors "+ancestor+"; base-uri 'none'; form-action 'self'")
         if filename:
             self.send_header('Content-Disposition', f'attachment; filename="{filename}"')
         self.end_headers()
@@ -522,6 +563,11 @@ class Handler(BaseHTTPRequestHandler):
         if not self.allowed_host():
             return self.reply(403, dict(error='Local host required'))
         url = urlsplit(self.path)
+        if url.path == '/api/fleet':
+            return self.reply(200,dict(devices=self.server.fleet.snapshot() if not os.environ.get('WUJI_FLEET_PARENT') else [],embedded=bool(os.environ.get('WUJI_FLEET_PARENT'))))
+        if url.path == '/api/retarget':
+            from retarget_settings import load
+            return self.reply(200,load(self.server.controller.reports.parent/'retargeting.json'))
         if url.path == '/api/desktop':
             host=getattr(self.server,'desktop',None)
             return self.reply(200,host.info() if host else dict(native=False,api_version=1,operations=[]))
@@ -580,9 +626,9 @@ class Handler(BaseHTTPRequestHandler):
         assets.update({'/workspace.js':('workspace.js','text/javascript; charset=utf-8'),
             '/workspace.css':('workspace.css','text/css; charset=utf-8'),
             '/parameters.js':('parameters.js','text/javascript; charset=utf-8')})
-        for name in ('studio.js','locale.js','floating_panel.js','viewer.js','action_picker.js','brand.js','installation.js','profiles.js','doctor.js','glove.js','desktop_shell.js','external_refraction.js','device_network.js','connection_toolbar.js'):
+        for name in ('studio.js','locale.js','floating_panel.js','viewer.js','action_picker.js','brand.js','installation.js','profiles.js','doctor.js','glove.js','desktop_shell.js','external_refraction.js','device_network.js','connection_toolbar.js','workbench_upgrade.js'):
             assets['/'+name]=(name,'text/javascript; charset=utf-8')
-        for name in ('studio.css','floating_panel.css','glass.css','glove.css','desktop_glass.css','desktop_refinement.css','glass_refresh.css'):
+        for name in ('studio.css','floating_panel.css','glass.css','glove.css','desktop_glass.css','desktop_refinement.css','glass_refresh.css','workbench_upgrade.css'):
             assets['/'+name]=(name,'text/css; charset=utf-8')
         assets['/viewer']=('viewer.html','text/html; charset=utf-8')
         assets['/favicon.ico']=('favicon.ico','image/x-icon')
@@ -615,6 +661,21 @@ class Handler(BaseHTTPRequestHandler):
                 result=dispatch(host,payload)
             elif payload.get('name') in ('desktop_open','desktop_viewer') and getattr(self.server,'desktop',None):
                 result=self.server.desktop.open_viewer() if payload['name']=='desktop_viewer' else dict(ok=True,native_opened=True)
+            elif payload.get('name')=='fleet_create':
+                if os.environ.get('WUJI_FLEET_PARENT'):raise ValueError('Open device manager in the main workspace')
+                result=dict(device=self.server.fleet.create(payload.get('label'),payload.get('profile')))
+            elif payload.get('name')=='fleet_remove':
+                if os.environ.get('WUJI_FLEET_PARENT'):raise ValueError('Open device manager in the main workspace')
+                result=self.server.fleet.remove(payload.get('id'))
+            elif payload.get('name')=='fleet_keepalive':
+                self.server.controller.action(dict(name='session_keepalive'))
+                result=dict(errors=self.server.fleet.heartbeat())
+            elif payload.get('name')=='fleet_stop':
+                errors=[]
+                for name in ('program_stop','glove_stop' if self.server.controller.glove.busy else 'hardware_stop'):
+                    try:self.server.controller.action(dict(name=name))
+                    except (ValueError, OSError) as error:errors.append(dict(id='main',action=name,error=str(error)))
+                result=dict(errors=errors+self.server.fleet.stop_all())
             else:result = self.server.controller.action(payload)
             self.reply(200, {'ok':True, **(result or {})})
         except (ValueError, TypeError) as error:
@@ -631,6 +692,13 @@ class ConsoleHTTPServer(ThreadingHTTPServer):
     allow_reuse_address = False
     allow_reuse_port = False
 
+    @property
+    def fleet(self):
+        if not hasattr(self,'_fleet'):
+            from device_fleet import DeviceFleet
+            self._fleet=DeviceFleet(DATA,RESOURCE,f'http://127.0.0.1:{self.server_address[1]}')
+        return self._fleet
+
     def server_bind(self):
         if sys.platform == 'win32':
             self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
@@ -644,8 +712,11 @@ def main():
     try:
         server.serve_forever()
     finally:
-        server.controller.action(dict(name='disconnect'))
-        server.server_close()
+        try:
+            if hasattr(server,'_fleet'):server._fleet.close()
+        finally:
+            server.controller.action(dict(name='disconnect'))
+            server.server_close()
 
 
 if __name__ == '__main__':

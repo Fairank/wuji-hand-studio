@@ -16,6 +16,10 @@ import sys
 import time
 import uuid
 
+if os.environ.get('WUJI_PARAMETERS_JSON'):
+    from agent_bootstrap import install_parameters
+    install_parameters(os.environ['WUJI_PARAMETERS_JSON'])
+
 from capture import require_left, serialize_frame
 from feedback_stream import drain_available
 from timing_stats import summarize_timing
@@ -24,7 +28,11 @@ from hardware_showcase import HardwareShowcase
 
 LABELS = {'baseline', 'thumb', 'index', 'middle', 'ring', 'little', 'withdrawal'}
 HARDWARE_COMMANDS = {'hardware_start','hardware_probe','hardware_trial','hardware_stop','hardware_pause','hardware_resume','hardware_keepalive'}
+_session=os.environ.get('WUJI_SESSION_ID','')
+if _session and (len(_session)!=16 or any(c not in '0123456789abcdef' for c in _session)):
+    raise ValueError('Invalid controller session ID')
 ROOT = Path(__file__).resolve().parent / 'sessions'
+if _session:ROOT=ROOT/_session
 
 
 def validate_command(command):
@@ -129,10 +137,13 @@ class Recorder:
 
 def worker_auto(address, serial, requests, events):
     from device_discovery import connect_discovered, SelectionRequired
-    hand = route = None
+    hand = route = ownership = None
     try:
         from wuji_sdk import SdkManager
         hand, route, selected = connect_discovered(SdkManager.instance(), address, serial)
+        if sys.platform.startswith('linux'):
+            from device_ownership import DeviceOwnership
+            ownership = DeviceOwnership(hand.serial_number)
         os.environ['WUJI_HAND_PROFILE'] = selected['id']
         events.put(dict(type='identity', profile=selected['id'], device_id=str(hand.serial_number)))
         if selected['generation'] == 'hand1':
@@ -140,7 +151,7 @@ def worker_auto(address, serial, requests, events):
             owned_hand = hand; hand = None
             worker_first(address, requests, events, prepared_hand=owned_hand)
         else:
-            owned_hand, owned_route = hand, route;hand = route = None
+            owned_hand, owned_route = hand, route;hand = route = ownership = None
             worker(address, requests, events, prepared=(owned_hand, owned_route))
     except SelectionRequired as error:
         events.put(dict(type='selection', devices=error.devices, message=str(error)))
@@ -149,6 +160,7 @@ def worker_auto(address, serial, requests, events):
     finally:
         if hand is not None:hand.disconnect()
         if route is not None:route.close()
+        if ownership is not None:ownership.close()
 
 
 def worker(address, requests, events, motion_factory=HardwareShowcase, prepared=None):
@@ -156,7 +168,7 @@ def worker(address, requests, events, motion_factory=HardwareShowcase, prepared=
     if controller_profile()["generation"]=="hand1":
         from first_generation import worker_first
         return worker_first(address,requests,events)
-    hand = sub = diagnostics = motion = protocol_route = None
+    hand = sub = diagnostics = motion = protocol_route = ownership = None
     recorder = Recorder()
     def finish(reason):
         report = recorder.finish(reason, time.monotonic())
@@ -180,6 +192,9 @@ def worker(address, requests, events, motion_factory=HardwareShowcase, prepared=
             hand = SdkManager.instance().connect(**kwargs)
         require_left(hand)
         device_id = str(hand.serial_number)
+        if prepared is None and sys.platform.startswith('linux'):
+            from device_ownership import DeviceOwnership
+            ownership=DeviceOwnership(device_id)
         command_type=None
         def make_command(**kwargs):
             nonlocal command_type
@@ -332,6 +347,8 @@ def worker(address, requests, events, motion_factory=HardwareShowcase, prepared=
         finally:
             if protocol_route is not None:
                 protocol_route.close()
+            if ownership is not None:
+                ownership.close()
         events.put(dict(type='closed',hardware=motion.status() if motion is not None else {}))
 
 

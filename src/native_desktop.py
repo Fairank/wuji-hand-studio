@@ -231,6 +231,11 @@ class NativeDesktop:
         if not self.session_lock.acquire(blocking=False):return dict(ok=False,error='正在结束会话 / Closing session')
         try:
             from desktop_tools import idle
+            if hasattr(self.server,'_fleet'):
+                if require_idle and any(x.get('connection')!='disconnected' or x.get('hardware') is not False for x in self.server.fleet.snapshot()):
+                    return dict(ok=False,error='先断开其他设备工作区 / Disconnect other device workspaces first')
+                fleet_result=self.server.fleet.close()
+                if not fleet_result['ok']:return fleet_result
             with self.server.controller.lock:
                 if require_idle and not idle(self.server.controller.snapshot(),self.server.controller.doctor.snapshot()):
                     return dict(ok=False,error='Disconnect devices and finish active work first')
@@ -255,7 +260,7 @@ class NativeDesktop:
             try:
                 state=self.server.controller.snapshot()
                 busy=state.get('parameter_sync',{}).get('busy') or self.server.controller.doctor.snapshot().get('running')
-                if needs_confirmation(state) or busy:
+                if needs_confirmation(state) or busy or (hasattr(self.server,'_fleet') and self.server.fleet.children):
                     self.window.evaluate_js('window.WujiDesktop?.confirmClose()')
                 else:self.stop_and_close()
             finally:self.closing=False

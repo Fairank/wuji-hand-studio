@@ -153,8 +153,16 @@ class Files:
 class WslController:
     def __init__(self,config,profile_id):
         from device_profiles import profile
-        profile(profile_id);check_ready();self.process=None;self.agent_directory=AGENT
-        self.agent_command=args(['/usr/bin/env','WUJI_HAND_PROFILE='+profile_id,PYTHON,'-u',AGENT+'/console_agent.py'])
+        profile(profile_id);check_ready();self.process=None
+        from controller_bundle import ensure_version
+        source=RESOURCE.parents[1]/'controller/source' if getattr(sys,'frozen',False) else RESOURCE
+        with Files() as remote:
+            self.agent_directory=ensure_version(source,remote)
+        from controller_launch import parameter_environment
+        self.parameters_in_launch=True
+        session=os.environ.get('WUJI_FLEET_ID','')
+        self.agent_command=args(['/usr/bin/env',parameter_environment(),'WUJI_HAND_PROFILE='+profile_id,
+                                 'WUJI_SESSION_ID='+session,PYTHON,'-u',self.agent_directory+'/agent_bootstrap.py'])
     def open_sftp(self):return Files()
     def exec_command(self,command,timeout=None):
         from local_controller import ReadStream

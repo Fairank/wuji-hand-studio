@@ -1,0 +1,44 @@
+/* Shared Windows/macOS content design. Native system material owns outer frame. */
+:root{--wb-ink:#1d1d1f;--wb-sub:#6e6e73;--wb-sheet:rgba(255,255,255,.76);--wb-card:rgba(255,255,255,.88);--wb-line:rgba(75,85,105,.12);--wb-accent:#007aff;--wb-shadow:0 20px 60px rgba(26,42,66,.08),inset 0 1px rgba(255,255,255,.84)}
+html[data-theme=dark]{color-scheme:dark;--wb-ink:#f5f5f7;--wb-sub:#a7a7ad;--wb-sheet:rgba(37,38,43,.74);--wb-card:rgba(43,44,49,.84);--wb-line:rgba(255,255,255,.14);--wb-accent:#7ab8ff;--wb-shadow:0 18px 44px rgba(0,0,0,.23),inset 0 1px rgba(255,255,255,.08)}
+html[data-theme=dark] body{background:#151519;color:var(--wb-ink)}
+html[data-theme=dark] .top,html[data-theme=dark] .directory,html[data-theme=dark] .connection-popover{background:var(--wb-sheet);border-color:var(--wb-line);box-shadow:var(--wb-shadow);color:var(--wb-ink)}
+html[data-theme=dark] .page-area{background:#222329;border-color:var(--wb-line);color:var(--wb-ink)}
+html[data-theme=dark] .panel,html[data-theme=dark] .studio-info,html[data-theme=dark] .desktop-menu-section,html[data-theme=dark] dialog{background:var(--wb-card);border-color:var(--wb-line);color:var(--wb-ink)}
+html[data-theme=dark] .directory a,html[data-theme=dark] .top h1,html[data-theme=dark] .page-heading h2,html[data-theme=dark] button.top-connection-status,html[data-theme=dark] #connection-details{color:var(--wb-ink)}
+html[data-theme=dark] .directory a[aria-current=page]{background:rgba(255,255,255,.13);color:var(--wb-accent);box-shadow:inset 0 0 0 1px var(--wb-line)}
+html[data-theme=dark] .directory a:hover,html[data-theme=dark] .top-connection{background:rgba(255,255,255,.08)}
+html[data-theme=dark] input,html[data-theme=dark] select,html[data-theme=dark] textarea,html[data-theme=dark] button:not(.primary):not(.top-connection-action){background:#303138;color:var(--wb-ink);border-color:var(--wb-line)}
+html[data-theme=dark] a{color:var(--wb-accent)}
+html[data-theme=dark] .hint,html[data-theme=dark] .page-heading p,html[data-theme=dark] .connection-summary{color:var(--wb-sub)}
+html[data-theme=dark] .pose-console,html[data-theme=dark] #pose-console{background:#24252b;color:var(--wb-ink)}
+html[data-theme=dark][data-external-backdrop=true] body{background:transparent}
+html[data-theme=dark][data-external-backdrop=true] .app{background:rgba(20,21,26,.86)}
+.wb-card{padding:20px 22px;border:1px solid var(--wb-line);border-radius:20px;background:var(--wb-card);box-shadow:0 5px 24px rgba(24,36,58,.035);margin:0 0 16px}
+.wb-card h3{font-size:17px;font-weight:600;letter-spacing:-.2px;margin:0 0 6px;color:var(--wb-ink)}
+.wb-card p{color:var(--wb-sub);font-size:13px;line-height:1.55;margin:0 0 12px}
+.wb-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:12px 0}
+.wb-row>label{display:flex;align-items:center;gap:8px;min-width:0}
+.wb-row input[type=number]{width:100px}.wb-row select{min-width:130px}
+.wb-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px}
+.wb-list{display:grid;gap:8px;margin:12px 0}
+.wb-finger-group{border:1px solid var(--wb-line);border-radius:14px;padding:0 10px;background:var(--wb-card)}
+.wb-finger-group>summary{cursor:pointer;padding:12px 6px;font-weight:600;list-style:none}
+.wb-finger-group>summary:after{content:'⌄';float:right;color:var(--wb-sub)}
+.wb-finger-group[open]>summary:after{transform:rotate(180deg)}
+.wb-finger-group>.wb-entry{margin-bottom:7px}
+.wb-entry-head{font-size:12px;color:var(--wb-sub);background:transparent!important;border:0!important}
+.wb-entry{display:grid;grid-template-columns:minmax(150px,1fr) 100px 82px 34px 34px 34px;align-items:center;gap:8px;padding:10px 12px;border:1px solid var(--wb-line);border-radius:14px;background:var(--wb-card)}
+.wb-entry button{min-width:30px;padding:5px}
+.wb-pills{display:flex;flex-wrap:wrap;gap:7px}.wb-pill{display:flex;align-items:center;gap:8px;border:1px solid var(--wb-line);border-radius:12px;padding:7px 10px;background:var(--wb-card)}
+.wb-pill button{margin:0}.wb-note{font-size:12px;color:var(--wb-sub);line-height:1.5}.wb-status{font-size:13px;color:var(--wb-ink);min-height:22px}
+#wb-device-switch{min-height:36px;border-radius:12px;white-space:nowrap;font-weight:600}
+#wb-device-frame{position:fixed;inset:80px 0 0;width:100%;height:calc(100vh - 80px);border:0;background:transparent;z-index:21}
+body.wb-child-active .directory,body.wb-child-active .page-area,body.wb-child-active .app>footer{visibility:hidden;pointer-events:none}
+body.wb-child-active .top{z-index:30}
+html[data-embedded=true] .top{display:none}
+html[data-embedded=true] .directory{top:5px;bottom:5px}
+html[data-embedded=true] .page-area{margin-top:5px;min-height:calc(100vh - 10px)}
+@media(max-width:980px){.wb-entry{grid-template-columns:minmax(120px,1fr) 82px 65px repeat(3,30px);gap:4px;padding:8px}.wb-card{padding:16px}}
+@media(max-width:700px){#wb-device-switch{max-width:96px;overflow:hidden;text-overflow:ellipsis}#wb-device-frame{inset:64px 0 0;height:calc(100vh - 64px)}.wb-entry{grid-template-columns:1fr 80px 65px;gap:8px}.wb-entry button{grid-row:2}}
+@media(prefers-reduced-motion:no-preference){.wb-card,.wb-entry,html .directory a,html button{transition:background-color .18s ease,box-shadow .18s ease,transform .18s ease}html button:active{transform:scale(.985)}}

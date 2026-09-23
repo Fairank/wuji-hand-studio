@@ -29,10 +29,15 @@ class LocalController:
     def __init__(self,config,profile_id):
         if not sys.platform.startswith('linux'):raise ValueError('Local SDK control requires Linux; select remote Linux on this platform')
         self.agent_directory=str(Path(config['agent_directory']).resolve());self.process=None
-        agent=Path(self.agent_directory)/'console_agent.py'
+        bootstrap=Path(self.agent_directory)/'agent_bootstrap.py'
+        agent=bootstrap if bootstrap.is_file() else Path(self.agent_directory)/'console_agent.py'
         if not agent.is_file():raise ValueError('Controller scripts not found in configured directory')
         self.agent_command=[config['python'],'-u',str(agent)]
+        self.parameters_in_launch=agent==bootstrap
         self.environment={**os.environ,'WUJI_HAND_PROFILE':profile_id}
+        if self.parameters_in_launch:
+            from controller_launch import parameter_environment
+            self.environment['WUJI_PARAMETERS_JSON']=parameter_environment().split('=',1)[1]
     def open_sftp(self):return LocalFiles(self.agent_directory)
     def exec_command(self,command,timeout=None):
         if command!=self.agent_command or self.process is not None:raise ValueError('Only the configured controller process may be started')

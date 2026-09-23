@@ -63,7 +63,7 @@ Name: "zh"; MessagesFile: "{#ZhIsl}"
 WebView2Error=Microsoft Edge WebView2 Runtime is required, but it was not detected and its setup did not complete (code %1). Check your network connection, install the WebView2 Runtime from Microsoft, then run this installer again.%n%n本程序需要 Microsoft Edge WebView2 运行时，但系统中未检测到，且其安装未能完成（代码 %1）。请检查网络连接，从微软官方安装 WebView2 运行时后，再重新运行本安装程序。
 
 [Tasks]
-Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
+Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
 
 [Files]
 ; Bootstrap first (own solid block) so ExtractTemporaryFile stays fast; it is never copied to the app folder.
@@ -84,8 +84,8 @@ Source: "{#ProjectRoot}\src\official_data\*"; DestDir: "{app}\controller\source\
 Source: "{#ProjectRoot}\controller\README.md"; DestDir: "{app}\controller"; Flags: ignoreversion
 
 [Icons]
-Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExe}"; WorkingDir: "{app}"
-Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; WorkingDir: "{app}"; Tasks: desktopicon
+Name: "{autoprograms}\灵巧手工作台"; Filename: "{app}\{#AppExe}"; WorkingDir: "{app}"
+Name: "{autodesktop}\灵巧手工作台"; Filename: "{app}\{#AppExe}"; WorkingDir: "{app}"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\{#AppExe}"; WorkingDir: "{app}"; Description: "{cm:LaunchProgram,{#StringChange(AppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent unchecked

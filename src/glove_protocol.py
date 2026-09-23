@@ -8,7 +8,7 @@ def validate(c):
     if not isinstance(c,dict) or c.get('name') not in COMMANDS:
         raise ValueError('Unknown glove operation')
     allowed={'name'}
-    if c['name']=='glove_open':allowed|={'serial','user_id','timeout_ms'}
+    if c['name']=='glove_open':allowed|={'serial','user_id','timeout_ms','retarget'}
     if c['name']=='glove_prepare':allowed|={'address'}
     if c['name']=='glove_follow':allowed|={'workspace_clear','lease'}
     if c['name']=='glove_keepalive':allowed|={'lease'}
@@ -17,6 +17,9 @@ def validate(c):
         if key in c and (not isinstance(c[key],str) or not re.fullmatch(r'[A-Za-z0-9_.-]{1,100}',c[key])):
             raise ValueError('Invalid '+key)
     if c['name']=='glove_open':
+        if 'retarget' in c:
+            from retarget_settings import validate as validate_retarget
+            validate_retarget(c['retarget'])
         if not c.get('serial'):raise ValueError('Select a discovered Wuji Glove')
         if type(c.get('timeout_ms')) is not int or not 100<=c['timeout_ms']<=2000:
             raise ValueError('Glove timeout must be 100–2000 ms')

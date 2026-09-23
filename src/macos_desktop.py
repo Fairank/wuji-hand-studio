@@ -101,10 +101,14 @@ class MacDesktop(NativeDesktop):
         import webbrowser
         self.start_service()
         origin = self.origin
+        host=self
         class WorkbenchBrowserDelegate(cocoa.BrowserView.BrowserDelegate):
             def webView_decidePolicyForNavigationAction_decisionHandler_(self, view, action, handler):
                 url = str(action.request().URL().absoluteString())
-                if url == 'about:blank' or same_origin(url, origin):
+                parts=urlsplit(url)
+                child=parts.scheme=='http' and parts.hostname=='127.0.0.1' and any(
+                    row['port']==parts.port for row in host.server._fleet.children.values()) if hasattr(host.server,'_fleet') else False
+                if url == 'about:blank' or same_origin(url, origin) or child:
                     super().webView_decidePolicyForNavigationAction_decisionHandler_(view, action, handler)
                 else:
                     handler(0)
@@ -134,6 +138,9 @@ class MacDesktop(NativeDesktop):
         try:
             webview.start(gui='cocoa', private_mode=False, storage_path=str(DATA / 'webview-macos'))
         finally:
+            if hasattr(self.server,'_fleet'):
+                result=self.server.fleet.close()
+                if not result['ok']:logging.error('Device workspace close unconfirmed: %s',result['error'])
             self.server.shutdown()
             self.server.server_close()
 

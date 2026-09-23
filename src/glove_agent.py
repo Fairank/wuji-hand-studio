@@ -7,6 +7,7 @@ import collections
 import copy
 import math
 import queue
+import sys
 import threading
 import time
 
@@ -62,6 +63,9 @@ def worker_glove(requests,events):
     hand_state={};hand_error='';manager=None;previous_user=None
     devices=[];users=[];current=None;state='starting';message='正在加载官方SDK'
     glove_sn='';last_emit=0.;next_map=0.;last_source_seq=None
+    from retarget_settings import OutputMapping, defaults
+    mapping=OutputMapping(defaults())
+    sdk_q=None;glove_ownership=None
     try:
         import numpy as np
         import wuji_sdk as sdk
@@ -95,11 +99,16 @@ def worker_glove(requests,events):
                                 raise ValueError('手套左右与工作台所选型号不符 / Glove side differs from profile')
                             model=sdk.HandModel.WujiHand2 if selected['generation']=='hand2' else sdk.HandModel.WujiHand
                             side=sdk.Handedness.Left if selected['side']=='left' else sdk.Handedness.Right
+                            if sys.platform.startswith('linux'):
+                                from device_ownership import DeviceOwnership
+                                glove_ownership=DeviceOwnership(c['serial'])
                             session=sdk.RetargetSession.for_hand(model,side=side)
                             sub=candidate.hand_skeleton().subscribe()
                         except Exception:
+                            if glove_ownership:glove_ownership.close();glove_ownership=None
                             candidate.disconnect();raise
                         glove=candidate;glove_sn=c['serial'];source=GloveSource(c['timeout_ms'])
+                        mapping=OutputMapping(c.get('retarget',defaults()));last_source_seq=None
                         state='receiving';message='已连接手套，机械手未启用 / Glove connected; hand not enabled'
                     elif name=='glove_prepare':
                         if glove is None:raise ValueError('先连接手套 / Connect glove first')
@@ -128,7 +137,8 @@ def worker_glove(requests,events):
                         if last_source_seq is None or seq>last_source_seq:
                             kp=np.asarray([j.pose.position for j in frame.joints],dtype=np.float32)
                             if kp.shape!=(21,3) or not np.isfinite(kp).all():raise ValueError('Expected 21 finite keypoints')
-                            q=np.asarray(session.step(kp),dtype=float).reshape(-1).tolist()
+                            sdk_q=np.asarray(session.step(kp),dtype=float).reshape(-1).tolist()
+                            q=mapping.apply(sdk_q,time.monotonic())
                             if source.update(q,seq,stamp,time.monotonic()):last_source_seq=seq
                 except Exception as e:
                     source.invalidate(str(e));message=str(e)
@@ -145,6 +155,8 @@ def worker_glove(requests,events):
             now=time.monotonic()
             if now-last_emit>=.05:
                 snapshot=source.snapshot(now)
+                snapshot['sdk_q']=sdk_q
+                snapshot['retarget']=mapping.settings
                 hw=copy.deepcopy(hand_state.get('hardware',{}))
                 feedback=copy.deepcopy({k:hand_state.get(k) for k in ('latest','device_id','joint_rates','metrics','connection')})
                 if feedback.get('latest'):
@@ -167,6 +179,7 @@ def worker_glove(requests,events):
         if glove:
             try:glove.disconnect()
             except Exception:pass
+        if glove_ownership:glove_ownership.close()
         if manager and previous_user and (not hand_thread or not hand_thread.is_alive()):
             try:manager.switch_user(previous_user['user_id'])
             except Exception as e:events.put(dict(type='glove_notice',message='用户恢复未完成：'+str(e)))

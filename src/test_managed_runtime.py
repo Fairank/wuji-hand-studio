@@ -18,7 +18,8 @@ class ManagedRuntimeTests(unittest.TestCase):
         with patch('bridge_config.sys.platform','darwin'):
             with self.assertRaises(ValueError):validate(dict(DEFAULT,mode='wsl'))
     def test_wrong_controller_command_cannot_execute(self):
-        with patch.object(runtime,'check_ready'),patch.object(runtime.sys,'platform','win32'):
+        with patch.object(runtime,'check_ready'),patch.object(runtime.sys,'platform','win32'), \
+             patch('controller_bundle.ensure_version',return_value='/opt/hand-workbench/code/test'):
             client=runtime.WslController({},'hand2_left')
             with patch.object(runtime.subprocess,'Popen') as launch:
                 with self.assertRaises(ValueError):client.exec_command(['wsl.exe','--unregister',runtime.NAME])

@@ -60,6 +60,9 @@ class ParameterStore:
         return source
 
     def transfer(self,client,source):
+        if getattr(client,'parameters_in_launch',False):
+            parse_parameters(source)
+            return # The next worker gets this workspace's immutable launch snapshot.
         REMOTE=client.agent_directory+'/motion_parameters.py'
         raw=source.encode('utf-8')
         with client.open_sftp() as sftp:

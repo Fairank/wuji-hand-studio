@@ -56,7 +56,21 @@ def ssh_client(c):
             allow_agent=password is None,look_for_keys=password is None)
         client.agent_directory=c['agent_directory'].rstrip('/')
         from device_profiles import selected_profile
-        client.agent_command='env WUJI_HAND_PROFILE='+shlex.quote(selected_profile()['id'])+' '+shlex.quote(c['python'])+' -u '+shlex.quote(client.agent_directory+'/console_agent.py')
+        from controller_launch import parameter_environment
+        try:
+            sftp=client.open_sftp()
+            try:sftp.stat(client.agent_directory+'/agent_bootstrap.py');bootstrap=True
+            except IOError:bootstrap=False
+            finally:sftp.close()
+        except OSError:
+            bootstrap=False
+        if os.environ.get('WUJI_FLEET_ID') and not bootstrap:
+            raise ValueError('多手 SSH 控制端需要新版独立启动程序 / Update SSH controller for multi-hand use')
+        client.parameters_in_launch=bootstrap
+        if bootstrap:
+            client.agent_command='env '+shlex.quote(parameter_environment())+' WUJI_HAND_PROFILE='+shlex.quote(selected_profile()['id'])+' '+shlex.quote(c['python'])+' -u '+shlex.quote(client.agent_directory+'/agent_bootstrap.py')
+        else:
+            client.agent_command='env WUJI_HAND_PROFILE='+shlex.quote(selected_profile()['id'])+' '+shlex.quote(c['python'])+' -u '+shlex.quote(client.agent_directory+'/console_agent.py')
         client.get_transport().set_keepalive(10)
         return client
     except Exception:
