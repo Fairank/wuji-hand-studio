@@ -54,6 +54,9 @@
   const pose=get('pose-console');const feedbackDock=get('visual-slot');
   const parking=document.createElement('div');parking.hidden=true;parking.id='viewer-parking';app.append(parking);parking.append(pose);
   oldMain.remove();bottom.remove();
+  // The reading canvas scrolls on its own so page titles never pass beneath
+  // the translucent desktop toolbar. Keep the original footer inside it.
+  const footer=app.querySelector(':scope > footer');if(footer)area.append(footer);
   const status=document.createElement('a');status.id='shell-connection';status.href='#connection';status.title='前往连接与校准';status.textContent='未连接';document.querySelector('.top-actions').prepend(status);
   const connectLink=document.createElement('a');connectLink.href='#connection';connectLink.className='connection-shortcut';connectLink.textContent='连接设备';document.querySelector('.top-actions').append(connectLink);
   get('runtime-mode').hidden=true;
@@ -68,6 +71,7 @@
     if(!window.wujiFloating?.isFloating())(['motion','library'].includes(current)?motionDock:current==='feedback'?feedbackDock:current==='glove'?get('glove-viewer-dock'):parking).append(pose);
     document.title=(window.WujiLocale?window.WujiLocale.text(current):pages.find(x=>x[0]===current)[1])+' · Hand Workbench';
     window.dispatchEvent(new CustomEvent('workspace-page',{detail:current}));
+    area.scrollTop=0;
     window.scrollTo({top:0,behavior:'instant'});
   }
   nav.addEventListener('click',e=>{const a=e.target.closest('a');if(!a)return;if(document.body.classList.contains('presentation'))get('presentation').click();});

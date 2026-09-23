@@ -10,7 +10,8 @@ from PIL import Image
 def crop_tiles(frame,rect,scale=1.):
     """rect is WebView's physical-pixel bounds relative to the capture source."""
     x,y,w,h=rect;scale=max(.75,min(4.,float(scale)))
-    edge=max(10,round(20*scale));pad=round(14*scale)
+    # Match the visible 17 CSS-pixel perimeter; never paint over the canvas.
+    edge=max(10,round(17*scale));pad=round(14*scale)
     if w<200 or h<200 or w>12000 or h>8000:return []
     specs=[('top',0,0,w,edge),('bottom',0,h-edge,w,edge),
            ('left',0,edge,edge,h-2*edge),('right',w-edge,edge,edge,h-2*edge)]

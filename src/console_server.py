@@ -51,6 +51,8 @@ class Controller:
         self.doctor=Doctor()
         from glove_bridge import GloveBridge
         self.glove=GloveBridge(factory)
+        from calibration_cli import CalibrationCLI
+        self.calibration=CalibrationCLI()
         from program_runner import ProgramRunner
         self.program=ProgramRunner(self)
         self.client = self.stdin = None
@@ -178,6 +180,8 @@ class Controller:
     def _action(self, command):
         if not isinstance(command,dict):raise ValueError('Invalid request')
         name=command.get('name','')
+        if self.calibration.run['running'] and name in {'program_start','connect','hardware_start','hardware_trial','hardware_probe','demo_start','glove_scan','glove_open','glove_prepare','glove_follow','doctor_run','doctor_version'}:
+            raise ValueError('Finish hand-model calibration first / 请先结束手部模型标定')
         if name=='session_keepalive':
             if self.program.lease:self.program.keepalive(self.program.lease)
             if self.hardware_lease and self.state['hardware'].get('active'):
@@ -201,7 +205,18 @@ class Controller:
         if name=='session_close':
             from desktop_lifecycle import close_sessions
             if hasattr(self,'program'):self.program.stop()
+            self.calibration.cancel()
             return close_sessions(self)
+        if name=='calibration_cancel':
+            return dict(calibration=self.calibration.cancel())
+        if name in {'calibration_profile_create','calibration_profile_switch','calibration_start'}:
+            if self.program.snapshot()['active'] or self.glove.busy or self.state['connection']!='disconnected' or self.state['hardware'].get('active') is not False or self.doctor.snapshot()['running']:
+                raise ValueError('End glove, hand and diagnostic sessions before calibration / 标定前请结束手套、机械手和诊断会话')
+            if name=='calibration_profile_create':
+                return dict(calibration=self.calibration.profile('create',command.get('profile')))
+            if name=='calibration_profile_switch':
+                return dict(calibration=self.calibration.profile('switch',command.get('profile')))
+            return dict(calibration=self.calibration.start(command.get('side'),command.get('serial'),command.get('replace',False)))
         if name=='retarget_save':
             if self.glove.busy:raise ValueError('先断开手套再保存映射 / Disconnect glove before changing mapping')
             from retarget_settings import validate
@@ -568,6 +583,8 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == '/api/retarget':
             from retarget_settings import load
             return self.reply(200,load(self.server.controller.reports.parent/'retargeting.json'))
+        if url.path == '/api/calibration':
+            return self.reply(200,self.server.controller.calibration.snapshot(refresh=parse_qs(url.query).get('refresh')==['1']))
         if url.path == '/api/desktop':
             host=getattr(self.server,'desktop',None)
             return self.reply(200,host.info() if host else dict(native=False,api_version=1,operations=[]))
@@ -626,9 +643,9 @@ class Handler(BaseHTTPRequestHandler):
         assets.update({'/workspace.js':('workspace.js','text/javascript; charset=utf-8'),
             '/workspace.css':('workspace.css','text/css; charset=utf-8'),
             '/parameters.js':('parameters.js','text/javascript; charset=utf-8')})
-        for name in ('studio.js','locale.js','floating_panel.js','viewer.js','action_picker.js','brand.js','installation.js','profiles.js','doctor.js','glove.js','desktop_shell.js','external_refraction.js','device_network.js','connection_toolbar.js','workbench_upgrade.js'):
+        for name in ('studio.js','locale.js','floating_panel.js','viewer.js','action_picker.js','brand.js','installation.js','profiles.js','doctor.js','glove.js','desktop_shell.js','external_refraction.js','device_network.js','connection_toolbar.js','workbench_upgrade.js','connection_hub.js'):
             assets['/'+name]=(name,'text/javascript; charset=utf-8')
-        for name in ('studio.css','floating_panel.css','glass.css','glove.css','desktop_glass.css','desktop_refinement.css','glass_refresh.css','workbench_upgrade.css'):
+        for name in ('studio.css','floating_panel.css','glass.css','glove.css','desktop_glass.css','desktop_refinement.css','glass_refresh.css','workbench_upgrade.css','connection_hub.css'):
             assets['/'+name]=(name,'text/css; charset=utf-8')
         assets['/viewer']=('viewer.html','text/html; charset=utf-8')
         assets['/favicon.ico']=('favicon.ico','image/x-icon')

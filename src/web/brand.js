@@ -1,9 +1,9 @@
 (function(){
   const heading=document.querySelector('.top h1');
   if(heading){const logo=document.createElement('img');logo.src='/wuji-logo.png';logo.alt='WUJI';logo.className='studio-brand';heading.before(logo);}
-  const note=document.createElement('span');note.className='unofficial-notice';document.querySelector('.app>footer')?.prepend(note);
+  const footer=document.querySelector('.page-area>footer,.app>footer');
+  const note=document.createElement('span');note.className='unofficial-notice';footer?.prepend(note);
   const rail=document.createElement('span');rail.className='nav-brand-note';document.querySelector('.directory')?.append(rail);
-  const footer=document.querySelector('.app>footer');
   const disclaimer=document.createElement('span');
   for(const child of [...footer.childNodes])if(child.nodeType===Node.TEXT_NODE)child.remove();
   footer.append(disclaimer);

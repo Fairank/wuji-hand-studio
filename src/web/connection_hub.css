@@ -1,0 +1,46 @@
+/* The reading surface scrolls within the window; navigation stays clear. */
+@media(min-width:901px){
+ html,body,.app{height:100%;overflow:hidden}
+ .top{z-index:30}
+ .directory{z-index:20}
+ .page-area{position:fixed;top:90px;right:var(--dg-frame);bottom:var(--dg-frame);left:var(--dg-rail);box-sizing:border-box;min-height:0!important;margin:0!important;overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable;scroll-padding-top:24px}
+ html[data-embedded=true] .page-area{top:5px;bottom:5px}
+ .page-area>footer{margin:36px 0 4px}
+ .viewer-dock{top:18px}
+}
+@media(max-width:900px){html,body,.app{height:auto;overflow:visible}.page-area{position:relative;overflow:visible}.page-area>footer{margin-top:28px}}
+
+/* Native backdrop or opt-in refraction supplies the outer material. Fake strips
+   previously placed a pale obstacle across the four sides. */
+:root{--dg-frame:17px}
+.glass-edge{display:none!important}
+html .top{inset:var(--dg-frame) var(--dg-frame) auto;height:60px;min-height:60px;border-radius:18px}
+html .directory{top:90px;left:var(--dg-frame);bottom:var(--dg-frame);width:calc(var(--dg-rail) - 23px)}
+.page-area{border-radius:19px;box-shadow:none}
+html[data-external-backdrop=true] .app{background:transparent}
+@media(max-width:900px){html .top{position:relative;inset:auto;margin:var(--dg-frame) var(--dg-frame) 0;width:calc(100% - 2*var(--dg-frame));height:auto;min-height:60px}html .directory{position:relative;inset:auto;width:auto;margin:8px var(--dg-frame)}.page-area{margin:8px var(--dg-frame) var(--dg-frame)!important}}
+@media(forced-colors:active){.top,.directory,.page-area{border:1px solid CanvasText}}
+
+.hub-tabs{display:flex;gap:4px;padding:5px;margin:0 0 22px;border-radius:16px;background:var(--wb-group);width:max-content;max-width:100%;overflow-x:auto;scrollbar-width:thin}
+body .hub-tabs button{border:0;box-shadow:none;white-space:nowrap;background:transparent;color:var(--wb-sub);min-height:38px;padding:8px 15px;border-radius:12px;font-size:13px}
+body .hub-tabs button[aria-selected=true]{background:var(--wb-card);box-shadow:0 1px 5px rgba(0,0,0,.1);color:var(--wb-ink);font-weight:600}
+.hub-section{min-width:0;animation:hw-panel-in .2s var(--hw-ease)}
+.hub-section>.panel,.hub-section>.folded-panel{max-width:none}
+.hub-intro{margin:0 0 20px}.hub-intro h3{margin:0 0 5px;font-size:17px}.hub-intro p{color:var(--wb-sub);font-size:13px;margin:8px 0 0;max-width:72ch}
+.hub-badges,.hub-legend,.hub-calib-state{display:flex;gap:9px;flex-wrap:wrap}
+.hub-badges span,.hub-legend span,.hub-calib-state span{border:1px solid var(--wb-line);border-radius:999px;padding:6px 11px;background:var(--wb-card);font-size:12px;color:var(--wb-ink)}
+.hub-calib-state{margin:18px 0}.hub-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin:18px 0}
+.hub-fields label{min-width:0;display:flex;flex-direction:column;gap:6px;color:var(--wb-sub);font-size:13px}.hub-fields :is(input,select){min-width:0;width:100%}
+.hub-calibration{max-width:780px}.hub-calibration .wb-actions{margin:12px 0 20px}.hub-calibration #hub-calib-status{font-size:13px}.hub-calibration #hub-calib-step{font-size:13px;color:var(--wb-sub)}
+.hub-replace{display:flex;align-items:center;gap:9px;padding:10px 0;color:var(--wb-ink);font-size:13px}
+.hub-replace input{flex:none}
+.hub-skeleton{padding:16px;margin-bottom:16px}.hub-skeleton-heading{display:flex;justify-content:space-between;align-items:center;gap:12px}.hub-skeleton-heading h3{margin:0}.hub-skeleton-heading span{color:var(--wb-sub);font-size:12px}
+.hub-skeleton:not(.is-live) #hub-skeleton-svg{display:none}
+.hub-refraction-setting{margin-top:18px;padding:15px 16px;border:1px solid var(--wb-line);border-radius:14px;background:var(--wb-group)}
+.hub-refraction-setting label{display:flex;align-items:center;justify-content:space-between;gap:14px;color:var(--wb-ink);font-weight:600}.hub-refraction-setting p{margin:7px 0 0;font-size:12px}
+#hub-skeleton-svg{display:block;width:min(100%,310px);height:280px;margin:6px auto 0;background:var(--wb-group);border-radius:16px}
+#hub-skeleton-lines line{stroke:#1986dc;stroke-width:3;stroke-linecap:round;opacity:.85}#hub-skeleton-points circle{fill:#005db3;stroke:var(--wb-card);stroke-width:1}
+#hub-visual .glove-layout{align-items:start}#hub-visual .glove-display{min-width:0}#hub-visual .glove-controls{max-width:none}
+#hub-retarget>.wb-card{max-width:900px}
+@media(max-width:700px){.hub-fields{grid-template-columns:1fr}.hub-tabs{width:100%}.hub-section{animation:none}}
+@media(prefers-reduced-motion:reduce){.hub-section{animation:none}}

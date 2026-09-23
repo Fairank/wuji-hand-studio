@@ -65,7 +65,7 @@ def worker_glove(requests,events):
     glove_sn='';last_emit=0.;next_map=0.;last_source_seq=None
     from retarget_settings import OutputMapping, defaults
     mapping=OutputMapping(defaults())
-    sdk_q=None;glove_ownership=None
+    sdk_q=None;latest_kp=None;glove_ownership=None
     try:
         import numpy as np
         import wuji_sdk as sdk
@@ -137,6 +137,7 @@ def worker_glove(requests,events):
                         if last_source_seq is None or seq>last_source_seq:
                             kp=np.asarray([j.pose.position for j in frame.joints],dtype=np.float32)
                             if kp.shape!=(21,3) or not np.isfinite(kp).all():raise ValueError('Expected 21 finite keypoints')
+                            latest_kp=kp.tolist()
                             sdk_q=np.asarray(session.step(kp),dtype=float).reshape(-1).tolist()
                             q=mapping.apply(sdk_q,time.monotonic())
                             if source.update(q,seq,stamp,time.monotonic()):last_source_seq=seq
@@ -156,6 +157,7 @@ def worker_glove(requests,events):
             if now-last_emit>=.05:
                 snapshot=source.snapshot(now)
                 snapshot['sdk_q']=sdk_q
+                snapshot['keypoints']=latest_kp if snapshot['fresh'] else None
                 snapshot['retarget']=mapping.settings
                 hw=copy.deepcopy(hand_state.get('hardware',{}))
                 feedback=copy.deepcopy({k:hand_state.get(k) for k in ('latest','device_id','joint_rates','metrics','connection')})
