@@ -20,7 +20,7 @@ This release reorganizes the interface. It does not modify gains, trajectories, 
 
 ## Delegation and package status
 
-The local Claude CLI supplied the generic dialog component using actual model `claude-opus-5-5`, effort `max`. The main assistant reviewed and integrated it; it has no device or network operations. Only public, bounded specifications were shared. A separate bilingual documentation task is recorded on completion.
+The local Claude CLI supplied the generic dialog component using actual model `claude-opus-5-5`, effort `max`. The main assistant reviewed and integrated it; it has no device or network operations. Only public, bounded specifications were shared. A separate optional bilingual-documentation call reported the same model but produced no final answer after more than 30 minutes; it was stopped and no output was adopted. Release notes were independently completed and reviewed. No Claude job is left running for this update.
 
 Windows executable and installer were built successfully. The packaged service passed the same two-session complete/stop/expiry and workspace-move checks. Nine served UI assets match the reviewed source in both packaged and installed services. Final locale and layout JavaScript are external bundle assets; these were refreshed after the language regression fix and before the final installer build.
 
