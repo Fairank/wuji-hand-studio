@@ -20,7 +20,7 @@ class ProfilesTests(unittest.TestCase):
         hand=SimpleNamespace(serial_number='TEST',handedness_name=lambda:side,
             joint_states=lambda:SimpleNamespace(subscribe=lambda:subscription),
             set_all_effort_limit=lambda value:calls.append('limit'),enable=enable,
-            disable=lambda:calls.append('disable'))
+            disable=lambda:calls.append('disable'),disconnect=lambda:calls.append('disconnect'))
         manager=SimpleNamespace(scan=lambda:[SimpleNamespace(device_type='Hand1',address='127.0.0.1',sn='TEST')],
             connect=lambda **kwargs:hand,disconnect_all=lambda:calls.append('disconnect'))
         sdk=SimpleNamespace(SdkManager=SimpleNamespace(instance=lambda:manager),DeviceType=SimpleNamespace(WujiHand='Hand1'),JointCommand=object,LowPass=object)

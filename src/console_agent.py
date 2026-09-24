@@ -151,7 +151,8 @@ def worker_auto(address, serial, requests, events):
             owned_hand = hand; hand = None
             worker_first(address, requests, events, prepared_hand=owned_hand)
         else:
-            owned_hand, owned_route = hand, route;hand = route = ownership = None
+            # Keep the ownership descriptor alive until the worker returns.
+            owned_hand, owned_route = hand, route;hand = route = None
             worker(address, requests, events, prepared=(owned_hand, owned_route))
     except SelectionRequired as error:
         events.put(dict(type='selection', devices=error.devices, message=str(error)))

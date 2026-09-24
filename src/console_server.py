@@ -52,7 +52,9 @@ class Controller:
         from glove_bridge import GloveBridge
         self.glove=GloveBridge(factory)
         from calibration_cli import CalibrationCLI
-        self.calibration=CalibrationCLI()
+        self.calibration=CalibrationCLI(self.reports.parent/'calibration_reports')
+        from retarget_workspace import RetargetWorkspace
+        self.retarget=RetargetWorkspace(self.reports.parent)
         from program_runner import ProgramRunner
         self.program=ProgramRunner(self)
         self.client = self.stdin = None
@@ -124,6 +126,8 @@ class Controller:
             result['parameter_sync']=dict(self.parameters.sync_status)
             result['glove']=self.glove.snapshot()
             result['program']=self.program.snapshot()
+            with self.calibration.lock:
+                result['calibration']={k:self.calibration.run.get(k) for k in ('running','status','side','user')}
             return result
 
     def parameter_snapshot(self):
@@ -217,17 +221,36 @@ class Controller:
             if name=='calibration_profile_switch':
                 return dict(calibration=self.calibration.profile('switch',command.get('profile')))
             return dict(calibration=self.calibration.start(command.get('side'),command.get('serial'),command.get('replace',False)))
-        if name=='retarget_save':
-            if self.glove.busy:raise ValueError('先断开手套再保存映射 / Disconnect glove before changing mapping')
+        if name=='retarget_context':
+            return dict(mapping=self.retarget.context(self.state['device_profile']))
+        if name=='retarget_binding_save':
+            if self.glove.snapshot()['connection'] not in ('disconnected','ready','error'):
+                raise ValueError('先断开手套预览再改变配对 / Disconnect preview before changing pairing')
+            return dict(mapping=self.retarget.select(command.get('binding'),self.state['device_profile']))
+        if name in {'retarget_save','retarget_preset_save','retarget_preset_delete','retarget_apply'}:
             from retarget_settings import validate
-            values=validate(command.get('values'))
-            path=self.reports.parent/'retargeting.json'
-            path.parent.mkdir(parents=True,exist_ok=True)
-            staged=path.with_suffix('.pending');staged.write_text(json.dumps(values),encoding='utf-8');staged.replace(path)
-            return dict(retarget=values)
+            context=self.retarget.context(self.state['device_profile'])
+            if name=='retarget_preset_save':self.retarget.library.save_preset(command.get('preset'),validate(command.get('values')))
+            elif name=='retarget_preset_delete':
+                try:self.retarget.library.delete_preset(command.get('preset'))
+                except KeyError:raise ValueError('Preset no longer exists / 预设已不存在，请刷新') from None
+            elif name=='retarget_apply':
+                g=self.glove.snapshot()
+                if g.get('connection')!='receiving' or (g.get('feedback') or {}).get('device_id') or self.glove.lease:
+                    raise ValueError('只在未连接机械手的手套预览中应用；已有反馈时请重新连接 / Apply in glove-only preview or reconnect')
+                self.glove.action(dict(name='glove_retarget',retarget=context['settings']))
+            else:
+                self.retarget.library.save(context['binding'],validate(command.get('values')),command.get('revision'))
+            return dict(mapping=self.retarget.context(self.state['device_profile']))
         if name=='glove_open':
-            from retarget_settings import load
-            command=dict(command,retarget=load(self.reports.parent/'retargeting.json'))
+            from glove_protocol import validate
+            validate(command)
+            context=self.retarget.open_glove(command,self.state['device_profile'],self.glove.snapshot().get('user') or {})
+            command=dict(command,retarget=context['settings'])
+        if name=='glove_prepare':
+            serial=self.retarget.context(self.state['device_profile'])['binding']['hand_serial']
+            if serial and command.get('serial') and command['serial']!=serial:raise ValueError('Hand differs from saved pairing / 机械手与保存配对不符')
+            command=dict(command,serial=serial or command.get('serial',''))
         if getattr(self,'desktop_closing',False) and name not in {'disconnect','hardware_stop','glove_stop','glove_disconnect','glove_keepalive','hardware_keepalive','demo_stop'}:
             raise ValueError('工作台正在退出 / Workbench is closing')
         if name=='hardware_stop' and self.glove.busy:
@@ -580,9 +603,13 @@ class Handler(BaseHTTPRequestHandler):
         url = urlsplit(self.path)
         if url.path == '/api/fleet':
             return self.reply(200,dict(devices=self.server.fleet.snapshot() if not os.environ.get('WUJI_FLEET_PARENT') else [],embedded=bool(os.environ.get('WUJI_FLEET_PARENT'))))
-        if url.path == '/api/retarget':
-            from retarget_settings import load
-            return self.reply(200,load(self.server.controller.reports.parent/'retargeting.json'))
+        if url.path in {'/api/retarget','/api/retarget/context'}:
+            c=self.server.controller
+            try:
+                with c.lock:result=c.retarget.context(c.state['device_profile'])
+            except (ValueError,OSError) as error:
+                return self.reply(409,dict(error=str(error)))
+            return self.reply(200,result if url.path.endswith('/context') else result['settings'])
         if url.path == '/api/calibration':
             return self.reply(200,self.server.controller.calibration.snapshot(refresh=parse_qs(url.query).get('refresh')==['1']))
         if url.path == '/api/desktop':
@@ -643,9 +670,9 @@ class Handler(BaseHTTPRequestHandler):
         assets.update({'/workspace.js':('workspace.js','text/javascript; charset=utf-8'),
             '/workspace.css':('workspace.css','text/css; charset=utf-8'),
             '/parameters.js':('parameters.js','text/javascript; charset=utf-8')})
-        for name in ('studio.js','locale.js','floating_panel.js','viewer.js','action_picker.js','brand.js','installation.js','profiles.js','doctor.js','glove.js','desktop_shell.js','device_network.js','connection_toolbar.js','workbench_upgrade.js','connection_hub.js','settings.js'):
+        for name in ('studio.js','locale.js','floating_panel.js','viewer.js','action_picker.js','brand.js','installation.js','profiles.js','doctor.js','glove.js','desktop_shell.js','device_network.js','connection_toolbar.js','workbench_upgrade.js','connection_hub.js','calibration_guide.js','settings.js'):
             assets['/'+name]=(name,'text/javascript; charset=utf-8')
-        for name in ('studio.css','floating_panel.css','glass.css','glove.css','desktop_glass.css','desktop_refinement.css','glass_refresh.css','workbench_upgrade.css','connection_hub.css'):
+        for name in ('studio.css','floating_panel.css','glass.css','glove.css','desktop_glass.css','desktop_refinement.css','glass_refresh.css','workbench_upgrade.css','connection_hub.css','calibration_guide.css'):
             assets['/'+name]=(name,'text/css; charset=utf-8')
         assets['/viewer']=('viewer.html','text/html; charset=utf-8')
         assets['/favicon.ico']=('favicon.ico','image/x-icon')
@@ -684,6 +711,9 @@ class Handler(BaseHTTPRequestHandler):
             elif payload.get('name')=='fleet_remove':
                 if os.environ.get('WUJI_FLEET_PARENT'):raise ValueError('Open device manager in the main workspace')
                 result=self.server.fleet.remove(payload.get('id'))
+            elif payload.get('name')=='fleet_rename':
+                if os.environ.get('WUJI_FLEET_PARENT'):raise ValueError('Open device manager in the main workspace')
+                result=dict(device=self.server.fleet.rename(payload.get('id'),payload.get('label')))
             elif payload.get('name')=='fleet_keepalive':
                 self.server.controller.action(dict(name='session_keepalive'))
                 result=dict(errors=self.server.fleet.heartbeat())

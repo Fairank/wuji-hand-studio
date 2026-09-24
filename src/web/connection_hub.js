@@ -43,8 +43,10 @@
  <p id="hub-calib-status" role="status" aria-live="polite"></p><p id="hub-calib-step"></p>
  <a href="https://docs.wuji.tech/docs/en/wuji-studio/latest/calibration/" target="_blank" rel="noopener" id="hub-calib-doc"></a>`;
  sections.calibration.append(calib);
+ const guideHost=document.createElement('div');guideHost.id='hub-calibration-guide';calib.append(guideHost);
+ const guide=window.CalibrationGuide?.mount(guideHost,{language:()=>window.WujiLocale?.lang||'zh',onPreview:()=>select('visual')});
  window.WujiConnectionHub={show(key){location.hash='#connection';ws.showPage();select(key)}};
- let active='device',calibration=null,consoleState=null,busy=false,lastError='';
+ let active='device',calibration=null,consoleState=null,busy=false,refreshPending=false,lastError='',renderedCalibration=null,renderedForm='';
  function select(key){if(!sections[key])key='device';active=key;for(const [name,section] of Object.entries(sections)){
    section.hidden=name!==key;const button=$('hub-tab-'+name);button.setAttribute('aria-selected',String(name===key));button.tabIndex=name===key?0:-1;
   }
@@ -77,13 +79,17 @@
   $('hub-glove-badge').textContent=t('手套：','Glove: ')+(glove==='receiving'?t('接收中','Receiving'):glove==='ready'?t('已发现','Discovered'):glove==='connecting'?t('连接中','Connecting'):glove==='disconnected'?t('离线','Offline'):t('未知','Unknown'));
   draw(consoleState?.glove?.stream?.fresh?consoleState.glove.stream.keypoints:null);
  }
- async function refresh(force=false){if(busy||(!force&&active!=='calibration'))return;try{const response=await fetch('/api/calibration'+(force?'?refresh=1':''));if(!response.ok)throw Error('Calibration status unavailable');calibration=await response.json();renderCalibration()}catch(error){lastError=error.message;renderCalibration()}}
+ async function refresh(force=false){if(busy||refreshPending||(!force&&active!=='calibration'))return;refreshPending=true;try{const response=await fetch('/api/calibration'+(force?'?refresh=1':''));if(!response.ok)throw Error('Calibration status unavailable');calibration=await response.json();renderCalibration()}catch(error){lastError=error.message;renderCalibration()}finally{refreshPending=false}}
  async function action(name,extra={}){if(busy)return;busy=true;lastError='';renderCalibration();try{
    const token=consoleState?.csrf;if(!token)throw Error(t('工作台服务未就绪','Workbench service not ready'));
    const response=await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json','X-Console-Token':token},body:JSON.stringify({name,...extra})});const data=await response.json();if(!response.ok)throw Error(data.error||'Action failed');
    calibration=data.calibration||calibration;if(name==='calibration_start')$('hub-replace').checked=false;
   }catch(error){lastError=error.message}finally{busy=false;renderCalibration();refresh(true)}}
- function renderCalibration(){const c=calibration||{},run=c.run||{},users=(c.users||[]).filter(x=>x&&typeof x==='object'),devices=(c.devices||[]).filter(x=>x&&typeof x==='object');
+ function renderCalibration(){
+  const form=JSON.stringify([busy,lastError,consoleState?.connection,!!consoleState?.glove?.busy,$('hub-profile').value,$('hub-calib-device').value,$('hub-new-profile').value,$('hub-side').value,$('hub-replace').checked,window.WujiLocale?.lang]);
+  if(renderedCalibration===calibration&&renderedForm===form)return;renderedCalibration=calibration;renderedForm=form;
+  const c=calibration||{},run=c.run||{},users=(c.users||[]).filter(x=>x&&typeof x==='object'),devices=(c.devices||[]).filter(x=>x&&typeof x==='object');
+  guide?.render(c);
   $('hub-calib-cli').textContent=c.available?(c.calibration_supported?t('官方 CLI 可用','Official CLI available'):t('远程 CLI 仅可查看状态','Remote CLI: status only')):t('官方 CLI 未就绪','Official CLI unavailable');
   const current=c.current||{},profile=current.name||'',old=$('hub-profile').value;
   $('hub-profile').replaceChildren(new Option(t('选择 SDK 用户','Select SDK user'),''),...users.map(u=>new Option(u.name+(u.is_default?' · Default':''),u.name)));
@@ -104,7 +110,7 @@
  }
  $('hub-calib-refresh').onclick=()=>refresh(true);$('hub-profile-switch').onclick=()=>action('calibration_profile_switch',{profile:$('hub-profile').value});$('hub-profile-create').onclick=()=>action('calibration_profile_create',{profile:$('hub-new-profile').value.trim()});
  $('hub-calib-start').onclick=()=>action('calibration_start',{side:$('hub-side').value,serial:$('hub-calib-device').value,replace:$('hub-replace').checked});$('hub-calib-cancel').onclick=()=>action('calibration_cancel');
- for(const id of ['hub-new-profile','hub-side','hub-replace'])$(id).addEventListener('input',renderCalibration);
+ for(const id of ['hub-new-profile','hub-side','hub-replace','hub-profile','hub-calib-device'])$(id).addEventListener('input',renderCalibration);
  window.addEventListener('console-state',event=>{consoleState=event.detail;renderStatus();renderCalibration()});
  window.addEventListener('console-offline',()=>{consoleState=null;renderStatus()});
  function labels(){for(const [key,zh,en] of definitions)$('hub-tab-'+key).textContent=t(zh,en);

@@ -15,6 +15,7 @@ def idle(state, doctor):
             and state.get('hardware', {}).get('active') is False
             and not state.get('recording', {}).get('active')
             and not state.get('parameter_sync', {}).get('busy')
+            and not state.get('calibration', {}).get('running')
             and not doctor.get('running'))
 
 

@@ -56,23 +56,56 @@ def read_latest(sub):
         latest=f
     raise ValueError('手套队列积压；请重新连接 / Glove backlog was not drained')
 
+
+def paired_hand_worker(address, serial, selected, requests, events, factory, source=None):
+    """Choose one fresh serial and verify side/model before creating a driver."""
+    from device_discovery import connect_discovered, SelectionRequired
+    from console_agent import worker
+    hand=route=ownership=None
+    try:
+        from wuji_sdk import SdkManager
+        hand,route,verified=connect_discovered(SdkManager.instance(),address,serial)
+        if verified['id']!=selected['id']:
+            raise ValueError('手套映射与机械手的代际或左右手不符 / Hand model/side differs from glove mapping')
+        if sys.platform.startswith('linux'):
+            from device_ownership import DeviceOwnership
+            ownership=DeviceOwnership(hand.serial_number)
+        owned_hand,owned_route=hand,route;hand=route=None
+        if selected['generation']=='hand1':
+            from first_generation import worker_first
+            try:worker_first(address,requests,events,prepared_hand=owned_hand,source=source)
+            finally:owned_route.close()
+        else:
+            worker(address,requests,events,factory,prepared=(owned_hand,owned_route))
+    except SelectionRequired as error:
+        events.put(dict(type='selection',devices=error.devices,message=str(error)))
+    except Exception as error:
+        events.put(dict(type='error',message=str(error)))
+    finally:
+        if hand is not None:hand.disconnect()
+        if route is not None:route.close()
+        if ownership is not None:ownership.close()
+
 def worker_glove(requests,events):
     from device_profiles import controller_profile
     selected=controller_profile();source=GloveSource();glove=sub=session=None
     hand_thread=None;hand_requests=queue.Queue();hand_events=queue.Queue()
     hand_state={};hand_error='';manager=None;previous_user=None
-    devices=[];users=[];current=None;state='starting';message='正在加载官方SDK'
+    devices=[];hands=[];users=[];current=None;state='starting';message='正在加载官方SDK'
     glove_sn='';last_emit=0.;next_map=0.;last_source_seq=None
     from retarget_settings import OutputMapping, defaults
     mapping=OutputMapping(defaults())
-    sdk_q=None;latest_kp=None;glove_ownership=None
+    sdk_q=None;latest_kp=None;glove_ownership=None;profile_lease=None
     try:
         import numpy as np
         import wuji_sdk as sdk
         manager=sdk.SdkManager.instance();previous_user=manager.current_user();current=previous_user
         users=manager.list_users()
         def scan():
-            return [dict(serial=d.sn,address=str(d.address)) for d in manager.scan()
+            nonlocal hands
+            from device_discovery import candidates
+            all_devices=list(manager.scan());hands=candidates(all_devices)
+            return [dict(serial=d.sn,address=str(d.address)) for d in all_devices
                     if d.device_type==sdk.DeviceType.WujiGlove]
         devices=scan();state='ready';message='选择手套和标定用户 / Select glove and SDK user'
         while True:
@@ -91,35 +124,57 @@ def worker_glove(requests,events):
                         if c['serial'] not in {d['serial'] for d in devices}:raise ValueError('请先扫描并选择手套')
                         user_id=c.get('user_id') or current['user_id']
                         if user_id not in {u['user_id'] for u in users}:raise ValueError('Unknown SDK user')
-                        manager.switch_user(user_id);current=manager.current_user()
-                        candidate=manager.connect(sn=c['serial'],device_name='studio_glove')
+                        candidate=None;selection_lease=None;switched=False
                         try:
+                            if sys.platform.startswith('linux'):
+                                from sdk_session import ProfileLease
+                                from device_ownership import DeviceOwnership
+                                profile_lease=ProfileLease()
+                                selection_lease=ProfileLease(selection=True)
+                                glove_ownership=DeviceOwnership(c['serial'])
+                            previous_user=manager.current_user()
+                            manager.switch_user(user_id);switched=True;current=manager.current_user()
+                            candidate=manager.connect(sn=c['serial'],device_name='studio_glove')
                             actual=str(candidate.hand_side().get()).lower()
                             if actual not in (selected['side'],'handedness.'+selected['side']):
                                 raise ValueError('手套左右与工作台所选型号不符 / Glove side differs from profile')
                             model=sdk.HandModel.WujiHand2 if selected['generation']=='hand2' else sdk.HandModel.WujiHand
                             side=sdk.Handedness.Left if selected['side']=='left' else sdk.Handedness.Right
-                            if sys.platform.startswith('linux'):
-                                from device_ownership import DeviceOwnership
-                                glove_ownership=DeviceOwnership(c['serial'])
                             session=sdk.RetargetSession.for_hand(model,side=side)
                             sub=candidate.hand_skeleton().subscribe()
                         except Exception:
                             if glove_ownership:glove_ownership.close();glove_ownership=None
-                            candidate.disconnect();raise
+                            if candidate:candidate.disconnect()
+                            if profile_lease:profile_lease.close();profile_lease=None
+                            raise
+                        finally:
+                            try:
+                                if switched and previous_user:manager.switch_user(previous_user['user_id'])
+                            except Exception:
+                                if candidate:candidate.disconnect()
+                                if glove_ownership:glove_ownership.close();glove_ownership=None
+                                if profile_lease:profile_lease.close();profile_lease=None
+                                raise
+                            finally:
+                                if selection_lease:selection_lease.close()
                         glove=candidate;glove_sn=c['serial'];source=GloveSource(c['timeout_ms'])
                         mapping=OutputMapping(c.get('retarget',defaults()));last_source_seq=None
                         state='receiving';message='已连接手套，机械手未启用 / Glove connected; hand not enabled'
                     elif name=='glove_prepare':
                         if glove is None:raise ValueError('先连接手套 / Connect glove first')
                         source.target(now)
-                        if selected['generation']!='hand2':raise ValueError('本版一代手套映射仅预览 / Hand 1 mapping preview only')
-                        if hand_thread is not None:raise ValueError('已有机械手会话；请先断开全部再重试')
-                        from console_agent import worker
+                        if hand_thread is not None and hand_thread.is_alive():raise ValueError('已有机械手会话；请先断开全部再重试')
                         from glove_motion import GloveMotion
                         def factory(*args):return GloveMotion(*args,source=source)
-                        hand_thread=threading.Thread(target=worker,args=(c.get('address',''),hand_requests,hand_events,factory),daemon=True)
+                        hand_state={};hand_error='';hand_requests=queue.Queue();hand_events=queue.Queue()
+                        hand_thread=threading.Thread(target=paired_hand_worker,args=(c.get('address',''),c.get('serial',''),selected,hand_requests,hand_events,factory,source),daemon=True)
                         hand_thread.start();message='正在连接机械手，只读反馈 / Connecting hand feedback only'
+                    elif name=='glove_retarget':
+                        if glove is None:raise ValueError('Connect glove preview first')
+                        if hand_thread and hand_thread.is_alive():raise ValueError('重新连接手套预览后应用映射 / Reconnect preview before applying mapping')
+                        mapping=OutputMapping(c['retarget'])
+                        source.invalidate('等待应用新映射后的骨架 / Waiting for a new mapped frame')
+                        message='映射已应用，等待下一帧 / Mapping applied; awaiting new frame'
                     elif name=='glove_follow':
                         if not hand_thread or not hand_thread.is_alive():raise ValueError('先连接机械手反馈 / Prepare hand feedback first')
                         source.target(now)
@@ -147,6 +202,8 @@ def worker_glove(requests,events):
                 try:event=hand_events.get_nowait()
                 except queue.Empty:break
                 if event['type']=='state':hand_state=event
+                elif event['type']=='selection':
+                    hands=event['devices'];message=event['message']
                 elif event['type'] in ('notice','error'):
                     hand_error=event['message'];message=hand_error
                     if event['type']=='error':hand_state['connection']='error'
@@ -164,7 +221,7 @@ def worker_glove(requests,events):
                 if feedback.get('latest'):
                     feedback['metrics']['age_ms']=max(0,now-feedback['latest']['host_s'])*1000
                 events.put(dict(type='glove_state',state=dict(version=1,connection=state,message=message,
-                    devices=devices,users=users,user=current,profile=selected['id'],glove_serial=glove_sn,
+                    devices=devices,hands=hands,users=users,user=current,profile=selected['id'],glove_serial=glove_sn,
                     stream=snapshot,hardware=hw,feedback=feedback,hand_error=hand_error,
                     parameters=__import__('official_policy').settings(),
                     source='official_sdk_live_retarget',hardware_validated=False)))
@@ -182,9 +239,7 @@ def worker_glove(requests,events):
             try:glove.disconnect()
             except Exception:pass
         if glove_ownership:glove_ownership.close()
-        if manager and previous_user and (not hand_thread or not hand_thread.is_alive()):
-            try:manager.switch_user(previous_user['user_id'])
-            except Exception as e:events.put(dict(type='glove_notice',message='用户恢复未完成：'+str(e)))
+        if profile_lease:profile_lease.close()
         final_hardware=copy.deepcopy(hand_state.get('hardware',{}))
         while True:
             try:e=hand_events.get_nowait()

@@ -2,14 +2,15 @@
 import re
 
 COMMANDS = {'glove_session','glove_scan','glove_open','glove_prepare',
-            'glove_follow','glove_keepalive','glove_stop','glove_disconnect'}
+            'glove_follow','glove_keepalive','glove_stop','glove_disconnect','glove_retarget'}
 
 def validate(c):
     if not isinstance(c,dict) or c.get('name') not in COMMANDS:
         raise ValueError('Unknown glove operation')
     allowed={'name'}
     if c['name']=='glove_open':allowed|={'serial','user_id','timeout_ms','retarget'}
-    if c['name']=='glove_prepare':allowed|={'address'}
+    if c['name']=='glove_prepare':allowed|={'address','serial'}
+    if c['name']=='glove_retarget':allowed|={'retarget'}
     if c['name']=='glove_follow':allowed|={'workspace_clear','lease'}
     if c['name']=='glove_keepalive':allowed|={'lease'}
     if set(c)-allowed:raise ValueError('Unexpected glove fields; joint targets are not accepted')
@@ -26,6 +27,9 @@ def validate(c):
     if c['name']=='glove_prepare':
         from console_agent import validate_command
         validate_command(dict(name='connect',address=c.get('address','')))
+    if c['name']=='glove_retarget':
+        from retarget_settings import validate as validate_retarget
+        validate_retarget(c.get('retarget'))
     if c['name']=='glove_follow' and c.get('workspace_clear') is not True:
         raise ValueError('Confirm the hand workspace before following')
     return c

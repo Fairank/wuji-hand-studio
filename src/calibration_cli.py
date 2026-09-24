@@ -5,12 +5,15 @@ explicitly selected glove are required before the official six-pose flow.
 """
 import copy
 import json
+import math
 import os
+from pathlib import Path
 import re
 import signal
 import subprocess
 import threading
 import time
+import uuid
 
 from bridge_config import load_config
 from doctor import local_run, remote_run
@@ -45,7 +48,10 @@ def controller_args(config, args):
 
 def cli_json(config, *args):
     command = [config['cli'] or 'wuji', '--json', *args]
-    if config['mode'] == 'ssh':
+    if len(args)>1 and args[0]=='user' and args[1] in ('create','switch'):
+        command = runner_command(config, 'profile', command)
+        code, out, err = local_run(command)
+    elif config['mode'] == 'ssh':
         code, out, err = remote_run(config, command)
     else:
         code, out, err = local_run(controller_args(config, command))
@@ -60,22 +66,58 @@ def cli_json(config, *args):
     return value
 
 
+def runner_command(config, mode, args):
+    """Deploy the same verified controller bundle used by the device sessions."""
+    if config['mode']=='wsl':
+        from managed_runtime import WslController, PYTHON
+        bridge=WslController(config, 'hand2_left')
+        directory=bridge.agent_directory;python=PYTHON
+    elif config['mode']=='local':
+        directory=config.get('agent_directory') or str(Path(__file__).parent)
+        python=config.get('python') or 'python3'
+    elif config['mode']=='macvm':
+        from macos_runtime import MacController
+        bridge=MacController(config, 'hand2_left')
+        directory=bridge.agent_directory;python=config.get('python') or 'python3'
+    else:
+        raise ValueError('Guided calibration requires the built-in or local controller')
+    return controller_args(config,[python,'-u',directory+'/calibration_runner.py',mode,*args])
+
+
+def progress_fields(event):
+    """Only explicit SDK fields are normalized; raw diagnostics remain visible.
+
+    No guessed indexing, thresholds, timers or synthesized pose completions.
+    """
+    payload=event.get('progress') if isinstance(event.get('progress'),dict) else event
+    index=payload.get('pose_index')
+    if type(index) is not int or not 0<=index<6:index=None
+    value=payload.get('fraction')
+    if value is None and isinstance(event.get('progress'),(int,float)):value=event['progress']
+    if type(value) not in (int,float) or not math.isfinite(value) or not 0<=value<=1:value=None
+    phase=payload.get('phase',payload.get('state',''))
+    return dict(step=payload.get('step_index',payload.get('step')),pose_index=index,
+                phase=phase if isinstance(phase,str) else '',progress=value)
+
+
 class CalibrationCLI:
-    def __init__(self):
+    def __init__(self, reports=None):
         self.lock = threading.RLock()
         self.process = None
         self.thread = None
         self.cache = None
         self.cached_at = 0.0
+        self.reports=Path(reports) if reports else None
         self.run = dict(running=False, status='idle', step=None, progress=None,
-                        event=None, error=None, exit_code=None, started=None)
+                        event=None, error=None, exit_code=None, started=None,pose_index=None,
+                        phase='',result=None,event_count=0)
 
     def snapshot(self, refresh=False):
         with self.lock:
             run = copy.deepcopy(self.run)
             cache = copy.deepcopy(self.cache)
             stale = time.monotonic() - self.cached_at > 8
-        if refresh or cache is None or (stale and not run['running']):
+        if not run['running'] and (refresh or cache is None or stale):
             config = None
             try:
                 config = load_config()
@@ -92,7 +134,8 @@ class CalibrationCLI:
             with self.lock:
                 self.cache = cache
                 self.cached_at = time.monotonic()
-        return dict(**cache, run=run)
+        with self.lock:run=copy.deepcopy(self.run)
+        return dict(**(cache or {}), run=run)
 
     def profile(self, operation, name):
         if not isinstance(name, str) or not _NAME.fullmatch(name):
@@ -101,6 +144,7 @@ class CalibrationCLI:
             if self.run['running']:
                 raise ValueError('Finish calibration before changing SDK user')
             config = load_config()
+            if config['mode']=='ssh':raise ValueError('Use built-in or local controller to change calibration profiles')
             users = cli_json(config, 'user', 'list').get('users', [])
             if operation == 'create':
                 if any(isinstance(u, dict) and u.get('name') == name for u in users):
@@ -136,25 +180,32 @@ class CalibrationCLI:
                 raise ValueError('This side is already calibrated; confirm replacement / 已有标定，请明确确认覆盖')
             if not any(isinstance(d, dict) and (d.get('sn') or d.get('serial')) == serial for d in state['devices']):
                 raise ValueError('Selected glove is not in the latest official scan / 手套不在最新扫描结果中')
+            device=next(d for d in state['devices'] if (d.get('sn') or d.get('serial'))==serial)
+            found_side=str(device.get('handedness') or device.get('side') or '').lower().removeprefix('handedness.')
+            if found_side in ('left','right') and found_side!=side:
+                raise ValueError('Selected glove side does not match calibration side / 手套与标定左右手不符')
             config = load_config()
             args = [config['cli'] or 'wuji', '--jsonl', 'calib', 'hand-model',
                     '--sn', serial, '--handedness', side, '--timeout-s', str(timeout_s)]
-            command = controller_args(config, args)
+            command = runner_command(config, 'calibrate', args)
             flags = getattr(subprocess, 'CREATE_NO_WINDOW', 0) | getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0)
-            process = subprocess.Popen(command, stdin=subprocess.DEVNULL,
+            process = subprocess.Popen(command, stdin=subprocess.PIPE,
                                        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                        creationflags=flags, env={**os.environ, 'WUJI_NO_UPDATE_CHECK': '1'},
                                        text=True, encoding='utf-8', errors='replace', bufsize=1)
             self.process = process
             self.run = dict(running=True, status='collecting', step=None, progress=None,
                             event=None, error=None, exit_code=None, started=time.time(),
-                            side=side, serial=serial, user=current['name'])
+                            side=side, serial=serial, user=current['name'],pose_index=None,phase='',
+                            result=None,event_count=0,id=uuid.uuid4().hex)
+            self._config=config
             self.thread = threading.Thread(target=self._collect, args=(process,), daemon=True)
             self.thread.start()
             return self.snapshot(refresh=False)
 
     def _collect(self, process):
         stderr_parts = []
+        terminal=None;trace=None;trace_size=0
         def drain():
             for line in process.stderr:
                 if sum(map(len, stderr_parts)) < 4000:
@@ -162,6 +213,9 @@ class CalibrationCLI:
         reader = threading.Thread(target=drain, daemon=True)
         reader.start()
         try:
+            if self.reports:
+                self.reports.mkdir(parents=True,exist_ok=True)
+                trace=(self.reports/(self.run['id']+'.jsonl')).open('x',encoding='utf-8')
             for line in process.stdout:
                 if len(line) > 65536:
                     continue
@@ -172,30 +226,52 @@ class CalibrationCLI:
                 if not isinstance(event, dict) or event.get('schema_version') != 2 or event.get('calibration') != 'hand_model':
                     continue
                 kind = event.get('event') or event.get('type') or 'progress'
+                if kind not in ('progress','result','error','cancelled'):continue
+                if trace and trace_size<8*1024*1024:
+                    trace.write(line);trace.flush();trace_size+=len(line.encode('utf-8'))
                 with self.lock:
                     self.run['event'] = event
-                    self.run['status'] = kind
-                    self.run['step'] = event.get('step_index', event.get('step'))
-                    self.run['progress'] = event.get('progress')
+                    self.run['event_count']+=1
+                    if kind=='progress':
+                        self.run.update(progress_fields(event))
+                        if self.run['status']!='cancelling':self.run['status']='solving' if self.run['phase']=='solving' else 'collecting'
+                    else:
+                        terminal=kind
+                        if kind=='result':self.run['result']=event
+                        elif kind=='error':self.run['error']=str(event.get('error') or 'Official calibration failed')[:800]
             code = process.wait()
             reader.join(timeout=1)
             with self.lock:
                 self.run['running'] = False
                 self.run['exit_code'] = code
-                if code == 0:
+                if code == 0 and terminal=='result':
                     self.run['status'] = 'completed'
-                elif code == 9 or self.run['status'] == 'cancelling':
+                elif code == 0:
+                    self.run.update(status='unconfirmed',error='CLI exited without an official result / 官方流程结束但未返回成功结果')
+                elif code == 9 or terminal=='cancelled':
                     self.run['status'] = 'cancelled'
                 else:
                     self.run['status'] = 'error'
-                    self.run['error'] = ''.join(stderr_parts)[-400:] or 'Official calibration failed'
+                    self.run['error'] = self.run['error'] or ''.join(stderr_parts)[-400:] or 'Official calibration failed'
                 self.process = None
                 self.cache = None
         except (OSError, ValueError) as error:
+            if process.poll() is None:
+                try:process.stdin.write('cancel\n');process.stdin.flush();process.wait(timeout=10)
+                except (OSError,ValueError,subprocess.TimeoutExpired):process.terminate()
             with self.lock:
                 self.run.update(running=False, status='error', error=str(error)[:400])
                 self.process = None
                 self.cache = None
+        finally:
+            if trace:trace.close()
+            if process.stdin:
+                try:process.stdin.close()
+                except OSError:pass
+            if self.reports:
+                with self.lock:record=copy.deepcopy(self.run)
+                try:(self.reports/(record['id']+'.json')).write_text(json.dumps(record,ensure_ascii=False,indent=2),encoding='utf-8')
+                except OSError:pass
 
     def cancel(self):
         with self.lock:
@@ -204,10 +280,7 @@ class CalibrationCLI:
                 return self.snapshot(refresh=False)
             self.run['status'] = 'cancelling'
             try:
-                if os.name == 'nt':
-                    process.send_signal(signal.CTRL_BREAK_EVENT)
-                else:
-                    process.send_signal(signal.SIGINT)
+                process.stdin.write('cancel\n');process.stdin.flush()
             except (OSError, ValueError):
                 process.terminate()
         return self.snapshot(refresh=False)

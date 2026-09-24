@@ -40,7 +40,7 @@ class GloveTests(unittest.TestCase):
             self.assertNotIn('HAND',calls);self.assertIn('disconnect-glove',calls,result)
             notices=[e['message'] for e in result if e['type']=='glove_notice']
             self.assertEqual(any('左右' in m for m in notices),actual=='right')
-            self.assertEqual(calls[-1],'user:user-1')
+            self.assertEqual(calls.count('user:user-1'),2)
 
     def test_duplicate_reordered_and_old_timestamp_cannot_refresh_target(self):
         s=GloveSource(250);s.update([.1]*20,8,100,1.)

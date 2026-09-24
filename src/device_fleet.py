@@ -22,6 +22,8 @@ class DeviceFleet:
         self.data, self.resource, self.origin = Path(data), Path(resource), origin
         self.lock = threading.RLock()
         self.children = {}
+        self._beat_pool=ThreadPoolExecutor(max_workers=8,thread_name_prefix='workspace-lease')
+        self._beat_pending={};self._closing=False
         self.records=self.data/'device_workspaces.json'
         try:
             saved=json.loads(self.records.read_text(encoding='utf-8'))
@@ -30,10 +32,10 @@ class DeviceFleet:
         for item in saved:
             if (isinstance(item,dict) and isinstance(item.get('id'),str) and len(item['id'])==16
                 and all(c in '0123456789abcdef' for c in item['id'])):
-                try:self.create(item['label'],item['profile'],_ident=item['id'])
+                try:self.create(item['label'],item['profile'],_ident=item['id'],_port=item.get('port'))
                 except (OSError,ValueError):pass
 
-    def create(self, label, profile, _ident=None):
+    def create(self, label, profile, _ident=None, _port=None):
         from device_profiles import PROFILES
         if not isinstance(label, str) or not 1 <= len(label.strip()) <= 40:
             raise ValueError('设备工作区名称需为1–40字 / Workspace name: 1–40 characters')
@@ -52,7 +54,9 @@ class DeviceFleet:
                 (folder/'device_profile.json').write_text(json.dumps({'id': profile}), encoding='utf-8')
             elif not folder.is_dir():raise ValueError('Device workspace data is missing')
             with socket.socket() as sock:
-                sock.bind(('127.0.0.1', 0))
+                preferred=_port if type(_port) is int and 1024<=_port<=65535 else 0
+                try:sock.bind(('127.0.0.1', preferred))
+                except OSError:sock.bind(('127.0.0.1',0))
                 port = sock.getsockname()[1]
             env = dict(os.environ, WUJI_STUDIO_DATA=str(folder), WUJI_STUDIO_PORT=str(port),
                        WUJI_FLEET_PARENT=self.origin, WUJI_FLEET_ID=ident)
@@ -63,21 +67,29 @@ class DeviceFleet:
                                          creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
             record = dict(id=ident, label=label.strip(), port=port, profile=profile, process=child)
             self.children[ident] = record
-        for _ in range(100):
-            if child.poll() is not None:
-                raise ValueError('设备工作区启动失败 / Device workspace failed to start')
-            try:
-                self.get(record, '/api/state')
-                if not _ident:
+        try:
+            for _ in range(100):
+                if child.poll() is not None:
+                    raise ValueError('设备工作区启动失败 / Device workspace failed to start')
+                try:self.get(record, '/api/state')
+                except (OSError, ValueError):time.sleep(.1);continue
+                with self.lock:
                     rows=json.loads(self.records.read_text(encoding='utf-8')) if self.records.exists() else []
-                    rows.append({k:record[k] for k in ('id','label','profile')})
+                    rows=[x for x in rows if x.get('id')!=ident]
+                    rows.append({k:record[k] for k in ('id','label','profile','port')})
                     staged=self.records.with_suffix('.pending')
                     staged.write_text(json.dumps(rows,ensure_ascii=False),encoding='utf-8')
                     staged.replace(self.records)
                 return self.public(record)
-            except (OSError, ValueError):
-                time.sleep(.1)
-        raise ValueError('设备工作区启动超时，请查看设备列表 / Workspace startup timed out; check device list')
+            raise ValueError('设备工作区启动超时 / Workspace startup timed out')
+        except Exception:
+            if child.poll() is None:
+                child.terminate()
+                try:child.wait(timeout=5)
+                except subprocess.TimeoutExpired:child.kill();child.wait(timeout=5)
+            with self.lock:self.children.pop(ident,None)
+            # Keep the data/log directory for diagnosis. Never delete user data.
+            raise
 
     @staticmethod
     def public(r):
@@ -98,14 +110,19 @@ class DeviceFleet:
             return json.load(response)
 
     def heartbeat(self):
-        with self.lock:records=list(self.children.values())
-        def beat(r):
-            if r['process'].poll() is not None:return None
-            try:self.post(r, {'name':'session_keepalive'})
-            except (OSError, ValueError) as error:return dict(id=r['id'],error=str(error))
-            return None
-        with ThreadPoolExecutor(max_workers=8) as pool:
-            return [x for x in pool.map(beat,records) if x]
+        # One slow workspace must not delay refreshing the other control leases.
+        errors=[]
+        with self.lock:
+            if self._closing:return errors
+            for ident,future in list(self._beat_pending.items()):
+                if not future.done():continue
+                try:future.result()
+                except (OSError,ValueError) as error:errors.append(dict(id=ident,error=str(error)))
+                del self._beat_pending[ident]
+            for r in self.children.values():
+                if r['id'] not in self._beat_pending and r['process'].poll() is None:
+                    self._beat_pending[r['id']]=self._beat_pool.submit(self.post,r,{'name':'session_keepalive'})
+        return errors
 
     def snapshot(self):
         with self.lock:
@@ -117,6 +134,13 @@ class DeviceFleet:
                 row.update(connection=s['connection'], device_id=s['device_id'],
                            profile=s['device_profile']['id'], hardware=s['hardware'].get('active'),
                            glove=s.get('glove', {}).get('connection'), program=s.get('program', {}))
+                g=s.get('glove',{});feedback=g.get('feedback') or {};hw=g.get('hardware') or {}
+                row.update(glove_serial=g.get('glove_serial'),sdk_user=(g.get('user') or {}).get('display_name'),
+                           hand_serial=feedback.get('device_id') or s.get('device_id'),
+                           following=hw.get('active'),feedback_hz=(feedback.get('metrics') or s.get('metrics') or {}).get('host_hz'),
+                           mapping_hz=(g.get('stream') or {}).get('retarget_hz'),
+                           stale=feedback.get('stale') if feedback.get('device_id') else s.get('stale'),
+                           message=g.get('message') if g.get('busy') else s.get('message'))
             except (OSError, ValueError):
                 row.update(connection='offline', hardware=None)
             return row
@@ -124,15 +148,29 @@ class DeviceFleet:
             return list(pool.map(describe,records))
 
     def stop_all(self):
-        errors = []
-        for r in list(self.children.values()):
+        with self.lock:records=list(self.children.values())
+        def stop(r):
+            errors=[]
             try:glove_busy=self.get(r,'/api/state').get('glove',{}).get('busy',False)
             except (OSError, ValueError):glove_busy=False
             for name in ('program_stop','glove_stop' if glove_busy else 'hardware_stop'):
                 try:self.post(r, {'name': name})
                 except (OSError, ValueError) as error:
                     errors.append(dict(id=r['id'],action=name,error=str(error)))
-        return errors
+            return errors
+        with ThreadPoolExecutor(max_workers=8) as pool:return [error for result in pool.map(stop,records) for error in result]
+
+    def rename(self, ident, label):
+        if not isinstance(label,str) or not 1<=len(label.strip())<=40:raise ValueError('Workspace name: 1–40 characters')
+        with self.lock:
+            if ident not in self.children:raise ValueError('Unknown workspace')
+            rows=json.loads(self.records.read_text(encoding='utf-8'))
+            for row in rows:
+                if row['id']==ident:row['label']=label.strip()
+            staged=self.records.with_suffix('.pending')
+            staged.write_text(json.dumps(rows,ensure_ascii=False),encoding='utf-8');staged.replace(self.records)
+            self.children[ident]['label']=label.strip()
+            return self.public(self.children[ident])
 
     def remove(self, ident):
         if not isinstance(ident,str) or ident not in self.children:raise ValueError('Unknown workspace')
@@ -165,5 +203,8 @@ class DeviceFleet:
                 r['process'].terminate()
                 try:r['process'].wait(timeout=5)
                 except subprocess.TimeoutExpired:r['process'].kill()
+        with self.lock:
+            self._closing=True
+            self._beat_pool.shutdown(wait=False,cancel_futures=True)
         self.children.clear()
         return dict(ok=True)

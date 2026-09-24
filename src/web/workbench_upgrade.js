@@ -114,7 +114,7 @@
  let lastHand=0,lastGlove=0,openedGlove=false;
  setInterval(()=>{
   const now=Date.now();
-  if(autoHand.checked&&!state?.glove?.busy&&['disconnected','error'].includes(state?.connection)&&now-lastHand>15000){lastHand=now;request('connect',{address:'',auto_detect:true}).catch(()=>{})}
+  if(autoHand.checked&&!autoGlove.checked&&!state?.glove?.busy&&['disconnected','error'].includes(state?.connection)&&now-lastHand>15000){lastHand=now;request('connect',{address:'',auto_detect:true}).catch(()=>{})}
   if(autoGlove.checked&&state?.connection==='disconnected'&&!state?.glove?.busy&&now-lastGlove>15000){lastGlove=now;request('glove_scan').catch(()=>{})}
   const g=state?.glove||{};
   if(autoGlove.checked&&g.connection==='ready'&&g.devices?.length===1&&!openedGlove){openedGlove=true;
@@ -146,45 +146,82 @@
    row.append(label,gain,offset);headers[Math.floor(i/4)].append(row);
   }
  }
- fetch('/api/retarget').then(r=>r.json()).then(value=>{retarget=value;retargetRender()}).catch(()=>{});
+ let mappingContext=null;
+ const mappingCard=$('wb-retarget-title').closest('.wb-card');
+ const bindingNote=document.createElement('p');bindingNote.className='wb-note';bindingNote.id='wb-mapping-binding';$('wb-retarget-note').after(bindingNote);
+ const presetRow=document.createElement('div');presetRow.className='wb-row';
+ const presetSelect=document.createElement('select');presetSelect.setAttribute('aria-label',t('映射预设','Mapping preset'));
+ const presetName=document.createElement('input');presetName.maxLength=48;presetName.placeholder=t('预设名称','Preset name');presetName.setAttribute('aria-label',t('预设名称','Preset name'));
+ const loadPreset=document.createElement('button'),savePreset=document.createElement('button'),deletePreset=document.createElement('button'),applyMapping=document.createElement('button');
+ for(const button of [loadPreset,savePreset,deletePreset,applyMapping])button.type='button';
+ presetRow.append(presetSelect,loadPreset,presetName,savePreset,deletePreset);mappingCard.append(presetRow);$('wb-retarget-save').after(applyMapping);
+ function showContext(value,replace=true){mappingContext=value;if(replace){retarget=value.settings;retargetRender()}
+  const b=value.binding;bindingNote.textContent=`${b.generation} · ${b.side} · ${t('手套','Glove')} ${b.glove_serial||'—'} → ${t('机械手','Hand')} ${b.hand_serial||t('连接时选择','Select on connect')} · ${t('用户','User')} ${b.sdk_user||'—'} · v${value.revision}`;
+  const choice=presetSelect.value;presetSelect.replaceChildren(new Option(t('选择映射预设','Select a mapping preset'),''),...(value.presets||[]).map(p=>new Option(p.name,p.name)));presetSelect.value=choice;
+ }
+ async function mappingRefresh(){try{const response=await fetch('/api/retarget/context');if(!response.ok)throw Error(t('无法读取映射配置','Cannot load mapping configuration'));showContext(await response.json())}catch(error){$('wb-retarget-status').textContent=error.message}}
+ window.addEventListener('retarget-binding-changed',mappingRefresh);mappingRefresh();
  $('wb-smoothing').oninput=()=>{if(retarget)retarget.smoothing_ms=Number($('wb-smoothing').value)};
  $('wb-retarget-default').onclick=()=>{retarget={gain:Array(20).fill(1),offset_deg:Array(20).fill(0),smoothing_ms:0};retargetRender()};
  $('wb-retarget-save').onclick=async()=>{if(!retarget)return;retarget.smoothing_ms=Number($('wb-smoothing').value);
-  try{await request('retarget_save',{values:retarget});$('wb-retarget-status').textContent=t('已保存；下次连接手套时生效。','Saved; takes effect on the next glove connection.')}catch(error){$('wb-retarget-status').textContent=error.message}
+  try{const out=await request('retarget_save',{values:retarget,revision:mappingContext?.revision});showContext(out.mapping);$('wb-retarget-status').textContent=t('已保存到当前设备配对。可应用到手套预览，或重新连接后生效。','Saved for this pairing. Apply in glove preview, or reconnect.')}catch(error){$('wb-retarget-status').textContent=error.message}
  };
+ loadPreset.onclick=()=>{const preset=mappingContext?.presets?.find(p=>p.name===presetSelect.value);if(preset){retarget=structuredClone(preset.settings);retargetRender();$('wb-retarget-status').textContent=t('已填入预设；保存后生效。','Preset loaded; save to use it.')}};
+ savePreset.onclick=async()=>{try{const out=await request('retarget_preset_save',{preset:presetName.value,values:retarget});showContext(out.mapping,false);$('wb-retarget-status').textContent=t('预设已保存','Preset saved')}catch(e){$('wb-retarget-status').textContent=e.message}};
+ deletePreset.onclick=async()=>{try{const out=await request('retarget_preset_delete',{preset:presetSelect.value});showContext(out.mapping,false)}catch(e){$('wb-retarget-status').textContent=e.message}};
+ applyMapping.onclick=async()=>{try{await request('retarget_apply');$('wb-retarget-status').textContent=t('已发送应用请求，请核对下方控制端状态。','Apply requested; check controller status below.')}catch(e){$('wb-retarget-status').textContent=e.message}};
+ const mappingLive=document.createElement('p');mappingLive.className='wb-note';mappingCard.append(mappingLive);
+ window.addEventListener('console-state',e=>{const g=e.detail?.glove||{};applyMapping.disabled=g.connection!=='receiving'||!!g.feedback?.device_id;
+  const equal=JSON.stringify(g.stream?.retarget)===JSON.stringify(mappingContext?.settings);
+  mappingLive.textContent=g.connection==='receiving'?(equal?t('控制端正在使用已保存的映射','Controller is using the saved mapping'):t('控制端映射与保存值不同；应用预览或重新连接','Controller mapping differs; apply in preview or reconnect')):t('连接手套后显示控制端实际使用的映射','Connect a glove to inspect the applied mapping');
+ });
  const gloveLink=document.createElement('a');gloveLink.href='#settings';gloveLink.className='wb-note';gloveLink.id='wb-glove-settings-link';
  $('page-glove')?.querySelector('.glove-controls')?.append(gloveLink);
- // Parent device switch keeps all same-origin child frames mounted and their leases alive.
+ // Parent device switch keeps all loopback child frames mounted and their leases alive.
  const selector=document.createElement('select');selector.id='wb-device-switch';selector.setAttribute('aria-label',t('切换设备工作区','Switch device workspace'));
  if(!embedded)document.querySelector('.top-actions').prepend(selector);
  function switchTo(id){active=id;document.body.classList.toggle('wb-child-active',id!=='main');
   for(const [key,frame] of frames)frame.hidden=key!==id;
   if(id!=='main'&&!frames.has(id)){
    const d=fleet.find(x=>x.id===id);if(!d)return;
-   const frame=document.createElement('iframe');frame.id='wb-device-frame';frame.title=d.label;
+   const frame=document.createElement('iframe');frame.id='wb-device-frame-'+id;frame.className='wb-device-frame';frame.title=d.label;
    frame.src=`http://127.0.0.1:${d.port}/?embedded=1&theme=${encodeURIComponent(themeChoice)}#library`;
    document.body.append(frame);frames.set(id,frame);
   }
   selector.value=id;
  }
  selector.onchange=()=>switchTo(selector.value);
- async function fleetRefresh(){if(embedded)return;try{
+ let fleetBusy=false,fleetViewKey='',fleetChoicesKey='';
+ const fleetStop=document.createElement('button');fleetStop.type='button';fleetStop.className='danger';
+ if(devices){fleetStop.textContent=t('停止所有工作区动作','Stop motion in all workspaces');$('wb-device-status').before(fleetStop);
+  fleetStop.onclick=async()=>{fleetStop.disabled=true;try{const out=await request('fleet_stop');$('wb-device-status').textContent=out.errors?.length?JSON.stringify(out.errors):t('已向全部工作区请求停止','Stop requested in every workspace')}catch(error){$('wb-device-status').textContent=error.message}finally{fleetStop.disabled=false}};
+ }
+ async function fleetRefresh(){if(embedded||fleetBusy)return;fleetBusy=true;try{
   const result=await (await fetch('/api/fleet')).json();fleet=result.devices||[];
-  const previous=selector.value;selector.replaceChildren(new Option(t('主工作区','Main workspace'),'main'),...fleet.map(x=>new Option(x.label,x.id)));
-  selector.value=fleet.some(x=>x.id===active)?active:'main';
+  const choicesKey=JSON.stringify([fleet.map(({id,label})=>({id,label})),L.lang]);
+  if(choicesKey!==fleetChoicesKey){fleetChoicesKey=choicesKey;
+   selector.replaceChildren(new Option(t('主工作区','Main workspace'),'main'),...fleet.map(x=>new Option(x.label,x.id)));
+   selector.value=fleet.some(x=>x.id===active)?active:'main';
+  }
   if(active!=='main'&&!fleet.some(x=>x.id===active))switchTo('main');
+  const viewKey=JSON.stringify([fleet.map(({id,label,profile,connection,hardware,glove,hand_serial,glove_serial,following,stale})=>({id,label,profile,connection,hardware,glove,hand_serial,glove_serial,following,stale})),L.lang]);
+  if(viewKey===fleetViewKey)return;fleetViewKey=viewKey;
   $('wb-device-list')?.replaceChildren(...fleet.map(x=>{
-   const row=document.createElement('div');row.className='wb-pill';
+   const row=document.createElement('article');row.className='wb-device-card';
    const name=document.createElement('strong');name.textContent=x.label;
-   const detail=document.createElement('span');detail.textContent=`${x.profile} · ${x.connection}${x.hardware===true?' · '+t('动作中','moving'):''}`;
+   const detail=document.createElement('p');detail.textContent=`${x.profile} · ${x.following===true?t('手套跟随中','Glove following'):x.hardware===true?t('动作中','Moving'):x.connection==='connected'?t('反馈在线','Feedback online'):x.glove==='receiving'?t('手套预览','Glove preview'):t('未连接','Disconnected')}`;
+   const pair=document.createElement('p');pair.textContent=t('机械手：','Hand: ')+(x.hand_serial||'—')+' · '+t('手套：','Glove: ')+(x.glove_serial||'—');
+   const actions=document.createElement('div');actions.className='wb-actions';
    const button=document.createElement('button');button.textContent=t('打开','Open');button.onclick=()=>switchTo(x.id);
    const remove=document.createElement('button');remove.textContent=t('移除','Remove');
+   remove.disabled=x.hardware===true||x.following===true||x.program?.active===true;
+   const rename=document.createElement('button');rename.textContent=t('重命名','Rename');rename.onclick=async()=>{const label=prompt(t('工作区名称','Workspace name'),x.label);if(!label)return;try{await request('fleet_rename',{id:x.id,label});await fleetRefresh()}catch(error){$('wb-device-status').textContent=error.message}};
    remove.onclick=async()=>{try{const result=await request('fleet_remove',{id:x.id});if(!result.removed)throw Error(result.error||'Workspace is active');
     frames.get(x.id)?.remove();frames.delete(x.id);if(active===x.id)switchTo('main');await fleetRefresh();
    }catch(error){$('wb-device-status').textContent=error.message}};
-   row.append(name,detail,button,remove);return row;
+   actions.append(button,rename,remove);row.append(name,detail,pair,actions);return row;
   }));
- }catch(error){if($('wb-device-status'))$('wb-device-status').textContent=error.message}}
+ }catch(error){if($('wb-device-status'))$('wb-device-status').textContent=error.message}finally{fleetBusy=false}}
  if(devices){$('wb-device-add').onclick=async()=>{const name=$('wb-device-name').value.trim();try{
   const response=await request('fleet_create',{label:name,profile:$('wb-device-profile').value});$('wb-device-name').value='';
   await fleetRefresh();switchTo(response.device.id);$('wb-device-status').textContent='';
@@ -194,6 +231,9 @@
   try{await request('fleet_keepalive')}catch{}finally{fleetBeating=false}
  },250);
  function labels(){
+  presetSelect.setAttribute('aria-label',t('映射预设','Mapping preset'));presetName.placeholder=t('预设名称','Preset name');presetName.setAttribute('aria-label',t('预设名称','Preset name'));
+  loadPreset.textContent=t('填入预设','Load preset');savePreset.textContent=t('保存为预设','Save preset');deletePreset.textContent=t('删除预设','Delete preset');applyMapping.textContent=t('应用到手套预览','Apply to glove preview');
+  fleetStop.textContent=t('停止所有工作区动作','Stop motion in all workspaces');
   selector.setAttribute('aria-label',t('切换设备工作区','Switch device workspace'));
   $('wb-appearance-title').textContent=t('外观','Appearance');
   $('wb-appearance-note').textContent=t('使用系统原生磨砂；不采集桌面、不绘制外部折射。','Native frosted material. No desktop capture or external refraction.');
@@ -202,7 +242,7 @@
   $('wb-auto-hand-label').querySelector('span').textContent=t('自动发现并连接单只机械手（只读反馈）','Find and connect a single hand automatically (feedback only)');
   $('wb-auto-glove-label').querySelector('span').textContent=t('自动发现并连接单只手套（仅预览）','Find and connect a single glove automatically (preview only)');
   $('wb-retarget-title').textContent=t('手套 → 机械手映射','Glove → hand mapping');
-  $('wb-retarget-note').textContent=t('官方 SDK 先把 21 个手套关键点映射成 20 个关节角。本页调整工作台输出幅度、偏移和平滑；默认不改变官方结果。调整后重新连接手套生效。','The official SDK first maps 21 landmarks to 20 joint angles. These are app output gain, offset and smoothing. Identity defaults preserve SDK output; reconnect the glove to apply changes.');
+  $('wb-retarget-note').textContent=t('官方 SDK 将 21 个关键点映射为 20 个关节角，再应用下方幅度、角度偏移和平滑。配置按左右手、代际、手套、机械手与标定用户分别保存。默认保持官方输出。','Official SDK maps 21 landmarks to 20 joint angles, followed by gain, offset and smoothing. Settings are separate for side, generation, glove, hand and SDK user. Defaults preserve SDK output.');
   $('wb-smoothing-label').textContent=t('输出平滑','Output smoothing');$('wb-retarget-default').textContent=t('恢复默认','Reset defaults');$('wb-retarget-save').textContent=t('保存映射','Save mapping');
   $('wb-glove-settings-link').textContent=t('调整手套映射 →','Adjust retargeting →');
   $('wb-program-title').textContent=t('手指舞节目单','Finger dance playlist');

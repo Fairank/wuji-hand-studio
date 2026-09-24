@@ -39,13 +39,22 @@ def target_at(start,action,amplitude,speed,cycles,elapsed):
     blend=smooth(min(1,(elapsed-transition-cycles*cycle_time)/transition))
     return [v*blend for v in start],duration
 
-def worker_first(address,requests,events,prepared_hand=None):
+def worker_first(address,requests,events,prepared_hand=None,source=None):
     from wuji_sdk import SdkManager,DeviceType,JointCommand,LowPass
     from console_agent import Recorder
     selected=controller_profile();manager=SdkManager.instance();hand=sub=publisher=lowpass=None
     latest=None;seq=0;recent=collections.deque(maxlen=500);recorder=Recorder();last=time.monotonic();last_emit=0.
-    active=False;paused=False;owned=False;lease='';last_beat=0.;elapsed=0.;tick=0.;next_send=0.;sent=0
-    action='';reason='一代手仅开放官方张开/握拳适配，其他动作可预览';plan=None;duration=0.
+    active=False;paused=False;owned=False;lease='';last_beat=0.;elapsed=0.;tick=0.;next_send=0.;sent=0;run_started=0.
+    action='';reason='一代手仅开放官方张开/握拳适配，其他动作可预览';plan=None;duration=0.;applied=None;raw_target=None
+    from device_profiles import native_ranges
+    from motion_parameters import COMMAND_SPEED_RAD_S, PATH_SPEED_RAD_S
+    ranges=native_ranges(selected['id'])
+    def glove_target(now):
+        from hardware_showcase import vector
+        q=vector(source.target(now))
+        if any(not lo<=x<=hi for x,(lo,hi) in zip(q,ranges)):
+            raise ValueError('映射目标超出一代手官方模型行程 / Retarget output outside Hand 1 model limits')
+        return q
     def stop(message):
         nonlocal active,paused,owned,publisher,lowpass,reason
         active=False;paused=False;reason=message
@@ -89,15 +98,22 @@ def worker_first(address,requests,events,prepared_hand=None):
                 elif name=='hardware_resume' and command.get('lease')==lease:paused=False;tick=now
                 elif name in {'hardware_start','hardware_probe','hardware_trial'}:
                     try:
-                        if name!='hardware_trial' or command.get('action') not in {'open','fist'}:raise ValueError('一代实机只支持官方张开/握拳适配；其余动作仅预览')
+                        following=source is not None and name=='hardware_start'
+                        if not following and (name!='hardware_trial' or command.get('action') not in {'open','fist'}):raise ValueError('一代实机支持张开/握拳及手套跟随；其他编排动作仅预览')
                         if active or owned or recorder.active or latest is None or now-last>.5:raise ValueError('请等待反馈并停止当前任务')
                         if command.get('workspace_clear') is not True or len(command.get('lease',''))!=32:raise ValueError('需要明确开始与有效控制会话')
-                        if command.get('amplitude') not in (.25,.5,.75,1.) or command.get('speed') not in (.25,.5,1.) or command.get('cycles') not in (1,3):raise ValueError('Invalid motion selection')
-                        plan=dict(start=[j['position_rad'] for j in latest['joints']],action=command['action'],amplitude=command['amplitude'],speed=command['speed'],cycles=command['cycles'])
+                        if following:
+                            glove_target(now);plan=None;applied=[j['position_rad'] for j in latest['joints']]
+                        else:
+                            if command.get('amplitude') not in (.25,.5,.75,1.) or command.get('speed') not in (.25,.5,1.) or command.get('cycles') not in (1,3):raise ValueError('Invalid motion selection')
+                            plan=dict(start=[j['position_rad'] for j in latest['joints']],action=command['action'],amplitude=command['amplitude'],speed=command['speed'],cycles=command['cycles'])
                         hand.set_all_effort_limit(CURRENT_LIMIT_A)
                         # Record ownership before enable so a partial failure still disables.
-                        owned=True;hand.enable();lowpass=hand.realtime_controller(LowPass(cutoff_hz=CUTOFF_HZ));lowpass.__enter__();publisher=hand.joint_command().publish()
-                        lease=command['lease'];last_beat=now;tick=now;next_send=now;elapsed=0.;sent=0;active=True;paused=False;action=plan['action'];reason='一代官方LowPass示例适配'
+                        owned=True;hand.enable();lowpass=hand.realtime_controller(LowPass(cutoff_hz=CUTOFF_HZ));lowpass.__enter__()
+                        if following:lowpass.set_target_position(applied)
+                        else:publisher=hand.joint_command().publish()
+                        lease=command['lease'];last_beat=now;tick=now;next_send=now;elapsed=0.;sent=0;active=True;paused=False;action='glove_teleoperation' if following else plan['action'];reason='一代官方LowPass示例适配'
+                        run_started=now
                     except Exception as error:stop(str(error));events.put(dict(type='notice',message=reason))
                 elif name=='record':
                     if active or owned:events.put(dict(type='notice',message='先停止动作再采集'))
@@ -106,10 +122,21 @@ def worker_first(address,requests,events,prepared_hand=None):
             if active:
                 if now-last>.5 or now-last_beat>2.5:stop('反馈或控制会话已过期')
                 elif now>=next_send:
-                    if not paused:elapsed+=max(0,now-tick)
-                    tick=now;q,duration=target_at(**plan,elapsed=elapsed)
-                    publisher.send([JointCommand(v,0.,0.) for v in q]);sent+=1;next_send=now+1/PUB_HZ
-                    if elapsed>=duration:stop('动作完成，已请求停用')
+                    dt=max(0,now-tick)
+                    if not paused:elapsed+=dt
+                    tick=now
+                    try:
+                        if source is not None and action=='glove_teleoperation':
+                            raw_target=glove_target(now)
+                            step=min(COMMAND_SPEED_RAD_S,PATH_SPEED_RAD_S)*min(.03,dt)
+                            if not paused:applied=[x+max(-step,min(step,y-x)) for x,y in zip(applied,raw_target)]
+                            lowpass.set_target_position(applied)
+                        else:
+                            q,duration=target_at(**plan,elapsed=elapsed)
+                            publisher.send([JointCommand(v,0.,0.) for v in q])
+                            if elapsed>=duration:stop('动作完成，已请求停用')
+                        sent+=1;next_send=now+1/PUB_HZ
+                    except Exception as error:stop(str(error))
             if recorder.active and now-recorder.started>=recorder.seconds:finish_record('completed')
             if now-last>3:raise RuntimeError('连续3秒无反馈')
             if now-last_emit>=.05:
@@ -117,10 +144,16 @@ def worker_first(address,requests,events,prepared_hand=None):
                 hz=(len(recent)-1)/span if span>.2 else None
                 rates=[dict(nid=i,host_hz=hz,device_hz=None,age_ms=(now-last)*1000,status='fresh' if now-last<=.1 else 'stale',missing_in_received_frames=0,missing_stream_slots=None,samples=len(recent)) for i in range(20)]
                 hw=dict(active=None if owned and not active else active,ready=False,trial_ready=latest is not None and not owned,probe_ready=False,probe_reason=reason,reason=reason,actions=['open','fist'],trial_controls_version=3,gesture_library_version=1,paused=paused,elapsed_s=elapsed,action=action,trial_phase='LowPass · '+action,trial_amplitude=plan['amplitude'] if plan else None,planned_duration_s=duration,cycles=plan['cycles'] if plan else 1,cycle=1,stop_confirmed=not owned,warnings=[],command_timing=dict(requested_hz=PUB_HZ),source='official_hand1_lowpass_adaptation',action_source=SOURCE,diagnostics_available=False,effort_unit='unavailable',kp_kd_applicable=False)
+                if source is not None:
+                    hw.update(probe_ready=latest is not None and not owned and now-last<=.1,raw_target_rad=raw_target,applied_target_rad=applied,
+                              action_source='Wuji Glove → RetargetSession → Hand 1 LowPass',hardware_validated=False,
+                              current_limit_A=CURRENT_LIMIT_A,lowpass_cutoff_hz=CUTOFF_HZ,max_velocity_rad_s=min(COMMAND_SPEED_RAD_S,PATH_SPEED_RAD_S))
+                    hw['command_timing']['host_publish_hz']=sent/(now-run_started) if active and now-run_started>.2 else None
                 events.put(dict(type='state',connection='connected' if latest else 'connecting',message='一代手反馈 · 设备频率/电流未由此接口提供，显示—',latest=latest,device_id=device_id,joint_rates=rates,metrics=dict(host_hz=hz,device_hz=None,age_ms=(now-last)*1000),recording=recorder.state(),hardware=hw));last_emit=now
             time.sleep(.0005)
     except Exception as error:events.put(dict(type='error',message=str(error)))
     finally:
         stop('连接结束');finish_record('disconnected')
         if sub:sub.close()
-        manager.disconnect_all();events.put(dict(type='closed'))
+        if hand:hand.disconnect()
+        events.put(dict(type='closed',hardware=dict(active=None if owned else False,stop_confirmed=not owned,reason=reason)))

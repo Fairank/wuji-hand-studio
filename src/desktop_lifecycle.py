@@ -4,12 +4,19 @@ import time
 def needs_confirmation(state):
     return (state.get('connection')!='disconnected' or state.get('glove',{}).get('busy',False)
             or state.get('recording',{}).get('active',False)
+            or state.get('calibration',{}).get('running',False)
             or state.get('hardware',{}).get('active') is not False)
 
 def close_sessions(controller, timeout=6., clock=time.monotonic, sleep=time.sleep):
     state=controller.snapshot()
     if state.get('parameter_sync',{}).get('busy') or controller.doctor.snapshot().get('running'):
         return dict(ok=False,error='请等待参数同步或诊断结束。 / Wait for parameter sync or diagnostics.')
+    if state.get('calibration',{}).get('running'):
+        controller.action(dict(name='calibration_cancel'))
+        deadline=clock()+timeout
+        while controller.calibration.run.get('running') and clock()<deadline:sleep(.05)
+        if controller.calibration.run.get('running'):
+            return dict(ok=False,error='官方标定仍在退出，请稍后重试 / Official calibration is still releasing the device')
     glove=state.get('glove',{}); hardware=glove.get('hardware',{}) if glove.get('busy') else state.get('hardware',{})
     active=hardware.get('active',False)
     if active is not False:

@@ -1,4 +1,5 @@
 /* The reading surface scrolls within the window; navigation stays clear. */
+#hub-calibration-guide{margin-top:24px;padding-top:24px;border-top:1px solid var(--wb-line)}
 @media(min-width:901px){
  html,body,.app{height:100%;overflow:hidden}
  .top{z-index:30}
@@ -29,7 +30,12 @@ body .hub-tabs button[aria-selected=true]{background:var(--wb-card);box-shadow:0
 .hub-badges span,.hub-legend span,.hub-calib-state span{border:1px solid var(--wb-line);border-radius:999px;padding:6px 11px;background:var(--wb-card);font-size:12px;color:var(--wb-ink)}
 .hub-calib-state{margin:18px 0}.hub-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin:18px 0}
 .hub-fields label{min-width:0;display:flex;flex-direction:column;gap:6px;color:var(--wb-sub);font-size:13px}.hub-fields :is(input,select){min-width:0;width:100%}
-.hub-calibration{max-width:780px}.hub-calibration .wb-actions{margin:12px 0 20px}.hub-calibration #hub-calib-status{font-size:13px}.hub-calibration #hub-calib-step{font-size:13px;color:var(--wb-sub)}
+.hub-calibration{max-width:1000px}.hub-calibration .wb-actions{margin:12px 0 20px}.hub-calibration #hub-calib-status{font-size:13px}.hub-calibration #hub-calib-step{font-size:13px;color:var(--wb-sub)}
+.hub-calib-state span:not(:first-child){display:none}
+#hub-calibration-guide .cg-root{padding:0;gap:16px}
+#hub-calibration-guide .cg-title{font-size:17px}
+#hub-calibration-guide .cg-card{padding:12px 15px}
+#hub-calibration-guide .cg-notes,#hub-calibration-guide .cg-sub{display:none}
 .hub-replace{display:flex;align-items:center;gap:9px;padding:10px 0;color:var(--wb-ink);font-size:13px}
 .hub-replace input{flex:none}
 .hub-skeleton{padding:16px;margin-bottom:16px}.hub-skeleton-heading{display:flex;justify-content:space-between;align-items:center;gap:12px}.hub-skeleton-heading h3{margin:0}.hub-skeleton-heading span{color:var(--wb-sub);font-size:12px}

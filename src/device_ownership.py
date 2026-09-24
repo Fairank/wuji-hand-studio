@@ -19,3 +19,7 @@ class DeviceOwnership:
 
     def close(self):
         self.file.close()
+
+    def __enter__(self):return self
+
+    def __exit__(self, *_):self.close()
