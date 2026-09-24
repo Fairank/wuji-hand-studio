@@ -4,3 +4,6 @@
 src/official_data/retarget/*.yaml -text
 src/official_data/retarget/LICENSE -text
 src/official_data/solver/** -text
+# Static joint references record these models by SHA-256 on every platform.
+src/assets/hand1/mjcf/*.xml text eol=lf
+src/assets/hand2/mjcf/*.xml text eol=lf

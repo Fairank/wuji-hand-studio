@@ -104,6 +104,8 @@
         Object.assign(input, { type: 'text', autocomplete: 'off', spellcheck: false });
         input.setAttribute('inputmode', 'decimal'); // text type keeps partial input such as '-' or '1e'
         input.value = fmt(opts.value[r][c]);
+        input.dataset.gridRow = String(r);
+        input.dataset.gridColumn = String(c);
         cellOf.set(input, [r, c]);
         return input;
       });

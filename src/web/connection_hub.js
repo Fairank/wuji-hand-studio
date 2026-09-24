@@ -9,7 +9,7 @@
  const old=[...body.children];
  const tabs=document.createElement('div');tabs.className='hub-tabs';tabs.setAttribute('role','tablist');tabs.setAttribute('aria-label',t('连接与校准分区','Connection sections'));
  const sections={};
- const definitions=[['device','设备','Device'],['visual','实时可视化','Live visualization'],['calibration','手套校准','Glove calibration'],['retarget','手套 → 手映射','Glove → hand mapping']];
+ const definitions=[['device','设备连接','Devices'],['calibration','手套校准','Calibration'],['retarget','映射调校','Mapping'],['visual','遥操作预览','Teleoperation']];
  for(const [key,zh,en] of definitions){
   const button=document.createElement('button');button.type='button';button.id='hub-tab-'+key;button.dataset.hubTab=key;button.setAttribute('role','tab');button.setAttribute('aria-controls','hub-'+key);button.textContent=t(zh,en);tabs.append(button);
   const section=document.createElement('section');section.className='hub-section';section.id='hub-'+key;section.setAttribute('role','tabpanel');section.setAttribute('aria-labelledby',button.id);section.hidden=true;sections[key]=section;
@@ -107,6 +107,7 @@
   for(const id of ['hub-profile','hub-new-profile','hub-calib-device','hub-side','hub-replace'])$(id).disabled=busy||run.running;
   const defaultUser=!profile||profile.toLowerCase()==='default'||users.some(u=>u.name===profile&&u.is_default);
   const hasModel=!!current[$('hub-side').value+'_hand']?.calibrated;
+  if(c.available&&!run.running&&!setup.dataset.offered){setup.open=defaultUser||!$('hub-calib-device').value;setup.dataset.offered='true'}
   $('hub-replace').closest('label').hidden=!hasModel;
   $('hub-profile-switch').disabled=busy||run.running||!c.available||!$('hub-profile').value||$('hub-profile').value===profile;
   $('hub-profile-create').disabled=busy||run.running||!c.available||!$('hub-new-profile').value.trim();
@@ -115,6 +116,13 @@
   $('hub-calib-cancel').disabled=busy||!run.running;
   $('hub-calib-status').textContent=lastError||c.error||(c.available&&!c.calibration_supported?t('远程 SSH 可查看标定状态；请改用工作台内置或本机 Linux 控制端执行引导标定。','SSH can read calibration status. Use the built-in or local Linux controller for the guided flow.'):null)||({'collecting':t('正在按官方引导采集','Collecting with official guide'),'completed':t('标定完成','Calibration completed'),'cancelled':t('已取消','Cancelled'),'error':t('官方流程失败','Official flow failed'),'cancelling':t('正在取消','Cancelling')})[run.status]||t('先选择命名用户，再按官方六个姿势完成标定。','Select a named user, then complete the six official poses.');
   $('hub-calib-step').textContent=run.running?t('当前阶段：','Current step: ')+(run.step??'—')+(run.progress!=null?' · '+run.progress:''):run.error||'';
+  if(!run.running&&!lastError&&!c.error&&c.available&&c.calibration_supported&&(!run.status||run.status==='idle')){
+   const reason=consoleState?.connection!=='disconnected'?t('先断开机械手反馈，再校准手套。','Disconnect hand feedback before glove calibration.'):
+    defaultUser?t('展开“选择用户与手套”，创建或选择一个命名用户。','Open user and glove settings to create or choose a named user.'):
+    !$('hub-calib-device').value?t('请选择要校准的手套；未发现时刷新官方状态。','Select a glove; refresh official status if none are listed.'):
+    hasModel&&!$('hub-replace').checked?t('此侧已有标定；如需重做，请在设置中确认覆盖。','This side is calibrated. Confirm replacement in settings to recalibrate.'):null;
+   if(reason)$('hub-calib-status').textContent=reason;
+  }
  }
  $('hub-calib-refresh').onclick=()=>refresh(true);$('hub-profile-switch').onclick=()=>action('calibration_profile_switch',{profile:$('hub-profile').value});$('hub-profile-create').onclick=()=>action('calibration_profile_create',{profile:$('hub-new-profile').value.trim()});
  $('hub-calib-start').onclick=()=>action('calibration_start',{side:$('hub-side').value,serial:$('hub-calib-device').value,replace:$('hub-replace').checked});$('hub-calib-cancel').onclick=()=>action('calibration_cancel');
@@ -122,7 +130,7 @@
  window.addEventListener('console-state',event=>{consoleState=event.detail;renderStatus();renderCalibration()});
  window.addEventListener('console-offline',()=>{consoleState=null;renderStatus()});
  function labels(){for(const [key,zh,en] of definitions)$('hub-tab-'+key).textContent=t(zh,en);
-  $('hub-intro-note').textContent=t('手和手套分别显示连接状态；连接并不表示已完成标定。','Hand and glove connection states are separate; a connection does not imply calibration.');
+  $('hub-intro-note').textContent=t('先连接设备，再校准与调校。连接状态与标定结果分别显示。','Connect first, then calibrate and tune. Connection and calibration are shown separately.');
   $('hub-visual-title').textContent=t('两路独立反馈','Two independent feedback views');
   $('hub-visual-note').textContent=t('三维画面显示机械手反馈或当前预览源；下方骨架仅显示手套原始 21 关键点。两者不代表已通过联动遥操作验收。','The 3D viewer shows hand feedback or the selected preview source. The skeleton below shows only 21 raw glove landmarks. Together they do not establish validated teleoperation.');
   $('hub-real-label').textContent=t('三维：机械手 / 映射预览','3D: hand / mapped preview');$('hub-preview-label').textContent=t('骨架：手套原始数据','Skeleton: raw glove data');

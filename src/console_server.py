@@ -711,6 +711,19 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == '/api/view':
             jpeg, meta = self.server.pose.get()
             return self.reply(200, dict(meta=meta, image='data:image/jpeg;base64,'+base64.b64encode(jpeg).decode('ascii') if jpeg else None))
+        if url.path in {'/api/joints', '/api/joint-reference'}:
+            from joint_reference import catalog as joint_catalog, image_path
+            query = parse_qs(url.query)
+            pid = query.get('profile', ['hand2_left'])[0]
+            try:
+                if url.path == '/api/joints':
+                    return self.reply(200, joint_catalog(pid, query.get('language', ['zh'])[0]))
+                path = image_path(pid, int(query.get('index', ['-1'])[0]))
+            except (ValueError, TypeError):
+                return self.reply(400, dict(error='Invalid joint reference'))
+            if not path.is_file():
+                return self.reply(404, dict(error='Joint reference unavailable'))
+            return self.reply(200, path.read_bytes(), 'image/png')
         if url.path == '/api/report':
             ident = parse_qs(url.query).get('id', [''])[0]
             if not re.fullmatch('[a-f0-9]{32}', ident):
@@ -730,9 +743,9 @@ class Handler(BaseHTTPRequestHandler):
         assets.update({'/workspace.js':('workspace.js','text/javascript; charset=utf-8'),
             '/workspace.css':('workspace.css','text/css; charset=utf-8'),
             '/parameters.js':('parameters.js','text/javascript; charset=utf-8')})
-        for name in ('studio.js','locale.js','floating_panel.js','viewer.js','action_picker.js','brand.js','installation.js','profiles.js','doctor.js','glove.js','desktop_shell.js','device_network.js','connection_toolbar.js','workbench_upgrade.js','connection_hub.js','calibration_guide.js','pose_grid.js','settings.js','group_panel.js','workspaces.js','group_view.js','workbench_sheet.js','workbench_clarity.js','numeric_grid.js','retarget_tuning.js'):
+        for name in ('studio.js','locale.js','floating_panel.js','viewer.js','action_picker.js','brand.js','installation.js','profiles.js','doctor.js','glove.js','desktop_shell.js','device_network.js','connection_toolbar.js','workbench_upgrade.js','connection_hub.js','calibration_guide.js','pose_grid.js','settings.js','group_panel.js','workspaces.js','group_view.js','workbench_sheet.js','workbench_clarity.js','numeric_grid.js','retarget_tuning.js','joint_inspector.js','connection_refinement.js'):
             assets['/'+name]=(name,'text/javascript; charset=utf-8')
-        for name in ('studio.css','floating_panel.css','glass.css','glove.css','desktop_glass.css','desktop_refinement.css','glass_refresh.css','workbench_upgrade.css','connection_hub.css','calibration_guide.css','pose_grid.css','group_panel.css','workspaces.css','group_view.css','workbench_sheet.css','workbench_clarity.css','numeric_grid.css','retarget_tuning.css'):
+        for name in ('studio.css','floating_panel.css','glass.css','glove.css','desktop_glass.css','desktop_refinement.css','glass_refresh.css','workbench_upgrade.css','connection_hub.css','calibration_guide.css','pose_grid.css','group_panel.css','workspaces.css','group_view.css','workbench_sheet.css','workbench_clarity.css','numeric_grid.css','retarget_tuning.css','joint_inspector.css','connection_refinement.css'):
             assets['/'+name]=(name,'text/css; charset=utf-8')
         assets['/viewer']=('viewer.html','text/html; charset=utf-8')
         assets['/favicon.ico']=('favicon.ico','image/x-icon')

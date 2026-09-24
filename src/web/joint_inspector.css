@@ -1,0 +1,95 @@
+/* joint_inspector.css - restrained styling for window.JointInspector.
+ * Inherits --wb-card, --wb-ink, --wb-sub, --wb-line, --wb-group; fallbacks follow the OS scheme. */
+.ji {
+  --ji-card: var(--wb-card, #ffffff);
+  --ji-ink: var(--wb-ink, #1d1d1f);
+  --ji-sub: var(--wb-sub, #6e6e73);
+  --ji-line: var(--wb-line, rgba(60, 60, 67, 0.18));
+  --ji-group: var(--wb-group, #f5f5f7);
+  box-sizing: border-box;
+  min-width: 0;
+  padding: 16px;
+  background: var(--ji-card);
+  color: var(--ji-ink);
+  font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei UI", sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  .ji {
+    --ji-card: var(--wb-card, #1c1c1e);
+    --ji-ink: var(--wb-ink, #f5f5f7);
+    --ji-sub: var(--wb-sub, #a1a1a6);
+    --ji-line: var(--wb-line, rgba(235, 235, 245, 0.18));
+    --ji-group: var(--wb-group, #2c2c2e);
+  }
+}
+.ji *, .ji *::before, .ji *::after { box-sizing: inherit; }
+.ji [hidden] { display: none !important; } /* hidden must win over display rules */
+.ji p, .ji h3, .ji figure, .ji dl, .ji dd { margin: 0; }
+.ji .ji-body { display: grid; gap: 16px; }
+.ji .ji-profile, .ji .ji-note, .ji .ji-bad { color: var(--ji-sub); }
+.ji .ji-profile, .ji .ji-note { font-size: 12px; }
+.ji .ji-sel { display: grid; gap: 6px; }
+.ji .ji-bar { display: grid; gap: 4px; }
+.ji .ji-fingers { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.ji .ji-joints { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.ji .ji-btn {
+  min-width: 0;
+  min-height: 32px;
+  margin: 0;
+  padding: 6px 2px;
+  border: 1px solid var(--ji-line);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ji-ink);
+  font: inherit;
+  font-weight: 500;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+.ji .ji-btn:hover { border-color: var(--ji-sub); }
+.ji .ji-btn[aria-pressed="true"] { border-color: var(--ji-ink); background: var(--ji-ink); color: var(--ji-card); }
+.ji .ji-btn:focus-visible,
+.ji .ji-tech summary:focus-visible { outline: 2px solid var(--ji-ink); outline-offset: 2px; }
+.ji .ji-fig { display: grid; gap: 8px; }
+.ji .ji-frame {
+  position: relative;
+  display: grid;
+  place-items: center;
+  aspect-ratio: 4 / 3; /* stable image space, with or without an image */
+  overflow: hidden;
+  border-radius: 12px;
+  background: var(--ji-group); /* the single grouped surface */
+}
+.ji .ji-img { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: contain; }
+.ji .ji-empty { padding: 12px; color: var(--ji-sub); text-align: center; }
+.ji .ji-text { display: grid; gap: 4px; }
+.ji .ji-title { color: var(--ji-ink); font-size: 18px; font-weight: 600; line-height: 1.3; overflow-wrap: anywhere; }
+.ji .ji-sep { color: var(--ji-sub); font-weight: 400; }
+.ji .ji-move { max-width: 64ch; overflow-wrap: anywhere; }
+.ji .ji-dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); column-gap: 16px; }
+.ji .ji-dl > dt, .ji .ji-dl > dd { padding: 8px 0; border-top: 1px solid var(--ji-line); }
+.ji .ji-dl > dt { color: var(--ji-sub); }
+.ji .ji-dl > dd { overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.ji .ji-tech summary { width: fit-content; border-radius: 4px; color: var(--ji-sub); cursor: pointer; }
+.ji .ji-tech summary:hover { color: var(--ji-ink); }
+.ji .ji-tech code {
+  display: block;
+  margin-top: 4px;
+  padding: 0;
+  background: none;
+  color: var(--ji-ink);
+  font: 12px/1.4 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 320px) {
+  .ji { padding: 12px; }
+  .ji .ji-dl { column-gap: 12px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ji .ji-btn { transition: none; }
+}
+@media (forced-colors: active) {
+  .ji .ji-btn[aria-pressed="true"] { forced-color-adjust: none; border-color: Highlight; background: Highlight; color: HighlightText; }
+}

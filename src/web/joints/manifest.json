@@ -1,0 +1,18 @@
+{
+  "hand2_left": {
+    "model_sha256": "61ccf3025e1c302baaee9b72bfb987b4cc756b632498c3d61b64bd0a62334ed7",
+    "images": 20
+  },
+  "hand2_right": {
+    "model_sha256": "d5057d3eb8b040a93f122e4244c67ee2189ee7539e6fb5fe149d089195e9874c",
+    "images": 20
+  },
+  "hand1_left": {
+    "model_sha256": "db34337059253be5e690ab48c694da02a54d1aeded756117cf039ca21dade746",
+    "images": 20
+  },
+  "hand1_right": {
+    "model_sha256": "534de028fe93968bcbc8e59ee85eadb1a22c04717efb433221deff3273cd46a6",
+    "images": 20
+  }
+}
