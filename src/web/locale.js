@@ -9,7 +9,7 @@
 
   var ZH = {
     appTitle: '灵巧手工作台', motion: '动作播放', parameters: '参数调节', feedback: '实时反馈', capture: '触碰采集',
-    records: '运行记录', connection: '连接与校准', library: '动作展示', interaction: '触碰互动', glove: '手套遥操作', doctor: '官方诊断', connect: '自动连接',
+    records: '运行记录', connection: '连接与校准', library: '单手展示', interaction: '触碰互动', glove: '手套遥操作', doctor: '官方诊断', connect: '自动连接',
     disconnect: '断开连接', start: '开始', pause: '暂停', resume: '继续', stop: '停止', preview: '预览',
     hardware: '硬件', source: '来源', official: '官方', project: '项目', unverified: '未验证',
     language: '语言', letters: '字母', numbers: '数字', clock: '时钟',
@@ -21,7 +21,7 @@
   };
   var EN = {
     appTitle: 'Hand Workbench', motion: 'Motion', parameters: 'Parameters', feedback: 'Feedback', capture: 'Capture',
-    records: 'Records', connection: 'Connection', library: 'Actions', interaction: 'Interaction', glove: 'Glove teleop', doctor: 'Diagnostics', connect: 'Auto-connect',
+    records: 'Records', connection: 'Connection', library: 'Single hand', interaction: 'Interaction', glove: 'Glove teleop', doctor: 'Diagnostics', connect: 'Auto-connect',
     disconnect: 'Disconnect', start: 'Start', pause: 'Pause', resume: 'Resume', stop: 'Stop', preview: 'Preview',
     hardware: 'Hardware', source: 'Source', official: 'Official', project: 'Project', unverified: 'Unverified',
     language: 'Language', letters: 'Letters', numbers: 'Numbers', clock: 'Clock',

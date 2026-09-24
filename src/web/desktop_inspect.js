@@ -9,6 +9,7 @@
    viewport:{width:innerWidth,height:innerHeight},scroll:{x:scrollX,y:scrollY},overflow:document.documentElement.scrollWidth>innerWidth,
    appearance:{reduceTransparency:document.documentElement.dataset.reduceTransparency,reduceMotion:document.documentElement.dataset.reduceMotion},
    heading:document.querySelector('.workspace-page:not([hidden]) h2')?.textContent,
+   closedLayoutBoxes:[...document.querySelectorAll('details:not([open])>:not(summary),dialog:not([open])')].filter(e=>e.getClientRects().length).map(e=>({id:e.id,tag:e.tagName,bounds:bounds(e)})),
    surfaces:{header:surface('.top'),navigation:surface('.directory'),content:surface('.page-area'),menu:surface('#desktop-menu')},
    controls:nodes.map(e=>({id:e.id,tag:e.tagName,label:e.getAttribute('aria-label')||e.getAttribute('title')||(e.tagName==='INPUT'?'':e.textContent.trim().slice(0,100)),disabled:!!e.disabled,bounds:bounds(e)})),
    connection:(()=>{const e=document.getElementById('connection-toggle'),g=document.getElementById('connection-toolbar');if(!e)return null;const c=getComputedStyle(e);return {label:e.textContent,disabled:e.disabled,state:g.dataset.state,background:c.backgroundColor,color:c.color,bounds:bounds(g),panelOpen:!!document.getElementById('connection-popover')?.open};})(),

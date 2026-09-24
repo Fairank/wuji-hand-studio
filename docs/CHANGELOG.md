@@ -1,5 +1,23 @@
 # 更新记录 / Changelog
 
+## 0.2.10 — 简化单手展示、多手演示与设备管理
+
+此前播放、参数说明和设备管理堆在同一页，操作需要反复向下翻。这次把常用步骤留在画面旁边，低频设置按需打开。
+
+- 主导航：单手展示、多手演示、连接与校准；反馈、参数、诊断和记录收进调试工具。
+- 单手展示：先选真实手／预览，再选动作和速度；循环、幅度可展开，节目单和运行详情使用独立弹窗。节目单收起后仍可看状态并停止。
+- 多手演示：参与手、同步动作／双手衔接与双画面集中展示。「管理设备」内分已添加、添加设备和工作区三个页签，保留发现、分配、移动、移除和独立设置。
+- 清理隐藏面板占位、非当前页面的装饰残留、重复画面来源按钮和过时的启动提示；改善黑色主题的选中对比与窄窗口布局。原截图白条的确切成因尚未完全复现，验证范围见下方报告。
+- 保留真实反馈／预览来源、错误状态、停止入口，以及手套可视化、官方标定、映射。没有调整电机增益、轨迹、发送频率或控制边界。
+
+Windows 源码检查为 463 项通过、2 项跳过。两个独立预览进程通过完整播放、手动停止、控制超时和设备移动检查；已验证弹窗、键盘切换、语言和明暗模式。安装包及原生窗口结果见 [0.2.10 验证记录](VALIDATION_0.2.10.md)。本轮没有驱动实机。
+
+本地 Claude Opus 5.5 max 辅助通用弹窗基础代码；主助手负责布局决策、接入审核和实际验收。继续使用一个安装包、原有用户数据目录和系统磨砂，不恢复桌面截图折射。
+
+### English
+
+0.2.10 simplifies the single-hand and ensemble pages. Common playback controls sit beside the views; playlists, run details and device administration open on demand. Device management separates existing hands, discovery/addition and workspaces. Hidden-panel paint artifacts, duplicate controls, stale request messages and dark selected-state contrast were corrected. Hardware control behavior is unchanged. See the linked validation report for software/package evidence and physical-test limitations.
+
 ## 0.2.9 — 多手工作区与双手连续动作
 
 这次把“每只手只能单独开工作区”扩展成“一个工作区可以管理多只手”。发现设备后，可以加入当前工作区，也可以新建工作区；原有单手连接、参数、手套配对及标定继续独立保存。

@@ -6,7 +6,10 @@
   const STORE = 'wsx.workspace', TIMEOUT_MS = 8000;
   const PROFILES = [['hand2_left', 2, 'left'], ['hand2_right', 2, 'right'], ['hand1_left', 1, 'left'], ['hand1_right', 1, 'right']];
   const S = {
-    title: ['多手工作区', 'Multi-hand workspaces'], hands: ['多手', 'Hands'], workspace: ['工作区', 'Workspace'], group: ['组控制', 'Group control'],
+    title: ['多手演示', 'Hand ensemble'], hands: ['多手', 'Hands'], workspace: ['工作区', 'Workspace'], group: ['组控制', 'Group control'],
+    management: ['管理设备', 'Manage hands'], close: ['关闭', 'Close'],
+    addedTab: ['已添加', 'Added hands'], addTab: ['添加设备', 'Add hands'], workspacesTab: ['工作区', 'Workspaces'],
+    more: ['更多操作', 'More actions'], offlinePreview: ['离线模型预览', 'Offline model preview'],
     stopAll: ['停止全部手','Stop all hands'], removeWs: ['删除空工作区', 'Remove empty workspace'], members: ['工作区内的手', 'Hands in workspace'], create: ['新建', 'Create'],
     emptyWs: ['此工作区还没有手', 'No hands in this workspace yet'], previewModel: ['预览型号', 'Preview model'],
     addPreview: ['添加预览手', 'Add preview hand'], noPanel: ['组控制面板未加载', 'Group panel not loaded'], manage: ['新建与发现', 'Create & discover'],
@@ -46,15 +49,15 @@
   <p class="wsx-note wsx-dstate"></p><div class="wsx-list wsx-disc"></div></section></div>`;
   const MEMBER = `<div class="wsx-hc-top"><strong class="wsx-name"></strong><span class="wsx-badge"></span></div>
 <div class="wsx-meta"></div><div class="wsx-msg"></div><div class="wsx-row"><button type="button" class="wsx-btn" data-wsx="settings"></button>
-<button type="button" class="wsx-btn" data-wsx="disc"></button><button type="button" class="wsx-btn wsx-danger" data-wsx="forget"></button></div>
-<div class="wsx-row"><label class="wsx-field"><span class="wsx-lbl"></span><select class="wsx-sel"></select></label>
-<button type="button" class="wsx-btn" data-wsx="move"></button></div>`;
+<button type="button" class="wsx-btn" data-wsx="disc"></button></div>
+<details class="wsx-member-more"><summary></summary><div class="wsx-row"><label class="wsx-field"><span class="wsx-lbl"></span><select class="wsx-sel"></select></label>
+<button type="button" class="wsx-btn" data-wsx="move"></button><button type="button" class="wsx-btn wsx-danger" data-wsx="forget"></button></div></details>`;
   const DISC = `<div class="wsx-hc-top"><strong class="wsx-name"></strong><span class="wsx-meta"></span></div><div class="wsx-msg"></div>
 <div class="wsx-row"><label class="wsx-field"><span class="wsx-lbl"></span><select class="wsx-sel"></select></label></div>
 <div class="wsx-row"><button type="button" class="wsx-btn wsx-primary" data-wsx="add"></button>
 <button type="button" class="wsx-btn" data-wsx="new"></button></div>`;
 
-  let root = null, topBtn = null, panel = null, viewer = null, panelKey = '', snap = null, csrf = null, forced = null;
+  let root = null, topBtn = null, panel = null, viewer = null, management = null, panelKey = '', snap = null, csrf = null, forced = null;
   let sel = 'main', selAt = 0, polling = false, again = false, pollErr = '';
   const leases = new Map(), leaseAt = new Map(), beatErr = new Map(), beating = new Set();
   const starting = new Set(), stopAsked = new Set(), inflight = new Set();
@@ -106,6 +109,7 @@
   function say(msg, bad) {
     if (!root) return;
     const el = $('.wsx-status'); tx(el, msg); el.classList.toggle('wsx-bad', !!bad);
+    if(management)tx($('.wsx-sheet-msg'),msg);
   }
   async function op(key, fn, okKey) {                                   // one in-flight request per button key
     if (inflight.has(key)) return;
@@ -175,7 +179,7 @@
       if (lease == null || lease === '') throw new Error(T('noLease'));
       if (!stopAsked.has(ws)) { leases.set(ws, String(lease)); leaseAt.set(ws, performance.now()); beat(); }
       else await act('ensemble_stop', { workspace: ws });
-      say(T('startReq')); return r;
+      say(''); return r; // the group panel displays actual progress, not a lasting request receipt
     } catch (e) { say(T('failed') + errMsg(e), true); throw e; }
     finally { starting.delete(ws); stopAsked.delete(ws); render(); kick(); }
   }
@@ -210,6 +214,7 @@
   function updMember(el, v) {
     const q = s => el.querySelector(s), badge = q('.wsx-badge'), pick = q('.wsx-sel');
     el.setAttribute('aria-label', v.label || v.id);
+    tx(q('.wsx-member-more summary'),T('more'));
     tx(q('.wsx-name'), v.label || v.id);
     tx(badge, T(v.stale ? 'unknown' : v.on ? 'online' : 'offline'));
     badge.classList.toggle('wsx-on', v.on && !v.stale);
@@ -303,10 +308,15 @@
     try { panel.render(ps, lang()); } catch (e) { say(T('failed') + errMsg(e), true); }
   }
   function renderErr() {                                                // concise poll/heartbeat failures only
-    if (root) tx($('.wsx-err'), [...new Set([pollErr, ...beatErr.values()])].filter(Boolean).join(' · '));
+    if (root) {
+      const error=[...new Set([pollErr, ...beatErr.values()])].filter(Boolean).join(' · ');
+      tx($('.wsx-err'),error);
+      if(management)tx($('.wsx-sheet-msg'),error||$('.wsx-status').textContent);
+    }
   }
   const CARD = {
     settings: k => op(`settings:${k}`, async () => {
+      management?.close();
       if (k === 'main') { location.hash = 'connection'; return; }       // primary session uses the connection page
       const H = window.HandSessions;
       if (!H || typeof H.show !== 'function') throw new Error(T('noSessions'));
@@ -352,7 +362,9 @@
     root.querySelectorAll('[data-wsx-t]').forEach(el => tx(el, T(el.dataset.wsxT)));
     root.querySelectorAll('[data-wsx-tp]').forEach(el => { el.placeholder = T(el.dataset.wsxTp); });
     root.lang = lang() === 'en' ? 'en' : 'zh-CN';
+    $('.wsx-ws').setAttribute('aria-label',T('workspace'));
     if (topBtn) tx(topBtn, T('hands'));
+    management?.setLabels({title:T('management'),triggerLabel:T('management'),closeLabel:T('close')});
     panelKey = ''; render();
   }
   function init() {
@@ -364,6 +376,29 @@
     root = document.createElement('section');
     root.className = 'wsx-root'; root.setAttribute('aria-labelledby', 'wsx-title'); root.innerHTML = SKELETON;
     body.prepend(root);
+    if(window.HandWorkbenchSheet){
+      management=window.HandWorkbenchSheet.create({id:'wsx-manage-hands',title:T('management'),triggerLabel:T('management')});
+      root.append(management.element); // retain scoped selectors and existing live control ownership
+      const membersCard=$('.wsx-members').closest('.wsx-card'),addCard=$('.wsx-create').closest('.wsx-card');
+      const workspaceCard=document.createElement('section');workspaceCard.className='wsx-card';
+      workspaceCard.append($('.wsx-create'),$('.wsx-rmws'));
+      const preview=document.createElement('details');preview.className='wsx-preview-options';
+      const previewTitle=document.createElement('summary');previewTitle.dataset.wsxT='offlinePreview';preview.append(previewTitle,$('.wsx-addprev').closest('.wsx-row'));
+      addCard.append(preview);addCard.querySelector('h3').dataset.wsxT='addTab';
+      const tabs=document.createElement('div');tabs.className='wsx-manage-tabs';tabs.setAttribute('role','tablist');
+      const panels=[membersCard,addCard,workspaceCard],keys=['addedTab','addTab','workspacesTab'],buttons=[];
+      function selectTab(index,focus=false){panels.forEach((pane,i)=>{pane.hidden=i!==index;buttons[i].setAttribute('aria-selected',String(i===index));buttons[i].tabIndex=i===index?0:-1;});if(focus)buttons[index].focus();}
+      panels.forEach((pane,index)=>{
+        const b=document.createElement('button');b.type='button';b.id='wsx-manage-tab-'+index;b.dataset.wsxT=keys[index];b.setAttribute('role','tab');
+        pane.id='wsx-manage-pane-'+index;pane.setAttribute('role','tabpanel');pane.setAttribute('aria-labelledby',b.id);b.setAttribute('aria-controls',pane.id);
+        b.onclick=()=>selectTab(index);b.onkeydown=e=>{const step=e.key==='ArrowRight'?1:e.key==='ArrowLeft'?-1:0;if(step){e.preventDefault();selectTab((index+step+3)%3,true);}};
+        buttons.push(b);tabs.append(b);
+      });
+      management.body.append(tabs,...panels);selectTab(0);
+      management.trigger.addEventListener('click',()=>{if(!(cur()?.members||[]).length)selectTab(1);});
+      const message=document.createElement('p');message.className='wsx-sheet-msg';message.setAttribute('role','status');management.body.append(message);
+      $('.wsx-head').insertBefore(management.trigger,$('.wsx-stopall'));
+    }
     const top = document.querySelector('.top-actions');
     if (top) {
       topBtn = document.createElement('button'); topBtn.type = 'button'; topBtn.className = 'wsx-top';

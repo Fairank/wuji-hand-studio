@@ -35,7 +35,7 @@
     const group=catalog?.actions.find(x=>x.id===picker.selected)?.group;
     const full=['dance','numbers','letters'].includes(group);
     // Reduced symbols need a visible explanation; ordinary parameter help stays folded.
-    if(full&&Number($('trial-amplitude').value)<1)$('trial-amplitude').closest('.motion-fields').after(amplitudeNote);
+    if(full&&Number($('trial-amplitude').value)<1)($('trial-amplitude').closest('.wc-options')||$('trial-amplitude').closest('.motion-fields')).after(amplitudeNote);
     else motionNotes.append(amplitudeNote);
     amplitudeNote.textContent=full?Number($('trial-amplitude').value)<1?
       text('当前为缩小幅度：数字可能不成形，舞蹈侧摆也会同步缩小。100% 表示完整编排。','Reduced amplitude can make digits unreadable and lateral movement smaller. 100% uses the complete choreography.'):

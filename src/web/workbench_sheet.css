@@ -1,0 +1,58 @@
+/* workbench_sheet.css — hws- settings sheet: quiet matte surface; the native window supplies any frost. */
+.hws-sheet, .hws-trigger {
+  --hws-bg: var(--dg-canvas, #fff); --hws-fg: var(--dg-text, #1d1d1f); --hws-fg2: var(--dg-text-2, #6e6e73);
+  --hws-line: var(--dg-line, rgba(0, 0, 0, .1)); --hws-accent: var(--dg-blue, #0071e3);
+  --hws-fill: rgba(0, 0, 0, .05); --hws-fill-2: rgba(0, 0, 0, .09);
+  --hws-shadow: 0 1px 2px rgba(0, 0, 0, .06), 0 16px 44px rgba(0, 0, 0, .16);
+  --hws-font: system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+html[data-theme=dark] .hws-sheet, html[data-theme=dark] .hws-trigger {
+  --hws-bg: var(--dg-canvas, #1c1c1e); --hws-fg: var(--dg-text, #f5f5f7); --hws-fg2: var(--dg-text-2, #a1a1a6);
+  --hws-line: var(--dg-line, rgba(255, 255, 255, .12)); --hws-accent: var(--dg-blue, #0a84ff);
+  --hws-fill: rgba(255, 255, 255, .08); --hws-fill-2: rgba(255, 255, 255, .14);
+  --hws-shadow: 0 16px 44px rgba(0, 0, 0, .5);
+}
+/* Closed or hidden: nothing paints. No box, no children, no pseudo elements, no backdrop. */
+.hws-sheet:not([open]), .hws-sheet[hidden], .hws-desc[hidden] { display: none !important; }
+.hws-sheet:not([open])::backdrop, .hws-sheet[hidden]::backdrop { display: none !important; }
+.hws-sheet[open] { display: flex; flex-direction: column; }
+.hws-sheet { /* % below = viewport of this fixed top-layer box, page scrollbar excluded */
+  box-sizing: border-box; width: min(660px, 100% - 48px); max-width: none; max-height: calc(100% - 64px);
+  margin: auto; padding: 0; overflow: hidden; border: 1px solid var(--hws-line); border-radius: 18px;
+  background: var(--hws-bg); color: var(--hws-fg); box-shadow: var(--hws-shadow); font: 14px/1.45 var(--hws-font);
+}
+.hws-sheet::backdrop { background: rgba(0, 0, 0, .24); }
+html[data-theme=dark] .hws-sheet::backdrop { background: rgba(0, 0, 0, .48); }
+.hws-head { flex: none; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 16px; padding: 24px 24px 12px; }
+.hws-title, .hws-desc { grid-column: 1; margin: 0; overflow-wrap: anywhere; }
+.hws-title { font: 600 17px/24px var(--hws-font); color: inherit; }
+.hws-desc { color: var(--hws-fg2); }
+.hws-close {
+  grid-area: 1 / 2; align-self: start; display: grid; place-items: center; box-sizing: border-box;
+  width: 28px; height: 28px; margin: -2px 0; padding: 0; border: 1px solid transparent;
+  border-radius: 50%; background: var(--hws-fill); color: var(--hws-fg2);
+}
+.hws-close svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
+.hws-close:hover { background: var(--hws-fill-2); color: var(--hws-fg); }
+/* 12px head + 4px body padding = 16px gap, leaving room for focus rings of moved controls. */
+.hws-body { flex: 1 1 auto; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 4px 24px 24px; }
+.hws-trigger {
+  display: inline-flex; align-items: center; box-sizing: border-box; min-height: 28px; padding: 0 12px;
+  border: 1px solid var(--hws-line); border-radius: 999px; background: var(--hws-fill);
+  color: var(--hws-fg); font: 500 13px/1.2 var(--hws-font); white-space: nowrap;
+}
+.hws-trigger:not(:disabled):hover { background: var(--hws-fill-2); }
+.hws-trigger:disabled { opacity: .5; }
+.hws-close:focus-visible, .hws-trigger:focus-visible { outline: 2px solid var(--hws-accent); outline-offset: 2px; }
+@keyframes hws-fade { from { opacity: 0; } }
+.hws-sheet[open], .hws-sheet[open]::backdrop { animation: hws-fade 140ms ease-out; }
+@media (prefers-reduced-motion: reduce) {
+  .hws-sheet[open], .hws-sheet[open]::backdrop { animation: none; }
+}
+html[data-reduce-motion=true] .hws-sheet[open],
+html[data-reduce-motion=true] .hws-sheet[open]::backdrop { animation: none; }
+@media (forced-colors: active) {
+  .hws-sheet { border-color: CanvasText; }
+  .hws-close, .hws-trigger { border-color: ButtonText; }
+  .hws-close:focus-visible, .hws-trigger:focus-visible { outline-color: Highlight; }
+}
