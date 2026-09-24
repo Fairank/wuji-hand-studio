@@ -87,7 +87,7 @@ class CalibrationTest(unittest.TestCase):
             self.assertEqual(service.run['status'], 'completed')
             self.assertEqual(service.run['step'], 1)
             self.assertEqual(created[0][0][-10:], ['wuji', '--jsonl', 'calib', 'hand-model', '--sn', 'WG123', '--handedness', 'left', '--timeout-s', '900'])
-            self.assertEqual(created[0][0][-11], 'calibrate')
+            self.assertEqual(created[0][0][-13:-10], ['calibrate','Demo','keep'])
             self.assertEqual(created[0][1]['stdin'], calibration_cli.subprocess.PIPE)
 
     def test_zero_exit_without_result_is_not_success(self):

@@ -66,7 +66,7 @@ def cli_json(config, *args):
     return value
 
 
-def runner_command(config, mode, args):
+def runner_command(config, mode, args, expected_user=None, replace=False):
     """Deploy the same verified controller bundle used by the device sessions."""
     if config['mode']=='wsl':
         from managed_runtime import WslController, PYTHON
@@ -81,7 +81,11 @@ def runner_command(config, mode, args):
         directory=bridge.agent_directory;python=config.get('python') or 'python3'
     else:
         raise ValueError('Guided calibration requires the built-in or local controller')
-    return controller_args(config,[python,'-u',directory+'/calibration_runner.py',mode,*args])
+    prefix=[mode]
+    if mode=='calibrate':
+        if not isinstance(expected_user,str) or not expected_user:raise ValueError('Expected calibration user required')
+        prefix.extend([expected_user,'replace' if replace else 'keep'])
+    return controller_args(config,[python,'-u',directory+'/calibration_runner.py',*prefix,*args])
 
 
 def progress_fields(event):
@@ -187,7 +191,7 @@ class CalibrationCLI:
             config = load_config()
             args = [config['cli'] or 'wuji', '--jsonl', 'calib', 'hand-model',
                     '--sn', serial, '--handedness', side, '--timeout-s', str(timeout_s)]
-            command = runner_command(config, 'calibrate', args)
+            command = runner_command(config, 'calibrate', args, current['name'], replace)
             flags = getattr(subprocess, 'CREATE_NO_WINDOW', 0) | getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0)
             process = subprocess.Popen(command, stdin=subprocess.PIPE,
                                        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
