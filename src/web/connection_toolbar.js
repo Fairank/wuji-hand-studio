@@ -16,7 +16,11 @@
   const footer=document.createElement('div');footer.className='connection-footer';
   const settings=document.createElement('a');settings.href='#connection';settings.onclick=()=>close();
   const dismiss=document.createElement('button');dismiss.type='button';dismiss.onclick=()=>close();footer.append(settings,dismiss);
-  pop.append(heading,summary,candidates,footer);document.body.append(pop);
+  const gloveBox=document.createElement('div');gloveBox.id='connection-glove-summary';
+  const gloveStatus=document.createElement('p'),gloveLinks=document.createElement('div');gloveLinks.className='connection-glove-links';
+  const gloveConnect=document.createElement('a'),gloveMapping=document.createElement('a');
+  for(const [link,tab] of [[gloveConnect,'visual'],[gloveMapping,'retarget']]){link.href='#connection';link.onclick=event=>{event.preventDefault();close();window.WujiConnectionHub.show(tab);};gloveLinks.append(link);}
+  gloveBox.append(gloveStatus,gloveLinks);pop.append(heading,summary,candidates,gloveBox,footer);document.body.append(pop);
   let state=null,busy=false,online=false,key='',candidateRows=[],announcedDevices='';
   const text=(zh,en)=>document.documentElement.lang==='en'?en:zh;
   function close(){pop.close();status.setAttribute('aria-expanded','false');}
@@ -31,6 +35,9 @@
     toggle.disabled=busy||!online||!!s?.glove?.busy;
     toggle.setAttribute('aria-label',toggle.textContent+' '+text('机械手','hand'));
     heading.textContent=text('设备连接','Device connection');dismiss.textContent=text('收起','Done');settings.textContent=text('连接设置','Connection settings');
+    const glove=s?.glove||{};
+    gloveStatus.textContent=text('手套：','Glove: ')+(!online?text('服务离线','Service offline'):glove.connection==='disconnected'||!glove.connection?text('未连接','Not connected'):glove.message||glove.connection);
+    gloveConnect.textContent=text('连接与遥操作','Connect & teleoperate');gloveMapping.textContent=text('调整映射','Adjust mapping');
     summary.textContent=s?.devices?.length?text('发现多只机械手，请选择要连接的一只。','Multiple hands found. Select one to connect.'):connected?[s.device_id,subtitle.textContent].filter(Boolean).join(' · '):s?.connection==='error'?s.message:connecting?text('正在检查设备身份与关节反馈。','Checking device identity and joint feedback.'):text('接好设备后，直接点击右上角连接。','Connect the device, then use Connect in the toolbar.');
     const next=JSON.stringify([s?.devices||[],document.documentElement.lang]);
     if(next!==key){key=next;candidateRows=(s?.devices||[]).map(d=>{const b=document.createElement('button');b.type='button';b.textContent=d.serial+' · '+d.generation+(d.side_hint?' · '+text(d.side_hint==='left'?'左手':'右手',d.side_hint):'');b.onclick=()=>run('connect',d.serial);return b;});candidates.replaceChildren(...candidateRows);}

@@ -35,8 +35,3 @@ html[data-reduce-motion=true] *,html[data-reduce-motion=true] *::before,html[dat
 html[data-reduce-transparency=true] .playback-modes,html[data-reduce-transparency=true] .symbol-kinds{background:#f0f0f3}
 @media(prefers-reduced-transparency:reduce){.playback-modes,.symbol-kinds{background:#f0f0f3}}
 @media(forced-colors:active){body button,.symbol-dialog,body select{border:1px solid ButtonText;box-shadow:none!important}.directory a[aria-current=page]{outline:1px solid Highlight}.playback-modes button[aria-pressed=true],.symbol-kinds button[aria-pressed=true]{outline:2px solid Highlight}}
-/* Real edge textures sit behind controls and never intercept input. */
-.external-glass-canvas{position:fixed;z-index:10;pointer-events:none;display:block}
-html[data-redact-external=true] .external-glass-canvas{visibility:hidden!important}
-html[data-external-refraction=true] .glass-edge{visibility:hidden}
-@media(forced-colors:active),(prefers-reduced-transparency:reduce){.external-glass-canvas{display:none!important}}

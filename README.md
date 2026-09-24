@@ -8,31 +8,19 @@
 
 ## Windows 下载和启动
 
-在 [Releases](../../releases) 选择实际已上传的安装包。Windows 0.2.6 是同一软件的原位更新，当前用户安装，无需另装 Python。Windows 安装器检查微软 WebView2 运行时，缺少时联网安装。包暂未进行发布者代码签名，附有 SHA-256 校验文件。源码分支与本地安装包的验证状态见 [0.2.6 验证记录](docs/VALIDATION_0.2.6.md)。
+在 [Releases](../../releases) 选择实际已上传的安装包。Windows 0.2.7 是同一软件的原位更新，当前用户安装，无需另装 Python。Windows 安装器检查微软 WebView2 运行时，缺少时联网安装。包暂未进行发布者代码签名，附有 SHA-256 校验文件。源码分支与本地安装包的验证状态见 [0.2.7 验证记录](docs/VALIDATION_0.2.7.md)。
 
-## 0.2.6 拖动窗口时保持折射采集会话
+## 0.2.7 原生磨砂与设置整理
 
-此前窗口位置每变化一次，就重启整条桌面捕获会话，是拖动卡顿的明确原因。现在同一显示器内移动或缩放只更新边缘取样坐标；跨显示器或切换显示模式才重建捕获。网页也不再反复写未变化的四边画布位置。折射不会因性能警告自动关闭。安装版试用期间仅启动一次捕获会话，但实际网页呈现约 54 Hz，尚未达到流畅目标。现有四张 JPEG 经 WebView 桥接的架构仍无法宣称达到苹果系统 Liquid Glass 的流畅度。
+按实际试用反馈，移除实验性桌面背景折射：不再采集桌面，不再经过 JPEG / WebView 传图，也没有折射开关或调节项。Windows 保留系统原生 Acrylic 磨砂；macOS 源码统一使用原生 vibrancy。旧实验记录仅供历史追溯，不是当前功能。
 
-## 0.2.5 折射持续开启
+设置按外观、连接与设备、数据与工具分类。中英文、主题、减少透明和动态效果集中管理；手套可视化、官方标定、映射和多手工作区可以直接进入。右上角连接详情新增独立的手套状态和入口。修复反馈刷新反复重建节目单、打断正在编辑的速度和循环选项的问题。
 
-按用户要求，卡顿或实际帧率不足只在界面和维护数据中提示，**不再自动关闭玻璃折射**。静止时继续等待新画面，不反复绘制；窗口最小化时暂停捕获，恢复后继续。手动关闭、关闭软件或系统减少透明效果仍会停止捕获；失去图形上下文或暂时采集失败时保持开关并尝试恢复。
-
-## 0.2.4 折射高刷新试运行
-
-实验折射借鉴 ProMotion 的按需刷新原则：根据所在显示器的模式请求 60–120 Hz 采集，静止时等待新画面而不重复编码或绘制；有连续变化时才启动显示节奏检查。实际采集、呈现、绘制耗时分别测量。0.2.4 版本曾在卡顿或低帧率时自动关闭，0.2.5 已取消该行为。
-
-8 毫秒是 120 Hz 显示器上的采集间隔请求，60 Hz 显示器请求 16 毫秒；Windows 不保证实际帧率，静态桌面也可能没有新画面。现有 JPEG/WebView 桥接仍在，真实动态桌面的 60–120 Hz 尚需现场测量，后续可研究原生 GPU 路径。折射默认关闭，需用户主动开启；性能下降时不会自动关闭。
-
-## 0.2.3 玻璃边缘与性能
-
-实验折射层的内侧改为连续透明渐变，不再用四条不透明画布硬截断背景。设置 → 外观提供“清透—染色”主滑杆，以及折叠的边缘过渡和折射幅度调节。参数本机保存，采集开关仍需每次主动开启；减少透明效果时继续关闭采集。
-
-绘图缓冲和 WebGL 纹理在尺寸不变时复用，减少每帧重复分配。Windows 实验效果仍通过屏幕采集、边缘 JPEG 编码、WebView 桥接和纹理上传，不是 macOS/iOS 的系统合成材质；还没有真实桌面动态帧率验收，不承诺达到苹果系统材质的流畅度。此版不改变手的连接、动作和控制参数。
+全部需求与未验证事项见 [功能验收清单](docs/REQUIREMENTS.md)。本次本地 Claude CLI 不可用，没有新 Claude 调用；实现与审核由主维护者完成。物理设备验收仍按各功能分别记录。
 
 ## 0.2.2 连接与校准
 
-动作页与工作台顶栏改为独立滚动层：向下查看动作时，页面标题不会滑进玻璃顶栏。移除四边模拟玻璃的浅色遮挡条，在桌面窗口留下更清楚的原生通透边缘。真正随桌面背景变形的四边折射仍是 Windows 上的实验功能，开关放在“设置 → 外观”，需主动开启；浏览器预览和不支持的系统不呈现外部桌面折射。
+动作页与工作台顶栏改为独立滚动层：向下查看动作时，页面标题不会滑进玻璃顶栏。移除四边模拟玻璃的浅色遮挡条，在桌面窗口留下更清楚的原生通透边缘。该历史版本曾包含实验背景折射，0.2.7 已移除。
 
 “连接与校准”集中设备、实时可视化、手套校准和手套→手机械映射。可视化把当前三维机械手画面与手套原始 21 关键点骨架分开显示；无手套数据时明确显示空态。手套手型标定通过[官方 Wuji CLI 流程](https://docs.wuji.tech/docs/zh/wuji-cli/latest/hand-model-calibration/)完成，按命名 SDK 用户及左右手保存；覆盖已有标定必须勾选确认。标定不会驱动机械手。此版本已做程序逻辑与离线界面测试，**未完成手套实物六姿势标定验收**。工作台输出增益、偏移和平滑仍作用于官方 21→20 关节映射之后，保存后重连生效。
 
@@ -50,7 +38,7 @@
 
 手套设置在官方 SDK 完成 21 个关键点到 20 个手关节的映射后，提供 20 关节各自的输出幅度、角度偏移及平滑时间。默认设置不改变官方结果；这不是修改官方 SDK 的 IK 权重或标定。保存后需重连手套。遥操作仍需在各工作区明确选择并启动，自动发现本身不会启动机械手跟随。
 
-Windows 用原生窗口材质和轻量模糊边缘；软件内的半透明面板与过渡可随系统减少透明设置回退。macOS 共用界面源码，但本轮没有在 Mac 上构建或实机验收。外部背景折射仍是已有实验功能，不能称为苹果系统 Liquid Glass 的完整复刻。
+Windows 用原生窗口材质和轻量模糊边缘；软件内的半透明面板与过渡可随系统减少透明设置回退。macOS 共用界面源码，但本轮没有在 Mac 上构建或实机验收。0.2.7 已移除外部背景折射。
 
 ## macOS 0.1.9 预览
 
@@ -58,7 +46,7 @@ Apple Silicon 版使用原生 Cocoa 窗口和 WKWebView，沿用同一软件、�
 
 当前已上传源码，**Mac 安装包尚未生成**：本机 Mac 不在线，GitHub 登录缺少工作流写入权限。构建流程先保存在 `ci/macos.yml.example`，不将模板误报为已运行的 GitHub Actions。
 
-优先使用 macOS 26 的公开玻璃 API；旧系统回退原生通透材质，减少透明时使用实色。构建验证、视觉验收、真实设备验收分别记录，不能互相替代。此版为未公证的预览包，不宣称已完成 M4 Max 的 Linux 启动、实机或外部背景折射验收。内置 Linux 暂不透传一代 USB 手；二代以太网自动发现仍需真实 Mac 验证，自定义网段可手动填写，多设备需自行选择。
+0.2.7 起使用原生 vibrancy 磨砂，减少透明时使用实色。构建验证、视觉验收、真实设备验收分别记录，不能互相替代。此版为未公证的预览包，不宣称已完成 M4 Max 的 Linux 启动、实机或外部背景折射验收。内置 Linux 暂不透传一代 USB 手；二代以太网自动发现仍需真实 Mac 验证，自定义网段可手动填写，多设备需自行选择。
 
 ## 0.1.8 全局连接与界面更新
 
@@ -80,7 +68,7 @@ Windows 使用独立原生窗口和内嵌 WebView2，不依赖浏览器应用窗
 - 一代 / 二代 × 左手 / 右手四种原生 MuJoCo 模型，实测关节同步、视角调整、浮动模型小窗。
 - 动作选择和循环、整句文字（例如 `wuji tech`）、数字、启动时刻 HH:MM、九套编排手指舞。字母是参考 ASL 的固定手腕近似，不是 WUJI 官方动作或通用手语。见 [动作来源与倍速说明](docs/MOTIONS.md)。
 - 0.1.6 使用中国常用单手数字比法：修正 4 的收拇指与 6–9；九套舞蹈均有明显侧摆。数字/舞蹈首次选择完整编排幅度，用户手动选择的幅度继续保留。控制端动作库版本 4 才支持本轮轨迹。
-- [实验性外部背景折射](docs/EXTERNAL_REFRACTION.md)：菜单明确开启后在本机处理外部图案，默认关闭；不作为苹果系统效果复刻。内部工具条、控件与短过渡进一步统一。
+- 系统原生磨砂、清晰内容卡片及短过渡。实验背景折射已移除，不采集桌面。
 - 参数调节、发送频率与真实反馈统计、采集和记录、官方诊断、手套映射预览及显式启动跟随。
 - [代码检视与升级接口](docs/DESKTOP_API.md)：读取软件状态、界面布局、导出自身画面、检查和应用安装包。不发送桌面鼠标键盘输入，不截取其他软件。
 
@@ -102,7 +90,7 @@ Windows 构建需要先按 `src/runtime_manifest.json` 准备对应压缩镜像�
 
 Ubuntu 已有历史 0.1.3 包。macOS 的原生构建在 GitHub Mac runner 上进行，真实 Mac 与机械手验收仍待完成；不把 Windows 文件改名当作 Mac 安装包。
 
-本轮本地 Claude 按用户最新偏好使用 `claude-opus-5-5 --effort max`，仅辅助边界明确的播放列表基础设计；实际返回模型为 `claude-opus-5-5`。输出经主维护者审核，控制逻辑、设备边界和真实结果由主维护者核验。代码接口用于检视软件，不操作桌面。来源和许可证见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+0.2.0 的本地 Claude 按用户当时偏好使用 `claude-opus-5-5 --effort max`，仅辅助边界明确的播放列表基础设计；实际返回模型为 `claude-opus-5-5`。输出经主维护者审核，控制逻辑、设备边界和真实结果由主维护者核验。代码接口用于检视软件，不操作桌面。来源和许可证见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
 ## English
 
@@ -114,4 +102,4 @@ Use the [code-only maintenance interface](docs/DESKTOP_API.md) for inspecting th
 
 Version 0.1.8 adds an always-visible connection control, discovered-device selection, refreshed translucent navigation and compact action layout. It pairs with controller image 1.0.1; upgrading the owned 1.0.0 environment preserves user parameters and records. No motor gains or trajectory settings are changed by this UI update.
 
-Version 0.1.9 adds an Apple Silicon Cocoa/WKWebView preview and a bundled Ubuntu/Lima control runtime. Initial SDK setup requires internet; subsequent VM starts are managed by the app. macOS 26 native glass is requested when available; earlier systems use vibrancy. Packages are ad-hoc signed, not notarized. Physical Mac VM startup, device operation and visual glass acceptance remain unverified. Hand 1 USB passthrough is not implemented; an external Linux controller remains available. The Mac workflow publishes a clearly marked prerelease only after a successful native build and bundle verification.
+Version 0.1.9 adds an Apple Silicon Cocoa/WKWebView preview and a bundled Ubuntu/Lima control runtime. Initial SDK setup requires internet; subsequent VM starts are managed by the app. Version 0.2.7 uses native vibrancy on macOS; experimental desktop refraction has been removed on Windows. Packages are ad-hoc signed, not notarized. Physical Mac VM startup, device operation and visual glass acceptance remain unverified. Hand 1 USB passthrough is not implemented; an external Linux controller remains available. The Mac workflow publishes a clearly marked prerelease only after a successful native build and bundle verification.

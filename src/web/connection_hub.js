@@ -19,8 +19,6 @@
  const glovePage=$('page-glove'),gloveBody=glovePage?.querySelector('.page-body');
  if(gloveBody)sections.visual.append(...[...gloveBody.children]);
  const retarget=$('wb-retarget-title')?.closest('.wb-card');if(retarget)sections.retarget.append(retarget);
- const appearance=$('wb-appearance-title')?.closest('.wb-card'),refraction=$('external-refraction-settings');
- if(appearance&&refraction){refraction.classList.add('hub-refraction-setting');appearance.append(refraction)}
  const oldGloveNav=document.querySelector('.directory [data-page="glove"]');if(oldGloveNav)oldGloveNav.hidden=true;
  const mappingLink=$('wb-glove-settings-link');if(mappingLink)mappingLink.href='#connection';
  mappingLink?.addEventListener('click',()=>select('retarget'));
@@ -45,6 +43,7 @@
  <p id="hub-calib-status" role="status" aria-live="polite"></p><p id="hub-calib-step"></p>
  <a href="https://docs.wuji.tech/docs/en/wuji-studio/latest/calibration/" target="_blank" rel="noopener" id="hub-calib-doc"></a>`;
  sections.calibration.append(calib);
+ window.WujiConnectionHub={show(key){location.hash='#connection';ws.showPage();select(key)}};
  let active='device',calibration=null,consoleState=null,busy=false,lastError='';
  function select(key){if(!sections[key])key='device';active=key;for(const [name,section] of Object.entries(sections)){
    section.hidden=name!==key;const button=$('hub-tab-'+name);button.setAttribute('aria-selected',String(name===key));button.tabIndex=name===key?0:-1;

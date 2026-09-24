@@ -62,11 +62,11 @@ class MaterialTests(unittest.TestCase):
         self.assertIs(self.window.contentView(), self.original)
         self.assertTrue(result['content_attached'])
 
-    def test_glass_only_when_public_class_exists(self):
+    def test_vibrancy_even_when_newer_material_is_available(self):
         self.modern = True
         material = WindowMaterial(self.window)
         result = material.apply()
-        self.assertEqual(result['material'], 'macos_glass')
+        self.assertEqual(result['material'], 'vibrancy')
         self.assertIs(self.window.contentView().contentView(), self.original)
 
     def test_repeated_mode_does_not_nest_or_replace_wrapper(self):

@@ -83,13 +83,21 @@ Source: "{#ProjectRoot}\src\assets\*"; DestDir: "{app}\controller\source\assets"
 Source: "{#ProjectRoot}\src\official_data\*"; DestDir: "{app}\controller\source\official_data"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#ProjectRoot}\controller\README.md"; DestDir: "{app}\controller"; Flags: ignoreversion
 
+[InstallDelete]
+; Retired application code only. Never touch per-user settings, models or records.
+Type: files; Name: "{app}\_internal\web\external_refraction.js"
+Type: files; Name: "{app}\_internal\web\refraction_health.js"
+Type: files; Name: "{app}\controller\source\external_refraction.py"
+Type: files; Name: "{app}\scripts\test_refraction_health.cjs"
+Type: filesandordirs; Name: "{app}\_internal\windows_capture"
+
 [Icons]
 Name: "{autoprograms}\灵巧手工作台"; Filename: "{app}\{#AppExe}"; WorkingDir: "{app}"
 Name: "{autodesktop}\灵巧手工作台"; Filename: "{app}\{#AppExe}"; WorkingDir: "{app}"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\{#AppExe}"; WorkingDir: "{app}"; Description: "{cm:LaunchProgram,{#StringChange(AppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent unchecked
-; No [UninstallDelete]/[InstallDelete]/[Registry] on purpose: user config and recordings outside the app folder are never touched.
+; No [UninstallDelete]/[Registry]: user data outside the app folder is never touched.
 
 
 [Code]

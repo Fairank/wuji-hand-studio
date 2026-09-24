@@ -231,11 +231,6 @@ body button.desktop-menu-row{width:100%;justify-content:flex-start;border:0;box-
 /* Workbench 0.1.5: breathing room for actions and an inset glass window surround.
    Only the four noninteractive edge siblings filter; never the viewer's ancestors. */
 :root{--dg-frame:12px;--dg-glass:rgba(255,255,255,.64)}
-.glass-edge{position:fixed;z-index:10;pointer-events:none;background:rgba(245,245,247,.48);backdrop-filter:var(--dg-blur);-webkit-backdrop-filter:var(--dg-blur);box-shadow:inset 0 0 0 1px rgba(255,255,255,.86)}
-.glass-edge-top{inset:0 0 auto;height:10px;border-radius:16px 16px 0 0}
-.glass-edge-left{top:10px;left:0;bottom:10px;width:10px;border-right:1px solid rgba(255,255,255,.8)}
-.glass-edge-right{top:10px;right:0;bottom:10px;width:var(--dg-frame);border-left:1px solid rgba(255,255,255,.9);box-shadow:inset 2px 0 6px rgba(255,255,255,.7),-1px 0 10px rgba(0,0,0,.06)}
-.glass-edge-bottom{inset:auto 0 0;height:var(--dg-frame);border-radius:0 0 16px 16px;box-shadow:inset 0 2px 4px rgba(255,255,255,.95),0 -1px 8px rgba(0,0,0,.05)}
 .top{top:10px;left:10px;right:var(--dg-frame);border:1px solid rgba(255,255,255,.92);border-radius:20px;box-shadow:var(--dg-rim),0 5px 18px rgba(0,0,0,.055)}
 .directory{top:84px;bottom:var(--dg-frame)}
 .page-area{margin-top:84px;margin-right:var(--dg-frame);margin-bottom:var(--dg-frame);min-height:calc(100vh - 96px);border:1px solid rgba(0,0,0,.06);border-radius:22px;padding:28px}
@@ -276,23 +271,18 @@ body button.desktop-menu-row{width:100%;justify-content:flex-start;border:0;box-
   .viewer-dock{position:static}
 }
 @media(max-width:420px){#page-library .motion-fields{grid-template-columns:minmax(0,1fr)}#page-library .motion-field{grid-column:1/-1}.page-area{padding:16px}}
-html[data-reduce-transparency=true] .glass-edge{background:var(--dg-bg);box-shadow:none}
-@media(prefers-reduced-transparency:reduce){.glass-edge{background:var(--dg-bg);box-shadow:none}}
-@media(forced-colors:active){.glass-edge{display:none}.top,.page-area{border:1px solid CanvasText;box-shadow:none}}
+@media(forced-colors:active){.top,.page-area{border:1px solid CanvasText;box-shadow:none}}
 
 /* Reviewed/adapted Claude Fable layout details: actual DOM, accessible labels and focus. */
 #page-library .motion-fields{align-items:end}
 #page-library .motion-field label,#page-library #action-selection-note{overflow-wrap:anywhere}
 #page-library :is(.symbol-shortcuts,.playback-modes,.button-row) button{min-width:0;height:auto;white-space:normal;overflow-wrap:anywhere;text-overflow:clip;scroll-margin:100px 0 28px}
 #page-library :is(#studio-action,.motion-field select){box-sizing:border-box;min-width:0;max-width:none;height:auto;min-height:44px}
-.glass-edge{box-sizing:border-box;margin:0}
 html{scroll-padding-top:100px;scroll-padding-bottom:28px}
-@supports not (backdrop-filter:blur(1px)){.glass-edge{background:#f5f5f7}}
 
 /* System Acrylic beneath the WebView: the real desktop participates in DWM compositing.
    CSS never obtains external pixels; the opaque reading canvas stays legible. */
 html[data-external-backdrop=true],html[data-external-backdrop=true] body,html[data-external-backdrop=true] .app{background:transparent}
-html[data-external-backdrop=true] .glass-edge{background:transparent;backdrop-filter:none;-webkit-backdrop-filter:none;box-shadow:inset 0 0 0 1px rgba(255,255,255,.65)}
 html[data-external-backdrop=true] .top,html[data-external-backdrop=true] .directory{background:rgba(255,255,255,.38);backdrop-filter:none;-webkit-backdrop-filter:none}
 html[data-external-backdrop=true] .page-area{background:#fff}
 
@@ -311,7 +301,6 @@ html[data-reduce-motion=true] .workspace-page>.page-heading,html[data-reduce-mot
 html[data-platform=macos][data-external-backdrop=true],
 html[data-platform=macos][data-external-backdrop=true] body{background:transparent!important}
 html[data-platform=macos] body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",sans-serif}
-html[data-platform=macos][data-external-backdrop=true] .glass-edge{background:transparent;backdrop-filter:none;-webkit-backdrop-filter:none;box-shadow:none;border-color:transparent}
 html[data-platform=macos][data-external-backdrop=true] .top,
 html[data-platform=macos][data-external-backdrop=true] .directory{background:rgba(250,250,252,.42);backdrop-filter:none;-webkit-backdrop-filter:none}
 html[data-platform=macos] .page-area{background:rgba(255,255,255,.96)}

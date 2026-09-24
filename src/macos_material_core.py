@@ -1,11 +1,10 @@
 """Native window material for a caller-supplied Cocoa NSWindow (public AppKit only).
-NSGlassEffectView is looked up dynamically (exists only in the macOS 26+ AppKit); else
-NSVisualEffectView (behind-window, active). Lazy PyObjC imports. Not device-validated."""
+NSVisualEffectView provides native behind-window blur. Lazy PyObjC imports.
+Not device-validated."""
 import platform
 
 TAG = "appmaterial."  # NSView.identifier prefix marking a wrapper created by this module
 KINDS = {  # kind -> (reported material, native view class, honest note)
-    "glass": ("macos_glass", "NSGlassEffectView", "hosted via NSGlassEffectView.contentView"),
     "vibrancy": ("vibrancy", "NSVisualEffectView", "behind-window blur; not glass, no refraction"),
     "opaque": ("opaque", "NSBox", "opaque window-background fill; Reduce Transparency is on"),
     "solid": ("solid", None, "original content view restored; no effect view"),
@@ -21,13 +20,12 @@ class WindowMaterial:
 
     def __init__(self, nswindow):
         import AppKit
-        from Foundation import NSClassFromString, NSThread
+        from Foundation import NSThread
         if not NSThread.isMainThread():
             raise RuntimeError("WindowMaterial must be used on the AppKit main thread")
         if not isinstance(nswindow, AppKit.NSWindow):
             raise TypeError("nswindow must be an AppKit.NSWindow")
         self.A, self.window = AppKit, nswindow
-        self.glass_cls = NSClassFromString("NSGlassEffectView")  # None before macOS 26
         view = nswindow.contentView()
         self.wrapper, self.kind, self.original = None, "solid", view
 
@@ -41,16 +39,11 @@ class WindowMaterial:
             return "solid", None, reduce
         if reduce:  # accessibility wins: choose the opaque appearance
             return "opaque", "reduce_transparency", reduce
-        if self.glass_cls is None:
-            return "vibrancy", "NSGlassEffectView_unavailable", reduce
-        return "glass", None, reduce
+        return "vibrancy", None, reduce
 
     def _build(self, kind, frame):
         A = self.A
-        if kind == "glass":
-            w = self.glass_cls.alloc().initWithFrame_(frame)
-            w.setCornerRadius_(16.0)
-        elif kind == "vibrancy":
+        if kind == "vibrancy":
             w = A.NSVisualEffectView.alloc().initWithFrame_(frame)
             w.setMaterial_(A.NSVisualEffectMaterialUnderWindowBackground)
             w.setBlendingMode_(A.NSVisualEffectBlendingModeBehindWindow)
@@ -99,9 +92,9 @@ class WindowMaterial:
         if isinstance(focus, A.NSView):
             win.makeFirstResponder_(focus)  # re-hosting can drop keyboard focus
 
-    def apply(self, mode="glass"):
-        if mode not in ("glass", "solid") or self.original is None or self.kind not in KINDS:
-            why = "original_view_not_found" if mode in ("glass", "solid") else "invalid_mode"
+    def apply(self, mode="vibrancy"):
+        if mode not in ("vibrancy", "solid") or self.original is None or self.kind not in KINDS:
+            why = "original_view_not_found" if mode in ("vibrancy", "solid") else "invalid_mode"
             return _reply(False, "error", reason=why, requested=str(mode))
         try:
             kind, why, reduce = self._target(mode)

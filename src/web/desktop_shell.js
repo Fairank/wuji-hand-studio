@@ -1,7 +1,6 @@
 /* Desktop commands and appearance only. Motor commands stay in the existing controller. */
 (()=>{
  'use strict';
- for(const side of ['top','left','right','bottom']){const edge=document.createElement('div');edge.className='glass-edge glass-edge-'+side;edge.setAttribute('aria-hidden','true');document.body.append(edge);}
  const $=id=>document.getElementById(id),t=(zh,en)=>window.WujiLocale?.lang==='en'?en:zh;
  let native=null,info=null,state=null;
  const button=document.createElement('button');button.className='app-menu-button';button.id='desktop-menu-button';button.type='button';button.textContent='⋯';button.setAttribute('aria-haspopup','dialog');
@@ -24,7 +23,7 @@
   appearance(key,saved);$(id).checked=saved;$(id).onchange=()=>appearance(key,$(id).checked);
  }
  function labels(){
-  button.title=t('工作台菜单 · Ctrl+,','Workbench menu · Ctrl+,');button.setAttribute('aria-label',t('工作台菜单','Workbench menu'));
+  button.title=t('工作台菜单','Workbench menu');button.setAttribute('aria-label',t('工作台菜单','Workbench menu'));
   $('desktop-menu-title').textContent=t('工作台','Workbench');$('desktop-menu-close').setAttribute('aria-label',t('关闭菜单','Close menu'));
   $('desktop-transparency-label').textContent=t('减少透明效果','Reduce transparency');$('desktop-motion-label').textContent=t('减少动态效果','Reduce motion');
   $('desktop-viewer').textContent=t('打开独立模型窗口','Open model window');$('desktop-folder').textContent=t('打开本机数据文件夹','Open local data folder');$('desktop-quit').textContent=t('退出工作台','Quit workbench');
@@ -60,7 +59,7 @@
  window.addEventListener('console-state',e=>{state=e.detail;});
  for(const query of ['(prefers-reduced-transparency: reduce)','(forced-colors: active)'])matchMedia(query).addEventListener('change',()=>applyMaterial().catch(()=>{}));
  document.addEventListener('keydown',e=>{
-  if((e.ctrlKey||e.metaKey)&&e.key===','){e.preventDefault();button.click();}
+  if((e.ctrlKey||e.metaKey)&&e.key===','){e.preventDefault();menu.close();location.hash='#settings';window.WujiWorkspace.showPage();}
   if((e.ctrlKey||e.metaKey)&&e.shiftKey&&e.code==='KeyV'&&native){e.preventDefault();native.open_viewer();}
   if(native&&(e.key==='F5'||(e.ctrlKey||e.metaKey)&&e.code==='KeyR')){e.preventDefault();}
  });

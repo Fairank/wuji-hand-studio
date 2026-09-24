@@ -25,14 +25,8 @@ class MacDesktop(NativeDesktop):
         from macos_material import WindowMaterial
         if self.mac_material is None:
             self.mac_material = WindowMaterial(self.window.native)
-        self.material = self.mac_material.apply('glass' if enabled else 'solid')
+        self.material = self.mac_material.apply('vibrancy' if enabled else 'solid')
         return self.material
-
-    def set_external_refraction(self, enabled):
-        if type(enabled) is not bool:
-            raise ValueError('Expected boolean refraction preference')
-        return dict(enabled=False, active=False, supported=False,
-                    reason='macOS uses native system material; desktop capture is not used')
 
     def install_runtime_components(self):
         from managed_runtime import start_install

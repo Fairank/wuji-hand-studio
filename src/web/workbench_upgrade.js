@@ -19,7 +19,7 @@
   const label=()=>{page.querySelector('h2').textContent=link.lastElementChild.textContent=t(zh,en);page.querySelector('header p').textContent=description[L.lang]};
   label();window.addEventListener('wuji-language',label);return page.querySelector('.page-body');
  }
- const settings=addPage('settings','设置','Settings',{zh:'外观、自动发现、手套映射与工作区。',en:'Appearance, discovery, glove mapping and workspaces.'});
+ const settings=addPage('settings','设置','Settings',{zh:'让工作台适合你的使用习惯。',en:'Make the workbench feel right for you.'});
  const devices=embedded?null:addPage('devices','多手设备','Devices',{zh:'每只手独立连接、播放和显示；切换视图不会结束其他设备的会话。',en:'Each hand has its own connection, playback and view. Switching views keeps other sessions running.'});
  settings.innerHTML=`<div class="wb-card"><h3 id="wb-appearance-title"></h3><p id="wb-appearance-note"></p><div class="wb-row"><label id="wb-theme-label" for="wb-theme"></label><select id="wb-theme"><option value="system"></option><option value="light"></option><option value="dark"></option></select></div><div class="wb-row"><label id="wb-auto-hand-label"><input type="checkbox" id="wb-auto-hand"><span></span></label></div><div class="wb-row"><label id="wb-auto-glove-label"><input type="checkbox" id="wb-auto-glove"><span></span></label></div></div>
  <div class="wb-card"><h3 id="wb-retarget-title"></h3><p id="wb-retarget-note"></p><div class="wb-row"><label for="wb-smoothing" id="wb-smoothing-label"></label><input id="wb-smoothing" type="number" min="0" max="1000" step="10" value="0"><span>ms</span></div><div id="wb-retarget-grid" class="wb-list"></div><div class="wb-actions"><button id="wb-retarget-default"></button><button id="wb-retarget-save" class="primary"></button></div><p id="wb-retarget-status" class="wb-status" role="status"></p></div>`;
@@ -51,6 +51,9 @@
    }
    row.prepend(name,speed,count);host.append(row);
   });
+  updateProgramControls();
+ }
+ function updateProgramControls(){
   $('wb-program-preview').disabled=programPending||!entries.length;
   $('wb-program-hardware').disabled=programPending||!entries.length||state?.connection!=='connected'||state?.stale||state?.device_profile?.generation!=='hand2'||state?.hardware?.active!==false;
  }
@@ -69,16 +72,24 @@
    .then(async r=>{const value=await r.json();if(!r.ok||!value.ok)throw Error(value.error||'Request failed');return value});
  }
  async function programCommand(name,payload={}){
-  programPending=true;renderEntries();
+  programPending=true;updateProgramControls();
   try{const out=await request(name,payload);if(out.program_lease)programLease=out.program_lease;if(name==='program_stop')programLease=null;$('wb-program-status').textContent='';}
   catch(error){$('wb-program-status').textContent=error.message;}
-  finally{programPending=false;renderEntries()}
+  finally{programPending=false;updateProgramControls()}
  }
  function plan(){return {entries:entries.map(x=>({...x})),order:$('wb-order').value,repeats:Number($('wb-repeats').value),seed:Number($('wb-seed').value)}}
  $('wb-program-preview').onclick=()=>programCommand('program_start',{mode:'preview',plan:plan(),amplitude:1});
  $('wb-program-hardware').onclick=()=>programCommand('program_start',{mode:'hardware',plan:plan(),amplitude:Number($('trial-amplitude')?.value||1),workspace_clear:!!$('trial-clear')?.checked});
  $('wb-program-pause').onclick=()=>programCommand(state?.program?.paused?'program_resume':'program_pause');
  $('wb-program-stop').onclick=()=>programCommand('program_stop');
+ // Keep playlist-level choices alongside the already-persistent entries.
+ const programOptions=['wb-order','wb-repeats','wb-seed'];
+ try{const saved=JSON.parse(localStorage.getItem('wuji-program-options')||'{}');
+  if(['sequence','shuffle'].includes(saved.order))$('wb-order').value=saved.order;
+  if(Number.isInteger(saved.repeats)&&saved.repeats>=0&&saved.repeats<=100)$('wb-repeats').value=saved.repeats;
+  if(Number.isInteger(saved.seed)&&saved.seed>=0&&saved.seed<=4294967295)$('wb-seed').value=saved.seed;
+ }catch{}
+ for(const id of programOptions)for(const event of ['input','change'])$(id).addEventListener(event,()=>{try{localStorage.setItem('wuji-program-options',JSON.stringify({order:$('wb-order').value,repeats:Number($('wb-repeats').value),seed:Number($('wb-seed').value)}));}catch{}});
  let beating=false;setInterval(async()=>{if(!programLease||beating)return;beating=true;
   try{await request('program_keepalive',{lease:programLease})}catch(error){programLease=null;$('wb-program-status').textContent=error.message}finally{beating=false}
  },250);
@@ -136,6 +147,7 @@
   }
  }
  fetch('/api/retarget').then(r=>r.json()).then(value=>{retarget=value;retargetRender()}).catch(()=>{});
+ $('wb-smoothing').oninput=()=>{if(retarget)retarget.smoothing_ms=Number($('wb-smoothing').value)};
  $('wb-retarget-default').onclick=()=>{retarget={gain:Array(20).fill(1),offset_deg:Array(20).fill(0),smoothing_ms:0};retargetRender()};
  $('wb-retarget-save').onclick=async()=>{if(!retarget)return;retarget.smoothing_ms=Number($('wb-smoothing').value);
   try{await request('retarget_save',{values:retarget});$('wb-retarget-status').textContent=t('已保存；下次连接手套时生效。','Saved; takes effect on the next glove connection.')}catch(error){$('wb-retarget-status').textContent=error.message}
@@ -182,12 +194,13 @@
   try{await request('fleet_keepalive')}catch{}finally{fleetBeating=false}
  },250);
  function labels(){
-  $('wb-appearance-title').textContent=t('外观与发现','Appearance and discovery');
-  $('wb-appearance-note').textContent=t('黑白主题与系统主题；玻璃材质随操作系统设置和透明度选项变化。','Light, dark or system theme. Window glass follows OS and transparency settings.');
+  selector.setAttribute('aria-label',t('切换设备工作区','Switch device workspace'));
+  $('wb-appearance-title').textContent=t('外观','Appearance');
+  $('wb-appearance-note').textContent=t('使用系统原生磨砂；不采集桌面、不绘制外部折射。','Native frosted material. No desktop capture or external refraction.');
   $('wb-theme-label').textContent=t('显示主题','Theme');
   for(const [id,zh,en] of [['system','跟随系统','System'],['light','白色','Light'],['dark','黑色','Dark']])$('wb-theme').querySelector(`[value=${id}]`).textContent=t(zh,en);
-  $('wb-auto-hand-label').lastElementChild.textContent=t('自动发现并连接单只机械手（只读反馈）','Find and connect a single hand automatically (feedback only)');
-  $('wb-auto-glove-label').lastElementChild.textContent=t('自动发现并连接单只手套（仅预览）','Find and connect a single glove automatically (preview only)');
+  $('wb-auto-hand-label').querySelector('span').textContent=t('自动发现并连接单只机械手（只读反馈）','Find and connect a single hand automatically (feedback only)');
+  $('wb-auto-glove-label').querySelector('span').textContent=t('自动发现并连接单只手套（仅预览）','Find and connect a single glove automatically (preview only)');
   $('wb-retarget-title').textContent=t('手套 → 机械手映射','Glove → hand mapping');
   $('wb-retarget-note').textContent=t('官方 SDK 先把 21 个手套关键点映射成 20 个关节角。本页调整工作台输出幅度、偏移和平滑；默认不改变官方结果。调整后重新连接手套生效。','The official SDK first maps 21 landmarks to 20 joint angles. These are app output gain, offset and smoothing. Identity defaults preserve SDK output; reconnect the glove to apply changes.');
   $('wb-smoothing-label').textContent=t('输出平滑','Output smoothing');$('wb-retarget-default').textContent=t('恢复默认','Reset defaults');$('wb-retarget-save').textContent=t('保存映射','Save mapping');
@@ -208,7 +221,8 @@
   $('wb-program-pause').disabled=!state?.program?.active;
   $('wb-program-stop').disabled=!state?.program?.active;
   $('wb-program-status').textContent=state?.program?.active?`${t('播放中','Playing')} · ${state.program.completed} · ${state.program.current?.action||''}`:state?.program?.reason||'';
-  renderEntries();
+  $('wb-program-pause').textContent=state?.program?.paused?t('继续','Resume'):t('暂停','Pause');
+  updateProgramControls();
  });
  window.addEventListener('wuji-language',()=>{labels();refreshCatalog();fleetRefresh()});
  refreshCatalog();labels();ws.showPage();

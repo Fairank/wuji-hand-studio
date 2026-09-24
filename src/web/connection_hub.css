@@ -10,10 +10,8 @@
 }
 @media(max-width:900px){html,body,.app{height:auto;overflow:visible}.page-area{position:relative;overflow:visible}.page-area>footer{margin-top:28px}}
 
-/* Native backdrop or opt-in refraction supplies the outer material. Fake strips
-   previously placed a pale obstacle across the four sides. */
+/* The system compositor supplies the frosted window material. */
 :root{--dg-frame:17px}
-.glass-edge{display:none!important}
 html .top{inset:var(--dg-frame) var(--dg-frame) auto;height:60px;min-height:60px;border-radius:18px}
 html .directory{top:90px;left:var(--dg-frame);bottom:var(--dg-frame);width:calc(var(--dg-rail) - 23px)}
 .page-area{border-radius:19px;box-shadow:none}
@@ -36,22 +34,34 @@ body .hub-tabs button[aria-selected=true]{background:var(--wb-card);box-shadow:0
 .hub-replace input{flex:none}
 .hub-skeleton{padding:16px;margin-bottom:16px}.hub-skeleton-heading{display:flex;justify-content:space-between;align-items:center;gap:12px}.hub-skeleton-heading h3{margin:0}.hub-skeleton-heading span{color:var(--wb-sub);font-size:12px}
 .hub-skeleton:not(.is-live) #hub-skeleton-svg{display:none}
-.hub-refraction-setting{margin-top:18px;padding:15px 16px;border:1px solid var(--wb-line);border-radius:14px;background:var(--wb-group)}
-.hub-refraction-setting label{display:flex;align-items:center;justify-content:space-between;gap:14px;color:var(--wb-ink);font-weight:600}.hub-refraction-setting p{margin:7px 0 0;font-size:12px}
-.external-refraction-settings{min-width:0}
-.external-refraction-settings .desktop-about{margin:5px 0 0;max-width:62ch;line-height:1.55}
-.external-refraction-settings .refraction-control{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px 12px;align-items:center;margin-top:17px}
-.external-refraction-settings .refraction-control label{display:block;grid-column:1;grid-row:1;min-width:0;font-size:13px;font-weight:600;color:var(--wb-ink)}
-.external-refraction-settings .refraction-control output{grid-column:2;grid-row:1;font-size:12px;color:var(--wb-sub);font-variant-numeric:tabular-nums}
-.external-refraction-settings .refraction-control input[type=range]{grid-column:1/-1;grid-row:2;width:100%;margin:0;accent-color:#007aff;cursor:pointer}
-.external-refraction-settings .refraction-scale{display:flex;justify-content:space-between;margin-top:5px;font-size:11px;color:var(--wb-sub)}
-.external-refraction-settings .refraction-advanced{margin-top:14px;padding-top:13px;border-top:1px solid var(--wb-line)}
-.external-refraction-settings .refraction-advanced summary{width:max-content;max-width:100%;font-size:12px;color:var(--wb-sub);cursor:pointer}
-.external-refraction-settings .refraction-advanced[open] summary{color:var(--wb-ink)}
-.external-refraction-settings .refraction-advanced .refraction-control{margin-top:14px}
 #hub-skeleton-svg{display:block;width:min(100%,310px);height:280px;margin:6px auto 0;background:var(--wb-group);border-radius:16px}
 #hub-skeleton-lines line{stroke:#1986dc;stroke-width:3;stroke-linecap:round;opacity:.85}#hub-skeleton-points circle{fill:#005db3;stroke:var(--wb-card);stroke-width:1}
 #hub-visual .glove-layout{align-items:start}#hub-visual .glove-display{min-width:0}#hub-visual .glove-controls{max-width:none}
 #hub-retarget>.wb-card{max-width:900px}
 @media(max-width:700px){.hub-fields{grid-template-columns:1fr}.hub-tabs{width:100%}.hub-section{animation:none}}
 @media(prefers-reduced-motion:reduce){.hub-section{animation:none}}
+.settings-section{max-width:820px}
+.settings-section .wb-card{padding:22px 24px}
+.settings-row{display:flex;justify-content:space-between;align-items:center;gap:24px;min-height:60px;margin:0;padding:13px 0;border-bottom:1px solid var(--wb-line);font-size:14px}
+.settings-row>select{width:180px;min-width:150px}
+.settings-row input[type=checkbox]{appearance:none;width:38px;height:23px;flex:none;border:0;border-radius:20px;background:#c7c7cc!important;position:relative;cursor:pointer;box-shadow:inset 0 1px 2px #0001;transition:background-color .18s ease}
+.settings-row input[type=checkbox]:before{content:'';position:absolute;left:3px;top:3px;width:17px;height:17px;border-radius:50%;background:#fff;box-shadow:0 1px 3px #0003;transition:transform .18s ease}
+.settings-row input[type=checkbox]:checked{background:#168344!important}.settings-row input[type=checkbox]:checked:before{transform:translateX(15px)}
+.settings-discovery>label{display:flex;justify-content:space-between;gap:20px;width:100%}
+.settings-row label{line-height:1.6}
+.settings-section .settings-footnote{font-size:12px;line-height:1.6;margin:14px 0 0;color:var(--wb-sub)}
+body .settings-route{display:flex;align-items:center;justify-content:space-between;width:100%;gap:18px;padding:15px 0;min-height:66px;text-align:left;border:0;border-bottom:1px solid var(--wb-line);border-radius:0;box-shadow:none;background:transparent!important;color:var(--wb-ink)}
+.settings-route>span:first-child{display:flex;flex-direction:column;gap:5px;min-width:0}
+.settings-route strong{font-size:14px;font-weight:500}.settings-route small{font-size:12px;font-weight:400;line-height:1.5;color:var(--wb-sub)}
+.settings-route>span:last-child{font-size:23px;color:var(--wb-sub)}
+.settings-route:last-child{border-bottom:0}.settings-route:hover strong{text-decoration:underline;text-underline-offset:4px}
+.settings-route:disabled{opacity:.5;cursor:default}.settings-route:disabled:hover strong{text-decoration:none}
+#connection-glove-summary{padding:14px 0;border-top:1px solid var(--wb-line);font-size:13px;line-height:1.6}
+#connection-glove-summary p{margin:0 0 10px}.connection-glove-links{display:flex;gap:16px;flex-wrap:wrap}
+html[data-theme=dark] img.studio-brand{filter:invert(1)}
+html[data-theme=dark] .top-connection-status small,html[data-theme=dark] .nav-brand-note,html[data-theme=dark] .page-area>footer{color:var(--wb-sub)}
+html[data-reduce-motion=true] .settings-section,html[data-reduce-motion=true] .hub-section{animation:none}
+html[data-reduce-motion=true] .settings-row input,html[data-reduce-motion=true] .settings-row input:before{transition:none}
+@media(prefers-reduced-motion:reduce){.settings-row input,.settings-row input:before{transition:none}}
+@media(forced-colors:active){.settings-row input[type=checkbox]{appearance:auto}.settings-row input:before{display:none}}
+@media(max-width:700px){.settings-row{gap:12px}.settings-row>select{width:140px;min-width:120px}.settings-section .wb-card{padding:18px}}

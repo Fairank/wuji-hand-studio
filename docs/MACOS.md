@@ -22,9 +22,9 @@ Lima 管理自己的内部密钥和本地传输，不导入个人 SSH 密钥、�
 
 ## 玻璃与代码检视
 
-macOS 26 动态检查公开 `NSGlassEffectView`；旧系统使用 `NSVisualEffectView` 原生通透材质，减少透明时回退实色。保留系统标题栏、窗口按钮与调整大小行为，工作区保持易读。没有抓取其他窗口或屏幕。系统玻璃及外部图案折射的实际观感需真机验收，源码接入不等于视觉通过。
+0.2.7 使用 `NSVisualEffectView` 原生磨砂材质，减少透明时回退实色。保留系统标题栏、窗口按钮与调整大小行为，工作区保持易读。没有抓取其他窗口或屏幕。原生磨砂的实际观感需真机验收，源码接入不等于视觉通过。实验折射已移除。
 
-代码检视接口可以查看软件状态和自身 WKWebView 截图，不控制电脑鼠标键盘。自身截图不能证明其他窗口背景的折射效果。
+代码检视接口可以查看软件状态和自身 WKWebView 截图，不控制电脑鼠标键盘。不采集其他窗口内容。
 
 ## 构建和验收
 
@@ -49,4 +49,4 @@ Linux 独立目录为 ~/.hand-workbench-runtime，不改个人 ~/.lima。使用�
 
 ## English
 
-Same unofficial app, native Cocoa/WKWebView on Apple Silicon macOS 13.5+. Ubuntu disk and Lima are bundled; initial SDK preparation needs internet. Later VM starts are app-managed. No VMware UI or user-managed SSH credentials. Dedicated Ethernet setup requests macOS approval and excludes default-route or already-configured networks. Every connection discovers and verifies the current hand; multiple hands require selection. Hand 1 USB passthrough is not implemented. macOS 26 glass falls back to native vibrancy on older systems. Ad-hoc signed, not notarized. Real VM/device and visual acceptance are separate from package checks.
+Same unofficial app, native Cocoa/WKWebView on Apple Silicon macOS 13.5+. Ubuntu disk and Lima are bundled; initial SDK preparation needs internet. Later VM starts are app-managed. No VMware UI or user-managed SSH credentials. Dedicated Ethernet setup requests macOS approval and excludes default-route or already-configured networks. Every connection discovers and verifies the current hand; multiple hands require selection. Hand 1 USB passthrough is not implemented. Version 0.2.7 uses native vibrancy and removes custom refraction. Ad-hoc signed, not notarized. Real VM/device and visual acceptance are separate from package checks.

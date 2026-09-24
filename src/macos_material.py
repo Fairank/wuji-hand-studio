@@ -9,8 +9,8 @@ class WindowMaterial:
         self.core = None
         self.lock = threading.Lock()
 
-    def apply(self, mode='glass'):
-        if mode not in ('glass', 'solid'):
+    def apply(self, mode='vibrancy'):
+        if mode not in ('vibrancy', 'solid'):
             raise ValueError('Unknown window material')
         try:
             import AppKit
@@ -29,7 +29,7 @@ class WindowMaterial:
                     if self.core is None:
                         self.core = CoreMaterial(self.window)
                     native = self.core.apply(mode)
-                    chosen = {'macos_glass':'liquid-glass','vibrancy':'vibrancy'}.get(native.get('material'), 'solid')
+                    chosen = {'vibrancy':'vibrancy'}.get(native.get('material'), 'solid')
                     self.mode = chosen
                     result.update(native, mode=chosen, external_backdrop=chosen != 'solid',
                                   refraction=False, desktop_capture=False, visual_acceptance_pending=True)
