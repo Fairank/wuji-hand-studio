@@ -33,10 +33,12 @@ def verify_update(data_dir, edition, version, digest):
     prefix = 'HandWorkbench'
     root = Path(data_dir).resolve()
     updates = root / 'updates'
-    if updates.is_symlink() or updates.resolve() != updates:
+    # Windows can virtualize LocalAppData for a packaged parent process; that
+    # changes resolve() even for an ordinary directory. Reject redirects only.
+    if updates.parent.resolve() != root or updates.is_symlink() or updates.is_junction():
         raise ValueError('Updates folder must be inside application data')
     path = updates / f'{prefix}-{version}-windows-x64-setup.exe'
-    if path.is_symlink() or path.resolve() != path or not path.is_file():
+    if path.parent != updates or path.is_symlink() or path.is_junction() or not path.is_file():
         raise ValueError('The installer has not been staged in application data')
     checksum = hashlib.sha256()
     with path.open('rb') as stream:

@@ -1,7 +1,7 @@
 import base64,io,unittest
 import numpy as np
 from PIL import Image
-from external_refraction import crop_tiles
+from external_refraction import crop_tiles,continuous_capture_rate,capture_interval_ms
 
 class EdgeCropTests(unittest.TestCase):
     def test_retains_only_bounded_border_tiles(self):
@@ -23,5 +23,16 @@ class EdgeCropTests(unittest.TestCase):
         self.assertGreater(int(image[2,2,1]),230) # padded white, not wrapped red
     def test_rejects_implausible_geometry(self):
         self.assertEqual(crop_tiles(np.zeros((2,2,4),dtype=np.uint8),(0,0,10,10)),[])
+
+    def test_capture_rate_uses_only_a_live_motion_burst(self):
+        self.assertEqual(continuous_capture_rate([i/60 for i in range(30)],29/60),(60.,30))
+        self.assertEqual(continuous_capture_rate([i/30 for i in range(12)],11/30),(30.,12))
+        self.assertEqual(continuous_capture_rate([i/30 for i in range(12)],2),(None,0))
+
+    def test_capture_request_tracks_monitor_mode_with_60_to_120_hz_bounds(self):
+        self.assertEqual(capture_interval_ms(60),(16,60))
+        self.assertEqual(capture_interval_ms(120),(8,120))
+        self.assertEqual(capture_interval_ms(165),(8,120))
+        self.assertEqual(capture_interval_ms(None),(16,60))
 
 if __name__=='__main__':unittest.main()

@@ -3,7 +3,8 @@
 (()=>{
  'use strict';
  const t=(a,b)=>window.WujiLocale?.lang==='en'?b:a,root=document.documentElement;
- let native=null,enabled=false,busy=false,last=0,timer=null,epoch=0;
+ let native=null,enabled=false,busy=false,last=0,raf=null,motionUntil=0,epoch=0,stopping=null,lastStop=null,captureTargetHz=60;
+ const health=new window.WujiRefractionHealth.RefractionHealth();
  const defaults={tint:35,feather:85,distortion:55};
  const preferences=Object.fromEntries(Object.entries(defaults).map(([key,value])=>{
   try{const raw=localStorage.getItem('wuji-refraction-'+key),saved=Number(raw);if(raw!==null&&Number.isFinite(saved)&&saved>=0&&saved<=100)return [key,saved];}catch{}
@@ -78,14 +79,47 @@
   try{localStorage.setItem('wuji-refraction-'+key,control.input.value);}catch{}
   repaint();
  });
- async function stop(){enabled=false;epoch++;clearTimeout(timer);toggle.checked=false;clear();if(native)await native.set_external_refraction(false);}
- async function poll(){if(!enabled||busy)return;busy=true;const token=epoch;try{const frame=await native.refraction_frame(last);if(token!==epoch)return;if(!frame.enabled){await stop();note.textContent=t('折射已停止，使用系统背景。','Refraction stopped; system backdrop is active.');return;}if(frame.reason!=='active'){clear();last=0;}else if(frame.tiles.length){last=frame.seq;const decoded=await Promise.all(frame.tiles.map(decode));if(token!==epoch)return;for(const {tile,img} of decoded)draw(tile,img);root.dataset.externalRefraction='true';}}catch(e){await stop();note.textContent=t('折射不可用：','Refraction unavailable: ')+e.message;}finally{busy=false;if(enabled)timer=setTimeout(poll,50);}}
- toggle.addEventListener('change',async()=>{if(!toggle.checked){await stop();return;}if(root.dataset.reduceTransparency==='true'){toggle.checked=false;note.textContent=t('请先关闭“减少透明效果”。','Turn off Reduce transparency first.');return;}toggle.disabled=true;try{const result=await native.set_external_refraction(true);enabled=result.enabled;toggle.checked=enabled;last=0;epoch++;if(enabled)poll();}catch(e){await stop();note.textContent=e.message;}finally{toggle.disabled=!native;}});
+ async function stop(fault=null){
+  if(stopping)return stopping;
+  enabled=false;epoch++;motionUntil=0;if(raf!==null)cancelAnimationFrame(raf);raf=null;toggle.checked=false;clear();
+  if(fault){lastStop=fault;note.textContent=fault.gap_ms!==undefined
+   ?t('折射检测到 '+fault.gap_ms+' 毫秒停顿，已自动关闭。','Refraction stopped after a '+fault.gap_ms+' ms stall.')
+   :t('折射刷新降至 '+fault.hz+' Hz，已自动关闭。','Refraction fell to '+fault.hz+' Hz and stopped.');}
+  stopping=(async()=>{try{if(native)await native.set_external_refraction(false);}finally{stopping=null;}})();
+  return stopping;
+ }
+ async function poll(){
+  if(!enabled||busy)return;busy=true;const token=epoch;
+  try{
+   const frame=await native.refraction_frame(last);if(token!==epoch)return;
+   if(Number.isFinite(frame.capture_target_hz))captureTargetHz=frame.capture_target_hz;
+   if(!frame.enabled){await stop();note.textContent=t('折射已停止，使用系统背景。','Refraction stopped; system backdrop is active.');return;}
+   const captureFault=health.capture(frame.recent_capture_hz,frame.recent_capture_frames);
+   if(captureFault){await stop(captureFault);return;}
+   if(frame.reason!=='active'){clear();last=0;}
+   else if(frame.tiles.length){last=frame.seq;const began=performance.now();
+    const decoded=await Promise.all(frame.tiles.map(decode));if(token!==epoch)return;
+    await new Promise(resolve=>requestAnimationFrame(resolve));if(token!==epoch)return;
+    for(const {tile,img} of decoded)draw(tile,img);root.dataset.externalRefraction='true';
+    const now=performance.now(),fault=health.processing(now-began,true)||health.present(now,frame.recent_capture_frames);
+    if(fault){void stop(fault);return;}
+    if(frame.recent_capture_frames>=2){motionUntil=now+100;if(raf===null)raf=requestAnimationFrame(tick);}}
+  }catch(e){await stop();note.textContent=t('折射不可用：','Refraction unavailable: ')+e.message;}
+  finally{busy=false;if(enabled&&token===epoch)queueMicrotask(()=>{void poll();});}
+ }
+ function tick(now){
+  if(!enabled)return;
+  const fault=health.display(now,root.dataset.externalRefraction==='true');
+  if(fault){void stop(fault);return;}
+  if(now>=motionUntil){health.display(now,false);raf=null;return;}
+  raf=requestAnimationFrame(tick);
+ }
+ toggle.addEventListener('change',async()=>{if(!toggle.checked){await stop();return;}if(root.dataset.reduceTransparency==='true'){toggle.checked=false;note.textContent=t('请先关闭“减少透明效果”。','Turn off Reduce transparency first.');return;}toggle.disabled=true;try{if(stopping)await stopping;const result=await native.set_external_refraction(true);enabled=result.enabled;toggle.checked=enabled;last=0;epoch++;motionUntil=0;health.reset();lastStop=null;if(enabled){note.textContent=t('跟随显示器刷新；静止时等待新画面，卡顿会自动关闭。','Display-paced; waits for changes when idle and stops on a stall.');void poll();}}catch(e){await stop();note.textContent=e.message;}finally{toggle.disabled=!native;}});
  document.addEventListener('visibilitychange',()=>{if(document.hidden)stop();});
  new MutationObserver(()=>{if(root.dataset.reduceTransparency==='true'||matchMedia('(forced-colors: active)').matches)stop();}).observe(root,{attributes:true,attributeFilter:['data-reduce-transparency']});
  function ready(){native=window.pywebview?.api||null;toggle.disabled=!native;}
  window.addEventListener('pywebviewready',ready);window.addEventListener('wuji-language',labels);ready();labels();
  new MutationObserver(repaint).observe(root,{attributes:true,attributeFilter:['data-theme']});
- window.WujiRefraction={redact(value){root.dataset.redactExternal=String(value);return new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve(true))));},
+ window.WujiRefraction={metrics(){return {...health.stats(),capture_target_hz:captureTargetHz,active:enabled&&root.dataset.externalRefraction==='true',last_stop:lastStop};},redact(value){root.dataset.redactExternal=String(value);return new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve(true))));},
   async selfTest(){if(enabled)throw Error('Turn off external refraction before self-test');const c=document.createElement('canvas');c.width=500;c.height=70;const g=c.getContext('2d');g.fillStyle='#f5f5f7';g.fillRect(0,0,500,70);for(let x=0;x<500;x+=16){g.fillStyle=x%32===0?'#007aff':'#ff9f0a';g.fillRect(x,0,8,70);}epoch++;const tile={side:'top',rect:[240,0,472,42],texture_size:[500,70],pad:14,url:c.toDataURL()};const {img}=await decode(tile);draw(tile,img);draw(tile,img);root.dataset.externalRefraction='true';setTimeout(()=>{if(!enabled)clear();},2500);return {ok:true,scope:'generated_reference_only',desktop_capture:false};},clearTest:clear};
 })();

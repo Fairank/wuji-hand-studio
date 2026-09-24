@@ -12,5 +12,6 @@
    surfaces:{header:surface('.top'),navigation:surface('.directory'),content:surface('.page-area'),menu:surface('#desktop-menu'),edgeTop:surface('.glass-edge-top'),edgeLeft:surface('.glass-edge-left'),edgeRight:surface('.glass-edge-right'),edgeBottom:surface('.glass-edge-bottom')},
    controls:nodes.map(e=>({id:e.id,tag:e.tagName,label:e.getAttribute('aria-label')||e.getAttribute('title')||(e.tagName==='INPUT'?'':e.textContent.trim().slice(0,100)),disabled:!!e.disabled,bounds:bounds(e)})),
    connection:(()=>{const e=document.getElementById('connection-toggle'),g=document.getElementById('connection-toolbar');if(!e)return null;const c=getComputedStyle(e);return {label:e.textContent,disabled:e.disabled,state:g.dataset.state,background:c.backgroundColor,color:c.color,bounds:bounds(g),panelOpen:!!document.getElementById('connection-popover')?.open};})(),
+   refraction:window.WujiRefraction?.metrics()||null,
    errors:window.WujiDesktop?.errors||[]};
 })()

@@ -56,10 +56,12 @@ def upgrade(client, source, digest, apply):
     if not match or not re.fullmatch('[a-f0-9]{64}',digest):raise ValueError('Invalid installer name or SHA-256')
     if checksum(source)!=digest:raise ValueError('Installer hash does not match the trusted release')
     root=Path(info['data_dir']).resolve();folder=root/'updates'
-    if folder.is_symlink() or folder.resolve()!=folder:raise ValueError('Invalid updates directory')
+    # Packaged Windows hosts can virtualize LocalAppData after the final path
+    # component. Reject reparse-point redirects, not that OS path translation.
+    if folder.parent.resolve()!=root or folder.is_symlink() or folder.is_junction():raise ValueError('Invalid updates directory')
     folder.mkdir(exist_ok=True)
     destination=folder/source.name
-    if destination.is_symlink():raise ValueError('Invalid installer destination')
+    if destination.is_symlink() or destination.is_junction():raise ValueError('Invalid installer destination')
     if not destination.exists():
         # Exclusive creation avoids overwriting an earlier staged installer.
         with source.open('rb') as src,destination.open('xb') as dst:shutil.copyfileobj(src,dst)
