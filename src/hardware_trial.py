@@ -18,6 +18,8 @@ LABELS=[f'{finger}_S{j}' for finger in ('thumb','index','middle','ring','pinky')
 NAMES={'open':'张开并返回','fist':'张开与轻握','opposition':'拇指依次对指姿态','sequence':'整套低力度展示',
        'official_opposition':'官方左手对指 · 限速适配'}
 NAMES.update({x['id']:x['zh'] for x in CATALOG if x['id'] in CUSTOM_IDS})
+from bimanual_program import INTERNAL_IDS
+NAMES.update({x:x for x in INTERNAL_IDS})
 
 
 def make_trial(q,action,amplitude,cycles,path=POSES,*,speed=1.,clock_at=None,text='WUJI TECH'):

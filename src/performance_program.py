@@ -17,7 +17,8 @@ DANCES = {'dance_jellyfish': ('水母舒展', 'Jellyfish', 16.),
           'dance_bloom': ('花苞绽放', 'Bloom', 16.),
           'dance_tutting': ('指节阶梯', 'Knuckle staircase', 12.)}
 NEW_DANCE_IDS = set(DANCES) - {'dance_jellyfish', 'dance_wave', 'dance_ripple'}
-PROGRAM_IDS = set(DANCES) | {'text_sequence', 'letter_J', 'letter_Z'}
+from bimanual_program import INTERNAL_IDS
+PROGRAM_IDS = set(DANCES) | INTERNAL_IDS | {'text_sequence', 'letter_J', 'letter_Z'}
 REFERENCE = 'https://www.brambilabong.com/blogs/popping/learn-3-finger-tutting-dance-moves-tutorial'
 SIGN_REFERENCE = 'https://www.lifeprint.com/asl101/pages-layout/fingerspelling.htm'
 WAVE_REFERENCE = 'https://howcast.com/videos/493866-how-to-do-waving-tutting/'
@@ -93,6 +94,9 @@ def _symbol(c):
 @lru_cache(maxsize=48)
 def program(action, text='WUJI TECH'):
     """Nominal timeline in seconds/radians, with repeated letters separated."""
+    if action in INTERNAL_IDS:
+        from bimanual_program import program as paired
+        return paired(action)
     from gesture_library import poses
     from phrase_text import normalize_phrase
     if action not in PROGRAM_IDS:raise ValueError('Unknown performance')
@@ -162,7 +166,7 @@ def real_points(action,text,q,amplitude,limit,min_transition,hold):
         if 'v' in p:p['v']=[amplitude*v for v in p['v']]
         points.append(p)
     scale=max(1.,max(segment_peak(a,b) for a,b in zip(points,points[1:]))/limit)
-    if action not in DANCES:
+    if action not in DANCES and action not in INTERNAL_IDS:
         scale=max(scale,max(min_transition/(b['t']-a['t']) for a,b in zip(points,points[1:]) if b.get('interpolation')=='minimum_jerk'))
     entry=max(min_transition,1.875*max(abs(x-y) for x,y in zip(q,points[0]['q']))/limit)
     for p in points:

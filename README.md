@@ -1,6 +1,6 @@
 # 灵巧手工作台 / Hand Workbench
 
-[English](#english)
+[English](#english) · [更新记录 / Changelog](docs/CHANGELOG.md)
 
 **非官方个人展示工具，不是舞肌科技发布、维护或背书的产品。** 官方名称、示例和标识仅说明兼容对象和来源。
 
@@ -8,7 +8,17 @@
 
 ## Windows 下载和启动
 
-在 [Releases](../../releases) 选择实际已上传的安装包。Windows 0.2.8 是同一软件的原位更新，当前用户安装，无需另装 Python。Windows 安装器检查微软 WebView2 运行时，缺少时联网安装。包暂未进行发布者代码签名，附有 SHA-256 校验文件。源码分支与本地安装包的验证状态见 [0.2.8 验证记录](docs/VALIDATION_0.2.8.md)。
+在 [Releases](../../releases) 选择实际已上传的安装包。Windows 0.2.9 是同一软件的原位更新，当前用户安装，无需另装 Python。Windows 安装器检查微软 WebView2 运行时，缺少时联网安装。包暂未进行发布者代码签名，附有 SHA-256 校验文件。源码分支与本地安装包的验证状态见 [0.2.9 验证记录](docs/VALIDATION_0.2.9.md)。
+
+## 0.2.9 多手工作区与双手编排
+
+发现设备后，可加入当前工作区或新建工作区；也可先创建空工作区，再添加设备。每只手仍保留独立的连接、参数、标定和手套映射，可在空闲时移动到其他工作区。右上角「多手」返回总览。
+
+同一工作区可让 2–8 只手执行相同手指舞；左右配对新增跨手波浪、反向与往返波浪、中心涟漪、交替、同步绽放、十指钢琴和双波追逐共八组动作。双画面显示各自原生 MuJoCo 姿态，明确区分预览和实测反馈，可调整视角。详见 [多手编排说明](docs/MULTI_HAND_GROUPS.md)。
+
+真实编排目前限二代手共享同一 Linux 控制端的时钟；同机内置 Linux 可作为控制端。独立 Linux 主机间的同步、一代真实群组编排、双手之间的避碰和实际机械同步精度尚未验收。控制故障或编排连接超时会请求全组停止，并分别报告停止确认。
+
+本轮本地 Claude Opus 5.5 max 承担动作基础曲线、界面与说明，主助手设计并审核控制协调、设备隔离及验收；实际返回模型、完成状态和审核结果在本地记录。未向 Claude 发送私有训练模型或设备记录。
 
 ## 0.2.8 多手、手套与软件内标定
 
@@ -103,6 +113,8 @@ Ubuntu 已有历史 0.1.3 包。macOS 的原生构建在 GitHub Mac runner 上�
 0.2.0 的本地 Claude 按用户当时偏好使用 `claude-opus-5-5 --effort max`，仅辅助边界明确的播放列表基础设计；实际返回模型为 `claude-opus-5-5`。输出经主维护者审核，控制逻辑、设备边界和真实结果由主维护者核验。代码接口用于检视软件，不操作桌面。来源和许可证见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
 ## English
+
+Version 0.2.9 adds logical multi-hand workspaces, explicit discovery-to-workspace assignment, shared same-action playback, eight authored left/right pair routines and actual per-session MuJoCo views. Real group playback currently requires native Hand 2 devices using the same Linux clock domain. Hardware acceptance and mechanical synchronization accuracy remain unverified. See [multi-hand guide](docs/MULTI_HAND_GROUPS.md) and [validation record](docs/VALIDATION_0.2.9.md).
 
 **Hand Workbench is one unofficial personal hand demonstration application. It is not published, maintained or endorsed by Wuji Technology.** Windows uses an independent native window with embedded WebView2. One installer serves both demonstrations and optional local model packs; there is no separate Research application. Private weights are excluded from the public build.
 

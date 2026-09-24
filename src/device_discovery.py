@@ -38,6 +38,25 @@ class Routes:
         self.routes.clear()
 
 
+def scan_only(manager,address=''):
+    """Read discovery advertisements without connecting to or enabling a hand."""
+    bundle=Routes()
+    try:
+        target=endpoint(address,'left') if address else ''
+        if managed_wsl():
+            for value in ([target] if target else ['192.168.1.110:7447','192.168.1.111:7447']):
+                route=DeviceRoute(value,'left')
+                try:route.open()
+                except RuntimeError:route.close()
+                else:bundle.routes.append(route)
+        found={};deadline=time.monotonic()+3
+        while time.monotonic()<deadline:
+            for item in candidates(manager.scan()):found[item['serial']]=item
+            time.sleep(.1)
+        return sorted(found.values(),key=lambda r:r['serial'])
+    finally:bundle.close()
+
+
 def connect_discovered(manager, address='', serial='', use_routes=None):
     """Address restricts endpoints. Ambiguity always needs a fresh serial choice."""
     bundle = Routes();hand = None

@@ -191,6 +191,7 @@
   selector.value=id;
  }
  selector.onchange=()=>switchTo(selector.value);
+ window.HandSessions={show:switchTo,refresh:()=>fleetRefresh()};
  let fleetBusy=false,fleetViewKey='',fleetChoicesKey='';
  const fleetStop=document.createElement('button');fleetStop.type='button';fleetStop.className='danger';
  if(devices){fleetStop.textContent=t('停止所有工作区动作','Stop motion in all workspaces');$('wb-device-status').before(fleetStop);
@@ -252,7 +253,7 @@
   $('wb-repeats-label').textContent=t('整单循环（0持续）','Playlist repeats (0 forever)');$('wb-seed-label').textContent=t('随机种子','Shuffle seed');
   $('wb-program-preview').textContent=t('画面预览','Preview');$('wb-program-hardware').textContent=t('真实手播放','Play on hand');
   $('wb-program-pause').textContent=state?.program?.paused?t('继续','Resume'):t('暂停','Pause');$('wb-program-stop').textContent=t('停止','Stop');
-  if(devices){$('wb-device-title').textContent=t('设备工作区','Device workspaces');$('wb-device-note').textContent=t('为每只手创建独立工作区，再在各自页面连接。一个工作区只连接一只实际设备。','Create one independent workspace per hand, then connect each from its page. A workspace owns one physical device.');$('wb-device-name-label').textContent=t('名称','Name');$('wb-device-profile-label').textContent=t('型号','Model');$('wb-device-add').textContent=t('添加工作区','Add workspace')}
+  if(devices){$('wb-device-title').textContent=t('独立设备会话','Independent hand sessions');$('wb-device-note').textContent=t('多手可加入同一个工作区，也可分开使用。','Hands can share a workspace or work independently.');$('wb-device-name-label').textContent=t('名称','Name');$('wb-device-profile-label').textContent=t('型号','Model');$('wb-device-add').textContent=t('添加工作区','Add workspace')}
   renderEntries();retargetRender();
  }
  window.addEventListener('console-state',event=>{state=event.detail;

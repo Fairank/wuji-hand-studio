@@ -93,6 +93,7 @@ class HardwareShowcase:
         self.trial=None;self.trial_result=None
         self.latest_observation=None
         self.refresh_before_enable=None
+        self.group_sync=None
         self.publish_timing=PublishTiming()
 
     def status(self):
@@ -106,6 +107,7 @@ class HardwareShowcase:
             probe_result=self.probe_result,probe_index=self.probe['index'] if self.probe else None,
             warnings=self.warnings,comm_stable=self.comm_healthy,
             trial_controls_version=3,gesture_library_version=4,warning_policy='official_sdk_severity',
+            group_sync_version=1,controller_clock_id=__import__('group_timing').clock_id(),group_sync=__import__('group_hardware').status(self),
             commissioning_policy=settings(),
             execution_version=EXECUTION_VERSION,command_timing=dict(self.publish_timing.snapshot(),
                 missed_deadlines=getattr(getattr(self,'cadence',None),'missed',0)),
@@ -123,6 +125,10 @@ class HardwareShowcase:
     def start_trial(self,command,row,diag,now):
         from hardware_trial import make_trial,LABELS
         if self.active or self.owned:raise ValueError('已有实机动作或停用状态待确认')
+        self.group_sync=None
+        if command.get('group_sync') is not None:
+            from group_hardware import validate_spec
+            validate_spec(command['group_sync'],command.get('action'))
         lease=command.get('lease')
         if command.get('workspace_clear') is not True or not isinstance(lease,str) or len(lease)!=32:
             raise ValueError('先确认底座固定且手指周围无人无物')
@@ -133,6 +139,8 @@ class HardwareShowcase:
         plan=make_trial(q,command.get('action'),command.get('amplitude'),command.get('cycles'),speed=command.get('speed',1.),clock_at=command.get('clock_at'),text=command.get('text','WUJI TECH'))
         self.probe=None;self.trial_result=None
         self.run_profile=plan;self.points=plan['points'];self.enabled_indices=list(range(20))
+        if command.get('group_sync') is not None:
+            self.group_sync=dict(token=command['group_sync']['token'],start_s=None,deadline=now+12.)
         self.action=plan['action'];self.speed=1.;self.cycles=plan['cycles'];self.lease=lease
         self.trial=dict(label=plan['label'],action=plan['action'],amplitude=plan['amplitude'],
             baseline=q[:],last=q[:],peak=[0.]*20,peak_current=[0.]*20,trace=[],commands_sent=0,
@@ -189,6 +197,7 @@ class HardwareShowcase:
 
     def start_probe(self,command,row,diag,now):
         if self.active or self.owned:raise ValueError('已有实机动作或停用状态待确认')
+        self.group_sync=None
         index=command.get('index');direction=command.get('direction');lease=command.get('lease')
         if (type(index) is not int or not 0<=index<20 or type(direction) is not int or direction not in {-1,1}
             or command.get('workspace_clear') is not True or not isinstance(lease,str) or len(lease)!=32):
@@ -236,6 +245,7 @@ class HardwareShowcase:
     def start(self,command,row,diag,now):
         if self.profile is None:raise ValueError(self.reason)
         if self.active or self.owned:raise ValueError('已有实机动作正在执行')
+        self.group_sync=None
         action=command.get('action');speed=command.get('speed');cycles=command.get('cycles')
         lease=command.get('lease')
         if action not in self.profile['actions'] or type(speed) not in {int,float} or speed not in {.25,.5,1.}:
@@ -346,6 +356,8 @@ class HardwareShowcase:
             if self.active and c.get('lease')==self.lease:self.last_beat=now
             return
         if not self.active or c.get('lease')!=self.lease:raise ValueError('实机控制会话已过期')
+        if name=='hardware_group_commit':return __import__('group_hardware').commit(self,c,now)
+        if self.group_sync:raise ValueError('编组期间请使用整组停止 / Use group stop during synchronized playback')
         if name=='hardware_pause':
             self.target=self.position(row,now)
             self.paused=True;self.reason='已暂停，低电流保持当前位置'
@@ -389,6 +401,7 @@ class HardwareShowcase:
                 elif now>self.enable_deadline:raise ValueError('关节启用超时')
                 else:return
             self.diagnostic(diag,now,require_enabled=True)
+            if __import__('group_hardware').wait(self,now):return
             if not (self.probe or self.trial) and max(abs(a-b) for a,b in zip(q,self.target))>.20:
                 raise ValueError('实际姿态与指令偏差过大')
             if not self.cadence.due(now):return
@@ -399,7 +412,9 @@ class HardwareShowcase:
                 desired=self.points[0]['q']
                 if max(abs(a-b) for a,b in zip(q,desired))<.03:self.phase='playing'
             else:
-                self.elapsed+=dt*self.speed
+                if self.group_sync and self.group_sync.get('start_s') is not None:
+                    self.elapsed=max(0.,now-self.group_sync['start_s'])
+                else:self.elapsed+=dt*self.speed
                 if self.cycles and self.elapsed>=self.period*self.cycles:
                     if not self.probe and not self.trial:
                         self.stop('循环完成，已请求停用电机',completed=True);return

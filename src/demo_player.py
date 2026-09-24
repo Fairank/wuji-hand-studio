@@ -21,6 +21,9 @@ PERIOD = {key:6. for key in CATALOG}
 PERIOD.update(opposition=20., wave=15., joints=60., all=53.)
 PERIOD['official_opposition']=30.999
 for _key in CUSTOM_IDS-PROGRAM_IDS:PERIOD[_key]=max(6.,len(route(_key))*3.)
+from bimanual_program import INTERNAL_IDS
+for _key in INTERNAL_IDS:
+    CATALOG[_key]=_key;PERIOD[_key]=16.
 PERIOD['touch_flow']=8.
 PERIOD['sequence']=53.
 PERIOD['official_sweep']=6.
@@ -39,9 +42,18 @@ class DemoPlayer:
         self.clock_at=None
         self.text='WUJI TECH'
         self.duration=PERIOD[self.action]
+        self.scheduled_start=None
+        self.amplitude=1.
+
+    def schedule(self,start):
+        with self.lock:
+            self.scheduled_start=start;self.elapsed=0.;self.tick=start;self.running=True
 
     def advance(self):
         now=time.monotonic()
+        if self.scheduled_start is not None:
+            if now<self.scheduled_start:return
+            self.tick=self.scheduled_start;self.scheduled_start=None
         if self.active and self.running:self.elapsed+=(now-self.tick)*self.speed
         self.tick=now
         if self.cycles and self.elapsed>=self.duration*self.cycles:
@@ -53,6 +65,8 @@ class DemoPlayer:
             self.advance()
             name=data['name']
             if name=='demo_start':
+                self.scheduled_start=None
+                self.amplitude=1.
                 action=data.get('action');speed=data.get('speed');cycles=data.get('cycles')
                 if action not in CATALOG or type(speed) not in {int,float} or speed not in PLAYBACK_SPEEDS:
                     raise ValueError('无效动作或速度')
@@ -69,7 +83,7 @@ class DemoPlayer:
             elif name=='demo_resume':
                 if self.cycles and self.elapsed>=self.duration*self.cycles:self.elapsed=0.
                 self.running=self.active
-            elif name=='demo_stop':self.active=self.running=False
+            elif name=='demo_stop':self.active=self.running=False;self.scheduled_start=None
             else:raise ValueError('Unknown preview command')
 
     def snapshot(self):
@@ -89,7 +103,7 @@ class DemoPlayer:
             return dict(active=self.active,running=self.running,action=self.action,
                 label=CATALOG[self.action]+' · '+phase_label if self.action in CUSTOM_IDS else phase_label,speed=self.speed,cycles=self.cycles,
                 clock_at=self.clock_at,
-                text=self.text if self.action=='text_sequence' else '',token_index=token_index,duration_s=self.duration,
+                text=self.text if self.action=='text_sequence' else '',token_index=token_index,duration_s=self.duration,amplitude=self.amplitude,
                 pose_elapsed_s=display_elapsed,
                 elapsed_s=self.elapsed,cycle=min(int(self.elapsed/self.duration)+1,self.cycles) if self.cycles else int(self.elapsed/self.duration)+1,
                 source='official_left_recording_model_preview' if self.action=='official_opposition' else 'scripted_mujoco_pose_preview',hardware_motion=False)

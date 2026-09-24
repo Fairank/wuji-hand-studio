@@ -1,0 +1,35 @@
+# 更新记录 / Changelog
+
+## 0.2.9 — 多手工作区与双手连续动作
+
+这次把“每只手只能单独开工作区”扩展成“一个工作区可以管理多只手”。发现设备后，可以加入当前工作区，也可以新建工作区；原有单手连接、参数、手套配对及标定继续独立保存。
+
+### 新增
+
+- 右上角多手入口；新建空工作区、发现设备后分配、空闲设备移动及离线模型预览。
+- 同一工作区内 2–8 只手执行同一个手指舞，或一左一右执行连贯编排。
+- 八组双手动作：跨手波浪、反向波浪、往返波浪、中心向外涟漪、双手交替、同步绽放、十指钢琴、双波追逐。
+- 各只手独立的原生 MuJoCo 画面、正面视角与拖动调视角，明确标出预览、实测反馈或参考姿态。
+- 速度、幅度及循环设置；共同开始时间，并按最慢参与手调整各段时长。
+- 全组停止与停止全部手，展示设备级错误和未确认的停止。
+
+### 修复与整理
+
+- 同一只设备连接尚未完成时，重复添加会被识别，避免创建重复会话。
+- 一只手准备失败时清理整组；控制连接超时会结束整组；启动过程中点击停止也会继续处理。
+- 多手页面刷新和中英文切换保留当前选择；修正代次显示、指令字段和成员状态。
+- 修复新双手画面的裁切与重复标题，保留黑白主题和原生磨砂，没有恢复桌面折射。
+
+### 已验证与尚未验证
+
+Windows 463 项通过、2 项跳过；Linux 33 项通过。两个独立预览进程及打包程序通过完整播放、手动停止、控制超时与设备移动检查。已原位安装并检查原生窗口，保留用户数据。详细证据见 [0.2.9 验证记录](VALIDATION_0.2.9.md)。
+
+本轮没有驱动真实机械手。真实多手编排目前需要二代手共享同一 Linux 时钟域；一代群组动作仅预览。多底座之间的碰撞、实物手套组合和机械同步精度尚未验收。这些动作是自编轨迹，不是官方录制。
+
+本地 Claude Opus 5.5 max 完成五项基础代码、界面、测试和文档任务；主助手设计并审核控制协调与验收。公开软件不含私有训练模型和凭据。
+
+## English
+
+0.2.9 adds multi-hand membership within one workspace, discovery-to-workspace assignment, eight paired routines, same-action groups and per-session MuJoCo views. It fixes duplicate connection attempts, partial-start cleanup, stop-during-start handling, changing UI selections and clipped previews. Existing glove pairing, official calibration and mapping presets remain separate for each hand.
+
+The Windows app was upgraded in place and verified without physical motion. Software tests passed as reported above; real grouped Hand 2 playback requires one Linux clock domain. Physical performance, inter-hand collision checking and mechanical synchronization accuracy remain unverified.

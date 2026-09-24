@@ -57,6 +57,8 @@ class Controller:
         self.retarget=RetargetWorkspace(self.reports.parent)
         from program_runner import ProgramRunner
         self.program=ProgramRunner(self)
+        from group_participant import GroupParticipant
+        self.group=GroupParticipant(self)
         self.client = self.stdin = None
         self.generation = 0
         self.last_update = 0.
@@ -126,6 +128,7 @@ class Controller:
             result['parameter_sync']=dict(self.parameters.sync_status)
             result['glove']=self.glove.snapshot()
             result['program']=self.program.snapshot()
+            result['group']=self.group.snapshot()
             with self.calibration.lock:
                 result['calibration']={k:self.calibration.run.get(k) for k in ('running','status','side','user')}
             return result
@@ -184,6 +187,13 @@ class Controller:
     def _action(self, command):
         if not isinstance(command,dict):raise ValueError('Invalid request')
         name=command.get('name','')
+        if name.startswith('group_'):
+            return dict(group=self.group.handle(command))
+        if self.group.active and not self.group.internal:
+            if name in {'hardware_stop','demo_stop','disconnect','session_close','program_stop'}:
+                self.group.stop('手动停止 / Manually stopped')
+            elif name not in {'session_keepalive','hardware_keepalive','view_camera','display_selected'}:
+                raise ValueError('请先停止编组 / Stop the group before changing this hand')
         if self.calibration.run['running'] and name in {'program_start','connect','hardware_start','hardware_trial','hardware_probe','demo_start','glove_scan','glove_open','glove_prepare','glove_follow','doctor_run','doctor_version'}:
             raise ValueError('Finish hand-model calibration first / 请先结束手部模型标定')
         if name=='session_keepalive':
@@ -348,13 +358,16 @@ class Controller:
                         version=hardware.get('gesture_library_version',0)
                         if (fast or command.get('action') in CUSTOM_IDS) and (type(version) is not int or version<required):
                             raise ValueError('控制端需升级到对应动作库版本，再重新连接 / Update the controller gesture library, then reconnect')
-                        if (command.get('action') not in {x['id'] for x in CATALOG} or
+                        from bimanual_program import INTERNAL_IDS
+                        grouped=self.group.active and self.group.internal and self.group.mode=='hardware'
+                        if (command.get('action') not in ({x['id'] for x in CATALOG} | (INTERNAL_IDS if grouped else set())) or
                             type(command.get('amplitude')) not in {int,float} or command['amplitude'] not in {.25,.5,.75,1.} or
                             type(command.get('speed',1.)) not in {int,float} or command.get('speed',1.) not in PLAYBACK_SPEEDS or
                             type(command.get('cycles')) is not int or command['cycles'] not in {1,3} or
                             command.get('workspace_clear') is not True):raise ValueError('选择试运行幅度和1/3轮，并确认周围清空')
                         outgoing={k:command.get(k) for k in ('name','action','amplitude','cycles','workspace_clear')}
                         outgoing['speed']=command.get('speed',1.)
+                        if grouped:outgoing['group_sync']=dict(token=self.group.token)
                         if command.get('action')=='text_sequence':
                             from phrase_text import normalize_phrase
                             outgoing['text']=normalize_phrase(command.get('text'))
@@ -601,6 +614,20 @@ class Handler(BaseHTTPRequestHandler):
         if not self.allowed_host():
             return self.reply(403, dict(error='Local host required'))
         url = urlsplit(self.path)
+        if url.path=='/api/workspaces':
+            if os.environ.get('WUJI_FLEET_PARENT'):return self.reply(403,dict(error='Use the main window'))
+            return self.reply(200,self.server.workspaces.snapshot())
+        if url.path=='/api/workspace-view':
+            member=parse_qs(url.query).get('member',['main'])[0]
+            if member=='main':
+                jpeg,meta=self.server.pose.get()
+                result=dict(meta=meta,image='data:image/jpeg;base64,'+base64.b64encode(jpeg).decode('ascii') if jpeg else None)
+            else:
+                with self.server.fleet.lock:r=self.server.fleet.children.get(member)
+                if not r:return self.reply(404,dict(error='Unknown hand session'))
+                try:result=self.server.fleet.get(r,'/api/view')
+                except (OSError,ValueError):return self.reply(503,dict(error='Hand view unavailable'))
+            return self.reply(200,result)
         if url.path == '/api/fleet':
             return self.reply(200,dict(devices=self.server.fleet.snapshot() if not os.environ.get('WUJI_FLEET_PARENT') else [],embedded=bool(os.environ.get('WUJI_FLEET_PARENT'))))
         if url.path in {'/api/retarget','/api/retarget/context'}:
@@ -670,9 +697,9 @@ class Handler(BaseHTTPRequestHandler):
         assets.update({'/workspace.js':('workspace.js','text/javascript; charset=utf-8'),
             '/workspace.css':('workspace.css','text/css; charset=utf-8'),
             '/parameters.js':('parameters.js','text/javascript; charset=utf-8')})
-        for name in ('studio.js','locale.js','floating_panel.js','viewer.js','action_picker.js','brand.js','installation.js','profiles.js','doctor.js','glove.js','desktop_shell.js','device_network.js','connection_toolbar.js','workbench_upgrade.js','connection_hub.js','calibration_guide.js','settings.js'):
+        for name in ('studio.js','locale.js','floating_panel.js','viewer.js','action_picker.js','brand.js','installation.js','profiles.js','doctor.js','glove.js','desktop_shell.js','device_network.js','connection_toolbar.js','workbench_upgrade.js','connection_hub.js','calibration_guide.js','settings.js','group_panel.js','workspaces.js','group_view.js'):
             assets['/'+name]=(name,'text/javascript; charset=utf-8')
-        for name in ('studio.css','floating_panel.css','glass.css','glove.css','desktop_glass.css','desktop_refinement.css','glass_refresh.css','workbench_upgrade.css','connection_hub.css','calibration_guide.css'):
+        for name in ('studio.css','floating_panel.css','glass.css','glove.css','desktop_glass.css','desktop_refinement.css','glass_refresh.css','workbench_upgrade.css','connection_hub.css','calibration_guide.css','group_panel.css','workspaces.css','group_view.css'):
             assets['/'+name]=(name,'text/css; charset=utf-8')
         assets['/viewer']=('viewer.html','text/html; charset=utf-8')
         assets['/favicon.ico']=('favicon.ico','image/x-icon')
@@ -705,6 +732,9 @@ class Handler(BaseHTTPRequestHandler):
                 result=dispatch(host,payload)
             elif payload.get('name') in ('desktop_open','desktop_viewer') and getattr(self.server,'desktop',None):
                 result=self.server.desktop.open_viewer() if payload['name']=='desktop_viewer' else dict(ok=True,native_opened=True)
+            elif str(payload.get('name','')).startswith(('workspace_','ensemble_')):
+                if os.environ.get('WUJI_FLEET_PARENT'):raise ValueError('Open workspaces in the main window')
+                result=self.server.workspaces.action(payload)
             elif payload.get('name')=='fleet_create':
                 if os.environ.get('WUJI_FLEET_PARENT'):raise ValueError('Open device manager in the main workspace')
                 result=dict(device=self.server.fleet.create(payload.get('label'),payload.get('profile')))
@@ -718,6 +748,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.server.controller.action(dict(name='session_keepalive'))
                 result=dict(errors=self.server.fleet.heartbeat())
             elif payload.get('name')=='fleet_stop':
+                if hasattr(self.server,'_workspaces'):
+                    for coordinator in self.server._workspaces.coordinators.values():coordinator.stop()
                 errors=[]
                 for name in ('program_stop','glove_stop' if self.server.controller.glove.busy else 'hardware_stop'):
                     try:self.server.controller.action(dict(name=name))
@@ -740,11 +772,21 @@ class ConsoleHTTPServer(ThreadingHTTPServer):
     allow_reuse_port = False
 
     @property
+    def workspaces(self):
+        # Lazy construction can race first polling and first button request.
+        with self.controller.lock:
+            if not hasattr(self,'_workspaces'):
+                from workspace_groups import WorkspaceGroups
+                self._workspaces=WorkspaceGroups(self.fleet,self.controller,DATA)
+            return self._workspaces
+
+    @property
     def fleet(self):
-        if not hasattr(self,'_fleet'):
-            from device_fleet import DeviceFleet
-            self._fleet=DeviceFleet(DATA,RESOURCE,f'http://127.0.0.1:{self.server_address[1]}')
-        return self._fleet
+        with self.controller.lock:
+            if not hasattr(self,'_fleet'):
+                from device_fleet import DeviceFleet
+                self._fleet=DeviceFleet(DATA,RESOURCE,f'http://127.0.0.1:{self.server_address[1]}')
+            return self._fleet
 
     def server_bind(self):
         if sys.platform == 'win32':

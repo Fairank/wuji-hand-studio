@@ -27,7 +27,7 @@ from joint_stats import JointRates
 from hardware_showcase import HardwareShowcase
 
 LABELS = {'baseline', 'thumb', 'index', 'middle', 'ring', 'little', 'withdrawal'}
-HARDWARE_COMMANDS = {'hardware_start','hardware_probe','hardware_trial','hardware_stop','hardware_pause','hardware_resume','hardware_keepalive'}
+HARDWARE_COMMANDS = {'hardware_start','hardware_probe','hardware_trial','hardware_stop','hardware_pause','hardware_resume','hardware_keepalive','hardware_group_commit'}
 _session=os.environ.get('WUJI_SESSION_ID','')
 if _session and (len(_session)!=16 or any(c not in '0123456789abcdef' for c in _session)):
     raise ValueError('Invalid controller session ID')
@@ -42,9 +42,9 @@ def validate_command(command):
     if isinstance(name,str) and name.startswith('glove_'):
         from glove_protocol import validate
         return validate(command)
-    if name not in {'connect', 'disconnect', 'record', 'stop'} | HARDWARE_COMMANDS:
+    if name not in {'connect', 'discover', 'disconnect', 'record', 'stop'} | HARDWARE_COMMANDS:
         raise ValueError('Unsupported console operation')
-    if name == 'connect':
+    if name in {'connect','discover'}:
         if type(command.get('auto_detect', False)) is not bool:
             raise ValueError('Invalid discovery mode')
         serial = command.get('serial', '')
@@ -383,6 +383,12 @@ def main():
                 try:
                     command = validate_command(json.loads(line))
                     name = command['name']
+                    if name=='discover':
+                        if process:raise ValueError('Discovery requires a separate session')
+                        from device_discovery import scan_only
+                        from wuji_sdk import SdkManager
+                        emit(dict(type='discovery',devices=scan_only(SdkManager.instance(),command.get('address',''))))
+                        break
                     if name == 'glove_session':
                         if process:raise ValueError('Already connected')
                         from glove_agent import worker_glove
