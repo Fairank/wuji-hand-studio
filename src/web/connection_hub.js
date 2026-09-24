@@ -19,8 +19,8 @@
  const glovePage=$('page-glove'),gloveBody=glovePage?.querySelector('.page-body');
  if(gloveBody)sections.visual.append(...[...gloveBody.children]);
  const retarget=$('wb-retarget-title')?.closest('.wb-card');if(retarget)sections.retarget.append(retarget);
- const appearance=$('wb-appearance-title')?.closest('.wb-card'),refraction=$('external-refraction-toggle')?.closest('label'),refractionNote=$('external-refraction-note');
- if(appearance&&refraction&&refractionNote){const group=document.createElement('div');group.className='hub-refraction-setting';group.append(refraction,refractionNote);appearance.append(group)}
+ const appearance=$('wb-appearance-title')?.closest('.wb-card'),refraction=$('external-refraction-settings');
+ if(appearance&&refraction){refraction.classList.add('hub-refraction-setting');appearance.append(refraction)}
  const oldGloveNav=document.querySelector('.directory [data-page="glove"]');if(oldGloveNav)oldGloveNav.hidden=true;
  const mappingLink=$('wb-glove-settings-link');if(mappingLink)mappingLink.href='#connection';
  mappingLink?.addEventListener('click',()=>select('retarget'));

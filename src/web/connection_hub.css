@@ -38,6 +38,17 @@ body .hub-tabs button[aria-selected=true]{background:var(--wb-card);box-shadow:0
 .hub-skeleton:not(.is-live) #hub-skeleton-svg{display:none}
 .hub-refraction-setting{margin-top:18px;padding:15px 16px;border:1px solid var(--wb-line);border-radius:14px;background:var(--wb-group)}
 .hub-refraction-setting label{display:flex;align-items:center;justify-content:space-between;gap:14px;color:var(--wb-ink);font-weight:600}.hub-refraction-setting p{margin:7px 0 0;font-size:12px}
+.external-refraction-settings{min-width:0}
+.external-refraction-settings .desktop-about{margin:5px 0 0;max-width:62ch;line-height:1.55}
+.external-refraction-settings .refraction-control{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px 12px;align-items:center;margin-top:17px}
+.external-refraction-settings .refraction-control label{display:block;grid-column:1;grid-row:1;min-width:0;font-size:13px;font-weight:600;color:var(--wb-ink)}
+.external-refraction-settings .refraction-control output{grid-column:2;grid-row:1;font-size:12px;color:var(--wb-sub);font-variant-numeric:tabular-nums}
+.external-refraction-settings .refraction-control input[type=range]{grid-column:1/-1;grid-row:2;width:100%;margin:0;accent-color:#007aff;cursor:pointer}
+.external-refraction-settings .refraction-scale{display:flex;justify-content:space-between;margin-top:5px;font-size:11px;color:var(--wb-sub)}
+.external-refraction-settings .refraction-advanced{margin-top:14px;padding-top:13px;border-top:1px solid var(--wb-line)}
+.external-refraction-settings .refraction-advanced summary{width:max-content;max-width:100%;font-size:12px;color:var(--wb-sub);cursor:pointer}
+.external-refraction-settings .refraction-advanced[open] summary{color:var(--wb-ink)}
+.external-refraction-settings .refraction-advanced .refraction-control{margin-top:14px}
 #hub-skeleton-svg{display:block;width:min(100%,310px);height:280px;margin:6px auto 0;background:var(--wb-group);border-radius:16px}
 #hub-skeleton-lines line{stroke:#1986dc;stroke-width:3;stroke-linecap:round;opacity:.85}#hub-skeleton-points circle{fill:#005db3;stroke:var(--wb-card);stroke-width:1}
 #hub-visual .glove-layout{align-items:start}#hub-visual .glove-display{min-width:0}#hub-visual .glove-controls{max-width:none}
