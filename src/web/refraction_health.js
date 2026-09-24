@@ -1,5 +1,5 @@
-/* A missed 60 Hz presentation (>31 ms) or sustained sub-60 Hz delivery turns experimental refraction off.
-   The limit applies only while the external pixels are visible. */
+/* Measure presentation gaps and low refresh during motion. These are warnings,
+   never a reason to switch off user-enabled refraction. */
 ((host)=>{
  'use strict';
  const MAX_GAP_MS=31,MIN_HZ=59.5,WINDOW=30;

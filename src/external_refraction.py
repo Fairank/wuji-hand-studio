@@ -122,8 +122,8 @@ class Refraction:
             from windows_capture import WindowsCapture
             bounds=None
             while not self.stop_event.wait(.08):
-                if time.monotonic()-self.last_request>3:break # Hidden/closed WebView no longer asks for pixels.
                 current=self.geometry.bounds()
+                if current and time.monotonic()-self.last_request>3:break # Stalled visible WebView; minimized windows pause capture below.
                 if current!=bounds:
                     self.generation+=1;generation=self.generation;self._halt_capture();bounds=current
                     with self.frames_ready:

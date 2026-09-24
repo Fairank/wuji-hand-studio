@@ -35,4 +35,4 @@ for(let i=0;i<30;i++)assert.equal(monitor.present(i*20,12),null);
 assert.equal(monitor.present(600,12).kind,'presentation_rate');
 monitor.present(1000,0);
 assert.equal(monitor.stats().presented_hz,null);
-console.log('Refraction 60/120 Hz and first-stall shutdown checks passed');
+console.log('Refraction 60/120 Hz and stall diagnostic checks passed');
