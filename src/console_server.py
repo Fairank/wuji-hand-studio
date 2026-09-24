@@ -55,6 +55,8 @@ class Controller:
         self.calibration=CalibrationCLI(self.reports.parent/'calibration_reports')
         from retarget_workspace import RetargetWorkspace
         self.retarget=RetargetWorkspace(self.reports.parent)
+        from retarget_tuning import TuningStore
+        self.tuning=TuningStore(self.retarget.folder/'official_tuning')
         from program_runner import ProgramRunner
         self.program=ProgramRunner(self)
         from group_participant import GroupParticipant
@@ -233,6 +235,12 @@ class Controller:
             return dict(calibration=self.calibration.start(command.get('side'),command.get('serial'),command.get('replace',False)))
         if name=='retarget_context':
             return dict(mapping=self.retarget.context(self.state['device_profile']))
+        if name in {'retarget_tuning_context','retarget_tuning_save','retarget_tuning_export'}:
+            binding=self.retarget.context(self.state['device_profile'])['binding']
+            if name=='retarget_tuning_context':return dict(tuning=self.tuning.context(binding))
+            if command.get('binding')!=binding:raise ValueError('Device pairing changed; reload the tuning table / 配对已改变，请重新载入参数表')
+            if name=='retarget_tuning_save':return dict(tuning=self.tuning.save(binding,command.get('values'),command.get('revision')))
+            return dict(tuning_export=self.tuning.export(binding,command.get('values')))
         if name=='retarget_binding_save':
             if self.glove.snapshot()['connection'] not in ('disconnected','ready','error'):
                 raise ValueError('先断开手套预览再改变配对 / Disconnect preview before changing pairing')
@@ -697,9 +705,9 @@ class Handler(BaseHTTPRequestHandler):
         assets.update({'/workspace.js':('workspace.js','text/javascript; charset=utf-8'),
             '/workspace.css':('workspace.css','text/css; charset=utf-8'),
             '/parameters.js':('parameters.js','text/javascript; charset=utf-8')})
-        for name in ('studio.js','locale.js','floating_panel.js','viewer.js','action_picker.js','brand.js','installation.js','profiles.js','doctor.js','glove.js','desktop_shell.js','device_network.js','connection_toolbar.js','workbench_upgrade.js','connection_hub.js','calibration_guide.js','settings.js','group_panel.js','workspaces.js','group_view.js','workbench_sheet.js','workbench_clarity.js'):
+        for name in ('studio.js','locale.js','floating_panel.js','viewer.js','action_picker.js','brand.js','installation.js','profiles.js','doctor.js','glove.js','desktop_shell.js','device_network.js','connection_toolbar.js','workbench_upgrade.js','connection_hub.js','calibration_guide.js','settings.js','group_panel.js','workspaces.js','group_view.js','workbench_sheet.js','workbench_clarity.js','numeric_grid.js','retarget_tuning.js'):
             assets['/'+name]=(name,'text/javascript; charset=utf-8')
-        for name in ('studio.css','floating_panel.css','glass.css','glove.css','desktop_glass.css','desktop_refinement.css','glass_refresh.css','workbench_upgrade.css','connection_hub.css','calibration_guide.css','group_panel.css','workspaces.css','group_view.css','workbench_sheet.css','workbench_clarity.css'):
+        for name in ('studio.css','floating_panel.css','glass.css','glove.css','desktop_glass.css','desktop_refinement.css','glass_refresh.css','workbench_upgrade.css','connection_hub.css','calibration_guide.css','group_panel.css','workspaces.css','group_view.css','workbench_sheet.css','workbench_clarity.css','numeric_grid.css','retarget_tuning.css'):
             assets['/'+name]=(name,'text/css; charset=utf-8')
         assets['/viewer']=('viewer.html','text/html; charset=utf-8')
         assets['/favicon.ico']=('favicon.ico','image/x-icon')

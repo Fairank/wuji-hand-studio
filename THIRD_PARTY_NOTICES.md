@@ -2,6 +2,8 @@
 
 This is an unofficial personal tool. Original application code is MIT licensed; third-party components retain their own licenses. Trademarks/logos are not licensed by the application's MIT grant and do not imply vendor endorsement.
 
+- Official retargeting YAML templates: [wuji-retargeting](https://github.com/wuji-technology/wuji-retargeting), commit `531f6ed4250b475d2e9231f54e988fc9b1c5b4ea`. Four upstream configurations remain unmodified under `src/official_data/retarget`, with their manifest/checksums and original MIT LICENSE. The Workbench editor exports selected field changes; it does not bundle or execute this optimizer. PyYAML is MIT licensed; its distribution notice is included in packaged dependency notices.
+
 - Native left-hand geometry: [wuji-technology/wuji-description](https://github.com/wuji-technology/wuji-description), hand2/hand2_beta2/body. Original MIT notice retained at `src/assets/LICENSE`.
 - Hand 2 example adaptations and `left.replay`: [wuji-technology/wuji-sdk](https://github.com/wuji-technology/wuji-sdk), example commit `b0e48652dd94f4bc33df61cdc23a6d5dc598f93d`. Original MIT notice retained at `src/official_data/LICENSE-wuji-sdk.txt`. Local changes include start/return transitions, scaling, explicit selection and the web control session. The sample is not claimed to be an independently learned policy.
 - WUJI logo: owner-supplied official complete wordmark, aspect ratio preserved. Original SHA256 `e44fe4f7c0ae125d594b0f6f40fa6f90f5b9a12cf79cfb1a567230453c10dbee`. Name/logo remain the property of Wuji Technology. No Apple imagery or marks are included.

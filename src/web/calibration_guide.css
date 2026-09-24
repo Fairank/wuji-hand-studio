@@ -388,3 +388,10 @@
   .cg-guide,
   .cg-outcome { padding: 18px; }
 }
+/* Official feedback only: no local constraints or inferred success. */
+.cg-checks{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:18px}
+.cg-check-card{display:flex;flex-direction:column;gap:7px;padding:14px;border-radius:14px;background:var(--surface-secondary,rgba(128,128,128,.07));border:1px solid rgba(128,128,128,.16)}
+.cg-check-card span{font-size:12px;opacity:.7}.cg-check-card strong{font-size:14px;font-weight:550}
+.cg-check-card[data-check=pass] strong{color:#27814b}.cg-check-card[data-check=fail] strong{color:#ae5a14}
+.cg-timing{font-size:12px;overflow-wrap:anywhere;opacity:.7}.cg-metrics{padding:0;list-style:none;max-height:250px;overflow:auto}
+.cg-metric{display:flex;flex-direction:column;gap:5px;padding:10px 0;border-bottom:1px solid rgba(128,128,128,.16);overflow-wrap:anywhere}.cg-metric span{font-size:12px;opacity:.8}

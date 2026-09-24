@@ -13,8 +13,8 @@
 
   /* Copy is selected by the host language picker. */
   var L = {
-    title: '六姿势指南 / Six-pose guide',
-    sub: '非官方界面 · 不发送机器人指令 / Unofficial UI · sends no robot commands',
+    title: '跟随官方标定 / Follow official calibration',
+    sub: '官方 CLI 采集与求解 · 工作台显示引导 / Official CLI capture and solver · Workbench guidance',
     left: '左手 / Left hand',
     right: '右手 / Right hand',
     yes: '已校准 / Calibrated',
@@ -318,6 +318,17 @@
     var progFill = h('div', 'cg-progress-fill', null, prog);
     var progText = h('span', 'cg-progress-text', null, live);
 
+    var checks = h('section', 'cg-checks', null, guide);
+    var stability = h('div', 'cg-check-card', null, checks);
+    var stabilityLabel = h('span', null, null, stability);
+    var stabilityValue = h('strong', null, null, stability);
+    var constraints = h('div', 'cg-check-card', null, checks);
+    var constraintsLabel = h('span', null, null, constraints);
+    var constraintsValue = h('strong', null, null, constraints);
+    var timingText = h('p', 'cg-timing', null, guide);
+    var metricList = h('ul', 'cg-metrics', null, guide);
+    var lastMetrics = '';
+
     var outcome = h('section', 'cg-outcome', null, root);
     outcome.setAttribute('aria-labelledby', id + '-out');
     var oTitle = h('h3', 'cg-h3', null, outcome);
@@ -396,6 +407,10 @@
       setAttr(stBox, 'class', 'cg-status cg-tone-' + tone);
       setText(stLabel, STATUS[key] + (key === 'unknown' ? ': ' + clip(String(run.status), 60) : ''));
       setText(stMsg, MSG[tx][key]);
+      if(active){
+        var phases={waiting_movement:zh?'张开手，再进入下一个姿势。':'Open your hand before the next pose.',waiting_stable:zh?'保持手腕和手指稳定。':'Hold the wrist and fingers steady.',collecting:zh?'正在采集，请保持当前姿势。':'Collecting; keep holding this pose.',done:zh?'本姿势采集完毕，等待官方下一步。':'Pose collected; waiting for the official next step.',solving:zh?'正在求解，请等待官方结果。':'Solving; waiting for the official result.'};
+        if(phases[run.phase])setText(stMsg,phases[run.phase]);
+      }
       var poseLine = !active ? '' : pose === null ? L.waiting
         : (zh ? '姿势 ' : 'Pose ') + (pose + 1) + ' / 6 · ' + POSES[pose][tx];
       setText(stPose, poseLine);
@@ -449,6 +464,34 @@
       }
 
       /* Active run details (raw host values only) */
+      var check = active && isObj(run.checks) ? run.checks : {};
+      setText(stabilityLabel,zh?'稳定性':'Stability');
+      setText(constraintsLabel,zh?'姿势约束':'Pose constraints');
+      function checkValue(node,card,value){
+        setText(node,value===true?(zh?'通过':'PASS'):value===false?(zh?'未通过':'FAIL'):(zh?'等待官方反馈':'Waiting for official feedback'));
+        setAttr(card,'data-check',value===true?'pass':value===false?'fail':'unknown');
+      }
+      checkValue(stabilityValue,stability,check.variance_ok);
+      checkValue(constraintsValue,constraints,check.constraints_ok);
+      var timing=active && isObj(run.timing)?run.timing:{},ts=[];
+      for(var tk of ['hold_elapsed','hold_target','collect_elapsed','collect_target','frames_collected']){
+        if(typeof timing[tk]==='number' && isFinite(timing[tk]))ts.push(tk+' = '+timing[tk]);
+      }
+      setText(timingText,ts.join(' · '));setHidden(timingText,!ts.length);
+      var metrics=Array.isArray(check.metrics)?check.metrics:[];
+      var metricKey=boundedJson(metrics,MAX_JSON)+tx;
+      if(metricKey!==lastMetrics){
+        lastMetrics=metricKey;metricList.replaceChildren();
+        metrics.slice(0,40).forEach(function(metric){
+          if(!isObj(metric))return;
+          var item=h('li','cg-metric',null,metricList);
+          var group=[metric.finger,metric.finger_b].filter(function(v){return typeof v==='string';}).join(' ↔ ');
+          h('strong',null,[group,plain(metric.label,200)].filter(Boolean).join(' · '),item);
+          var detail=Object.keys(metric).filter(function(k){return !['finger','finger_b','label'].includes(k);}).map(function(k){return k+' = '+formatStep(metric[k]);}).join(' · ');
+          h('span',null,detail,item);
+        });
+      }
+      setHidden(metricList,!metrics.length);
       setHidden(live, !active);
       if (active) {
         setRow(mSide, run.side === 'left' ? L.sideLeft : run.side === 'right' ? L.sideRight : '');

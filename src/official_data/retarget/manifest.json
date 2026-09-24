@@ -1,0 +1,31 @@
+{
+  "repository": "https://github.com/wuji-technology/wuji-retargeting",
+  "commit": "531f6ed4250b475d2e9231f54e988fc9b1c5b4ea",
+  "files": [
+    {
+      "file": "LICENSE",
+      "upstream_path": "LICENSE",
+      "sha256": "8c0114d9f726c5aa4aa31a427123df7b2d250c89a89aea92bb428cc31d03d05e"
+    },
+    {
+      "file": "adaptive_analytical_wuji_glove_left.yaml",
+      "upstream_path": "example/config/adaptive_analytical_wuji_glove_left.yaml",
+      "sha256": "63a20cb7245f912b9a7607bf2db5df9cee9eefd0d02988ca24c8b9232c509a58"
+    },
+    {
+      "file": "adaptive_analytical_wuji_glove_right.yaml",
+      "upstream_path": "example/config/adaptive_analytical_wuji_glove_right.yaml",
+      "sha256": "a898ba86fe399ffd80ee21a2105100ef90b7a2f0a6dedbe53f9503dca6851e7f"
+    },
+    {
+      "file": "adaptive_analytical_wuji_glove_wuji_hand_2_left.yaml",
+      "upstream_path": "example/config/adaptive_analytical_wuji_glove_wuji_hand_2_left.yaml",
+      "sha256": "12d7d3fea4e5773ad2bb52bbd48ec4894dc3b194b66d21c53133a58b5b07d0c1"
+    },
+    {
+      "file": "adaptive_analytical_wuji_glove_wuji_hand_2_right.yaml",
+      "upstream_path": "example/config/adaptive_analytical_wuji_glove_wuji_hand_2_right.yaml",
+      "sha256": "6db7500b6d3630db8fc9398bf9f6e44d70d96f78a23af1c97dede12f376117c5"
+    }
+  ]
+}

@@ -1,0 +1,78 @@
+/* numeric_grid.css: compact translucent matrix editor; every selector uses the ng- prefix. */
+.ng-root {
+  --ng-bg: rgba(255, 255, 255, 0.72);
+  --ng-fg: #1f2328;
+  --ng-muted: #59636e;
+  --ng-line: rgba(31, 35, 40, 0.12);
+  --ng-edge: rgba(31, 35, 40, 0.5);
+  --ng-field: rgba(255, 255, 255, 0.85);
+  --ng-focus: #2563eb;
+  --ng-error: #c62828;
+  --ng-error-bg: rgba(198, 40, 40, 0.08);
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
+  padding: 8px 10px 6px;
+  border: 1px solid var(--ng-line);
+  border-radius: 8px;
+  background: var(--ng-bg); /* translucent only: no backdrop-filter blur */
+  color: var(--ng-fg);
+  font-size: 13px;
+  line-height: 1.35;
+  color-scheme: light;
+}
+[data-theme="dark"] .ng-root {
+  --ng-bg: rgba(24, 26, 31, 0.72);
+  --ng-fg: #e6e8eb;
+  --ng-muted: #9aa3ad;
+  --ng-line: rgba(255, 255, 255, 0.12);
+  --ng-edge: rgba(255, 255, 255, 0.35);
+  --ng-field: rgba(0, 0, 0, 0.28);
+  --ng-focus: #60a5fa;
+  --ng-error: #ff8a80;
+  --ng-error-bg: rgba(255, 138, 128, 0.12);
+  color-scheme: dark;
+}
+.ng-root *,
+.ng-root *::before,
+.ng-root *::after { box-sizing: border-box; }
+/* Only the table wrapper scrolls, so a 10 x 10 grid never widens a 900px page. */
+.ng-scroll { max-width: 100%; overflow-x: auto; overscroll-behavior-x: contain; }
+.ng-table { border-collapse: collapse; }
+.ng-table th,
+.ng-table td { padding: 3px 4px; border-bottom: 1px solid var(--ng-line); }
+.ng-table tbody tr:last-child > * { border-bottom: 0; }
+.ng-col { color: var(--ng-muted); font-weight: 600; text-align: right; white-space: nowrap; }
+.ng-row { padding-right: 10px; font-weight: 600; text-align: left; white-space: nowrap; }
+.ng-input {
+  width: 8ch;
+  height: 26px;
+  margin: 0;
+  padding: 2px 6px;
+  border: 1px solid var(--ng-edge);
+  border-radius: 4px;
+  background: var(--ng-field);
+  color: inherit;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  transition: border-color 120ms ease, background-color 120ms ease;
+}
+.ng-input:focus { border-color: var(--ng-focus); outline: 2px solid var(--ng-focus); outline-offset: -1px; }
+.ng-input[aria-invalid="true"] { border-color: var(--ng-error); background: var(--ng-error-bg); }
+.ng-input:disabled { cursor: not-allowed; }
+.ng-disabled .ng-table { opacity: 0.6; }
+.ng-status { min-height: 1.35em; margin-top: 4px; color: var(--ng-muted); font-size: 12px; overflow-wrap: anywhere; }
+.ng-status-error { color: var(--ng-error); }
+@media (prefers-reduced-motion: reduce) {
+  .ng-root,
+  .ng-root * { transition: none !important; animation: none !important; }
+}
+/* Workbench integration: override global form sizing inside numeric tables. */
+.ng-root .ng-table{width:100%;table-layout:fixed}
+.ng-root .ng-table th,.ng-root .ng-table td{padding:7px 8px}
+.ng-root .ng-input{box-sizing:border-box;width:100%;min-width:5ch;max-width:100%;min-height:32px;height:32px;padding:5px 8px;border-radius:7px;font-size:13px}
+.ng-root .ng-row{width:90px}
+.ng-root{border-radius:12px;padding:10px}
+#wb-output-kind{margin:8px 0 12px}
+html[data-reduce-motion=true] .ng-root *{transition:none!important}

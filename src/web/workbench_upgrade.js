@@ -126,25 +126,26 @@
   autoHand.checked=false;localStorage.setItem('wuji-auto-hand','false');
  }},true);
  const fingerNames=()=>L.lang==='en'?['Thumb','Index','Middle','Ring','Little']:['拇指','食指','中指','无名指','小指'];
- function retargetRender(){if(!retarget)return;
-  $('wb-smoothing').value=String(retarget.smoothing_ms);
-  const host=$('wb-retarget-grid');host.replaceChildren();
-  const headers=[];
-  for(let f=0;f<5;f++){
-   const group=document.createElement('details');group.className='wb-finger-group';
-   const title=document.createElement('summary');title.textContent=fingerNames()[f];group.append(title);
-   const header=document.createElement('div');header.className='wb-entry wb-entry-head';header.style.gridTemplateColumns='minmax(120px,1fr) 100px 100px';
-   for(const value of [t('关节','Joint'),t('幅度','Gain'),t('偏移 °','Offset °')]){const label=document.createElement('span');label.textContent=value;header.append(label)}
-   group.append(header);headers.push(group);host.append(group);
-  }
-  for(let i=0;i<20;i++){
-   const row=document.createElement('div');row.className='wb-entry';row.style.gridTemplateColumns='minmax(120px,1fr) 100px 100px';
-   const label=document.createElement('strong');label.textContent=`${fingerNames()[Math.floor(i/4)]} ${i%4+1}`;
-   const gain=document.createElement('input');gain.type='number';gain.min='0';gain.max='2';gain.step='.05';gain.value=retarget.gain[i];gain.setAttribute('aria-label',t('幅度','Gain'));
-   const offset=document.createElement('input');offset.type='number';offset.min='-180';offset.max='180';offset.step='1';offset.value=retarget.offset_deg[i];offset.setAttribute('aria-label',t('角度偏移','Offset degrees'));
-   gain.oninput=()=>{retarget.gain[i]=Number(gain.value)};offset.oninput=()=>{retarget.offset_deg[i]=Number(offset.value)};
-   row.append(label,gain,offset);headers[Math.floor(i/4)].append(row);
-  }
+ let outputGrid=null,outputKind='gain';
+ const kindSelect=document.createElement('select');kindSelect.id='wb-output-kind';kindSelect.setAttribute('aria-label',t('调整项','Adjustment'));
+ kindSelect.append(new Option(t('幅度系数','Gain'),'gain'),new Option(t('角度偏移 °','Offset °'),'offset_deg'));
+ $('wb-retarget-grid').before(kindSelect);
+ const outputRows=()=>fingerNames().map((label,i)=>({key:String(i),label}));
+ const outputCols=()=>[1,2,3,4].map(i=>({key:String(i),label:t('关节 ','Joint ')+i}));
+ function retargetRead(){
+  if(!retarget)return;
+  if(outputGrid)retarget[outputKind]=outputGrid.read().flat();
+  const raw=$('wb-smoothing').value.trim();if(!raw||!Number.isFinite(Number(raw)))throw Error(t('请填写输出平滑','Enter output smoothing'));
+  retarget.smoothing_ms=Number(raw);
+ }
+ kindSelect.onchange=()=>{try{retargetRead();outputKind=kindSelect.value;retargetRender()}catch(e){kindSelect.value=outputKind;$('wb-retarget-status').textContent=e.message}};
+ function retargetRender(replace=true){if(!retarget)return;
+  kindSelect.options[0].textContent=t('幅度系数','Gain');kindSelect.options[1].textContent=t('角度偏移 °','Offset °');
+  kindSelect.setAttribute('aria-label',t('调整项','Adjustment'));
+  const matrix=Array.from({length:5},(_,i)=>retarget[outputKind].slice(i*4,i*4+4));
+  if(!outputGrid)outputGrid=NumericGrid.mount($('wb-retarget-grid'),{rows:outputRows(),columns:outputCols(),value:matrix,language:L.lang,onChange:value=>{retarget[outputKind]=value.flat()}});
+  else{outputGrid.setLabels(outputRows(),outputCols());outputGrid.setLanguage(L.lang);if(replace)outputGrid.setValue(matrix)}
+  if(replace)$('wb-smoothing').value=String(retarget.smoothing_ms);
  }
  let mappingContext=null;
  const mappingCard=$('wb-retarget-title').closest('.wb-card');
@@ -163,11 +164,11 @@
  window.addEventListener('retarget-binding-changed',mappingRefresh);mappingRefresh();
  $('wb-smoothing').oninput=()=>{if(retarget)retarget.smoothing_ms=Number($('wb-smoothing').value)};
  $('wb-retarget-default').onclick=()=>{retarget={gain:Array(20).fill(1),offset_deg:Array(20).fill(0),smoothing_ms:0};retargetRender()};
- $('wb-retarget-save').onclick=async()=>{if(!retarget)return;retarget.smoothing_ms=Number($('wb-smoothing').value);
-  try{const out=await request('retarget_save',{values:retarget,revision:mappingContext?.revision});showContext(out.mapping);$('wb-retarget-status').textContent=t('已保存到当前设备配对。可应用到手套预览，或重新连接后生效。','Saved for this pairing. Apply in glove preview, or reconnect.')}catch(error){$('wb-retarget-status').textContent=error.message}
+ $('wb-retarget-save').onclick=async()=>{if(!retarget)return;
+  try{retargetRead();const out=await request('retarget_save',{values:retarget,revision:mappingContext?.revision});showContext(out.mapping);$('wb-retarget-status').textContent=t('已保存到当前设备配对。可应用到手套预览，或重新连接后生效。','Saved for this pairing. Apply in glove preview, or reconnect.')}catch(error){$('wb-retarget-status').textContent=error.message}
  };
  loadPreset.onclick=()=>{const preset=mappingContext?.presets?.find(p=>p.name===presetSelect.value);if(preset){retarget=structuredClone(preset.settings);retargetRender();$('wb-retarget-status').textContent=t('已填入预设；保存后生效。','Preset loaded; save to use it.')}};
- savePreset.onclick=async()=>{try{const out=await request('retarget_preset_save',{preset:presetName.value,values:retarget});showContext(out.mapping,false);$('wb-retarget-status').textContent=t('预设已保存','Preset saved')}catch(e){$('wb-retarget-status').textContent=e.message}};
+ savePreset.onclick=async()=>{try{retargetRead();const out=await request('retarget_preset_save',{preset:presetName.value,values:retarget});showContext(out.mapping,false);$('wb-retarget-status').textContent=t('预设已保存','Preset saved')}catch(e){$('wb-retarget-status').textContent=e.message}};
  deletePreset.onclick=async()=>{try{const out=await request('retarget_preset_delete',{preset:presetSelect.value});showContext(out.mapping,false)}catch(e){$('wb-retarget-status').textContent=e.message}};
  applyMapping.onclick=async()=>{try{await request('retarget_apply');$('wb-retarget-status').textContent=t('已发送应用请求，请核对下方控制端状态。','Apply requested; check controller status below.')}catch(e){$('wb-retarget-status').textContent=e.message}};
  const mappingLive=document.createElement('p');mappingLive.className='wb-note';mappingCard.append(mappingLive);
@@ -242,7 +243,7 @@
   for(const [id,zh,en] of [['system','跟随系统','System'],['light','白色','Light'],['dark','黑色','Dark']])$('wb-theme').querySelector(`[value=${id}]`).textContent=t(zh,en);
   $('wb-auto-hand-label').querySelector('span').textContent=t('自动发现并连接单只机械手（只读反馈）','Find and connect a single hand automatically (feedback only)');
   $('wb-auto-glove-label').querySelector('span').textContent=t('自动发现并连接单只手套（仅预览）','Find and connect a single glove automatically (preview only)');
-  $('wb-retarget-title').textContent=t('手套 → 机械手映射','Glove → hand mapping');
+  $('wb-retarget-title').textContent=t('当前 SDK 输出调整','Current SDK output adjustment');
   $('wb-retarget-note').textContent=t('官方 SDK 将 21 个关键点映射为 20 个关节角，再应用下方幅度、角度偏移和平滑。配置按左右手、代际、手套、机械手与标定用户分别保存。默认保持官方输出。','Official SDK maps 21 landmarks to 20 joint angles, followed by gain, offset and smoothing. Settings are separate for side, generation, glove, hand and SDK user. Defaults preserve SDK output.');
   $('wb-smoothing-label').textContent=t('输出平滑','Output smoothing');$('wb-retarget-default').textContent=t('恢复默认','Reset defaults');$('wb-retarget-save').textContent=t('保存映射','Save mapping');
   $('wb-glove-settings-link').textContent=t('调整手套映射 →','Adjust retargeting →');
@@ -254,7 +255,7 @@
   $('wb-program-preview').textContent=t('画面预览','Preview');$('wb-program-hardware').textContent=t('真实手播放','Play on hand');
   $('wb-program-pause').textContent=state?.program?.paused?t('继续','Resume'):t('暂停','Pause');$('wb-program-stop').textContent=t('停止','Stop');
   if(devices){$('wb-device-title').textContent=t('独立设备会话','Independent hand sessions');$('wb-device-note').textContent=t('多手可加入同一个工作区，也可分开使用。','Hands can share a workspace or work independently.');$('wb-device-name-label').textContent=t('名称','Name');$('wb-device-profile-label').textContent=t('型号','Model');$('wb-device-add').textContent=t('添加工作区','Add workspace')}
-  renderEntries();retargetRender();
+  renderEntries();retargetRender(false);
  }
  window.addEventListener('console-state',event=>{state=event.detail;
   if(!state?.program?.active)programLease=null;

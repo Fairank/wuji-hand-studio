@@ -1,5 +1,16 @@
 # 更新记录 / Changelog
 
+## 0.2.11 — 官方标定反馈与可编辑参数矩阵
+
+- 修复官方 SDK 回调的六姿势编号、姿势名称和 progress 字段解析；稳定性、约束分别显示官方结果，缺失数据保持未知。
+- 标定设置集中在「选择用户与手套」，运行中收起；官方采集状态每 500 ms 更新。继续由官方 CLI 采集、求解和发布模型，没有另造标定算法。
+- 20 关节幅度/偏移改成五指 × 四关节数值表，支持矩形粘贴、完整数值检查、切换语言保留未完成输入。
+- 新增独立的官方开源映射参数草稿表：五指目标比例、对指距离和输出平滑；按配对隔离保存，带版本冲突检查，导出完整 YAML。
+- 四套官方 YAML 固定至提交 531f6ed4，保留路径、其他权重、原始配置、校验和及 MIT 许可。与当前 SDK 内置映射分开显示，不冒称保存后已实时应用。
+- 通用表格由本地 Claude Opus 5.5 max 辅助，审核后采用。没有调整电机参数或启动实机；验证范围见 [记录](VALIDATION_0.2.11.md)。
+
+Official calibration feedback is now visible, and output settings use editable numeric matrices. A separate per-pairing editor exports the pinned open-retargeting YAML; it does not modify the current SDK solver. See [scope and workflow](CALIBRATION_AND_TUNING.md).
+
 ## 0.2.10 — 简化单手展示、多手演示与设备管理
 
 此前播放、参数说明和设备管理堆在同一页，操作需要反复向下翻。这次把常用步骤留在画面旁边，低频设置按需打开。

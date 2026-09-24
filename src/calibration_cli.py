@@ -89,19 +89,37 @@ def runner_command(config, mode, args, expected_user=None, replace=False):
 
 
 def progress_fields(event):
-    """Only explicit SDK fields are normalized; raw diagnostics remain visible.
+    """Normalize the public SDK callback, retaining unknown CLI data verbatim.
 
-    No guessed indexing, thresholds, timers or synthesized pose completions.
+    SDK example 5.calibration.py documents zero-based step_index/step_total,
+    step_name, progress, variance_ok, constraints_ok, and metric diagnostics.
+    A step index is only mapped to our six references when step_total is six.
+    Pose names take precedence and a conflicting/unknown name stays unknown.
+    No local pass thresholds, estimated elapsed time, or fabricated completion.
     """
-    payload=event.get('progress') if isinstance(event.get('progress'),dict) else event
+    payload=event
+    for key in ('progress','feedback'):
+        if isinstance(event.get(key),dict):payload=event[key];break
+    names=('pinch_index','pinch_middle','pinch_ring','pinch_pinky','four_finger_bend_90','flat_open')
+    name=payload.get('step_name')
     index=payload.get('pose_index')
     if type(index) is not int or not 0<=index<6:index=None
-    value=payload.get('fraction')
-    if value is None and isinstance(event.get('progress'),(int,float)):value=event['progress']
+    if isinstance(name,str) and name:
+        index=names.index(name) if name in names else None
+    elif index is None and type(payload.get('step_total')) is int and payload['step_total']==6:
+        step=payload.get('step_index')
+        if type(step) is int and 0<=step<6:index=step
+    value=payload.get('fraction',payload.get('progress'))
     if type(value) not in (int,float) or not math.isfinite(value) or not 0<=value<=1:value=None
     phase=payload.get('phase',payload.get('state',''))
+    checks={key:payload.get(key) if type(payload.get(key)) is bool else None
+            for key in ('variance_ok','constraints_ok')}
+    checks['metrics']=copy.deepcopy(payload['metrics']) if isinstance(payload.get('metrics'),list) else []
+    timing={key:payload[key] for key in ('hold_elapsed','hold_target','collect_elapsed','collect_target','frames_collected')
+            if type(payload.get(key)) in (int,float) and math.isfinite(payload[key]) and payload[key]>=0}
     return dict(step=payload.get('step_index',payload.get('step')),pose_index=index,
-                phase=phase if isinstance(phase,str) else '',progress=value)
+                step_name=name if isinstance(name,str) else '',step_total=payload.get('step_total'),
+                phase=phase if isinstance(phase,str) else '',progress=value,checks=checks,timing=timing)
 
 
 class CalibrationCLI:

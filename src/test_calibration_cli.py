@@ -114,6 +114,27 @@ class CalibrationTest(unittest.TestCase):
         with patch.object(calibration_cli,'cli_json') as cli:
             self.assertTrue(service.snapshot(refresh=True)['run']['running']);cli.assert_not_called()
 
+    def test_public_sdk_feedback_keeps_stability_constraints_and_real_progress(self):
+        feedback=dict(step_index=2,step_total=6,step_name='pinch_ring',state='waiting_stable',progress=.4,
+                      variance_ok=False,constraints_ok=True,hold_elapsed=.8,hold_target=2,
+                      metrics=[dict(finger='ring',label='distance',error=.012,unit='m',hint='closer')])
+        for event in (feedback,{'progress':feedback},{'feedback':feedback}):
+            with self.subTest(event=event):
+                fields=calibration_cli.progress_fields(event)
+                self.assertEqual(fields['pose_index'],2);self.assertEqual(fields['progress'],.4)
+                self.assertFalse(fields['checks']['variance_ok']);self.assertTrue(fields['checks']['constraints_ok'])
+                self.assertEqual(fields['checks']['metrics'],feedback['metrics'])
+                self.assertEqual(fields['timing']['hold_elapsed'],.8)
+
+    def test_only_documented_six_pose_index_is_mapped(self):
+        self.assertEqual(calibration_cli.progress_fields({'step_index':5,'step_total':6})['pose_index'],5)
+        for event in ({'step_index':1},{'step_index':1,'step_total':8},{'step_index':True,'step_total':6},
+                      {'step_index':1,'step_total':6,'step_name':'future_pose'}):
+            self.assertIsNone(calibration_cli.progress_fields(event)['pose_index'])
+        value=calibration_cli.progress_fields({'state':'done','variance_ok':'true','constraints_ok':1})
+        self.assertIsNone(value['progress']);self.assertIsNone(value['checks']['variance_ok'])
+        self.assertIsNone(value['checks']['constraints_ok'])
+
     def test_cli_unavailable_returns_safe_status(self):
         with patch.object(calibration_cli, 'load_config', side_effect=ValueError('not configured')):
             status = calibration_cli.CalibrationCLI().snapshot(refresh=True)
