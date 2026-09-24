@@ -66,18 +66,18 @@
 
   var MSG = {
     zh: {
-      idle: '可选择姿势卡片查看参考。开始或停止请使用主机控件。',
+      idle: '先选好用户与手套，再开始校准。按亮起的格子做动作，每步结束先张开手。',
       collecting: '请按官方步骤摆出当前姿势。',
-      solving: '正在求解。主机确认结果后才算完成。',
-      cancelling: '正在取消，等待主机确认。',
-      completed: '主机已确认官方结果。',
-      cancelled: '校准已取消。请使用主机控件重新开始。',
-      error: '校准出错。请使用主机控件重新开始。',
+      solving: '正在求解。官方流程确认结果后才算完成。',
+      cancelling: '正在取消，等待官方流程确认。',
+      completed: '官方流程已确认官方结果。',
+      cancelled: '校准已取消。请使用官方流程控件重新开始。',
+      error: '校准出错。请使用官方流程控件重新开始。',
       unconfirmed: '结果未确认，不视为完成。',
-      unknown: '主机报告未知状态，不视为完成。'
+      unknown: '官方流程报告未知状态，不视为完成。'
     },
     en: {
-      idle: 'Select a pose card to inspect it. Use the host controls to start or stop.',
+      idle: 'Choose your user and glove, then start. Follow the highlighted pose and open your hand between steps.',
       collecting: 'Form the pose named by the official step.',
       solving: 'Solving. Not complete until the host confirms the result.',
       cancelling: 'Cancelling; waiting for the host to confirm.',
@@ -90,10 +90,10 @@
   };
 
   var GUIDE = {
-    zh: ['从张开的手开始。', '保持姿势直到主机进入下一步，然后张开手。'],
+    zh: ['从张开的手开始。', '保持姿势直到官方流程进入下一步，然后张开手。'],
     en: ['Start from an open hand.', 'Hold until the host moves on, then open your hand.']
   };
-  var WAIT_TITLE = { zh: '等待主机报告当前姿势', en: 'Waiting for the host to report the current pose' };
+  var WAIT_TITLE = { zh: '等待官方流程报告当前姿势', en: 'Waiting for the host to report the current pose' };
   var FINGERS = { zh: ['拇指', '食指', '中指', '无名指', '小指'], en: ['Thumb', 'Index', 'Middle', 'Ring', 'Pinky'] };
   var ROLES = {
     zh: { t: '指尖相触', b: '弯曲 90°', f: '伸平并拢', r: '放松', n: '—' },
@@ -252,7 +252,9 @@
     var stMsg = h('span', 'cg-status-msg', null, stBox);
     var stPose = h('span', 'cg-status-pose', null, stBox);
 
-    var profile = h('div', 'cg-profile', null, root);
+    var profileDetails=h('details','cg-profile-details',null,root);
+    addPair('档案信息 / Profile details');h('summary',null,'档案信息 / Profile details',profileDetails);
+    var profile = h('div', 'cg-profile', null, profileDetails);
     function sideCard(label) {
       var card = h('div', 'cg-card cg-side', null, profile);
       h('span', 'cg-card-label', label, card);
@@ -274,14 +276,9 @@
     var seqHead = h('div', 'cg-seq-head', null, seq);
     h('h3', 'cg-h3', L.sequence, seqHead).id = id + '-seq';
     var seqCount = h('span', 'cg-count', null, seqHead);
-    var list = h('ol', 'cg-pose-list', null, seq);
-    var cards = POSES.map(function (p, i) {
-      var btn = h('button', 'cg-pose', null, h('li', null, null, list));
-      btn.type = 'button';
-      btn.setAttribute('data-index', String(i));
-      h('span', 'cg-pose-num', String(i + 1), btn);
-      return { btn: btn, name: h('span', 'cg-pose-name', null, btn), tag: h('span', 'cg-pose-tag', null, btn) };
-    });
+    h('p','cg-caption',L.schematic,seq);
+    var gridHost = h('div', 'cg-grid-host', null, seq);
+    var poseGrid = window.PoseGrid.mount(gridHost,{onSelect:function(index){if(!curActive){selected=index;update();}}});
 
     var guide = h('section', 'cg-guide', null, main);
     guide.setAttribute('aria-labelledby', id + '-guide');
@@ -301,7 +298,9 @@
     });
     h('p', 'cg-note', L.openHand, guide);
 
-    var live = h('div', 'cg-live', null, guide);
+    var live = h('details', 'cg-live', null, guide);
+    h('summary',null,'运行详情 / Run details',live);
+    addPair('运行详情 / Run details');
     var meta = h('dl', 'cg-meta', null, live);
     function metaRow(label) {
       var row = h('div', 'cg-meta-row', null, meta);
@@ -426,18 +425,12 @@
       /* Sequence sidebar: idle = selectable reference, active = official pose only */
       var view = active ? pose : selected;
       setText(seqCount, (view === null ? '—' : view + 1) + ' / 6');
-      for (i = 0; i < POSES.length; i++) {
-        var c = cards[i], isCur = active && pose === i, isSel = !active && selected === i;
-        setText(c.name, POSES[i][tx]);
-        setAttr(c.btn, 'aria-label', (zh ? '姿势 ' + (i + 1) + '：' : 'Pose ' + (i + 1) + ': ') + POSES[i][tx]);
-        setAttr(c.btn, 'aria-pressed', active ? null : String(isSel));
-        setAttr(c.btn, 'aria-disabled', active ? 'true' : null);
-        setAttr(c.btn, 'aria-current', isCur ? 'step' : null);
-        setAttr(c.btn, 'class', 'cg-pose' + (isCur ? ' cg-pose--current' : '') +
-          (isSel ? ' cg-pose--selected' : '') + (active ? ' cg-pose--locked' : ''));
-        setText(c.tag, isCur ? L.current : isSel ? L.viewing : '');
-        setHidden(c.tag, !isCur && !isSel);
-      }
+      var captured=Array.isArray(run.captured_poses)?run.captured_poses:[];
+      var shortNames=zh?['拇指 · 食指','拇指 · 中指','拇指 · 无名指','拇指 · 小指','四指弯曲 90°','四指伸平并拢']:['Thumb · index','Thumb · middle','Thumb · ring','Thumb · little','Four fingers bent 90°','Four fingers flat'];
+      poseGrid.render({language:tx,selectedIndex:active?null:selected,currentIndex:active?pose:null,
+        items:POSES.map(function(p,index){return {title:shortNames[index],instruction:p.act[tx],
+          state:captured.includes(index)||key==='completed'?'captured':key==='error'&&pose===index?'error':active&&pose===index?'current':'pending',
+          progress:active&&pose===index?run.progress:null};})});
 
       /* Center guidance */
       var waiting = view === null;
@@ -569,6 +562,7 @@
       destroy: function () {
         if (destroyed) return;
         destroyed = true;
+        poseGrid.destroy();
         root.removeEventListener('click', onClick);
         if (root.parentNode) root.parentNode.removeChild(root);
         state = {};

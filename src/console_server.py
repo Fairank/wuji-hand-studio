@@ -57,6 +57,8 @@ class Controller:
         self.retarget=RetargetWorkspace(self.reports.parent)
         from retarget_tuning import TuningStore
         self.tuning=TuningStore(self.retarget.folder/'official_tuning')
+        from solver_runtime import SolverRuntime
+        self.solver_runtime=SolverRuntime()
         from program_runner import ProgramRunner
         self.program=ProgramRunner(self)
         from group_participant import GroupParticipant
@@ -103,6 +105,7 @@ class Controller:
     def snapshot(self):
         with self.lock:
             result = copy.deepcopy(self.state)
+            result['solver_runtime']=self.solver_runtime.snapshot()
             # The user explicitly requested a live visual preview before full
             # calibration. This observed node-group profile is provisional and
             # display-only; it must never authorize hardware command mapping.
@@ -235,6 +238,27 @@ class Controller:
             return dict(calibration=self.calibration.start(command.get('side'),command.get('serial'),command.get('replace',False)))
         if name=='retarget_context':
             return dict(mapping=self.retarget.context(self.state['device_profile']))
+        if name in {'solver_probe','solver_install'}:
+            if self.glove.busy or self.calibration.run.get('running') or self.state['connection']!='disconnected':
+                raise ValueError('Finish device sessions before preparing the solver environment')
+            return dict(solver_runtime=self.solver_runtime.start(install=name=='solver_install'))
+        if name=='retarget_engine_select':
+            binding=self.retarget.context(self.state['device_profile'])['binding']
+            if command.get('binding')!=binding:raise ValueError('Pairing changed; reload first')
+            engine=command.get('engine')
+            if engine not in ('sdk','official_open'):raise ValueError('Unknown solver engine')
+            g=self.glove.snapshot()
+            if (g.get('feedback') or {}).get('device_id') or self.glove.lease or self.state['connection']!='disconnected':
+                raise ValueError('先断开机械手反馈再切换求解器 / Disconnect hand feedback before switching solver')
+            context=self.tuning.context(binding)
+            if command.get('revision')!=context['revision']:raise ValueError('Tuning changed; reload first')
+            if self.glove.busy and g.get('connection') not in ('receiving','ready','error'):
+                raise ValueError('Wait for glove connection to finish')
+            if engine=='official_open':context=self.tuning.save(binding,command.get('values'),context['revision'])
+            if g.get('connection')=='receiving':
+                self.glove.action(dict(name='glove_solver',solver=dict(engine=engine,values=context['values'])))
+            self.tuning.select_engine(binding,engine)
+            return dict(tuning=self.tuning.context(binding),submitted=True,runtime_applied=False)
         if name in {'retarget_tuning_context','retarget_tuning_save','retarget_tuning_export'}:
             binding=self.retarget.context(self.state['device_profile'])['binding']
             if name=='retarget_tuning_context':return dict(tuning=self.tuning.context(binding))
@@ -264,7 +288,8 @@ class Controller:
             from glove_protocol import validate
             validate(command)
             context=self.retarget.open_glove(command,self.state['device_profile'],self.glove.snapshot().get('user') or {})
-            command=dict(command,retarget=context['settings'])
+            tuning=self.tuning.context(context['binding'])
+            command=dict(command,retarget=context['settings'],solver=dict(engine=tuning['engine'],values=tuning['values']))
         if name=='glove_prepare':
             serial=self.retarget.context(self.state['device_profile'])['binding']['hand_serial']
             if serial and command.get('serial') and command['serial']!=serial:raise ValueError('Hand differs from saved pairing / 机械手与保存配对不符')
@@ -705,9 +730,9 @@ class Handler(BaseHTTPRequestHandler):
         assets.update({'/workspace.js':('workspace.js','text/javascript; charset=utf-8'),
             '/workspace.css':('workspace.css','text/css; charset=utf-8'),
             '/parameters.js':('parameters.js','text/javascript; charset=utf-8')})
-        for name in ('studio.js','locale.js','floating_panel.js','viewer.js','action_picker.js','brand.js','installation.js','profiles.js','doctor.js','glove.js','desktop_shell.js','device_network.js','connection_toolbar.js','workbench_upgrade.js','connection_hub.js','calibration_guide.js','settings.js','group_panel.js','workspaces.js','group_view.js','workbench_sheet.js','workbench_clarity.js','numeric_grid.js','retarget_tuning.js'):
+        for name in ('studio.js','locale.js','floating_panel.js','viewer.js','action_picker.js','brand.js','installation.js','profiles.js','doctor.js','glove.js','desktop_shell.js','device_network.js','connection_toolbar.js','workbench_upgrade.js','connection_hub.js','calibration_guide.js','pose_grid.js','settings.js','group_panel.js','workspaces.js','group_view.js','workbench_sheet.js','workbench_clarity.js','numeric_grid.js','retarget_tuning.js'):
             assets['/'+name]=(name,'text/javascript; charset=utf-8')
-        for name in ('studio.css','floating_panel.css','glass.css','glove.css','desktop_glass.css','desktop_refinement.css','glass_refresh.css','workbench_upgrade.css','connection_hub.css','calibration_guide.css','group_panel.css','workspaces.css','group_view.css','workbench_sheet.css','workbench_clarity.css','numeric_grid.css','retarget_tuning.css'):
+        for name in ('studio.css','floating_panel.css','glass.css','glove.css','desktop_glass.css','desktop_refinement.css','glass_refresh.css','workbench_upgrade.css','connection_hub.css','calibration_guide.css','pose_grid.css','group_panel.css','workspaces.css','group_view.css','workbench_sheet.css','workbench_clarity.css','numeric_grid.css','retarget_tuning.css'):
             assets['/'+name]=(name,'text/css; charset=utf-8')
         assets['/viewer']=('viewer.html','text/html; charset=utf-8')
         assets['/favicon.ico']=('favicon.ico','image/x-icon')

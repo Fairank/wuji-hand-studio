@@ -395,3 +395,19 @@
 .cg-check-card[data-check=pass] strong{color:#27814b}.cg-check-card[data-check=fail] strong{color:#ae5a14}
 .cg-timing{font-size:12px;overflow-wrap:anywhere;opacity:.7}.cg-metrics{padding:0;list-style:none;max-height:250px;overflow:auto}
 .cg-metric{display:flex;flex-direction:column;gap:5px;padding:10px 0;border-bottom:1px solid rgba(128,128,128,.16);overflow-wrap:anywhere}.cg-metric span{font-size:12px;opacity:.8}
+
+/* Six official poses, with technical details progressively disclosed. */
+.cg-root{padding:0;gap:14px}.cg-main{display:grid;grid-template-columns:minmax(0,1fr);gap:14px}
+.cg-seq{padding:0;border:0;box-shadow:none;background:none}.cg-seq-head{display:none}
+.cg-profile-details{order:5}.cg-profile-details>summary{color:var(--wb-sub);cursor:pointer}
+.cg-profile{margin-top:12px}.cg-guide{padding:16px;box-shadow:none}
+.cg-guide .cg-steps,.cg-guide .cg-fingers-wrap,.cg-guide .cg-note,.cg-guide-head{display:none!important}
+.cg-guide-title{font-size:15px;margin:0 0 10px}.cg-live{margin:8px 0}.cg-live>summary{cursor:pointer;color:var(--wb-sub)}
+.cg-root .pg-grid{--pg-min:185px;gap:10px}.cg-root .pg-cell{border-radius:16px;min-height:180px}
+.cg-root .pg-title{font-size:16px}.cg-root .pg-svg{max-width:96px}.cg-root .pg-cap{font-size:10px}
+.cg-root .pg-fig{align-items:center}.cg-root .pg-inst{font-size:12px}.cg-root .pg-sel{display:none}
+.cg-root .pg-cell[aria-pressed="true"]{border-color:var(--wb-accent,#007aff)}
+.cg-metrics{max-height:180px;overflow:auto}.cg-sub{display:none}
+.cg-head{display:none}.cg-status{padding:10px 12px;box-shadow:none}
+.cg-status-msg{font-size:12px}.cg-root .pg-cap{display:none}
+.cg-root .pg-cell{min-height:168px;gap:5px}.cg-root .pg-svg{max-width:82px}

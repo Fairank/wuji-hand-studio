@@ -3,3 +3,4 @@
 # Pinned upstream files are checked by byte-level SHA-256 at runtime.
 src/official_data/retarget/*.yaml -text
 src/official_data/retarget/LICENSE -text
+src/official_data/solver/** -text

@@ -32,7 +32,7 @@
  const sdkHead=document.createElement('th');sdkHead.id='glove-sdk-target-label';$('glove-target-label').before(sdkHead);
  const f=(v,d=1)=>typeof v==='number'&&Number.isFinite(v)?v.toFixed(d):'—';
  const labels={
- 'glove-hand-device-label':['配对机械手','Paired robot hand'],'glove-pair-note':['先选择手套、用户及机械手，再打开预览。多只同侧设备按编号区分；仅一只时可自动选择。','Choose glove, user and hand before preview. Multiple same-side devices are identified by serial; a single device can be selected automatically.'],'glove-sdk-target-label':['SDK 原始角度','Raw SDK angles'],
+ 'glove-hand-device-label':['配对机械手','Paired robot hand'],'glove-pair-note':['先选择手套、用户及机械手，再打开预览。多只同侧设备按编号区分；仅一只时可自动选择。','Choose glove, user and hand before preview. Multiple same-side devices are identified by serial; a single device can be selected automatically.'],'glove-sdk-target-label':['求解器原始角度','Raw solver angles'],
  'glove-title':['手套遥操作','Glove teleoperation'],'glove-subtitle':['手套接收 → 映射预览 → 真实手跟随','Glove input → Mapping preview → Real-hand follow'],
  'glove-receive-title':['连接与预览','Connect and preview'],'glove-scan':['扫描手套','Scan gloves'],'glove-config':['控制端设置','Controller settings'],
  'glove-device-label':['选择手套','Select glove'],'glove-user-label':['标定用户','SDK user profile'],'glove-user-note':['选择完成标定时使用的用户。Default 使用内置手型；选择具名用户也不代表已经完成标定。','Choose the profile used for calibration. Default uses the built-in hand model; a named profile alone does not prove calibration.'],

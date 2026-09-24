@@ -6,7 +6,7 @@
 
 打开「连接与校准 → 手套校准」，在「选择用户与手套」中选择命名 SDK 用户、捕获手套和左右侧。Default 不能保存人体模型。已有模型需要明确选择覆盖。开始调用 `wuji --jsonl calib hand-model`，并检查当前用户、设备侧与跨工作区占用；不发送机械手运动指令。
 
-官方步骤为拇指分别与食、中、无名、小指指尖相触，再四指弯曲约 90°，最后伸平并拢。页面跟随官方姿势名称或已确认的六姿势编号，显示官方 `variance_ok` 稳定性和 `constraints_ok` 约束检查；诊断值、单位、误差与建议照原始反馈显示。缺字段显示等待，不按本地阈值补成通过。未知步骤保留原始诊断，不强行指向一个姿势。
+官方步骤为拇指分别与食、中、无名、小指指尖相触，再四指弯曲约 90°，最后伸平并拢。页面使用三列两行六宫格（窄窗口自动换行），每格有示意与操作要求。已采集只来自官方 done 事件，进度满格或步骤跳转不等于完成。页面跟随官方姿势名称或已确认的六姿势编号，显示官方 `variance_ok` 稳定性和 `constraints_ok` 约束检查；诊断值、单位、误差与建议照原始反馈显示。缺字段显示等待，不按本地阈值补成通过。未知步骤保留原始诊断，不强行指向一个姿势。
 
 采集、稳定性判定、约束判定、求解和模型发布均由官方工具完成。当前姿势采集完成不代表整次标定成功；必须收到正式 result 且进程退出码为 0。页面刷新官方采集状态的间隔为 500 ms，不改变 SDK 采样频率。
 
@@ -17,7 +17,7 @@
 | 页面 | 实际作用 | 如何生效 |
 |---|---|---|
 | 实时输出调整 | 官方 SDK 输出后的 20 关节幅度系数、角度偏移和时间平滑 | 保留原有保存、手套预览应用与重连流程 |
-| 官方参数表 | 开源 `wuji-retargeting` 的目标比例、对指距离、低通与变化权重 | 保存草稿或生成完整 YAML，供官方 `tuning_tool.py` 加载 |
+| 官方参数表 | 开源 `wuji-retargeting` 的目标比例、对指距离、低通与变化权重 | 保存草稿、应用到嵌入的开源映射预览，或生成完整 YAML |
 
 参数表使用可填写数值的行列格子，支持按单元格编辑及从表格粘贴矩形数据。空值、非有限数、越出表格的粘贴均不覆盖旧值。每个工作区的草稿按代际、左右侧、手套、机械手、SDK 用户隔离；保存冲突要求重新载入。
 
@@ -27,7 +27,21 @@
 
 导出的完整 YAML 放到该官方仓库的 `example/config` 目录，选择对应模型和左右手，用官方 `tuning_tool.py` 加载。相对 URDF/MJCF 路径依赖原仓库及其模型子模块，不能把 YAML 孤立放在任意目录就运行。
 
-**当前 SDK 的内置 RetargetSession 没有开放这些 YAML 参数。本版不启动开源优化器；生成或保存 YAML 不会改变正在运行的遥操作。** 这条限制在软件内直接显示，不用“已应用”误导操作者。后续接入该求解器需要独立验证模型版本、关节顺序和输出边界。
+### 在软件里使用开源求解器（0.2.12）
+
+1. 使用 Windows 内置 Linux 控制端；在官方参数表点击「准备求解环境」。首次联网下载约 130 MB 依赖，安装到独立 Python 3.12 环境，不替换 SDK 的依赖。
+2. 选择手型、SDK 用户与手套，在手套预览连接完成后重新载入对应配对的参数表。数值表支持逐格编辑和矩形粘贴。
+3. 点击「应用到开源映射」。当前有机械手反馈会话时，需先断开；切换不会启用电机。选择和草稿按设备组合保存。
+4. 控制端收到新骨架后，页面按实际引擎和参数摘要确认「本表已生效」。保存、发出切换请求、陈旧帧都不算生效。若参数不合适，点击「使用 SDK 映射」。
+5. 确认手套预览后，再使用原有机械手连接和跟随入口；实际反馈与求解目标继续分开。
+
+当前 SDK 的内置 RetargetSession 仍不接受这套 YAML。本版嵌入 MIT 许可的公开 `wuji-retargeting` 核心（提交 531f6ed4）作为可选引擎，不改写 SDK 求解器，不是完整原版 Studio。首版安装器只验证 Linux x86_64 Python 3.12；Mac/ARM 和远程 SSH 新求解环境未集成，原有 SDK 路径保留。
+
+开源求解器用 21 个官方手套骨架点求解 20 个关节。Hand 2 的运行 URDF 改为与软件画面一致的 Beta 2，Hand 1/2 左右模型固定到 c2cd7f8d；输出逐项按关节名重排。Hand 1 的 URDF 与 MJCF 有最多 0.0005 rad 的小数舍入差，采用两者限位交集，未扩大原界限。原模板导出的 YAML 仍保留官方 Beta 1 相对路径，与软件内 Beta 2 运行入口不同。
+
+依赖按 wheel 哈希固定，源码和模型在运行前校验；求解器独立进程不持有设备连接。首次 SciPy 加载放到初始化，后续超时或无效结果使预览失效，不更新帧的新鲜时间。一次合成骨架测试的稳态耗时约 5–10 ms，不承诺 1000 Hz 求解，也不代表真实手套准确率。
+
+
 
 研发人员使用的多行多列数值面板没有截图或字段名称，因此不能认定此表与内部工具完全相同。这里每个字段都有公开来源。
 
@@ -44,4 +58,4 @@
 
 Calibration executes the official CLI, with the Workbench displaying public SDK feedback fields. Stability and constraint checks are official booleans; missing values stay unknown. This is not the original Studio UI or its full-sensor debug recorder. Physical calibration acceptance remains separate from software tests.
 
-Live output gain/offset adjustments and archived open-retargeting solver configuration are distinct tabs. The latter is a per-pairing draft/editor and complete YAML export only. The current built-in SDK solver does not accept these YAML settings, and this release does not start a second solver or silently change teleoperation. Keep exported files under the pinned upstream repository's example/config directory so relative model paths resolve.
+Live output gain/offset adjustments and official solver parameters remain separate tabs. Version 0.2.12 embeds the pinned open retargeter as an optional engine in an isolated Linux x86_64/Python 3.12 environment. Prepare dependencies, apply in glove-only preview, then verify fresh output with the matching parameter digest. SDK fallback is explicit; hand follow remains a separate operator action. The SDK's built-in mapper does not accept these YAML values. This is not the complete original Studio, and physical glove/hand acceptance is still pending. Hand 2 uses the viewer-matched Beta 2 model; exported upstream YAML retains its original Beta 1 paths. Mac/ARM setup is not yet integrated.

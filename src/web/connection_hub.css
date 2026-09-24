@@ -3,6 +3,10 @@
 .hub-calibration-setup{margin:16px 0;padding:14px 16px;border:1px solid var(--wb-line);border-radius:14px}
 .hub-calibration-setup>summary{cursor:pointer;font-size:14px;font-weight:550}
 #hub-calib-description{font-size:13px;line-height:1.65}
+#hub-calibration-guide{margin-top:12px;padding-top:12px}
+#hub-calibration>.wb-card{padding:18px 22px}
+#hub-calib-step:empty{display:none}#hub-calib-doc{font-size:12px}
+.hub-calibration-setup{margin:10px 0;padding:10px 12px}
 @media(min-width:901px){
  html,body,.app{height:100%;overflow:hidden}
  .top{z-index:30}

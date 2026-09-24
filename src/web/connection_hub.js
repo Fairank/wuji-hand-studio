@@ -43,7 +43,7 @@
  <p id="hub-calib-status" role="status" aria-live="polite"></p><p id="hub-calib-step"></p>
  <a href="https://docs.wuji.tech/docs/en/wuji-studio/latest/calibration/" target="_blank" rel="noopener" id="hub-calib-doc"></a>`;
  sections.calibration.append(calib);
- const setup=document.createElement('details');setup.className='hub-calibration-setup';setup.open=true;
+ const setup=document.createElement('details');setup.className='hub-calibration-setup';setup.open=false;
  const setupLabel=document.createElement('summary');setupLabel.id='hub-calib-setup-label';setup.append(setupLabel);
  const setupFields=[...calib.querySelectorAll('.hub-fields,.hub-replace')];
  const profileActions=$('hub-profile-switch').parentElement;
@@ -129,7 +129,7 @@
   $('hub-skeleton-title').textContent=t('手套骨架','Glove skeleton');$('hub-skeleton-note').textContent=t('仅作实时可视化；姿态按相对坐标缩放。','Live visualization only; pose scaled from relative coordinates.');
   $('hub-calib-title').textContent=t('官方手部模型标定','Official hand-model calibration');
   $('hub-calib-setup-label').textContent=t('选择用户与手套','Select user and glove');
-  $('hub-calib-description').textContent=t('按 SDK 用户和左右手分别保存。Default 用户不保存标定；已有标定需明确勾选覆盖。标定过程不驱动机械手。','Saved per SDK user and hand side. Default does not save calibration; replacing an existing model requires explicit consent. Calibration does not drive the robot hand.');
+  $('hub-calib-description').textContent=t('选择用户与手套，然后按六个格子的引导完成校准。结果按用户和左右手分别保存。','Saved per SDK user and hand side. Default does not save calibration; replacing an existing model requires explicit consent. Calibration does not drive the robot hand.');
   $('hub-profile-label').textContent=t('当前 SDK 用户','Current SDK user');$('hub-new-profile-label').textContent=t('新建命名用户','New named user');$('hub-profile-switch').textContent=t('切换用户','Switch user');$('hub-profile-create').textContent=t('创建并切换','Create and switch');$('hub-calib-refresh').textContent=t('刷新官方状态','Refresh official status');
   $('hub-glove-label').textContent=t('已发现手套','Discovered glove');$('hub-side-label').textContent=t('标定侧','Hand side');$('hub-side').options[0].textContent=t('左手','Left');$('hub-side').options[1].textContent=t('右手','Right');$('hub-replace-label').textContent=t('覆盖这一侧已有标定','Replace existing model for this side');$('hub-calib-start').textContent=t('开始官方标定','Start official calibration');$('hub-calib-cancel').textContent=t('取消标定','Cancel calibration');$('hub-calib-doc').textContent=t('查看官方六姿势说明 ↗','Official six-pose guide ↗');
   renderStatus();renderCalibration();

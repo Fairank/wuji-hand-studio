@@ -155,7 +155,9 @@ class WslController:
         from device_profiles import profile
         profile(profile_id);check_ready();self.process=None
         from controller_bundle import ensure_version
-        source=RESOURCE.parents[1]/'controller/source' if getattr(sys,'frozen',False) else RESOURCE
+        source=Path(sys.executable).resolve().parent/'controller/source' if getattr(sys,'frozen',False) else RESOURCE
+        if not (source/'agent_bootstrap.py').is_file():
+            raise ValueError('Controller source is missing from this installation; reinstall the complete package')
         with Files() as remote:
             self.agent_directory=ensure_version(source,remote)
         from controller_launch import parameter_environment

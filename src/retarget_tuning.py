@@ -10,7 +10,6 @@ import json
 import math
 from pathlib import Path
 import threading
-import yaml
 
 from mapping_library import binding_key, validate_binding
 from runtime_paths import RESOURCE
@@ -19,8 +18,12 @@ FINGERS=('thumb','index','middle','ring','pinky')
 ROOT=RESOURCE/'official_data/retarget'
 EDITABLE={'segment_scaling','pinch_thresholds','lp_alpha','norm_delta'}
 
+def values_hash(values):
+    return hashlib.sha256(json.dumps(validate(values),sort_keys=True,separators=(',',':')).encode()).hexdigest()
+
 
 def source(binding):
+    import yaml
     b=validate_binding(binding)
     infix='_wuji_hand_2' if b['generation']=='hand2' else ''
     filename=f'adaptive_analytical_wuji_glove{infix}_{b["side"]}.yaml'
@@ -88,7 +91,20 @@ class TuningStore:
                 values=validate(saved['values']);revision=saved['revision']
                 if type(revision) is not int or revision<1:raise ValueError('Invalid tuning revision')
             return dict(binding=binding,values=values,defaults=defaults(binding),revision=revision,
-                        source=origin,runtime_applied=False,mode='official_yaml_export')
+                        source=origin,runtime_applied=False,mode='official_yaml_export',engine=self.engine(binding),values_sha256=values_hash(values))
+
+    def engine(self,binding):
+        path=self.folder/(binding_key(validate_binding(binding))+'.engine.json')
+        engine=json.loads(path.read_text(encoding='utf-8'))['engine'] if path.exists() else 'sdk'
+        if engine not in ('sdk','official_open'):raise ValueError('Unknown saved solver engine')
+        return engine
+
+    def select_engine(self,binding,engine):
+        if engine not in ('sdk','official_open'):raise ValueError('Unknown solver engine')
+        with self.lock:
+            self.folder.mkdir(parents=True,exist_ok=True)
+            path=self.folder/(binding_key(validate_binding(binding))+'.engine.json')
+            stage=path.with_suffix('.pending');stage.write_text(json.dumps(dict(engine=engine)),encoding='utf-8');stage.replace(path)
 
     def save(self,binding,values,revision):
         with self.lock:
@@ -104,6 +120,7 @@ class TuningStore:
             return self.context(binding)
 
     def export(self,binding,values):
+        import yaml
         clean=validate(values)
         template,origin=source(binding)
         template['retarget'].update(clean)

@@ -10,3 +10,5 @@
 #rt-yaml{box-sizing:border-box;width:100%;margin-top:12px;padding:14px;border:1px solid #8884;border-radius:12px;background:var(--wb-card,#fff);color:inherit;font:12px/1.6 monospace;resize:vertical}
 #rt-export-result{margin-top:16px}#rt-status{font-size:13px;min-height:1.5em}#hub-retarget .wb-actions{flex-wrap:wrap}
 @media(max-width:700px){.rt-fields{grid-template-columns:1fr}.rt-heading{flex-direction:column}.rt-segments{width:100%;box-sizing:border-box}.rt-segments button{flex:1;padding-inline:8px}}
+
+.rt-runtime{padding:12px 16px;margin:16px 0;border:1px solid #8883;border-radius:14px}.rt-runtime p{font-size:13px;line-height:1.6;margin:0 0 10px;color:var(--wb-sub)}

@@ -95,12 +95,19 @@ def worker_glove(requests,events):
     glove_sn='';last_emit=0.;next_map=0.;last_source_seq=None
     from retarget_settings import OutputMapping, defaults
     mapping=OutputMapping(defaults())
-    sdk_q=None;latest_kp=None;glove_ownership=None;profile_lease=None
+    sdk_q=None;latest_kp=None;glove_ownership=None;profile_lease=None;solver_engine='sdk'
     try:
         import numpy as np
         import wuji_sdk as sdk
         manager=sdk.SdkManager.instance();previous_user=manager.current_user();current=previous_user
         users=manager.list_users()
+        def new_solver(settings):
+            if settings.get('engine','sdk')=='official_open':
+                from solver_session import SolverSession
+                return SolverSession(selected['id'],settings['values'])
+            model=sdk.HandModel.WujiHand2 if selected['generation']=='hand2' else sdk.HandModel.WujiHand
+            side=sdk.Handedness.Left if selected['side']=='left' else sdk.Handedness.Right
+            return sdk.RetargetSession.for_hand(model,side=side)
         def scan():
             nonlocal hands
             from device_discovery import candidates
@@ -138,11 +145,11 @@ def worker_glove(requests,events):
                             actual=str(candidate.hand_side().get()).lower()
                             if actual not in (selected['side'],'handedness.'+selected['side']):
                                 raise ValueError('手套左右与工作台所选型号不符 / Glove side differs from profile')
-                            model=sdk.HandModel.WujiHand2 if selected['generation']=='hand2' else sdk.HandModel.WujiHand
-                            side=sdk.Handedness.Left if selected['side']=='left' else sdk.Handedness.Right
-                            session=sdk.RetargetSession.for_hand(model,side=side)
+                            session=new_solver(c.get('solver',{}));solver_engine=c.get('solver',{}).get('engine','sdk')
                             sub=candidate.hand_skeleton().subscribe()
                         except Exception:
+                            if hasattr(session,'close'):session.close()
+                            session=None
                             if glove_ownership:glove_ownership.close();glove_ownership=None
                             if candidate:candidate.disconnect()
                             if profile_lease:profile_lease.close();profile_lease=None
@@ -151,6 +158,9 @@ def worker_glove(requests,events):
                             try:
                                 if switched and previous_user:manager.switch_user(previous_user['user_id'])
                             except Exception:
+                                if sub:sub.close();sub=None
+                                if hasattr(session,'close'):session.close()
+                                session=None
                                 if candidate:candidate.disconnect()
                                 if glove_ownership:glove_ownership.close();glove_ownership=None
                                 if profile_lease:profile_lease.close();profile_lease=None
@@ -160,6 +170,15 @@ def worker_glove(requests,events):
                         glove=candidate;glove_sn=c['serial'];source=GloveSource(c['timeout_ms'])
                         mapping=OutputMapping(c.get('retarget',defaults()));last_source_seq=None
                         state='receiving';message='已连接手套，机械手未启用 / Glove connected; hand not enabled'
+                    elif name=='glove_solver':
+                        if glove is None:raise ValueError('Connect glove preview first')
+                        if hand_thread and hand_thread.is_alive():raise ValueError('Disconnect hand feedback before changing solver')
+                        replacement=new_solver(c['solver'])
+                        old=session;session=replacement;solver_engine=c['solver']['engine']
+                        if hasattr(old,'close'):old.close()
+                        mapping=OutputMapping(mapping.settings);sdk_q=None
+                        source.invalidate('等待新求解器的下一帧 / Waiting for a new solver frame')
+                        message='求解器已切换，等待新骨架 / Solver switched; waiting for fresh skeleton'
                     elif name=='glove_prepare':
                         if glove is None:raise ValueError('先连接手套 / Connect glove first')
                         source.target(now)
@@ -187,6 +206,7 @@ def worker_glove(requests,events):
                 try:
                     frame=read_latest(sub)
                     if frame is not None:
+                        arrival=time.monotonic()
                         seq=frame.header.seq;stamp=frame.header.timestamp_us
                         # No repeated SDK frame may renew the controller's freshness.
                         if last_source_seq is None or seq>last_source_seq:
@@ -195,7 +215,7 @@ def worker_glove(requests,events):
                             latest_kp=kp.tolist()
                             sdk_q=np.asarray(session.step(kp),dtype=float).reshape(-1).tolist()
                             q=mapping.apply(sdk_q,time.monotonic())
-                            if source.update(q,seq,stamp,time.monotonic()):last_source_seq=seq
+                            if source.update(q,seq,stamp,arrival):last_source_seq=seq
                 except Exception as e:
                     source.invalidate(str(e));message=str(e)
             while True:
@@ -216,6 +236,7 @@ def worker_glove(requests,events):
                 snapshot['sdk_q']=sdk_q
                 snapshot['keypoints']=latest_kp if snapshot['fresh'] else None
                 snapshot['retarget']=mapping.settings
+                snapshot['solver']=dict(getattr(session,'info',{}) or {},engine=solver_engine,applied=bool(session and snapshot['fresh']))
                 hw=copy.deepcopy(hand_state.get('hardware',{}))
                 feedback=copy.deepcopy({k:hand_state.get(k) for k in ('latest','device_id','joint_rates','metrics','connection')})
                 if feedback.get('latest'):
@@ -224,7 +245,7 @@ def worker_glove(requests,events):
                     devices=devices,hands=hands,users=users,user=current,profile=selected['id'],glove_serial=glove_sn,
                     stream=snapshot,hardware=hw,feedback=feedback,hand_error=hand_error,
                     parameters=__import__('official_policy').settings(),
-                    source='official_sdk_live_retarget',hardware_validated=False)))
+                    source='official_open_live_retarget' if solver_engine=='official_open' else 'official_sdk_live_retarget',hardware_validated=False)))
                 last_emit=now
             time.sleep(.001)
     except Exception as e:events.put(dict(type='glove_error',message=str(e)))
@@ -238,6 +259,7 @@ def worker_glove(requests,events):
         if glove:
             try:glove.disconnect()
             except Exception:pass
+        if session is not None and hasattr(session,'close'):session.close()
         if glove_ownership:glove_ownership.close()
         if profile_lease:profile_lease.close()
         final_hardware=copy.deepcopy(hand_state.get('hardware',{}))

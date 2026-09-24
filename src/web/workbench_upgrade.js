@@ -243,8 +243,8 @@
   for(const [id,zh,en] of [['system','跟随系统','System'],['light','白色','Light'],['dark','黑色','Dark']])$('wb-theme').querySelector(`[value=${id}]`).textContent=t(zh,en);
   $('wb-auto-hand-label').querySelector('span').textContent=t('自动发现并连接单只机械手（只读反馈）','Find and connect a single hand automatically (feedback only)');
   $('wb-auto-glove-label').querySelector('span').textContent=t('自动发现并连接单只手套（仅预览）','Find and connect a single glove automatically (preview only)');
-  $('wb-retarget-title').textContent=t('当前 SDK 输出调整','Current SDK output adjustment');
-  $('wb-retarget-note').textContent=t('官方 SDK 将 21 个关键点映射为 20 个关节角，再应用下方幅度、角度偏移和平滑。配置按左右手、代际、手套、机械手与标定用户分别保存。默认保持官方输出。','Official SDK maps 21 landmarks to 20 joint angles, followed by gain, offset and smoothing. Settings are separate for side, generation, glove, hand and SDK user. Defaults preserve SDK output.');
+  $('wb-retarget-title').textContent=t('映射输出调整','Mapper output adjustment');
+  $('wb-retarget-note').textContent=t('所选求解器将 21 个关键点映射为 20 个关节角，再应用下方幅度、角度偏移和平滑。配置按左右手、代际、手套、机械手与标定用户分别保存。默认保持官方输出。','The selected solver maps 21 landmarks to 20 joint angles, followed by gain, offset and smoothing. Settings are separate for side, generation, glove, hand and SDK user. Defaults preserve SDK output.');
   $('wb-smoothing-label').textContent=t('输出平滑','Output smoothing');$('wb-retarget-default').textContent=t('恢复默认','Reset defaults');$('wb-retarget-save').textContent=t('保存映射','Save mapping');
   $('wb-glove-settings-link').textContent=t('调整手套映射 →','Adjust retargeting →');
   $('wb-program-title').textContent=t('手指舞节目单','Finger dance playlist');

@@ -121,6 +121,13 @@ def progress_fields(event):
                 step_name=name if isinstance(name,str) else '',step_total=payload.get('step_total'),
                 phase=phase if isinstance(phase,str) else '',progress=value,checks=checks,timing=timing)
 
+def record_progress(run,event):
+    fields=progress_fields(event)
+    captured=list(run.get('captured_poses',[]))
+    if fields['phase']=='done' and fields['pose_index'] is not None and fields['pose_index'] not in captured:
+        captured.append(fields['pose_index'])
+    run.update(fields,captured_poses=sorted(captured))
+
 
 class CalibrationCLI:
     def __init__(self, reports=None):
@@ -219,7 +226,7 @@ class CalibrationCLI:
             self.run = dict(running=True, status='collecting', step=None, progress=None,
                             event=None, error=None, exit_code=None, started=time.time(),
                             side=side, serial=serial, user=current['name'],pose_index=None,phase='',
-                            result=None,event_count=0,id=uuid.uuid4().hex)
+                            result=None,event_count=0,captured_poses=[],id=uuid.uuid4().hex)
             self._config=config
             self.thread = threading.Thread(target=self._collect, args=(process,), daemon=True)
             self.thread.start()
@@ -255,7 +262,7 @@ class CalibrationCLI:
                     self.run['event'] = event
                     self.run['event_count']+=1
                     if kind=='progress':
-                        self.run.update(progress_fields(event))
+                        record_progress(self.run,event)
                         if self.run['status']!='cancelling':self.run['status']='solving' if self.run['phase']=='solving' else 'collecting'
                     else:
                         terminal=kind

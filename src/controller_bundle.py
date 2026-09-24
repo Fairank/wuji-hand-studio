@@ -21,11 +21,13 @@ def source_files(root):
 
 def ensure_version(root, remote_files):
     """remote_files exposes path() within /opt/hand-workbench. Never overwrite a running version."""
+    if not Path(root).is_dir():raise ValueError('Controller source directory does not exist')
     rows=[];h=hashlib.sha256()
     for rel,path in source_files(root):
         data=path.read_bytes();digest=hashlib.sha256(data).hexdigest()
         rows.append((rel,data,digest))
         h.update(rel.as_posix().encode()+b'\0'+digest.encode()+b'\n')
+    if not rows:raise ValueError('Controller source directory is empty')
     version=h.hexdigest()[:16]
     target=f'/opt/hand-workbench/code/{version}'
     with _lock:

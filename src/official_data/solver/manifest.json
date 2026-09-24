@@ -1,0 +1,77 @@
+{
+  "retarget_commit": "531f6ed4250b475d2e9231f54e988fc9b1c5b4ea",
+  "model_commit": "c2cd7f8d1ef8b6dc8cb907c17daa5a88b4442d95",
+  "hand2_version": "beta2",
+  "files": [
+    {
+      "file": "wuji_retargeting/mediapipe.py",
+      "source": "wuji-retargeting/wuji_retargeting/mediapipe.py",
+      "sha256": "9c3e03a71c5f6bef2edec7d4bea716076331a6390d334e3c73c0d3294332718b"
+    },
+    {
+      "file": "wuji_retargeting/retarget.py",
+      "source": "wuji-retargeting/wuji_retargeting/retarget.py",
+      "sha256": "b5256190cf393254c3e5e12bed31e3054814f245c005bae56b996e99c3207630"
+    },
+    {
+      "file": "wuji_retargeting/robot.py",
+      "source": "wuji-retargeting/wuji_retargeting/robot.py",
+      "sha256": "70f3583bba902b8bdf2534d7068fce6cda3e8da55b459fb6feadfc87abb0ffd2"
+    },
+    {
+      "file": "wuji_retargeting/__init__.py",
+      "source": "wuji-retargeting/wuji_retargeting/__init__.py",
+      "sha256": "90c52bc22b89cf01face88b51adbdb25502be0d29bfb9408a965b95992b7c139"
+    },
+    {
+      "file": "wuji_retargeting/opt/adaptive_analytical.py",
+      "source": "wuji-retargeting/wuji_retargeting/opt/adaptive_analytical.py",
+      "sha256": "469f3febc9c8b152126aaaa902d84a31771fbc8bab9a35be2b15c36847f2183e"
+    },
+    {
+      "file": "wuji_retargeting/opt/base.py",
+      "source": "wuji-retargeting/wuji_retargeting/opt/base.py",
+      "sha256": "074dd3198c0498dcf0e677d1f9d98b9e8deac527983ee266fdf2ec78a11afc94"
+    },
+    {
+      "file": "wuji_retargeting/opt/vector.py",
+      "source": "wuji-retargeting/wuji_retargeting/opt/vector.py",
+      "sha256": "21fbbbbefa4cf7cfacbb94b736aaf2b0effa798daa8704ac25e42232b61f3e39"
+    },
+    {
+      "file": "wuji_retargeting/opt/__init__.py",
+      "source": "wuji-retargeting/wuji_retargeting/opt/__init__.py",
+      "sha256": "068e98d801fda5d6cee4654f38c0b7d7eba98317a1c3bceb7d48a8480fc22505"
+    },
+    {
+      "file": "LICENSE",
+      "source": "wuji-retargeting/LICENSE",
+      "sha256": "7689894332fba78f04fc03d1244e0b341ad503828140a8d81c2b74a173e3746e"
+    },
+    {
+      "file": "models/hand1_left.urdf",
+      "source": "https://raw.githubusercontent.com/wuji-technology/wuji-description/c2cd7f8d1ef8b6dc8cb907c17daa5a88b4442d95/hand/body/urdf/left.urdf",
+      "sha256": "8dc5fd7dc0f3fb5420b36c63f69a63e45477ae68feb3ec6aace24aec3091a2de"
+    },
+    {
+      "file": "models/hand1_right.urdf",
+      "source": "https://raw.githubusercontent.com/wuji-technology/wuji-description/c2cd7f8d1ef8b6dc8cb907c17daa5a88b4442d95/hand/body/urdf/right.urdf",
+      "sha256": "47aa811f1657ad236a1e22f009128d58a7e38045eca59fce0cca08c65a949b74"
+    },
+    {
+      "file": "models/hand2_left.urdf",
+      "source": "https://raw.githubusercontent.com/wuji-technology/wuji-description/c2cd7f8d1ef8b6dc8cb907c17daa5a88b4442d95/hand2/hand2_beta2/body/urdf/left.urdf",
+      "sha256": "4515cb77eb7e6bc5da18edde3063ed44242a5597d8d38cb04a66b648d198ea30"
+    },
+    {
+      "file": "models/hand2_right.urdf",
+      "source": "https://raw.githubusercontent.com/wuji-technology/wuji-description/c2cd7f8d1ef8b6dc8cb907c17daa5a88b4442d95/hand2/hand2_beta2/body/urdf/right.urdf",
+      "sha256": "8c514f579944b49635027f5308990a68d0cddc5190800e4b5dfd86fc21c27332"
+    },
+    {
+      "file": "MODELS_LICENSE",
+      "source": "https://raw.githubusercontent.com/wuji-technology/wuji-description/c2cd7f8d1ef8b6dc8cb907c17daa5a88b4442d95/LICENSE",
+      "sha256": "38b27e3155e0c1c8d6f3e909e7a00359a302085dfd9ae963b52a91cbbe25afa3"
+    }
+  ]
+}
