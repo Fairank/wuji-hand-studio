@@ -18,6 +18,11 @@ def continuous_capture_rate(times,now):
     count=len(times)
     return (round((count-1)/(times[-1]-times[0]),1) if count>1 and times[-1]>times[0] else None,count)
 
+
+def capture_session_key(bounds):
+    """Window motion is cheap; only a monitor or display-mode change restarts WGC."""
+    return tuple(bounds[:5])+(bounds[10],) if bounds else None
+
 def crop_tiles(frame,rect,scale=1.):
     """rect is WebView's physical-pixel bounds relative to the capture source."""
     x,y,w,h=rect;scale=max(.75,min(4.,float(scale)))
@@ -99,6 +104,7 @@ class Refraction:
     def __init__(self,hwnd,web_hwnd):
         self.geometry=Geometry(hwnd,web_hwnd);self.lock=threading.Lock();self.frames_ready=threading.Condition(self.lock);self.stop_event=threading.Event()
         self.thread=None;self.control=None;self.tiles=[];self.seq=0;self.reason='off';self.frame_at=0.;self.generation=0
+        self.capture_bounds=None;self.capture_sessions_started=0;self.geometry_updates=0
         self.frame_times=[];self.encode_ms=[];self.capture_target_hz=60
         self.enabled=False;self.last_request=time.monotonic()
     def status(self):
@@ -107,7 +113,8 @@ class Refraction:
             return dict(enabled=self.enabled,active=bool(self.tiles),reason=self.reason,frames=self.seq,
                 desktop_capture=self.enabled,storage='memory_only_edge_tiles',frame_age_s=round(time.monotonic()-self.frame_at,2) if self.frame_at else None,
                 recent_capture_hz=hz,recent_capture_frames=count,capture_target_hz=self.capture_target_hz,
-                mean_edge_encode_ms=round(sum(self.encode_ms)/len(self.encode_ms),2) if self.encode_ms else None)
+                mean_edge_encode_ms=round(sum(self.encode_ms)/len(self.encode_ms),2) if self.encode_ms else None,
+                capture_sessions_started=self.capture_sessions_started,geometry_updates=self.geometry_updates)
     def start(self):
         if self.enabled:return self.status()
         self.geometry.exclude();self.enabled=True;self.stop_event.clear();self.reason='starting';self.last_request=time.monotonic()
@@ -120,25 +127,31 @@ class Refraction:
     def _run(self):
         try:
             from windows_capture import WindowsCapture
-            bounds=None
-            while not self.stop_event.wait(.08):
+            bounds=None;source=None;moving_until=0.
+            while not self.stop_event.wait(.008 if time.monotonic()<moving_until else .06):
                 current=self.geometry.bounds()
-                if current and time.monotonic()-self.last_request>3:break # Stalled visible WebView; minimized windows pause capture below.
                 if current!=bounds:
-                    self.generation+=1;generation=self.generation;self._halt_capture();bounds=current
+                    self.geometry_updates+=1
+                    moving_until=time.monotonic()+.25
+                    bounds=current;self.capture_bounds=current
+                    new_source=capture_session_key(current)
+                    if new_source==source:continue # Moving or resizing within one monitor never tears down capture.
+                    source=new_source;self.generation+=1;generation=self.generation;self._halt_capture()
                     with self.frames_ready:
                         self.tiles=[];self.frame_times=[];self.encode_ms=[]
-                        self.reason='window_outside_single_display' if not bounds else 'starting'
+                        self.reason='window_outside_single_display' if not current else 'starting'
                         self.frames_ready.notify_all()
-                    if bounds:
-                        index,l,t,fw,fh,x,y,w,h,scale,refresh=bounds
+                    if current:
+                        index,l,t,fw,fh,x,y,w,h,scale,refresh=current
                         interval,target=capture_interval_ms(refresh)
                         self.capture_target_hz=target
                         # This is an upper-rate request, not a measured frame-rate guarantee.
                         capture=WindowsCapture(cursor_capture=False,draw_border=True,minimum_update_interval=interval,monitor_index=index)
-                        captured_bounds=bounds
-                        def on_frame_arrived(frame,control,epoch=generation,b=captured_bounds):
+                        captured_source=source
+                        def on_frame_arrived(frame,control,epoch=generation,monitor=captured_source):
                             if self.stop_event.is_set() or epoch!=self.generation:control.stop();return
+                            b=self.capture_bounds
+                            if not b or capture_session_key(b)!=monitor:return
                             if (frame.width,frame.height)!=(b[3],b[4]):return
                             began=time.perf_counter()
                             tiles=crop_tiles(frame.frame_buffer,(b[5],b[6],b[7],b[8]),b[9])
@@ -154,10 +167,12 @@ class Refraction:
                         def on_closed():pass
                         capture.event(on_frame_arrived);capture.event(on_closed)
                         self.control=capture.start_free_threaded()
+                        self.capture_sessions_started+=1
                 elif self.control is not None and self.control.is_finished():
                     self.reason='capture_ended';break
         except Exception as error:self.reason='capture_unavailable:'+type(error).__name__
         finally:
+            self.capture_bounds=None
             try:self._halt_capture()
             finally:
                 self.geometry.restore()

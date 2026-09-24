@@ -49,7 +49,7 @@
    note.textContent=t('折射画面暂时中断，正在等待显卡恢复。','Refraction rendering paused; waiting for the graphics context to recover.');});return {canvas,gl,program,texture,buffer,textureWidth:0,textureHeight:0,
    dimensions:gl.getUniformLocation(program,'dimensions'),pad:gl.getUniformLocation(program,'pad'),side:gl.getUniformLocation(program,'side'),
    tint:gl.getUniformLocation(program,'tint'),feather:gl.getUniformLocation(program,'feather'),
-   distortion:gl.getUniformLocation(program,'distortion'),shade:gl.getUniformLocation(program,'shade'),lastTile:null};
+   distortion:gl.getUniformLocation(program,'distortion'),shade:gl.getUniformLocation(program,'shade'),lastTile:null,lastRect:null};
  }
  function paint(item,tile){const {gl,program}=item;gl.useProgram(program);gl.bindTexture(gl.TEXTURE_2D,item.texture);
   gl.uniform2f(item.dimensions,...tile.texture_size);gl.uniform1f(item.pad,tile.pad);
@@ -59,7 +59,9 @@
   gl.drawArrays(gl.TRIANGLES,0,6);item.lastTile=tile;
  }
  function draw(tile,img){let item=canvases.get(tile.side);if(!item){item=create(tile.side);canvases.set(tile.side,item);}
-  const {canvas,gl,program}=item,[x,y,w,h]=tile.rect;Object.assign(canvas.style,{left:x+'px',top:y+'px',width:w+'px',height:h+'px'});
+  const {canvas,gl,program}=item,[x,y,w,h]=tile.rect;
+  const rect=tile.rect.join(',');
+  if(item.lastRect!==rect){Object.assign(canvas.style,{left:x+'px',top:y+'px',width:w+'px',height:h+'px'});item.lastRect=rect;}
   const width=Math.max(1,Math.round(w*devicePixelRatio)),height=Math.max(1,Math.round(h*devicePixelRatio));
   if(canvas.width!==width||canvas.height!==height){canvas.width=width;canvas.height=height;gl.viewport(0,0,width,height);}
   gl.useProgram(program);gl.bindTexture(gl.TEXTURE_2D,item.texture);
