@@ -14,6 +14,20 @@
 
 ## 两种参数表各做什么
 
+### 重启、换设备与换电脑
+
+手套重启不会清除已经成功保存的 SDK 标定。手型标定按 SDK 用户与左右侧保存到控制环境的 `~/.wuji/sdk/users/<profile-id>/models/{left,right}_hand.urdf`；同一用户的同侧手套共用该手型。触觉标定则另按用户与手套编号保存到 `~/.wuji/sdk/users/<profile-id>/tactile/<glove-sn>/`。Default 档案不保存这些个人标定。
+
+这些文件在运行 SDK 的电脑/系统用户环境里，而不是靠手套上电记忆。Windows 内置 Linux、实体 Linux 与原来运行 Studio 的电脑可能是不同环境；换环境时需使用官方用户档案导入/导出。工作台的映射参数另外按设备配对保存，只改变骨架到机械手目标的换算，不改写原始传感器、官方人体手型或手套固件；只有明确开启实机跟随才发送相应动作。
+
+### 原版 Studio 与 Visualization 的接入范围
+
+2026-09-25 核对的 Studio 公共仓库仅有发行说明，官方已建议使用 CLI / SDK，不能将当前页面称为搬入了原版应用。当前六姿势图仍是工作台示意图，点击官方说明可看原版手势。此版本没有将 Studio 的人体模型、触觉热图或全传感器记录器嵌入。
+
+官方新的 `wuji viz` 文档提供 Rerun Web Viewer：手套骨架、EMF、触觉点云与原始矩阵，以及具备触觉传感器的机械手指尖显示。可使用 `--no-open --jsonl` 获取官方本地 Viewer URL，保留完整查询串且同一会话只打开一个 Viewer。后续集成需固定支持手套的 CLI 版本、处理与现有 SDK 的连接占用、显示独立数据失效状态；官方 Viewer 断流可能保留最后一帧，不能仅凭画面存在就称实时。本机已有 2026.8.31 CLI 的 help 仍以 Hand 2 描述可视化，尚未进行真实手套验收，因此本版没有增加一个未经验证的“已嵌入”按钮。
+
+依据：[SDK 用户档案](https://docs.wuji.tech/docs/en/wuji-cli/latest/user/)、[触觉标定保存](https://docs.wuji.tech/docs/en/wuji-studio/latest/tactile-calibration/)、[官方实时可视化](https://docs.wuji.tech/docs/en/wuji-cli/latest/visualization/)。
+
 | 页面 | 实际作用 | 如何生效 |
 |---|---|---|
 | 实时输出调整 | 官方 SDK 输出后的 20 关节幅度系数、角度偏移和时间平滑 | 保留原有保存、手套预览应用与重连流程 |
