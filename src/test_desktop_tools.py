@@ -31,6 +31,14 @@ class DesktopToolsTests(unittest.TestCase):
         with self.assertRaises(ValueError):dispatch(host,dict(operation='connection_panel',state='execute'))
         host.server.controller.action.assert_not_called()
 
+    def test_playlist_picker_only_opens_editor(self):
+        host=Mock()
+        dispatch(host,dict(operation='picker',kind='playlist'))
+        host.picker.assert_called_once_with('playlist')
+        for kind in ('play','hardware','program_start'):
+            with self.assertRaises(ValueError):dispatch(host,dict(operation='picker',kind=kind))
+        host.server.controller.action.assert_not_called()
+
     def test_idle_rejects_unknown_hardware_or_unfinished_work(self):
         state=dict(connection='disconnected',hardware=dict(active=False))
         self.assertTrue(idle(state,{}))

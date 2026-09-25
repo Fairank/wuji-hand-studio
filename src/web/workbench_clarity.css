@@ -75,13 +75,9 @@ html dialog.hws-sheet{background:var(--dg-canvas);color:var(--dg-text);backdrop-
 .hws-sheet .hws-close{min-height:28px;height:28px;width:28px;padding:0;border-radius:50%;box-shadow:none}
 html button.hws-trigger{min-height:34px;padding:6px 12px;border-radius:10px;background:var(--dg-matte);box-shadow:none;font-size:12px}
 .hws-body #wb-program{border:0;background:none;box-shadow:none;padding:0;margin:0}
-.hws-body #wb-program>summary{display:none}
-.hws-body .wb-program-body{padding:0}
 .hws-body .motion-notes,.hws-body .library-reference{margin:0 0 12px;background:var(--dg-matte);color:var(--dg-text);border:1px solid var(--dg-line);border-radius:10px;padding:10px 12px}
 .hws-body .hint,.hws-body .studio-small{font-size:12px;color:var(--dg-text-2);line-height:1.6}
 .hws-body :is(p,li){overflow-wrap:anywhere}
-.hws-body #wb-program .wb-entry{grid-template-columns:minmax(100px,1fr) 78px 68px 30px 30px 30px;gap:5px}
-.hws-body #wb-program .wb-entry button{padding:4px;min-height:30px}
 /* Multi-hand: choose participants beside the views; management stays in its own sheet. */
 html .wsx-root{gap:18px}.wsx-title{font-size:24px!important;color:var(--dg-text)}
 html .wsx-head{align-items:center;gap:12px}.wsx-head .wsx-pick{flex:0 1 190px}.wsx-pick>span{display:none}
@@ -126,6 +122,13 @@ html .hg-panel .hg-card{padding:0;border:0;background:none;box-shadow:none;gap:1
 .hg-panel .hg-options>summary{font-size:12px;color:var(--dg-text-2);cursor:pointer}
 .hg-panel .hg-options .hg-grid{padding-top:12px}
 .hg-panel .hg-clear{border:0;background:none;padding:0;font-size:12px;line-height:1.6;gap:8px}
+.hg-panel .hg-destination{border:0;padding:0;margin:0;min-width:0}
+.hg-panel .hg-targets{display:flex;gap:3px;padding:3px;border-radius:10px;background:var(--dg-fill);margin-top:8px}
+.hg-panel .hg-targets label{position:relative;flex:1;text-align:center;padding:9px 5px;border-radius:8px;font-size:12px;cursor:pointer}
+.hg-panel .hg-targets label:has(input:checked){background:var(--dg-canvas);color:var(--dg-blue,#007aff);box-shadow:0 1px 3px #00000013}
+.hg-panel .hg-targets input{position:absolute;opacity:0;width:1px;height:1px}
+.hg-panel .hg-targets label:has(input:focus-visible){outline:2px solid #007aff;outline-offset:2px}
+.hg-panel [hidden]{display:none!important}
 .hg-panel .hg-note{padding:0;background:none;font-size:11px;line-height:1.5}
 .hg-panel .hg-actions{gap:8px;flex-wrap:nowrap}.hg-panel .hg-actions button{flex:1;padding:8px;font-size:12px}
 html .hg-panel .hg-primary{background:#007aff;color:#fff;border-color:transparent;box-shadow:none}
@@ -145,7 +148,13 @@ html .hgv-card header{padding:12px;gap:6px;flex-wrap:wrap}.hgv-card strong{font-
 html .hgv-picture{height:clamp(240px,48vh,480px);background:#000}
 .hgv-source{font-size:11px;color:var(--dg-text-2);padding:10px 12px;line-height:1.55}
 @media(max-width:1150px){html .page-area{padding:20px}html #page-library .motion-layout{grid-template-columns:265px minmax(0,1fr);gap:20px}html .wsx-group-card{grid-template-columns:275px minmax(0,1fr);gap:20px}html .hgv-grid{grid-template-columns:1fr}html .hgv-picture{height:220px}}
-@media(max-width:850px){html #page-library .motion-layout,html .wsx-group-card{grid-template-columns:1fr}.wsx-panel,.wsx-views{grid-column:1;grid-row:auto}.wsx-views{grid-row:1}.wsx-panel{grid-row:2}html .hgv-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.wc-heading-tools{margin-left:0}.hws-body #wb-program .wb-entry{grid-template-columns:minmax(80px,1fr) 70px 60px 26px 26px 26px}}
+@media(max-width:850px){html #page-library .motion-layout,html .wsx-group-card{grid-template-columns:1fr}.wsx-panel,.wsx-views{grid-column:1;grid-row:auto}.wsx-views{grid-row:1}.wsx-panel{grid-row:2}html .hgv-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.wc-heading-tools{margin-left:0}}
 @media(prefers-reduced-motion:reduce){.wc-playlist-running{transition:none}}
+.motion-controls[hidden],.wc-playlist-running[hidden]{display:none!important}
+.motion-layout>.wc-playlist-running{display:flex;flex-direction:column;align-items:stretch;gap:18px;align-self:start;padding:24px;background:var(--dg-matte);border:1px solid var(--dg-line);border-radius:16px;margin:0;min-width:0}
+.wc-playlist-running h3{font-size:13px;font-weight:500;color:var(--dg-text-2);margin:0}
+.wc-playlist-running strong{font-size:23px;line-height:1.35;overflow-wrap:anywhere}
+.wc-playlist-running p{font-size:12px;line-height:1.8;color:var(--dg-text-2);margin:0}
+.wc-program-actions{display:flex;gap:8px;flex-wrap:wrap}.wc-program-actions button{flex:1;min-height:38px}
 html[data-reduce-transparency=true] #page-library .camera-lens{background:#29292e!important;backdrop-filter:none!important}
 @media(forced-colors:active){.hg-panel .hg-opt:has(input:checked){outline:2px solid Highlight}.wc-options{border-color:CanvasText}html #page-library .pose-screen .camera-lens{background:Canvas}html #page-library .pose-screen .camera-lens button{color:CanvasText}}

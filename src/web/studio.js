@@ -56,7 +56,11 @@
     if(mode==='preview'){$('play-action').value=picker.selected;$('play-action').dispatchEvent(new Event('change'));}
   }
   window.WujiWorkbench={
-    picker:kind=>picker.show(kind),
+    picker:kind=>{
+      if(kind==='playlist'){window.HandWorkbenchPlaylist?.open();return {ok:true};}
+      if(kind==='closed')window.HandWorkbenchPlaylist?.close();
+      return picker.show(kind);
+    },
     async preview(action,speed){
       if(!catalog?.actions.some(x=>x.id===action))throw Error('Action is not available in this picker');
       const result=await post({name:'demo_start',action,speed,cycles:0,...picker.payload});

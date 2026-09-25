@@ -13,8 +13,8 @@
   const heading=$('page-library').querySelector('.page-heading'),controls=document.querySelector('.motion-controls');
   const headingTools=document.createElement('div');headingTools.className='wc-heading-tools';heading.append(headingTools);
   const modes=document.querySelector('.playback-modes');controls.prepend(modes);
-  const program=$('wb-program');program.open=true;
-  const playlist=sheet('wc-playlist','节目单','Playlist',[program]);headingTools.append(playlist.trigger);
+  const program=$('wb-program');
+  const playlist=sheet('wc-playlist','节目单','Playlist',[program]);headingTools.append(playlist.trigger);window.HandWorkbenchPlaylist.attach(playlist);
   const details=sheet('wc-run-details','运行详情','Run details',[]);
   headingTools.append(details.trigger);
   // Keep errors/blockers and confirmation on the main screen. Only reference copy is moved.
@@ -34,10 +34,12 @@
   const source=document.createElement('p');source.className='wc-view-help';
   const dock=document.querySelector('.viewer-dock');dock.append(source);
   const running=document.createElement('div');running.className='wc-playlist-running';running.hidden=true;
-  const runningText=document.createElement('span'),playlistOpen=document.createElement('button'),playlistStop=document.createElement('button');
+  const runningTitle=document.createElement('h3'),runningText=document.createElement('strong'),runningDetail=document.createElement('p'),playlistOpen=document.createElement('button'),playlistPause=document.createElement('button'),playlistStop=document.createElement('button');
   playlistOpen.type='button';playlistOpen.onclick=()=>playlist.open();
+  playlistPause.type='button';playlistPause.onclick=()=>{if(!$('wb-program-pause').disabled)$('wb-program-pause').click();};
   playlistStop.type='button';playlistStop.className='wc-stop';playlistStop.onclick=()=>{if(!$('wb-program-stop').disabled)$('wb-program-stop').click();};
-  running.append(runningText,playlistOpen,playlistStop);heading.after(running);
+  const runningActions=document.createElement('div');runningActions.className='wc-program-actions';runningActions.append(playlistPause,playlistStop);
+  running.append(runningTitle,runningText,runningDetail,runningActions,playlistOpen);controls.before(running);
   const nav=document.querySelector('.directory'),advanced=nav.querySelector('.nav-tool-links');
   for(const key of ['feedback','parameters','doctor','interaction','capture','records']){
    const link=nav.querySelector(`[data-page="${key}"]`);if(link)advanced.append(link);
@@ -50,6 +52,7 @@
    summary.textContent=t('循环与幅度','Cycles & amplitude');
    source.textContent=t('拖动旋转 · 滚轮缩放 · 画面来源始终标在左下角','Drag to orbit · Scroll to zoom · Source is labelled in the view');
    playlistOpen.textContent=t('查看节目单','View playlist');
+   runningTitle.textContent=t('节目单播放','Playlist playback');
    playlistStop.textContent=t('停止节目单','Stop playlist');
    const names={devices:['多手演示','Hand ensemble'],glove:['手套遥操作','Glove control']};
    for(const [key,pair]of Object.entries(names)){
@@ -72,8 +75,11 @@
   const observer=new MutationObserver(mode);observer.observe($('mode-preview'),{attributes:true,attributeFilter:['aria-pressed']});
   window.addEventListener('console-state',e=>{
    const p=e.detail?.program;running.hidden=!p?.active;
+   controls.hidden=!!p?.active;
    playlistStop.disabled=$('wb-program-stop').disabled;
-   runningText.textContent=p?.active?t('节目单播放中','Playlist playing'):'';
+   playlistPause.disabled=$('wb-program-pause').disabled;playlistPause.textContent=p?.paused?t('继续播放','Resume'):t('暂停','Pause');
+   runningText.textContent=p?.active?window.HandWorkbenchPlaylist.nameOf(p.current?.action||'')||t('准备播放','Preparing'):'';
+   runningDetail.textContent=p?.active?`${p.mode==='preview'?t('屏幕预览','Screen preview'):t('真实手','Real hand')} · ${p.paused?t('已暂停','Paused'):t('播放中','Playing')}${p.current?t(` · 第 ${p.current.position}/${p.current.total_in_round} 项 · 第 ${p.current.round} 遍`,` · Item ${p.current.position}/${p.current.total_in_round} · Pass ${p.current.round}`):''}`:'';
   });
   window.addEventListener('wuji-language',labels);
   window.addEventListener('workspace-page',()=>{

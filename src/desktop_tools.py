@@ -93,7 +93,7 @@ def dispatch(host, payload):
     if op == 'viewer':
         return host.open_viewer()
     if op == 'picker':
-        if payload.get('kind') not in ('letters','numbers','closed'):
+        if payload.get('kind') not in ('letters','numbers','playlist','closed'):
             raise ValueError('Unsupported picker')
         return host.picker(payload['kind'])
     if op == 'preview':

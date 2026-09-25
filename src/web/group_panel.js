@@ -20,7 +20,9 @@
     action: ['动作', 'Action'], noAction: ['此类型暂无动作', 'No actions for this type'], options: ['循环与幅度', 'Cycles & amplitude'],
     speed: ['速度', 'Speed'], cycles: ['循环次数', 'Cycles'], amp: ['幅度', 'Amplitude'],
     clear: ['我已确认工作区内无人员和障碍物', 'I confirm the workspace is clear of people and obstacles'],
-    preview: ['预览', 'Preview'], hardware: ['实机运行', 'Run on real hands'],
+    preview: ['开始预览', 'Start preview'], hardware: ['开始实机播放', 'Play on real hands'],
+    destination: ['播放到', 'Play on'], targetPreview: ['屏幕预览', 'Screen preview'], targetHardware: ['真实手', 'Real hands'],
+    previewReady: ['将在屏幕中展示所选手的动作。', 'The selected hands will play on screen.'],
     hActive: ['正在运行，设置已锁定；停止按钮始终可用。', 'Run in progress. Setup is locked; Stop stays available.'],
     hPending: ['正在等待响应…', 'Waiting for a response…'], hStale: ['状态暂不可用，请等待重新连接。','Status unavailable. Waiting for reconnection.'],
     hEmpty: ['工作区至少需要两只手才能开始。', 'At least two hands must be in the workspace to start.'],
@@ -121,7 +123,8 @@
       <div class="hg-body"><div class="hg-seg">${kind('same')}${kind('pair')}</div><p class="hg-note" data-t="pairNote"></p></div></fieldset>
     <div class="hg-grid hg-main-fields">${field('action', '')}${field('speed', opt(SPEEDS, v => v + '×'))}</div>
     <details class="hg-options"><summary data-t="options"></summary><div class="hg-grid">${field('cycles', opt(CYCLES, String))}${field('amp', opt(AMPS, v => Math.round(v * 100) + '%'))}</div></details>
-    <label class="hg-clear"><input type="checkbox" class="hg-clearbox"><span data-t="clear"></span></label>
+    <fieldset class="hg-destination"><legend class="hg-legend" data-t="destination"></legend><div class="hg-targets"><label><input type="radio" name="${p}destination" value="preview" checked><span data-t="targetPreview"></span></label><label><input type="radio" name="${p}destination" value="hardware"><span data-t="targetHardware"></span></label></div></fieldset>
+    <label class="hg-clear" hidden><input type="checkbox" class="hg-clearbox"><span data-t="clear"></span></label>
     <div class="hg-actions"><button type="button" class="hg-btn" data-cmd="preview" data-t="preview" aria-describedby="${p}hint"></button><button type="button" class="hg-btn hg-primary" data-cmd="hardware" data-t="hardware" aria-describedby="${p}hint"></button></div>
   </fieldset>
   <p class="hg-hint" id="${p}hint" aria-live="polite" aria-atomic="true"></p>
@@ -148,7 +151,7 @@
       clear: $('.hg-clearbox'), preview: $('[data-cmd="preview"]'), hw: $('[data-cmd="hardware"]'),
       hint: $('.hg-hint'), msg: $('.hg-msg')
     };
-    const st = { L: 'zh', snap: norm(null), kind: 'same', pref: { same: '', pair: '' }, sig: '', sel: new Set(),
+    const st = { L: 'zh', snap: norm(null), kind: 'same', destination: 'preview', pref: { same: '', pair: '' }, sig: '', sel: new Set(),
       pendStart: false, pendStop: false, cmd: 0, msg: null, dead: false };
     const memMap = new Map(), runMap = new Map();
     const ix = () => (st.L === 'en' ? 1 : 0);
@@ -250,16 +253,22 @@
 
     function update() {
       const ev = evaluate(), m = st.msg, n = st.snap.members.length;
+      if(ev.active&&['preview','hardware'].includes(st.snap.run.mode))st.destination=st.snap.run.mode;
+      el.querySelectorAll(`input[name="${p}destination"]`).forEach(x=>{x.checked=x.value===st.destination;});
       E.config.disabled = ev.locked;
       E.preview.disabled = !ev.canPreview;
       E.hw.disabled = !ev.canHw;
+      E.preview.hidden = st.destination !== 'preview';
+      E.hw.hidden = st.destination !== 'hardware';
+      E.clear.closest('label').hidden = st.destination !== 'hardware';
+      E.preview.classList.toggle('hg-primary',st.destination === 'preview');
       E.stop.disabled = st.pendStop;
       E.stop.classList.toggle('hg-danger', ev.active || st.pendStart);
       E.note.hidden = st.kind !== 'pair';
       E.empty.hidden = n > 0;
       E.members.hidden = n === 0;
       setText(E.count, n ? fmt(t('count'), { n: ev.sel.length, t: n }) : '');
-      setText(E.hint, fmt(t(ev.hint), ev.vars));
+      setText(E.hint, fmt(t(st.destination==='preview'&&ev.canPreview?'previewReady':ev.hint), ev.vars));
       setTone(E.hint, ev.canHw ? 'ok' : ev.canPreview ? 'warn' : '');
       const failure=st.snap.run.phase==='failed'?pickText(st.snap.run.reason):'';
       const acknowledged=m&&!m.bad&&['mStarted','mStopped'].includes(m.key)&&st.snap.run.phase&&st.snap.run.phase!=='idle';
@@ -294,6 +303,7 @@
       if (!x || !x.classList) return;
       if (x.classList.contains('hg-check')) { if (x.checked) st.sel.add(x.value); else st.sel.delete(x.value); }
       else if (x.name === p + 'kind') { st.kind = x.value === 'pair' ? 'pair' : 'same'; renderActions(); }
+      else if (x.name === p + 'destination') st.destination = x.value === 'hardware' ? 'hardware' : 'preview';
       else if (x === E.action) st.pref[st.kind] = x.value;
       update();
     }
