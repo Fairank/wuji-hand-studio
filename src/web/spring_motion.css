@@ -1,0 +1,75 @@
+/* Presentation only. The browser owns these finite transitions; no frame loop,
+   scroll interception, desktop capture, layout animation or command delay. */
+:root {
+  --wb-spring: cubic-bezier(.2,.9,.25,1.06);
+  --wb-settle: 450ms;
+}
+/* Generated spring: begin */
+@supports (animation-timing-function: linear(0, 1)) {
+  :root { --wb-spring: linear(0 0%, 0.012572 1.666667%, 0.046369 3.333333%, 0.096087 5%, 0.15716 6.666667%, 0.225711 8.333333%, 0.298503 10%, 0.372882 11.666667%, 0.446715 13.333333%, 0.518333 15%, 0.586474 16.666667%, 0.650228 18.333333%, 0.708981 20%, 0.762372 21.666667%, 0.810244 23.333333%, 0.852607 25%, 0.889602 26.666667%, 0.921471 28.333333%, 0.948528 30%, 0.971135 31.666667%, 0.989687 33.333333%, 1.004594 35%, 1.016266 36.666667%, 1.025105 38.333333%, 1.031496 40%, 1.035803 41.666667%, 1.038361 43.333333%, 1.039479 45%, 1.039434 46.666667%, 1.038474 48.333333%, 1.036814 50%, 1.034644 51.666667%, 1.032122 53.333333%, 1.029385 55%, 1.026544 56.666667%, 1.02369 58.333333%, 1.020894 60%, 1.018212 61.666667%, 1.015684 63.333333%, 1.013339 65%, 1.011195 66.666667%, 1.009261 68.333333%, 1.00754 70%, 1.006027 71.666667%, 1.004717 73.333333%, 1.003596 75%, 1.002653 76.666667%, 1.001873 78.333333%, 1.00124 80%, 1.000738 81.666667%, 1.000351 83.333333%, 1.000066 85%, 0.999866 86.666667%, 0.999739 88.333333%, 0.999673 90%, 0.999656 91.666667%, 0.999678 93.333333%, 0.999731 95%, 0.999806 96.666667%, 0.999898 98.333333%, 1 100%); }
+}
+/* Generated spring: end */
+
+/* Individual scale leaves positioning transforms and the layout box untouched. */
+html body :is(button,.button,.wa-row,.ui-link-button,.directory a):not(:disabled,[aria-disabled=true],[class*=handle i],[class*=resize i],.danger,.stop-motion,[id$="-stop"],#stop) {
+  scale: 1;
+  transition: scale var(--wb-settle) var(--wb-spring),
+    background-color 140ms ease, border-color 140ms ease, color 140ms ease,
+    box-shadow 140ms ease;
+}
+html body :is(button,.button,.wa-row,.ui-link-button,.directory a):not(:disabled,[aria-disabled=true],[class*=handle i],[class*=resize i],.danger,.stop-motion,[id$="-stop"],#stop):active {
+  scale: .97;
+  transform: none;
+  transition: scale 75ms cubic-bezier(.2,.7,.3,1),
+    background-color 100ms ease, border-color 100ms ease, color 100ms ease,
+    box-shadow 100ms ease;
+}
+/* Stop controls retain an immediate, stable target. */
+html body :is(.danger,.stop-motion,[id$="-stop"],#stop) {
+  scale: 1!important;
+  transform: none!important;
+  transition: background-color 100ms ease, border-color 100ms ease;
+}
+html body button:disabled,html body [aria-disabled=true] { scale:1;transition:none; }
+
+@keyframes wb-spring-dialog {
+  from { transform: translateY(6px) scale(.985); }
+  to { transform: translateY(0) scale(1); }
+}
+@keyframes wb-spring-content {
+  from { transform: translateY(4px); }
+  to { transform: translateY(0); }
+}
+@keyframes wb-micro-fade { from { opacity:0; } to { opacity:1; } }
+html dialog[open]:is(.symbol-dialog,.connection-popover,.hws-sheet,#desktop-menu,#desktop-close-dialog) {
+  animation: wb-spring-dialog var(--wb-settle) var(--wb-spring), wb-micro-fade 130ms ease-out;
+}
+html .workspace-page:not([hidden])>.page-heading {
+  animation: wb-spring-content 360ms var(--wb-spring), wb-micro-fade 130ms ease-out;
+}
+html :is(.hub-section,.settings-section):not([hidden]) { animation:wb-micro-fade 140ms ease-out; }
+/* Chevron/switch motion stays inside its existing control. */
+html :is(.wc-options,.cr-details,.hub-calibration-setup,.rt-advanced,.rt-help,.folded-panel,.motion-notes,.library-reference)>summary:after,
+html .cg-chevron,html #wb-program .wb-program-summary svg {
+  transition: transform 320ms var(--wb-spring);
+}
+html .settings-row input[type=checkbox]:before {
+  transition: transform 300ms var(--wb-spring);
+}
+.spring-preview-row { display:flex;align-items:center;justify-content:space-between;gap:18px;padding:16px 0;border-top:1px solid var(--ui-line); }
+.spring-preview-copy { min-width:0; }
+.spring-preview-copy strong { display:block;font-size:13px;font-weight:600;color:var(--ui-ink); }
+.spring-preview-copy p { margin:5px 0 0!important;font-size:12px!important;line-height:1.5;color:var(--ui-sub); }
+html #spring-preview { display:inline-flex;align-items:center;justify-content:center;gap:9px;flex:none;min-height:36px;padding:8px 12px;border:1px solid var(--ui-line);border-radius:10px;background:var(--ui-fill);color:var(--ui-ink);font-size:12px; }
+.spring-preview-dot { display:block;width:12px;height:12px;border-radius:50%;background:var(--ui-blue); }
+@media(max-width:600px){.spring-preview-row{align-items:flex-start;flex-direction:column;gap:10px}}
+/* Honor both preferences. Settling is immediate even during an active press. */
+html[data-reduce-motion=true] body :is(button,.button,.wa-row,.ui-link-button,.directory a),
+html[data-reduce-motion=true] .spring-preview-dot { scale:1!important;transform:none!important;transition:none!important;animation:none!important; }
+html[data-reduce-motion=true] :is(dialog,.page-heading,.hub-section,.settings-section),
+html[data-reduce-motion=true] :is(summary:after,.cg-chevron,.settings-row input:before) { animation:none!important;transition:none!important; }
+@media(prefers-reduced-motion:reduce) {
+  html body :is(button,.button,.wa-row,.ui-link-button,.directory a),.spring-preview-dot { scale:1!important;transform:none!important;transition:none!important;animation:none!important; }
+  html :is(dialog,.page-heading,.hub-section,.settings-section),
+  html :is(summary:after,.cg-chevron,.settings-row input:before) { animation:none!important;transition:none!important; }
+}
