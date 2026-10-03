@@ -11,6 +11,7 @@ from pathlib import Path
 import re
 import signal
 import subprocess
+import sys
 import threading
 import time
 import uuid
@@ -76,9 +77,9 @@ def runner_command(config, mode, args, expected_user=None, replace=False):
         directory=config.get('agent_directory') or str(Path(__file__).parent)
         python=config.get('python') or 'python3'
     elif config['mode']=='macvm':
-        from macos_runtime import MacController
+        from macos_runtime import MacController, PYTHON
         bridge=MacController(config, 'hand2_left')
-        directory=bridge.agent_directory;python=config.get('python') or 'python3'
+        directory=bridge.agent_directory;python=PYTHON
     else:
         raise ValueError('Guided calibration requires the built-in or local controller')
     prefix=[mode]
@@ -146,6 +147,24 @@ class CalibrationCLI:
             run = copy.deepcopy(self.run)
             cache = copy.deepcopy(self.cache)
             stale = time.monotonic() - self.cached_at > 8
+        # Opening or polling the Mac calibration tab must not wake its Linux VM.
+        # Only the explicit Refresh action is allowed to run the official CLI scan.
+        if not run['running'] and not refresh and sys.platform == 'darwin':
+            try:
+                config = load_config()
+            except (OSError, ValueError, RuntimeError):
+                config = None
+            if config:
+                if cache is None:
+                    cache = dict(available=False, calibration_supported=False, mode=config.get('mode'),
+                                 users=[], current=None, devices=[],
+                                 error='Status has not been refreshed. Click Refresh to query the controller. / 尚未刷新状态。点击“刷新”以查询控制端。')
+                    with self.lock:
+                        self.cache = cache
+                        self.cached_at = time.monotonic()
+                with self.lock:
+                    run = copy.deepcopy(self.run)
+                return dict(**cache, run=run)
         if not run['running'] and (refresh or cache is None or stale):
             config = None
             try:

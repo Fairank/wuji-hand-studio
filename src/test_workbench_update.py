@@ -20,7 +20,7 @@ class UpdateTests(unittest.TestCase):
                 result=ctl.upgrade(client,source,ctl.checksum(source),True)
             self.assertTrue(result['ok']);self.assertFalse(result['app_restarted'])
             self.assertEqual([c.args[0] for c in client.call.call_args_list],['prepare_update','close_idle'])
-            self.assertEqual(Path(execute.call_args.args[0][0]).parent,data/'updates')
+            self.assertEqual(Path(execute.call_args.args[0][0]).parent.resolve(),(data/'updates').resolve())
 
     def test_bad_checksum_does_not_close_or_start_installer(self):
         with tempfile.TemporaryDirectory() as tmp:

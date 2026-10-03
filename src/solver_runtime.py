@@ -10,6 +10,12 @@ class SolverRuntime:
         with self.lock:return copy.deepcopy(self.state)
 
     def start(self,install=False):
+        from bridge_config import load_config
+        if load_config().get('mode')=='macvm':
+            with self.lock:
+                self.state.update(busy=False,supported=False,ready=False,stage='unsupported',
+                    error='The verified open solver requires Linux x86_64; built-in Mac ARM64 is unsupported. Drafts, export and the SDK mapper remain available. / 已验证的开源求解器需要 Linux x86_64；Mac ARM64 内置环境暂不支持。参数草稿、导出和 SDK 映射仍可使用。')
+            return self.snapshot()
         with self.lock:
             if self.state['busy']:raise ValueError('Solver environment check/setup is already running')
             self.state.update(busy=True,stage='installing' if install else 'checking',error='')
@@ -21,6 +27,11 @@ class SolverRuntime:
             from bridge_config import load_config
             from calibration_cli import controller_args
             config=load_config()
+            if config.get('mode')=='macvm':
+                with self.lock:
+                    self.state.update(supported=False,ready=False,stage='unsupported',
+                        error='The verified open solver requires Linux x86_64; built-in Mac ARM64 is unsupported. Drafts, export and the SDK mapper remain available. / 已验证的开源求解器需要 Linux x86_64；Mac ARM64 内置环境暂不支持。参数草稿、导出和 SDK 映射仍可使用。')
+                return
             if config['mode']=='wsl':
                 from managed_runtime import WslController,PYTHON
                 controller=WslController(config,'hand2_left');directory=controller.agent_directory;python=PYTHON

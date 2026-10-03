@@ -139,6 +139,22 @@ def ensure_running():
             run('start', '--tty=false', NAME, timeout=240)
 
 
+def stop_owned():
+    """Stop only this app's idle VM, after its active sessions have closed."""
+    if _state['busy']:
+        return False
+    owner = ROOT / 'owner.json'
+    if not owner.is_file() or json.loads(owner.read_text()).get('product') != 'hand-workbench':
+        return False
+    if not (ROOT / 'lima' / NAME / 'lima.yaml').is_file():
+        return False
+    with _boot_lock:
+        records = [json.loads(line) for line in run('list', '--json', NAME).splitlines() if line.strip()]
+        if any(row.get('name') == NAME and row.get('status') == 'Running' for row in records):
+            run('stop', NAME, timeout=60)
+    return True
+
+
 def args(command_args, user='workbench'):
     if not isinstance(command_args, list) or not command_args or not all(isinstance(v, str) and '\0' not in v for v in command_args):
         raise ValueError('Invalid controller command')
@@ -225,13 +241,20 @@ class MacController:
     def __init__(self, config, profile_id):
         from device_profiles import profile
         profile(profile_id)
+        self.process = None
+        from controller_bundle import ensure_version
+        source = RESOURCE / 'controller-source' if getattr(sys, 'frozen', False) else RESOURCE
+        if not (source / 'agent_bootstrap.py').is_file():
+            raise ValueError('Controller source is missing from this installation; reinstall the complete package')
         ensure_running()
-        self.agent_directory, self.process = AGENT, None
+        with Files() as remote:
+            self.agent_directory = ensure_version(source, remote)
         from controller_launch import parameter_environment
         self.parameters_in_launch = True
+        session = os.environ.get('WUJI_FLEET_ID', '')
         self.agent_command = args(['/usr/bin/env', parameter_environment(), 'WUJI_HAND_PROFILE=' + profile_id,
-                                   'WUJI_SESSION_ID='+os.environ.get('WUJI_FLEET_ID',''),
-                                   'WUJI_MANAGED_RUNTIME=macvm', PYTHON, '-u', AGENT + '/agent_bootstrap.py'])
+                                   'WUJI_SESSION_ID='+session,
+                                   'WUJI_MANAGED_RUNTIME=macvm', PYTHON, '-u', self.agent_directory + '/agent_bootstrap.py'])
     def open_sftp(self): return Files()
     def exec_command(self, command_args, timeout=None):
         from local_controller import ReadStream

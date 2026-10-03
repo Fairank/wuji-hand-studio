@@ -6,12 +6,17 @@ class WindowMaterial:
     def __init__(self, window):
         self.window = window
         self.mode = 'solid'
+        self.requested = 'glass'
         self.core = None
         self.lock = threading.Lock()
 
-    def apply(self, mode='vibrancy'):
-        if mode not in ('vibrancy', 'solid'):
+    def apply(self, mode='glass', *, theme=None, glass_style=None):
+        if mode not in ('glass', 'solid'):
             raise ValueError('Unknown window material')
+        if theme is not None and theme not in ('system', 'light', 'dark'):
+            raise ValueError('Unknown window appearance')
+        if glass_style is not None and glass_style not in ('frosted', 'clear'):
+            raise ValueError('Unknown glass style')
         try:
             import AppKit
             from Foundation import NSThread
@@ -28,11 +33,14 @@ class WindowMaterial:
                     from macos_material_core import WindowMaterial as CoreMaterial
                     if self.core is None:
                         self.core = CoreMaterial(self.window)
+                    self.core.configure(theme, glass_style)
                     native = self.core.apply(mode)
-                    chosen = {'vibrancy':'vibrancy'}.get(native.get('material'), 'solid')
+                    self.requested = mode
+                    chosen = {'macos_glass':'liquid-glass','vibrancy':'vibrancy'}.get(native.get('material'), 'solid')
                     self.mode = chosen
                     result.update(native, mode=chosen, external_backdrop=chosen != 'solid',
-                                  refraction=False, desktop_capture=False, visual_acceptance_pending=True)
+                                  refraction=None if chosen == 'liquid-glass' else False,
+                                  desktop_capture=False, visual_acceptance_pending=True)
             except Exception as error:
                 # Leave the content attached even if a material API is unavailable.
                 if self.core is not None:

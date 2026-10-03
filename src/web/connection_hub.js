@@ -58,7 +58,7 @@
   }
   if(key==='visual'&&window.wujiFloating?.isFloating()!==true)$('glove-viewer-dock')?.append($('pose-console'));
   else if(window.wujiFloating?.isFloating()!==true)ws.viewerHome()?.append($('pose-console'));
-  if(key==='calibration')refresh(true);
+  if(key==='calibration')refresh(false);
   document.body.dataset.hubTab=key;
  }
  tabs.addEventListener('click',event=>{const key=event.target.closest('[data-hub-tab]')?.dataset.hubTab;if(key)select(key)});

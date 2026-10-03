@@ -61,7 +61,7 @@
   const attached=!!g.feedback?.device_id||!!g.hardware?.active||state?.connection==='connected';
   $('rt-install').textContent=t('准备求解环境','Prepare solver environment');
   $('rt-apply').textContent=t('应用到开源映射','Apply to open mapper');$('rt-sdk').textContent=t('使用 SDK 映射','Use SDK mapper');
-  $('rt-install').disabled=!!r.busy||!!g.busy||attached||r.ready===true;
+  $('rt-install').disabled=!!r.busy||r.supported===false||!!g.busy||attached||r.ready===true;
   $('rt-apply').disabled=busy||stale||!context||!r.ready||attached;
   $('rt-sdk').disabled=busy||stale||!context||attached;
   let text=r.busy?t('正在准备独立求解环境…','Preparing isolated solver environment…'):r.ready?t('求解环境已就绪','Solver environment ready'):r.error||t('首次使用先准备求解环境，需要联网下载依赖。','Prepare the solver first; initial dependency download needs internet.');

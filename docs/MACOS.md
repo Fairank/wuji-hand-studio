@@ -1,34 +1,42 @@
-# Hand Workbench on Mac / Mac 预览版
+# Hand Workbench on Mac / macOS 0.2.17
 
-0.1.9 是同一个非官方个人展示软件的 Apple Silicon 原生 Cocoa / WKWebView 版本，沿用中英文、动作库、参数页面、右上角连接入口及独立 MuJoCo 小窗。
+非官方个人展示工具。0.2.17 基于 Windows `v0.2.16-windows`（`d8a9f49`），使用原生 Cocoa / WKWebView，保留节目单、顺序与随机播放、多手工作区、连接、官方校准和映射页面。
 
-## 安装
+## 安装与启动
 
-仅下载 Releases 中实际存在的 `HandWorkbench-0.1.9-macos-arm64.zip`，核对 SHA-256，解压后把 `HandWorkbench.app` 放入“应用程序”。不需另装 Python、Homebrew、VMware 或填写 SSH。需要 macOS 13.5+ 和 Apple Silicon；Intel Mac 暂无此内置环境安装包。
+Apple Silicon、macOS 13.5+。解压 `HandWorkbench-0.2.17-macos-arm64.zip`，核对配套 SHA-256，将 `HandWorkbench.app` 放入应用程序。无需另装 Python、Homebrew、VMware 或填写 SSH。安装包含 Lima 和 Ubuntu ARM64 磁盘，不代表 SDK 首次准备无需联网。
 
-包采用本地临时签名，尚未获得 Apple Developer ID 签名和公证。首次可能被 Gatekeeper 阻止；核对来源后使用系统“隐私与安全性”中的明确允许操作，不要关闭系统检查或批量删除隔离属性。
+本地包为 ad-hoc 签名，尚无 Apple Developer ID 签名或公证。来源和摘要核对后，如系统阻止启动，使用“隐私与安全性”明确允许；不要关闭 Gatekeeper 或批量删除隔离属性。GitHub 是否已有安装包，以实际 Release 附件为准。
 
-第一次在连接页点“安装内置控制环境”：校验附带 Ubuntu ARM64 磁盘、Lima 和官方诊断 CLI，在软件自己的目录创建 Linux，联网安装固定版本 SDK。需要能访问 Ubuntu 软件源和 PyPI，准备进度和错误直接显示。默认 2 CPU、2 GiB 内存、最大 12 GiB 虚拟磁盘；实际磁盘占用随使用增长。之后连接时自动启动，无需另开虚拟机。
+应用数据继续使用 `~/Library/Application Support/WujiStudio`，不清空既有参数、SDK 配置、标定备份。启动与页面切换默认不连接硬件、不播放实机动作。只读状态轮询不会为刷新校准列表启动 Linux；明确点击刷新、安装、诊断或连接时才允许访问控制环境。
 
-Lima 管理自己的内部密钥和本地传输，不导入个人 SSH 密钥、不转发 SSH agent。只共享软件自己的控制目录，不共享个人文件夹。安装、启动和连接均不自动播放动作。
+## 原生磨砂玻璃
 
-## 插手和换手
+macOS 26+ 使用 `NSGlassEffectView` 的 Regular（磨砂）样式，较旧系统回退 `NSVisualEffectView` 的 behind-window vibrancy。顶部及侧栏保留透明背景，避免遮住系统材质；主要内容保持可读。明暗主题与原生材质同步，减少透明时恢复实色，遵循系统辅助功能设置。
 
-二代手使用专用以太网或 USB 网卡。右上角“连接”会检查当前网卡；唯一专用网卡缺少设备子网时，请求 macOS 管理员授权添加局部地址，不改 Wi-Fi、默认网关及正在使用的其他网段。多个候选网卡在软件内选择。系统重启后临时地址可能需要再次授权。
+保留系统关闭、最小化、缩放和拖动行为。没有屏幕录制、其他窗口像素采集或自制外部折射。公开系统材质会处理背景，实际效果随系统、背景及窗口活跃状态变化，并不保证和 Windows Acrylic 逐像素一致。
 
-每次重新调用官方 SDK 发现设备，验证型号和真实左右手身份，然后同步模型和反馈；不把上一次序列号当成新发现。多只手由用户选择。内置模式尝试二代左右手出厂地址；自定义地址可填写，未知任意网段和其他厂商不在自动兼容承诺中。
+Mac 的透明 WebView 在重新附着窗口材质时可能停住装饰性 CSS 时间线，因此原生窗口关闭这类过渡，保证文字和选中状态立即可见；不影响 3D 帧、动作编排或控制频率。
 
-**一代 USB 透传尚未实现。** 四类原生模型及 SDK 适配不等于 Mac 内置 Linux 已能获取全部 USB 设备。一代 USB 手请使用外部 Linux 控制端，不能把二代以太网测试当作一代通过。
+右上角设备标题统一为 `wuji hand`；型号、手性与序列号仍由设备连接信息确认。
 
-## 玻璃与代码检视
+## Linux 与设备边界
 
-0.2.7 使用 `NSVisualEffectView` 原生磨砂材质，减少透明时回退实色。保留系统标题栏、窗口按钮与调整大小行为，工作区保持易读。没有抓取其他窗口或屏幕。原生磨砂的实际观感需真机验收，源码接入不等于视觉通过。实验折射已移除。
+首次点击“安装内置控制环境”会校验随包镜像，并联网准备固定版本 SDK。默认 2 CPU、2 GiB 内存、最大 12 GiB 虚拟磁盘；之后明确连接时由应用管理启动，不需打开额外虚拟机界面。
 
-代码检视接口可以查看软件状态和自身 WKWebView 截图，不控制电脑鼠标键盘。不采集其他窗口内容。
+Linux 使用应用自己的 `~/.hand-workbench-runtime`，不改个人 `~/.lima`，不导入个人 SSH 密钥或转发 agent，不共享个人文件夹。控制代码按内容摘要部署为不可变版本，避免新版界面调用旧版控制程序。
 
-## 构建和验收
+只有全部工作区和设备会话安全结束后，正常退出才尝试关闭这个带所有权标记的 Linux；不会强杀其他虚拟机，也不会在安装进行中终止环境。
 
-在 Apple Silicon Mac 安装 Python 3.12、requirements.txt、PyInstaller；构建机另需 qemu-img（例如 Homebrew qemu），仅转换构建磁盘，用户安装不用。
+二代以太网连接需要可达的专用网卡；网络配置请求 macOS 管理员授权，排除默认路由和其他已使用网段。多设备必须明确选择。物理网口亮灯不等于 SDK 已发现或可收到有效反馈。
+
+一代 USB 透传尚未实现；一代模型存在不代表内置 Linux 能访问一代 USB 手，需要外部 Linux 控制端。此次软件移植没有执行真实手套标定、实体手连接或电机命令。
+
+当前锁定的开源求解器只在 Linux x86_64 / Python 3.12 通过验证，Mac ARM64 内置模式返回明确不支持，并禁用其安装入口。SDK 映射、参数草稿与 YAML 导出仍可用；不伪称 ARM 环境已完成真实求解验收。
+
+## 构建与验证
+
+在 Apple Silicon 构建机准备 Python 3.12、requirements.txt、PyInstaller；准备镜像时需 qemu-img。
 
 ```sh
 python scripts/prepare_macos_payload.py
@@ -37,16 +45,12 @@ python scripts/verify_macos_bundle.py
 open -n dist/HandWorkbench.app
 ```
 
-构建脚本从官方固定版本下载并校验摘要，不能导出个人 VM 作为镜像。Linux 和助手在 `.app` 内，单独拖动应用不会丢失组件。首次准备 SDK 仍需网络，不能称完全离线安装。
+可设置 `WUJI_DIST_DIR` 将生成物放到指定缓存目录。`--binary-only` 不生成 ZIP；`--package-only` 复用已生成的可执行程序，仅更新随包资源、签名和归档。不要把更新了源代码却没重建的可执行程序当成新版。
 
-构建流程已保存在 `ci/macos.yml.example`。当前 GitHub 登录缺少 `workflow` 权限，服务器拒绝创建正式工作流，因此尚未生成或上传 Mac 安装包。获得授权后可将模板放到 `.github/workflows/macos.yml`，在 Mac ARM64 runner 原生构建；通过后上传包和 `macos-validation.json`。架构、签名完整性和文件哈希不等于 VM 启动、实机连接或玻璃视觉验收。
+`scripts/workbenchctl.py` 只检查或操作应用自己的窗口和固定功能，不提供任意 shell/JavaScript 执行。Mac 桥使用闭包和 WebKit 公共接口，保持页面 `script-src 'self'`，不启用 unsafe-eval。
 
-Linux 独立目录为 ~/.hand-workbench-runtime，不改个人 ~/.lima。使用短路径避免 macOS 本地套接字路径长度限制。
-
-数据路径沿用 `~/Library/Application Support/WujiStudio`，保留已有参数；日志 `desktop.log`。源码克隆可运行 `bash scripts/run-macos.command`，会创建项目内 `.venv-macos`。未准备 Linux 组件时仍可看界面、MuJoCo 或使用自行选择的外部 Linux。
-
-历史源码启动脚本由本地 Claude Opus 5 max 协助，主维护者审核。此次原生材质基础代码由本地 `claude-fable-5-1 --effort max` 完成，已审核并修正窗口生命周期和错误回退后采用；24 项 Mac 逻辑测试通过，尚未真实 Mac 视觉验收。
+架构、签名、镜像摘要、模型离线渲染、原生界面交互和实际硬件必须分别验收。验证记录见 [0.2.17 移植报告](MACOS_PORT_0.2.17.md)。
 
 ## English
 
-Same unofficial app, native Cocoa/WKWebView on Apple Silicon macOS 13.5+. Ubuntu disk and Lima are bundled; initial SDK preparation needs internet. Later VM starts are app-managed. No VMware UI or user-managed SSH credentials. Dedicated Ethernet setup requests macOS approval and excludes default-route or already-configured networks. Every connection discovers and verifies the current hand; multiple hands require selection. Hand 1 USB passthrough is not implemented. Version 0.2.7 uses native vibrancy and removes custom refraction. Ad-hoc signed, not notarized. Real VM/device and visual acceptance are separate from package checks.
+Native Apple Silicon Cocoa/WKWebView port of Windows v0.2.16. macOS 26+ uses system frosted Liquid Glass, with native vibrancy on older supported systems. Linux ARM64 is bundled; first SDK preparation still needs networking. No external screen capture, no automatic motor playback. Ad-hoc signed, not notarized. Hand 1 USB passthrough and the verified x86_64 open solver are not supported by the built-in ARM runtime. SDK mapping and draft/export remain available. Software acceptance does not establish hardware acceptance.

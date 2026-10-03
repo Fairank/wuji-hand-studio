@@ -51,7 +51,7 @@ class DesktopToolsTests(unittest.TestCase):
             root=Path(tmp);(root/'updates').mkdir();data=b'MZ'+b'test installer';digest=hashlib.sha256(data).hexdigest()
             p=root/'updates/HandWorkbench-0.1.5-windows-x64-setup.exe';p.write_bytes(data)
             edition=dict(name='basic',version='0.1.4')
-            self.assertEqual(verify_update(root,edition,'0.1.5',digest)['installer'],str(p))
+            self.assertEqual(Path(verify_update(root,edition,'0.1.5',digest)['installer']).resolve(),p.resolve())
             for version,sha,ed in [('0.1.5','0'*64,edition),('0.1.3',digest,edition),('../0.1.5',digest,edition),('0.1.5',digest,dict(name='workbench',version='0.1.6'))]:
                 with self.assertRaises(ValueError):verify_update(root,ed,version,sha)
             p.write_bytes(b'not an exe')

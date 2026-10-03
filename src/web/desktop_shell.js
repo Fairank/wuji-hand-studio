@@ -10,12 +10,20 @@
  document.body.append(menu);
  const closeDialog=document.createElement('dialog');closeDialog.id='desktop-close-dialog';
  closeDialog.innerHTML=`<h2 id="desktop-close-title"></h2><p id="desktop-close-note"></p><p id="desktop-close-status" role="status"></p><div class="desktop-close-actions"><button id="desktop-close-cancel"></button><button id="desktop-close-confirm" class="primary"></button></div>`;document.body.append(closeDialog);
- async function applyMaterial(){
-  if(!native)return;
-  const reduce=document.documentElement.dataset.reduceTransparency==='true'||matchMedia('(prefers-reduced-transparency: reduce)').matches||matchMedia('(forced-colors: active)').matches;
-  const result=await native.set_window_material(!reduce);
-  document.documentElement.dataset.externalBackdrop=String(result.external_backdrop===true);
-  document.documentElement.dataset.nativeMaterial=result.mode||'solid';if(info)info.material=result;
+ let materialQueue=Promise.resolve();
+ function applyMaterial(){
+  if(!native)return Promise.resolve();
+  // Native bridge calls run on different threads. Serialize rehosting/theme
+  // changes and read the latest preferences so rapid toggles cannot restore
+  // a stale solid material after the user has switched glass back on.
+  materialQueue=materialQueue.catch(()=>{}).then(async()=>{
+   const reduce=document.documentElement.dataset.reduceTransparency==='true'||matchMedia('(prefers-reduced-transparency: reduce)').matches||matchMedia('(forced-colors: active)').matches;
+   let result=await native.set_window_material(!reduce);
+   if(info?.platform==='macos')result=await native.set_window_appearance(document.documentElement.dataset.theme||'system');
+   document.documentElement.dataset.externalBackdrop=String(result.external_backdrop===true);
+   document.documentElement.dataset.nativeMaterial=result.mode||'solid';if(info)info.material=result;
+  });
+  return materialQueue;
  }
  function appearance(key,value){document.documentElement.dataset[key]=String(value);try{localStorage.setItem('wuji-'+key,String(value));}catch{}if(key==='reduceTransparency')applyMaterial().catch(()=>{});}
  for(const [key,id] of [['reduceTransparency','desktop-transparency'],['reduceMotion','desktop-motion']]){
@@ -49,13 +57,14 @@
  window.addEventListener('error',e=>{errors.push(String(e.message).slice(0,200));if(errors.length>20)errors.shift();});
  window.addEventListener('unhandledrejection',e=>{errors.push(String(e.reason?.message||e.reason).slice(0,200));if(errors.length>20)errors.shift();});
  window.WujiDesktop={errors,
-  setAppearance(key,value){if(key==='language'){window.WujiLocale.setLanguage(value);return;}appearance(key,value);$(key==='reduceMotion'?'desktop-motion':'desktop-transparency').checked=value;},
+  setAppearance(key,value){if(key==='language'){window.WujiLocale.setLanguage(value);return;}if(key==='theme'){window.WujiTheme.set(value);return;}appearance(key,value);$(key==='reduceMotion'?'desktop-motion':'desktop-transparency').checked=value;},
   setMenu(opened){if(opened&&!menu.open){labels();menu.showModal();}else if(!opened)menu.close();},
   confirmClose(){menu.close();labels();$('desktop-close-status').textContent='';if(!closeDialog.open)closeDialog.showModal();}};
  async function ready(){native=window.pywebview?.api;if(!native)return;info=await native.info();document.documentElement.dataset.desktop='true';document.documentElement.dataset.platform=info.platform;if($('studio-desktop'))$('studio-desktop').hidden=true;await native.set_language(window.WujiLocale.lang);await applyMaterial();labels();}
  window.addEventListener('pywebviewready',()=>ready().catch(e=>{$('desktop-menu-status').textContent=e.message;}));
  if(window.pywebview?.api)ready().catch(()=>{});
  window.addEventListener('wuji-language',()=>{labels();if(native)native.set_language(window.WujiLocale.lang).catch(()=>{});});
+ window.addEventListener('wuji-theme',()=>{if(native&&info?.platform==='macos')applyMaterial().catch(e=>errors.push(String(e.message).slice(0,200)));});
  window.addEventListener('console-state',e=>{state=e.detail;});
  for(const query of ['(prefers-reduced-transparency: reduce)','(forced-colors: active)'])matchMedia(query).addEventListener('change',()=>applyMaterial().catch(()=>{}));
  document.addEventListener('keydown',e=>{

@@ -302,6 +302,7 @@ class DesktopAPI:
     def select_key_file(self):return self._host.select_key_file()
     def set_language(self,lang):return self._host.set_language(lang)
     def set_window_material(self,enabled):return self._host.set_window_material(enabled)
+    def set_window_appearance(self,theme):return self._host.set_window_appearance(theme)
     def install_runtime_components(self):return self._host.install_runtime_components()
     def network_status(self,address=''):return self._host.network_status(address)
     def configure_device_network(self,adapter_id,address=''):return self._host.configure_device_network(adapter_id,address)

@@ -34,9 +34,11 @@
   const theme=value==='system'?(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'):value;
   document.documentElement.dataset.theme=theme;
   $('wb-theme').value=value;
+  window.dispatchEvent(new Event('wuji-theme'));
   if(!embedded)for(const frame of frames.values())frame.contentWindow?.postMessage({type:'wb-theme',value},'*');
  }
  let themeChoice=localStorage.getItem('wuji-workbench-theme')||'system';
+ window.WujiTheme={set(value){if(!['system','light','dark'].includes(value))throw Error('Unknown theme');themeChoice=value;localStorage.setItem('wuji-workbench-theme',value);themeApply(value);}};
  const fromParent=new URLSearchParams(location.search).get('theme');if(embedded&&['system','light','dark'].includes(fromParent))themeChoice=fromParent;
  themeApply(themeChoice);
  $('wb-theme').onchange=()=>{themeChoice=$('wb-theme').value;localStorage.setItem('wuji-workbench-theme',themeChoice);themeApply(themeChoice)};

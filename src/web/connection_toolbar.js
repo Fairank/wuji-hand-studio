@@ -32,16 +32,16 @@
   function open(){if(!pop.open)pop.show();status.setAttribute('aria-expanded','true');render();}
   function render(){
     const s=state,connected=online&&s?.connection==='connected',connecting=online&&s?.connection==='connecting',fresh=connected&&!s.stale;
-    title.textContent=connected?(s.device_profile?.[document.documentElement.lang==='en'?'en':'zh']||text('机械手','Hand')):text('机械手','Hand');
+    title.textContent='wuji hand';
     subtitle.textContent=!online?text('软件服务离线','Service offline'):connecting?text('正在识别…','Discovering…'):connected?(fresh?text('已连接','Connected'):text('反馈已过期','Feedback stale')):s?.connection==='error'?text('连接未完成','Connection incomplete'):text('未连接','Not connected');
     if(fresh&&Number.isFinite(s.metrics?.device_hz))subtitle.textContent+=' · '+Math.round(s.metrics.device_hz)+' Hz';
     group.dataset.state=fresh?'connected':connecting?'connecting':connected||s?.connection==='error'?'error':'disconnected';
     toggle.textContent=busy?text('请稍候','Please wait'):connecting?text('取消','Cancel'):connected?(s.hardware?.active?text('停止并断开','Stop & disconnect'):text('断开','Disconnect')):text('连接','Connect');
     toggle.disabled=busy||!online||!!s?.glove?.busy;
-    toggle.setAttribute('aria-label',toggle.textContent+' '+text('机械手','hand'));
+    toggle.setAttribute('aria-label',toggle.textContent+' wuji hand');
     heading.textContent=text('设备与连接','Devices & connections');dismiss.setAttribute('aria-label',text('关闭连接面板','Close connection panel'));dismiss.title=dismiss.getAttribute('aria-label');
     routes.setAttribute('aria-label',text('设备操作入口','Device destinations'));
-    handCard.name.textContent=text('机械手','Robot hand');handCard.value.textContent=subtitle.textContent;handCard.card.dataset.state=group.dataset.state;
+    handCard.name.textContent='wuji hand';handCard.value.textContent=subtitle.textContent;handCard.card.dataset.state=group.dataset.state;
     gloveCard.name.textContent=text('数据手套','Data glove');
     const glove=s?.glove||{};
     const gloveFresh=online&&glove.connection==='receiving'&&glove.stream?.fresh===true;

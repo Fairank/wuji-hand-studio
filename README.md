@@ -6,6 +6,12 @@
 
 一个软件、一个图标、一个安装包。公开展示与自用模型共用同一套程序；私有模型通过菜单导入为本机数据，不再提供独立“基础版 / 研究版”软件。
 
+## macOS 0.2.17
+
+以 Windows `v0.2.16-windows` 为基线移植到 Apple Silicon，保留节目单、多手工作区、标定与映射页面。macOS 26+ 使用系统 `NSGlassEffectView` 磨砂玻璃，较旧系统回退原生 vibrancy；不截取外部屏幕。右上角设备名称统一为 `wuji hand`。安装方式和限制见 [Mac 说明](docs/MACOS.md)。
+
+Mac 内置 Linux 为 ARM64。当前锁定的开源求解器仅有已验证的 Linux x86_64 环境，因此内置模式明确禁用其安装入口；SDK 映射、参数草稿及导出保留。此次移植由 Codex 主助手和低成本子 Codex 完成；Claude Code 调用因组织权限被拒，未参与此次代码生成。
+
 ## Windows 下载和启动
 
 在 [Releases](../../releases) 选择实际已上传的安装包。Windows 0.2.16 是同一软件的原位更新，当前用户安装，无需另装 Python。Windows 安装器检查微软 WebView2 运行时，缺少时联网安装。包暂未进行发布者代码签名，附有 SHA-256 校验文件。本次操作方式见 [节目单说明](docs/PLAYLIST_EDITOR.md)，发布验证记录见对应 Release。

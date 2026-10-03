@@ -69,6 +69,27 @@ body .settings-route{display:flex;align-items:center;justify-content:space-betwe
 .settings-route>span:last-child{font-size:23px;color:var(--wb-sub)}
 .settings-route:last-child{border-bottom:0}.settings-route:hover strong{text-decoration:underline;text-underline-offset:4px}
 .settings-route:disabled{opacity:.5;cursor:default}.settings-route:disabled:hover strong{text-decoration:none}
+
+/* Public AppKit glass owns the entire native surround. Reserve the system
+   titlebar rather than overlaying HTML controls on the traffic-light buttons. */
+html[data-platform=macos][data-desktop=true] .top{top:36px}
+html[data-platform=macos][data-desktop=true] .directory,
+html[data-platform=macos][data-desktop=true] .page-area{top:109px}
+html[data-platform=macos][data-external-backdrop=true] .top,
+html[data-platform=macos][data-external-backdrop=true] .directory{
+ background:transparent!important;backdrop-filter:none!important;-webkit-backdrop-filter:none!important;
+ border-color:var(--wb-line);box-shadow:none;
+}
+html[data-platform=macos][data-theme=dark] .page-area{background:#222329}
+html[data-platform=macos][data-theme=dark][data-reduce-transparency=true] body{background:#222329!important}
+/* Hosted WKWebView may suspend decorative CSS timelines when AppKit
+   rehosts its content for glass. Labels and selections must paint immediately;
+   this does not change the model stream, program timing or motor control. */
+html[data-platform=macos][data-desktop=true] *,
+html[data-platform=macos][data-desktop=true] *::before,
+html[data-platform=macos][data-desktop=true] *::after{
+ transition:none!important;animation:none!important;
+}
 #connection-glove-summary{padding:14px 0;border-top:1px solid var(--wb-line);font-size:13px;line-height:1.6}
 #connection-glove-summary p{margin:0 0 10px}.connection-glove-links{display:flex;gap:16px;flex-wrap:wrap}
 html[data-theme=dark] img.studio-brand{filter:invert(1)}

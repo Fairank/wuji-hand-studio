@@ -11,9 +11,9 @@ class SolverIntegrationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             root=Path(td);source=root/'controller/source';source.mkdir(parents=True)
             (source/'agent_bootstrap.py').write_text('# fixture')
-            with patch.object(m.sys,'frozen',True,create=True),patch.object(m.sys,'executable',str(root/'HandWorkbench.exe')),patch.object(m,'check_ready'),patch.object(m,'Files'),patch('controller_bundle.ensure_version',return_value='/opt/hand-workbench/code/fixture') as deploy,patch('controller_launch.parameter_environment',return_value='TEST=1'):
+            with patch.object(m.sys,'frozen',True,create=True),patch.object(m.sys,'executable',str(root/'HandWorkbench.exe')),patch.object(m,'args',side_effect=lambda command,user='workbench':command),patch.object(m,'check_ready'),patch.object(m,'Files'),patch('controller_bundle.ensure_version',return_value='/opt/hand-workbench/code/fixture') as deploy,patch('controller_launch.parameter_environment',return_value='TEST=1'):
                 m.WslController({},'hand2_left')
-                self.assertEqual(deploy.call_args.args[0],source)
+                self.assertEqual(Path(deploy.call_args.args[0]).resolve(),source.resolve())
 
     def test_empty_controller_bundle_is_not_a_successful_deployment(self):
         from controller_bundle import ensure_version

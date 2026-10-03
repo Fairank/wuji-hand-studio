@@ -82,8 +82,9 @@ def dispatch(host, payload):
         return dict(ok=True)
     if op == 'appearance':
         key, value = payload.get('key'), payload.get('value')
-        if key not in ('reduceTransparency', 'reduceMotion', 'language') or (
-                value not in ('zh', 'en') if key == 'language' else type(value) is not bool):
+        if key not in ('reduceTransparency', 'reduceMotion', 'language', 'theme') or (
+                value not in ('zh', 'en') if key == 'language' else
+                value not in ('system', 'light', 'dark') if key == 'theme' else type(value) is not bool):
             raise ValueError('Unsupported appearance setting')
         return host.appearance(key, value)
     if op == 'menu':

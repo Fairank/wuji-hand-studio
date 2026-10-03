@@ -1,12 +1,14 @@
 """Verify a real Mac artifact without claiming VM, device or visual acceptance."""
 import hashlib
 import json
+import os
 from pathlib import Path
 import platform
 import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
-APP = ROOT / 'dist/HandWorkbench.app'
+DIST = Path(os.environ.get('WUJI_DIST_DIR', str(ROOT / 'dist'))).expanduser().resolve()
+APP = DIST / 'HandWorkbench.app'
 
 
 def main():
@@ -29,7 +31,7 @@ def main():
     result = dict(architecture=arch, bundle_verified=True, bundled_linux=True,
                   ad_hoc_signed=True, notarized=False, native_ui_opened=False,
                   vm_boot_verified=False, real_hand_verified=False, liquid_glass_visually_verified=False)
-    (ROOT / 'dist/macos-validation.json').write_text(json.dumps(result, indent=2))
+    (DIST / 'macos-validation.json').write_text(json.dumps(result, indent=2))
     print(json.dumps(result))
 
 
