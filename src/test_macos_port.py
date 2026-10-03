@@ -70,7 +70,10 @@ class MacRuntimeTests(unittest.TestCase):
             self.assertEqual(run.call_args.args, ('start', '--tty=false', runtime.NAME))
 
     def test_transport_does_not_allow_another_command(self):
-        with patch.object(runtime, 'ensure_running'), patch.object(runtime, 'args', side_effect=lambda x:x):
+        with patch.object(runtime, 'ensure_running'), \
+             patch.object(runtime, 'args', side_effect=lambda x:x), \
+             patch.object(runtime, 'Files'), \
+             patch('controller_bundle.ensure_version', return_value='/opt/hand-workbench/code/test-fixture'):
             client = runtime.MacController({}, 'hand2_left')
         with patch.object(runtime.subprocess, 'Popen') as popen:
             with self.assertRaises(ValueError):
