@@ -23,6 +23,10 @@ DESCRIPTIONS={
 THUMB_TUCK=(.95,.10,1.10,.65)
 THUMB_EXTEND=(-.60,-.30,.05,.05)
 FAN=(0.,-.32,-.10,.13,.36)
+# A relaxed curl varies with finger length instead of setting four identical
+# rigid cylinders. Values remain authored targets, not recorded human data.
+FOLDED=((.78,0.,1.18,.78),(.84,0.,1.25,.82),
+        (.92,0.,1.28,.78),(1.00,0.,1.20,.70))
 SEVEN=(.930261,-.457870,.505524,.277122,
        .618314,.000384,.987046,.612804,
        .724803,-.039430,.916238,.552755,
@@ -32,17 +36,22 @@ def digit(number):
     if type(number) is not int or not 0<=number<=9:
         raise ValueError('Digit must be an integer from 0 to 9')
     if number==7:return list(SEVEN)
-    q=list(THUMB_TUCK)+[.85,0.,1.2,.9]*4
+    q=list(THUMB_TUCK)+[x for pose in FOLDED for x in pose]
     extended={0:(),1:(1,),2:(1,2),3:(1,2,3),4:(1,2,3,4),
               5:(1,2,3,4),6:(4,),8:(1,),9:(1,)}[number]
-    for f in extended:q[4*f:4*f+4]=[.04,FAN[f],.04,.04]
+    for f in extended:q[4*f:4*f+4]=[.06,FAN[f],.07,.05]
     if number in (5,6,8):q[:4]=THUMB_EXTEND
     # Folded fingers occupy the palm for 0/1/2: the thumb rests outside them.
     # Four extended fingers leave room for the full inward thumb tuck of 4.
-    if number in (0,1,2):q[:4]=[.30,-.30,.70,.50]
+    if number==0:
+        # Fold the thumb across the palm toward the curled index; native-mesh
+        # FK places the tips about 11–13 mm apart, without contact validation.
+        q[:4]=[.30,-.65,1.30,.55]
+    if number in (1,2):q[:4]=[.30,-.30,.70,.50]
     if number==1:q[5]=-.10
     if number==8:q[5]=-.22
     if number==9:
         q[4:8]=[.08,-.14,1.30,.65]
-        q[:4]=[.55,-.25,.70,.45]
+        # Hooked index with the thumb tucked beside the curled fingers.
+        q[:4]=[.55,-.70,1.20,.60]
     return q

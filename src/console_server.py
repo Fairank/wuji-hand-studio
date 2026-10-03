@@ -368,6 +368,10 @@ class Controller:
                     if self.state['recording']['active']:raise ValueError('先停止采集')
                     if name in {'hardware_probe','hardware_trial'} and hardware.get('trial_controls_version')!=3:
                         raise ValueError('请断开后重新连接，加载官方参数版本的动作程序')
+                    action_id=command.get('action','')
+                    action_meta=next((item for item in CATALOG if item['id']==action_id),None)
+                    if name in {'hardware_start','hardware_trial'} and action_meta is not None and action_meta.get('hardware') is False:
+                        raise ValueError('Preview-only actions cannot be started on hardware')
                     if name=='hardware_start':
                         if not hardware['ready']:raise ValueError(hardware['reason'])
                         if command.get('action') not in hardware['actions']:raise ValueError('该动作尚未实机核验')
@@ -385,7 +389,6 @@ class Controller:
                         fast=type(command.get('speed',1.)) in {int,float} and command.get('speed',1.)>1
                         if fast and self.state['device_profile']['generation']=='hand1':
                             raise ValueError('一代实机暂不支持超过1倍；可用画面预览 / Hand 1 supports up to 1x on hardware')
-                        action_id=command.get('action','')
                         revised=action_id in DANCES or action_id in {'count_digits','clock','text_sequence','splay'} or str(action_id).startswith('digit_')
                         required=4 if revised else 3 if fast else 2 if action_id in PROGRAM_IDS else 1
                         version=hardware.get('gesture_library_version',0)
@@ -747,6 +750,9 @@ class Handler(BaseHTTPRequestHandler):
             assets['/'+name]=(name,'text/javascript; charset=utf-8')
         for name in ('studio.css','floating_panel.css','glass.css','glove.css','desktop_glass.css','desktop_refinement.css','glass_refresh.css','workbench_upgrade.css','connection_hub.css','calibration_guide.css','pose_grid.css','group_panel.css','workspaces.css','group_view.css','workbench_sheet.css','workbench_clarity.css','numeric_grid.css','retarget_tuning.css','joint_inspector.css','connection_refinement.css','control_surfaces.css','spring_motion.css','playlist_editor.css'):
             assets['/'+name]=(name,'text/css; charset=utf-8')
+        assets.update({'/polish.js': ('polish.js', 'text/javascript; charset=utf-8'),
+                       '/polish.css': ('polish.css', 'text/css; charset=utf-8'),
+                       '/viewer.css': ('viewer.css', 'text/css; charset=utf-8')})
         assets['/viewer']=('viewer.html','text/html; charset=utf-8')
         assets['/favicon.ico']=('favicon.ico','image/x-icon')
         assets['/app-icon.png']=('app-icon.png','image/png')

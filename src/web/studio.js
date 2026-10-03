@@ -61,6 +61,7 @@
       if(kind==='closed')window.HandWorkbenchPlaylist?.close();
       return picker.show(kind);
     },
+    isHardwareActionAllowed(action){return !picker.isPreviewOnly(action);},
     async preview(action,speed){
       if(!catalog?.actions.some(x=>x.id===action))throw Error('Action is not available in this picker');
       const result=await post({name:'demo_start',action,speed,cycles:0,...picker.payload});
@@ -88,6 +89,7 @@
       $('trial-amplitude').value=['numbers','dance','letters'].includes(group)?'1':'0.25';
     }
     amplitudeLabels();
+    picker.render();
   }
   function restorePlayback(){
     if(restored||!catalog||!state)return;restored=true;
@@ -127,7 +129,7 @@
       for(const item of catalog.actions){let o=[...select.options].find(o=>o.value===item.id);if(!o){o=new Option('',item.id);select.add(o);}o.textContent=L.lang==='en'?item.en:item.zh;}
       select.value=value;
     }
-    if(catalog)picker.setCatalog([...catalog.actions,...[['joints','逐关节活动','Joint preview'],['thumb','拇指活动','Thumb preview'],['index','食指活动','Index preview'],['middle','中指活动','Middle preview'],['ring','无名指活动','Ring preview'],['little','小指活动','Little finger preview']].map(([id,zh,en])=>({id,zh,en,group:'preview',hardware:false}))]);touchState();modeLabels();
+    if(catalog)picker.setCatalog([...catalog.actions,...[['joints','逐关节活动','Joint preview'],['thumb','拇指活动','Thumb preview'],['index','食指活动','Index preview'],['middle','中指活动','Middle preview'],['ring','无名指活动','Ring preview'],['little','小指活动','Little finger preview']].map(([id,zh,en])=>({id,zh,en,group:'preview',source:'project',hardware:false,note_zh:'仅供画面预览；非官方动作，未经实机验证。',note_en:'Preview only; not an official motion; not hardware-validated.'}))]);touchState();modeLabels();
     if(catalog){$('official-list').replaceChildren(...catalog.official_inventory.map(item=>{const li=document.createElement('li');const a=node('a',item.name);a.href=item.url;a.target='_blank';a.rel='noopener';li.append(a,node('p',item.detail));return li;}));}
     staticEnglish();
   }

@@ -7,7 +7,7 @@ from datetime import datetime
 import json
 import math
 from pathlib import Path
-from performance_program import DANCES, PROGRAM_IDS, DANCE_REFERENCES, SIGN_REFERENCE
+from performance_program import DANCES, PROGRAM_IDS, DANCE_REFERENCES, SIGN_REFERENCE, PREVIEW_ONLY_IDS
 from chinese_digits import digit, DESCRIPTIONS as DIGIT_DESCRIPTIONS, REFERENCE as DIGIT_REFERENCE, CONVENTION
 
 LETTERS = 'ABCDEFGHIKLMNOPQRSTUVWXY'
@@ -37,7 +37,11 @@ CATALOG += [entry('alphabet','静态字母串 · 不含 J / Z','Static letter se
 CATALOG += [entry('text_sequence','文字顺序展示','Text sequence','letters'),
     entry('letter_J','字母 J · 动态近似','Letter J · motion approximation','letters'),
     entry('letter_Z','字母 Z · 动态近似','Letter Z · motion approximation','letters')]
-CATALOG += [entry(k,z,e,'dance',note=DANCE_REFERENCES[k]) for k,(z,e,_) in DANCES.items()]
+for k,(z,e,_) in DANCES.items():
+    preview_only=k in PREVIEW_ONLY_IDS
+    note=('Project-authored large-range visual exploration; preview only, not an official recording or hardware action.'
+          if preview_only else DANCE_REFERENCES[k])
+    CATALOG.append(dict(entry(k,z,e,'dance',note=note),hardware=not preview_only))
 CUSTOM_IDS = {x['id'] for x in CATALOG} - {'open','fist','opposition','sequence','official_opposition'}
 
 OFFICIAL_INVENTORY = [

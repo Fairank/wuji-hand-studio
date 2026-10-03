@@ -23,6 +23,9 @@ NAMES.update({x:x for x in INTERNAL_IDS})
 
 
 def make_trial(q,action,amplitude,cycles,path=POSES,*,speed=1.,clock_at=None,text='WUJI TECH'):
+    metadata=next((item for item in CATALOG if item['id']==action),None)
+    if metadata is not None and metadata.get('hardware') is False:
+        raise ValueError('This large-range exploration is preview-only and cannot be used for a hardware trial')
     if action not in NAMES or type(amplitude) not in {int,float} or amplitude not in {.25,.5,.75,1.}:
         raise ValueError('请选择试运行动作和25/50/75/100%幅度')
     if type(cycles) is not int or cycles not in {1,3}:raise ValueError('试运行支持1或3轮')

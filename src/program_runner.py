@@ -32,6 +32,9 @@ class ProgramRunner:
         plan=validate_plan(command.get('plan'),allowed)
         mode=command.get('mode')
         if mode not in ('preview','hardware'):raise ValueError('Choose preview or real hand')
+        preview_only={item['id'] for item in CATALOG if item.get('hardware') is False}
+        if mode=='hardware' and any(row['action'] in preview_only for row in plan['entries']):
+            raise ValueError('Preview-only actions cannot be used in a hardware playlist')
         amplitude=command.get('amplitude',1.)
         if type(amplitude) not in (int,float) or amplitude not in (.25,.5,.75,1.):raise ValueError('Invalid amplitude')
         s=self.controller.snapshot()

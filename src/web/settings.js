@@ -28,8 +28,13 @@
  for(const id of ['wb-auto-hand-label','wb-auto-glove-label']){const label=$(id),row=label.closest('.wb-row');row.classList.add('settings-row','settings-discovery');label.append(label.querySelector('input'));discovery.append(row);}
  discovery.append(el('p','发现多只设备时需要选择；网络或控制端未就绪时，在连接页查看具体原因。','Select a device when multiple are found. Connection details show network or controller issues.','settings-footnote'));
  const appearanceRow=$('wb-theme').closest('.wb-row');appearanceRow.classList.add('settings-row');
- const languageRow=el('div',undefined,undefined,'wb-row settings-row'),languageLabel=el('label','语言','Language'),language=el('select');language.id='settings-language';languageLabel.htmlFor=language.id;
+ const languageRow=el('div',undefined,undefined,'wb-row settings-row'),languageLabel=el('label','语言','Language'),language=el('select');language.id='settings-language';languageLabel.id='settings-language-label';languageLabel.htmlFor=language.id;
  language.append(new Option('简体中文','zh'),new Option('English','en'));language.value=L.lang;language.onchange=()=>L.setLanguage(language.value);languageRow.append(languageLabel,language);appearanceRow.after(languageRow);
+ const fontRow=el('div',undefined,undefined,'wb-row settings-row'),fontLabel=el('label','字体大小','Text size'),fontSize=el('select');fontSize.id='settings-font-size';fontLabel.htmlFor=fontSize.id;
+ fontSize.append(new Option('小 · 90%','90'),new Option('标准 · 100%','100'),new Option('大 · 110%','110'));
+ for(const option of fontSize.options){option.textContent=L.lang==='en'?({90:'Small · 90%',100:'Default · 100%',110:'Large · 110%'})[Number(option.value)]:({90:'小 · 90%',100:'标准 · 100%',110:'大 · 110%'})[Number(option.value)];}
+ try{fontSize.value=['90','100','110'].includes(localStorage.getItem('wuji-font-scale'))?localStorage.getItem('wuji-font-scale'):'100';}catch{fontSize.value='100';}
+ fontSize.onchange=()=>window.WujiPolish?.setFontScale(fontSize.value);fontRow.append(fontLabel,fontSize);languageRow.after(fontRow);
  // Move, do not clone: checked state, native callbacks and persistence stay intact.
  const oldPreferenceSection=$('desktop-transparency').closest('.desktop-menu-section');
  for(const id of ['desktop-transparency','desktop-motion']){const label=$(id).closest('label');label.className='settings-row settings-toggle';appearance.append(label);}
@@ -61,6 +66,6 @@
  const version=el('p');version.id='settings-version';about.append(version);
  function syncNative(){for(const button of tools.querySelectorAll('[data-desktop-action]'))button.disabled=$(button.dataset.desktopAction).disabled;version.textContent=$('desktop-about').textContent;}
  const observer=new MutationObserver(syncNative);observer.observe($('desktop-about'),{childList:true,subtree:true});syncNative();
- window.addEventListener('wuji-language',()=>{for(const [node,zh,en] of textNodes)node.textContent=t(zh,en);language.value=L.lang;tabs.setAttribute('aria-label',t('设置分类','Settings categories'));syncNative();});
+ window.addEventListener('wuji-language',()=>{for(const [node,zh,en] of textNodes)node.textContent=t(zh,en);language.value=L.lang;for(const option of fontSize.options)option.textContent=t(({90:'小 · 90%',100:'标准 · 100%',110:'大 · 110%'})[Number(option.value)],({90:'Small · 90%',100:'Default · 100%',110:'Large · 110%'})[Number(option.value)]);tabs.setAttribute('aria-label',t('设置分类','Settings categories'));syncNative();});
  tabs.setAttribute('aria-label',t('设置分类','Settings categories'));show('appearance');
 })();

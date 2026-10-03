@@ -24,6 +24,9 @@ class View:
         for old in list(self.children): old.removeFromSuperview()
         if view is not None: self.addSubview_(view)
     def contentView(self): return self.children[0] if self.children else None
+    def setStyle_(self, value): self.effect_style = value
+    def setMaterial_(self, value): self.effect_material = value
+    def setBlendingMode_(self, value): self.effect_blending = value
     def window(self): return self.parent.window() if self.parent else None
     def __getattr__(self, name):
         if name.startswith('set'): return lambda *a:None
@@ -67,7 +70,7 @@ class MaterialTests(unittest.TestCase):
             NSWorkspace=types.SimpleNamespace(sharedWorkspace=lambda:types.SimpleNamespace(accessibilityDisplayShouldReduceTransparency=lambda:self.reduced)),
             NSColor=types.SimpleNamespace(windowBackgroundColor=lambda:'opaque', clearColor=lambda:'clear'),
             NSAppearance=types.SimpleNamespace(appearanceNamed_=lambda name: ('appearance', name)))
-        for name in ('NSVisualEffectMaterialSidebar','NSVisualEffectBlendingModeBehindWindow','NSVisualEffectStateActive','NSBoxCustom','NSNoTitle','NSViewWidthSizable','NSViewHeightSizable', 'NSWindowStyleMaskFullSizeContentView','NSWindowTitleHidden','NSTitlebarSeparatorStyleNone','NSAppearanceNameDarkAqua','NSAppearanceNameAqua'):
+        for name in ('NSVisualEffectMaterialUnderWindowBackground','NSVisualEffectBlendingModeBehindWindow','NSVisualEffectStateActive','NSBoxCustom','NSNoTitle','NSViewWidthSizable','NSViewHeightSizable', 'NSWindowStyleMaskFullSizeContentView','NSWindowTitleHidden','NSTitlebarSeparatorStyleNone','NSAppearanceNameDarkAqua','NSAppearanceNameAqua'):
             setattr(appkit, name, 1)
         foundation = types.SimpleNamespace(NSClassFromString=lambda name:View if self.modern else None,
                                          NSThread=types.SimpleNamespace(isMainThread=lambda:True))
@@ -113,6 +116,22 @@ class MaterialTests(unittest.TestCase):
         self.reduced = False
         self.assertEqual(material.apply()['material'], 'macos_glass')
         self.assertTrue(material._attached())
+
+    def test_clear_surface_keeps_real_frost_backing_and_content(self):
+        self.modern = True
+        material = WindowMaterial(self.window)
+        material.configure('light', 'clear')
+        result = material.apply()
+        backing = self.window.contentView()
+        self.assertEqual(backing.effect_material, 1)
+        self.assertEqual(backing.effect_blending, 1)
+        self.assertEqual(backing.children[0].effect_style, 1)
+        self.assertEqual(result['glass_style'], 'clear')
+        self.assertEqual(result['backdrop'], 'behind_window_frost')
+        self.assertTrue(result['content_attached'])
+        material.configure('dark', 'frosted')
+        self.assertEqual(backing.children[0].effect_style, 0)
+        self.assertIs(backing.children[0].contentView(), self.original)
 
     def test_repeated_mode_does_not_nest_or_replace_wrapper(self):
         material = WindowMaterial(self.window)

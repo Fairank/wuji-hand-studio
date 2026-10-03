@@ -28,7 +28,7 @@ class MacDesktop(NativeDesktop):
         window.run_js = run_script
         # Trusted, fixed host operations use WebKit's native evaluator, not
         # JavaScript eval(). Do not relax script-src for desktop integration.
-        def evaluate(script, callback=None):
+        def evaluate(script, callback=None, *, await_promise=False):
             from Foundation import NSJSONSerialization, NSJSONWritingFragmentsAllowed, NSThread
             from PyObjCTools import AppHelper
             from webview.platforms.cocoa import BrowserView
@@ -55,7 +55,17 @@ class MacDesktop(NativeDesktop):
                 if cancelled.is_set():
                     return
                 try:
-                    BrowserView.instances[window.uid].webview.evaluateJavaScript_completionHandler_(script, completed)
+                    view = BrowserView.instances[window.uid].webview
+                    if await_promise:
+                        # WKWebView's synchronous evaluator cannot serialize a
+                        # Promise. Await the fixed host expression through the
+                        # public asynchronous API; never eval page-provided code.
+                        from WebKit import WKContentWorld
+                        view.callAsyncJavaScript_arguments_inFrame_inContentWorld_completionHandler_(
+                            'return await (' + script + ');', {}, None,
+                            WKContentWorld.pageWorld(), completed)
+                    else:
+                        view.evaluateJavaScript_completionHandler_(script, completed)
                 except Exception as failure:
                     result['error'] = failure
                     done.set()
@@ -77,6 +87,11 @@ class MacDesktop(NativeDesktop):
         result.update(platform='macos', engine='WKWebView', external_capture_supported=False)
         return result
 
+    def preview(self, action, speed):
+        return self.window.evaluate_js(
+            'window.WujiWorkbench.preview(' + json.dumps(action) + ',' + json.dumps(speed) + ')',
+            await_promise=True)
+
     def set_window_material(self, enabled):
         if type(enabled) is not bool:
             raise ValueError('Expected boolean material preference')
@@ -92,8 +107,11 @@ class MacDesktop(NativeDesktop):
         if self.mac_material is None:
             from macos_material import WindowMaterial
             self.mac_material = WindowMaterial(self.window.native)
+        # The backing NSVisualEffectView already supplies real behind-window
+        # frost. Regular glass adds a second dense white/black fill across a
+        # hosted WebView; use the public Clear surface to retain that backdrop.
         self.material = self.mac_material.apply(self.mac_material.requested,
-                                               theme=theme, glass_style='frosted')
+                                               theme=theme, glass_style='clear')
         return self.material
 
     def install_runtime_components(self):

@@ -2,7 +2,7 @@
 (() => {
   'use strict';
   window.WujiActionPicker={create({root,text,onSelect}){
-    let catalog=[],selected='official_opposition',lastHardware=selected,kind='letters',busy=false,allowPreview=false,phrase='WUJI TECH';
+    let catalog=[],selected='official_opposition',kind='letters',busy=false,allowPreview=false,phrase='WUJI TECH';
     const letters='ABCDEFGHIJKLMNOPQRSTUVWXYZ',digits='0123456789';
     root.className='compact-picker';
     root.innerHTML=`<label for="studio-action" id="studio-action-label"></label><div class="action-select-row"><select id="studio-action"></select><div class="symbol-shortcuts"><button type="button" id="choose-letter"></button><button type="button" id="choose-digit"></button></div></div><p class="action-selection-note" id="action-selection-note"></p><div id="phrase-strip" class="phrase-strip"></div><p id="performance-status" class="performance-status" role="status"></p><a id="performance-export" class="performance-export" hidden></a>`;
@@ -34,7 +34,7 @@
     }
     function choose(id){
       if(busy||!catalog.some(x=>x.id===id))return;
-      selected=id;if(catalog.find(x=>x.id===id)?.hardware!==false)lastHardware=id;render();onSelect(id);
+      selected=id;render();onSelect(id);
     }
     function open(next){
       if(busy)return;
@@ -46,21 +46,21 @@
       if(allowPreview)groups.push(['preview',text('单指 / 关节（仅预览）','Finger / joint (preview only)')]);
       const opts=[];
       for(const [key,label] of groups){const group=document.createElement('optgroup');group.label=label;for(const item of catalog.filter(x=>x.group===key&&!/^(letter_|digit_)/.test(x.id)))group.append(new Option(text(item.zh,item.en),item.id));if(group.children.length)opts.push(group);}
-      if(/^(letter_|digit_)/.test(selected)){
+      if(/^(letter_|digit_)/.test(selected)||(!allowPreview&&catalog.find(x=>x.id===selected)?.hardware===false)){
         const item=catalog.find(x=>x.id===selected);if(item){const g=document.createElement('optgroup');g.label=text('当前选择','Current selection');g.append(new Option(text(item.zh,item.en),item.id));opts.unshift(g);}
       }
       select.replaceChildren(...opts);select.value=selected;
       $('studio-action-label').textContent=text('展示动作','Selected action');
       $('choose-letter').textContent=text('输入文字…','Enter text…');$('choose-digit').textContent=text('选择数字…','Choose digit…');
       const item=catalog.find(x=>x.id===selected);
-      $('action-selection-note').textContent=!item?text('正在加载动作','Loading actions'):item.hardware===false?text('仅供画面预览；切回真实手时恢复上次实机动作。','Preview only; switching to Real hand restores its previous selection.'):item.group==='letters'?text('近似手指造型 · 尚未实机验收','Approximate finger shape · not hardware-validated'):item.id==='clock'?text('播放时读取本机 HH:MM，依次展示四位数字。','Captures local HH:MM at start and displays four digits.'):item.source==='official'?text('官方源码适配 · 按当前幅度和速度播放','Adapted official example · uses selected amplitude and speed'):text('项目编排动作 · 新选择在下次播放时生效','Scripted motion · changes apply on the next playback');
+      $('action-selection-note').textContent=!item?text('正在加载动作','Loading actions'):item.hardware===false?text(item.note_zh||(item.group==='dance'?'项目自编的大幅度视觉探索；仅供画面预览；真实手模式会禁用实机启动；非官方录制，未经实机验证。':'仅供画面预览；真实手模式会禁用实机启动；非官方动作，未经实机验证。'),item.note_en||(item.group==='dance'?(item.note?item.note+' Hardware start is disabled in Real hand mode; hardware validation is incomplete.':'Project-authored large-range visual exploration; preview only; hardware start is disabled in Real hand mode; not official or hardware-validated.'):'Preview only; hardware start is disabled in Real hand mode; not an official motion and not hardware-validated.')):item.group==='letters'?text('近似手指造型 · 尚未实机验收','Approximate finger shape · not hardware-validated'):item.id==='clock'?text('播放时读取本机 HH:MM，依次展示四位数字。','Captures local HH:MM at start and displays four digits.'):item.source==='official'?text('官方源码适配 · 按当前幅度和速度播放','Adapted official example · uses selected amplitude and speed'):text('项目编排动作 · 新选择在下次播放时生效','Scripted motion · changes apply on the next playback');
       [select,$('choose-letter'),$('choose-digit')].forEach(x=>x.disabled=busy||!catalog.length);
       if(selected==='text_sequence')$('action-selection-note').textContent=text('依次展示：','Sequence: ')+phrase;
-      if(item?.group==='dance')$('action-selection-note').textContent=text('真人教程启发 · 连续关节曲线 · 固定底座改编','Inspired by human tutorials · continuous curves · fixed-base adaptation');
-      if(item?.id.startsWith('digit_'))$('action-selection-note').textContent=text(item.description_zh,item.description_en);
-      const exportable=selected==='text_sequence'||selected==='letter_J'||selected==='letter_Z'||item?.group==='dance';
+      if(item?.group==='dance'&&item.hardware!==false)$('action-selection-note').textContent=text('真人教程启发 · 连续关节曲线 · 固定底座改编','Inspired by human tutorials · continuous curves · fixed-base adaptation');
+      if(item?.id.startsWith('digit_')&&item.hardware!==false)$('action-selection-note').textContent=text(item.description_zh,item.description_en);
+      const exportable=item?.hardware!==false&&(selected==='text_sequence'||selected==='letter_J'||selected==='letter_Z'||item?.group==='dance');
       const link=$('performance-export');link.hidden=!exportable;link.textContent=text('下载关节轨迹 · 1000 Hz CSV','Download joint trajectory · 1000 Hz CSV');
-      link.href='/api/performance?action='+encodeURIComponent(selected)+'&text='+encodeURIComponent(phrase)+'&format=csv';
+      if(exportable)link.href='/api/performance?action='+encodeURIComponent(selected)+'&text='+encodeURIComponent(phrase)+'&format=csv';else link.removeAttribute('href');
       $('phrase-strip').replaceChildren(...(selected==='text_sequence'?[...phrase].map(c=>{const s=document.createElement('span');s.textContent=c===' '?'·':c;s.dataset.space=String(c===' ');return s;}):[]));
       if(dialog.open)dialogLabels();
     }
@@ -72,6 +72,6 @@
     $('symbol-form').addEventListener('submit',e=>{e.preventDefault();const c=valid();if(c&&!busy){if(kind==='letters'){phrase=c;choose('text_sequence');}else choose('digit_'+c);dialog.close();}});
     // HTML dialog supplies Escape dismissal, focus containment and focus return.
     render();
-    return {show(value){if(value==='closed')dialog.close();else open(value);return {ok:true,kind:value};},restore(id,value){if(catalog.some(x=>x.id===id)){selected=id;if(typeof value==="string"&&value)phrase=value;render();}},setCatalog(data){catalog=data;render();},setPreview(value){allowPreview=value;if(!value&&catalog.find(x=>x.id===selected)?.hardware===false){selected=lastHardware;onSelect(selected);}render();},render,setBusy(value){busy=value;[select,$('choose-letter'),$('choose-digit')].forEach(x=>x.disabled=busy||!catalog.length);if(dialog.open)draft();},update(state){const p=state.playback,h=state.hardware;const active=p?.active&&p.action===selected;const idx=h?.active&&h.action===selected&&h.text===phrase?h.token_index:active&&p.text===phrase?p.token_index:-1;[...$('phrase-strip').children].forEach((e,i)=>e.setAttribute('aria-current',String(i===idx)));$('performance-status').textContent=h?.active?h.trial_phase||'':active?p.label+' · '+text('预览','Preview')+' '+Math.round(100*((!p.running&&p.cycles&&p.elapsed_s>=p.duration_s*p.cycles)?1:(p.elapsed_s%p.duration_s)/p.duration_s))+'%':'';},get payload(){return selected==='text_sequence'?{text:phrase}:{};},get selected(){return selected;}};
+    return {show(value){if(value==='closed')dialog.close();else open(value);return {ok:true,kind:value};},restore(id,value){if(catalog.some(x=>x.id===id)){selected=id;if(typeof value==="string"&&value)phrase=value;render();}},setCatalog(data){catalog=data;render();},setPreview(value){allowPreview=value;render();},isPreviewOnly(id){const item=catalog.find(x=>x.id===(id||selected));return item?.hardware===false;},render,setBusy(value){busy=value;[select,$('choose-letter'),$('choose-digit')].forEach(x=>x.disabled=busy||!catalog.length);if(dialog.open)draft();},update(state){const p=state.playback,h=state.hardware;const active=p?.active&&p.action===selected;const idx=h?.active&&h.action===selected&&h.text===phrase?h.token_index:active&&p.text===phrase?p.token_index:-1;[...$('phrase-strip').children].forEach((e,i)=>e.setAttribute('aria-current',String(i===idx)));$('performance-status').textContent=h?.active?h.trial_phase||'':active?p.label+' · '+text('预览','Preview')+' '+Math.round(100*((!p.running&&p.cycles&&p.elapsed_s>=p.duration_s*p.cycles)?1:(p.elapsed_s%p.duration_s)/p.duration_s))+'%':'';},get payload(){return selected==='text_sequence'?{text:phrase}:{};},get selected(){return selected;}};
   }};
 })();

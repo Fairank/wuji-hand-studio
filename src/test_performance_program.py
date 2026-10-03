@@ -1,8 +1,10 @@
 """Offline regression checks for phrase transport and continuous motion curves."""
 import io,json,math,tempfile,time,unittest
+import numpy as np
 from pathlib import Path
 from unittest.mock import patch
 from performance_program import program,sample,DANCES,segment_peak
+from performance_program import PREVIEW_ONLY_IDS
 from motion_timing import segment_position
 from hardware_trial import make_trial
 from official_policy import LOWER_RAD,UPPER_RAD
@@ -29,9 +31,32 @@ class PerformanceTests(unittest.TestCase):
                 a=segment_position(pts[i-1],pts[i],t-epsilon);b=pts[i]['q'];c=segment_position(pts[i],pts[i+1],t+epsilon)
                 self.assertLess(max(abs((y-x)/epsilon-(z-y)/epsilon) for x,y,z in zip(a,b,c)),.001)
 
+    def test_preview_only_range_curves_are_bounded_smooth_and_recentered(self):
+        open_pose=__import__('gesture_library').poses()['open']
+        for action in PREVIEW_ONLY_IDS:
+            data=program(action);points=data['points']
+            self.assertTrue(data['hardware_preview_only'],action)
+            self.assertFalse(data['hardware_validated'],action)
+            self.assertEqual(points[0]['q'],open_pose,action)
+            self.assertEqual(points[-1]['q'],open_pose,action)
+            self.assertEqual(points[0]['v'],[0.]*20,action)
+            self.assertEqual(points[-1]['v'],[0.]*20,action)
+            q=np.asarray([point['q'] for point in points])
+            self.assertTrue(np.isfinite(q).all(),action)
+            self.assertTrue(np.all(q>=np.asarray(LOWER_RAD)),action)
+            self.assertTrue(np.all(q<=np.asarray(UPPER_RAD)),action)
+            for a,b in zip(points,points[1:]):
+                for t in np.linspace(a['t'],b['t'],5):
+                    pose=segment_position(a,b,t)
+                    self.assertTrue(all(lo<=x<=hi for x,lo,hi in zip(pose,LOWER_RAD,UPPER_RAD)),action)
+            ranges=np.ptp(q,axis=0)
+            if action=='preview_finger_limits':self.assertTrue(np.all(ranges[6::4]>1.5),action)
+            elif action=='preview_lateral_limits':self.assertTrue(np.all(ranges[1::4]>.9),action)
+            else:self.assertGreater(float(np.ptp(q[:,:4],axis=0).max()),1.8,action)
+
     def test_retiming_respects_velocity_and_measured_start(self):
         with patch('hardware_trial.MAX_TRIAL_DURATION_S',100000):
-            for action in list(DANCES)+['text_sequence','letter_J','letter_Z']:
+            for action in (list(set(DANCES)-PREVIEW_ONLY_IDS)+['text_sequence','letter_J','letter_Z']):
                 p=make_trial([.1]*20,action,.75,1,speed=.5,text='WUJI TECH')
                 self.assertEqual(p['points'][0]['q'],[.1]*20)
                 self.assertEqual(p['points'][-1]['q'],[.1]*20)
@@ -77,6 +102,10 @@ class PerformanceTests(unittest.TestCase):
         self.assertTrue(all(b>a for a,b in zip(stamps,stamps[1:])))
         data=export_program('dance_jellyfish','WUJI TECH','hand1_right')
         self.assertTrue(data['hand1_preview_only']);self.assertFalse(data['hardware_validated'])
+        for action in PREVIEW_ONLY_IDS:
+            for fmt in ('json','csv'):
+                with self.assertRaisesRegex(ValueError,'preview-only'):
+                    export_program(action,'WUJI TECH','hand2_left',fmt)
 
 
 if __name__=='__main__':unittest.main()

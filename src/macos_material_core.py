@@ -76,7 +76,7 @@ class WindowMaterial:
             w.setTintColor_(None)
         elif kind == "vibrancy":
             w = A.NSVisualEffectView.alloc().initWithFrame_(frame)
-            w.setMaterial_(A.NSVisualEffectMaterialSidebar)
+            w.setMaterial_(A.NSVisualEffectMaterialUnderWindowBackground)
             w.setBlendingMode_(A.NSVisualEffectBlendingModeBehindWindow)
             w.setState_(A.NSVisualEffectStateActive)
         else:  # opaque backing; the dynamic system color follows light/dark
@@ -92,7 +92,9 @@ class WindowMaterial:
 
     def _backdrop(self, frame):
         view = self.A.NSVisualEffectView.alloc().initWithFrame_(frame)
-        view.setMaterial_(self.A.NSVisualEffectMaterialSidebar)
+        # This material is explicitly intended to reveal content behind the
+        # window. Sidebar is optimized for a denser navigation-area fill.
+        view.setMaterial_(self.A.NSVisualEffectMaterialUnderWindowBackground)
         view.setBlendingMode_(self.A.NSVisualEffectBlendingModeBehindWindow)
         view.setState_(self.A.NSVisualEffectStateActive)
         view.setWantsLayer_(True)
@@ -174,5 +176,6 @@ class WindowMaterial:
                       material=material, native_view=native, note=note, fallback_reason=why,
                       reduce_transparency=reduce, content_attached=self._attached(),
                       theme=self.theme, glass_style=self.glass_style,
+                      backdrop="behind_window_frost" if self.kind in ("glass", "vibrancy") else "none",
                       titlebar="original" if self.kind == "solid" else "transparent",
                       full_size_titlebar=bool(self.window.styleMask() & self.A.NSWindowStyleMaskFullSizeContentView))

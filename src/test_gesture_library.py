@@ -10,6 +10,7 @@ from datetime import datetime,timezone,timedelta
 from unittest.mock import patch
 import gesture_library as g
 from hardware_trial import make_trial
+from performance_program import PREVIEW_ONLY_IDS
 from official_policy import LOWER_RAD,UPPER_RAD
 from motion_timing import segment_position
 
@@ -27,6 +28,16 @@ class GestureTests(unittest.TestCase):
                 self.assertEqual(len(q),20)
                 self.assertTrue(all(math.isfinite(v) and a<=v<=b for v,a,b in zip(q,LOWER_RAD,UPPER_RAD)),action)
 
+    def test_large_range_explorations_are_labeled_preview_only_and_rejected_by_trial_builder(self):
+        entries={item['id']:item for item in g.CATALOG}
+        self.assertEqual(PREVIEW_ONLY_IDS,{'preview_finger_limits','preview_lateral_limits','preview_thumb_limits'})
+        for action in PREVIEW_ONLY_IDS:
+            self.assertFalse(entries[action]['hardware'],action)
+            self.assertIn('preview',entries[action]['en'].lower())
+            self.assertIn('仅预览',entries[action]['zh'])
+            with self.assertRaisesRegex(ValueError,'preview-only'):
+                make_trial([0.]*20,action,.25,1)
+
     def test_clock_uses_requested_local_hour_and_zero_padding(self):
         at=datetime(2026,9,19,0,7,tzinfo=timezone(timedelta(hours=8)))
         steps=g.route('clock',at=at)
@@ -37,6 +48,9 @@ class GestureTests(unittest.TestCase):
         start=[.1]*20
         with patch('hardware_trial.MAX_TRIAL_DURATION_S',100000.):
             for key in g.CUSTOM_IDS:
+                if key in PREVIEW_ONLY_IDS:
+                    with self.assertRaises(ValueError):make_trial(start,key,.5,1)
+                    continue
                 plan=make_trial(start,key,.5,1,clock_at='2026-09-19T14:35:00+08:00')
                 self.assertEqual(plan['points'][0]['q'],start,key)
                 self.assertEqual(plan['points'][-1]['q'],start,key)

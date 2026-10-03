@@ -15,7 +15,11 @@ DANCES = {'dance_jellyfish': ('水母舒展', 'Jellyfish', 16.),
           'dance_alternate': ('交替律动', 'Alternating rhythm', 12.),
           'dance_fan': ('折扇开合', 'Folding fan', 16.),
           'dance_bloom': ('花苞绽放', 'Bloom', 16.),
-          'dance_tutting': ('指节阶梯', 'Knuckle staircase', 12.)}
+          'dance_tutting': ('指节阶梯', 'Knuckle staircase', 12.),
+          'preview_finger_limits': ('逐指屈伸大幅度预览 · 仅预览', 'Large-range finger flexion preview · preview only', 19.),
+          'preview_lateral_limits': ('逐指侧摆大幅度预览 · 仅预览', 'Large-range finger splay preview · preview only', 19.),
+          'preview_thumb_limits': ('拇指活动范围大幅度预览 · 仅预览', 'Large-range thumb preview · preview only', 12.)}
+PREVIEW_ONLY_IDS = {'preview_finger_limits','preview_lateral_limits','preview_thumb_limits'}
 NEW_DANCE_IDS = set(DANCES) - {'dance_jellyfish', 'dance_wave', 'dance_ripple'}
 from bimanual_program import INTERNAL_IDS
 PROGRAM_IDS = set(DANCES) | INTERNAL_IDS | {'text_sequence', 'letter_J', 'letter_Z'}
@@ -75,6 +79,72 @@ def _dance(action, t):
     return q,v
 
 
+def _range_preview(action, t):
+    """High-amplitude, fixed-base display explorations; never a device plan."""
+    from gesture_library import poses
+    q=poses()['open'][:]
+    v=[0.]*20
+
+    def ease(x):
+        x=min(1.,max(0.,x))
+        return x*x*x*(10+x*(-15+6*x))
+
+    def ease_rate(x):
+        return 30*x*x*(1-x)*(1-x) if 0.<x<1. else 0.
+
+    if action in {'preview_finger_limits','preview_lateral_limits'}:
+        # Three-second windows with eased entry/exit and no concurrent fingers.
+        # The last joint stays visibly flexed while each finger is isolated.
+        for f in range(5):
+            start=.7+3.35*f
+            phase=t-start
+            if action=='preview_finger_limits':
+                if phase<0. or phase>=3.:continue
+                if phase<1.:
+                    amount=ease(phase);rate=ease_rate(phase)
+                elif phase<2.:
+                    amount=1.;rate=0.
+                else:
+                    amount=1.-ease(phase-2.);rate=-ease_rate(phase-2.)
+                target=(1.15,.58,1.40,1.35) if f==0 else (1.40,0.,1.92,1.38)
+                for j,value in enumerate(target):
+                    index=f*4+j
+                    delta=value-q[index]
+                    q[index]+=delta*amount
+                    v[index]=delta*rate
+            else:
+                if phase<0. or phase>=3.:continue
+                # Broad but not hard-stop side-to-side exploration, with zero
+                # velocity at each reversal and at the neutral return.
+                joint=f*4+1
+                if phase<1.:
+                    amount=-.62*ease(phase);rate=-.62*ease_rate(phase)
+                elif phase<2.:
+                    x=phase-1.;amount=-.62+1.24*ease(x);rate=1.24*ease_rate(x)
+                else:
+                    x=phase-2.;amount=.62-.62*ease(x);rate=-.62*ease_rate(x)
+                q[joint]=amount
+                v[joint]=rate
+        return q,v
+
+    # A three-stop thumb arc samples both sides of its native travel with a
+    # margin from the limits, then settles back at the open reference pose.
+    targets=((1.15,.58,1.40,1.35),(-1.05,-1.30,-.90,-.90),(.05,-.20,.15,.10))
+    segment=3.
+    phase=min(3.,max(0.,t/segment))
+    if phase>=3.:
+        q[:4]=list(targets[-1])
+        return q,v
+    index=int(phase);u=phase-index
+    weight=ease(u);rate=ease_rate(u)/segment
+    source=(.05,-.20,.15,.10) if index==0 else targets[index-1]
+    target=targets[index]
+    for j,(a,b) in enumerate(zip(source,target)):
+        q[j]=a+(b-a)*weight
+        v[j]=(b-a)*rate
+    return q,v
+
+
 def _symbol(c):
     from gesture_library import poses, letter, digit
     if c==' ':return [('单词停顿 / Word pause',poses()['open'][:],.8)]
@@ -107,7 +177,7 @@ def program(action, text='WUJI TECH'):
         duration=DANCES[action][2]
         # 100 Hz Hermite knots; the host evaluates the curve at its configured rate.
         for k in range(int(duration*100)+1):
-            t=k/100.;q,v=_dance(action,t)
+            t=k/100.;q,v=_range_preview(action,t) if action in PREVIEW_ONLY_IDS else _dance(action,t)
             p=dict(t=t,q=q,v=v,label=DANCES[action][0]+' / '+DANCES[action][1],interpolation='cubic_hermite',token_index=-1)
             if k==0:points[0]=p
             else:points.append(p)
@@ -126,8 +196,9 @@ def program(action, text='WUJI TECH'):
         points.append(dict(t=points[-1]['t']+.4,q=start[:],label='完成 / Complete',token_index=-1))
     return dict(schema='wuji-performance-v1',action=action,text=normalized,points=points,
         duration_s=points[-1]['t'],source='project_authored_human_inspired',
-        source_url=DANCE_REFERENCES[action] if action in DANCES else SIGN_REFERENCE,
-        fixed_base=True,hardware_validated=False,sign_language_certified=False)
+        source_url=None if action in PREVIEW_ONLY_IDS else DANCE_REFERENCES[action] if action in DANCES else SIGN_REFERENCE,
+        fixed_base=True,hardware_validated=False,hardware_preview_only=action in PREVIEW_ONLY_IDS,
+        sign_language_certified=False)
 
 
 @lru_cache(maxsize=48)

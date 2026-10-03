@@ -8,6 +8,10 @@ from performance_program import program, sample
 def export_program(action,text,profile_id,format='json'):
     from device_profiles import profile,performance_preview_pose
     from hardware_trial import LABELS
+    from gesture_library import CATALOG
+    metadata=next((item for item in CATALOG if item['id']==action),None)
+    if metadata is not None and metadata.get('hardware') is False:
+        raise ValueError('This authored range exploration is preview-only; trajectory export is disabled')
     p=profile(profile_id);data=program(action,text)
     def adapted(q):
         return performance_preview_pose(q,profile_id)

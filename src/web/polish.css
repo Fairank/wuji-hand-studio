@@ -1,0 +1,157 @@
+/* Unified, restrained control polish. Keep the system compositor responsible
+   for the outer window material; this file only refines the existing UI. */
+:root{
+  --dg-frame:22px;
+  --dg-rail:188px;
+  --dg-gutter:24px;
+  --dg-top:68px;
+  --wuji-font-scale:1;
+  --wuji-polish-radius:22px;
+  --wuji-polish-control-radius:12px;
+  --wuji-polish-accent:#1677f8;
+  --wuji-polish-accent-soft:rgba(22,119,248,.11);
+  --wuji-polish-nav:rgba(255,255,255,.18);
+  --wuji-polish-reading:rgba(255,255,255,.48);
+  --wuji-polish-control:rgba(255,255,255,.76);
+  --wuji-polish-line:rgba(60,60,67,.12);
+  --wuji-polish-text:#1d1d1f;
+  --wuji-polish-sub:#6e6e73;
+  --wuji-polish-chevron:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='m1 1.5 5 5 5-5' fill='none' stroke='%236e6e73' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+html[data-theme=dark]{
+  --wuji-polish-accent:#71adff;
+  --wuji-polish-accent-soft:rgba(113,173,255,.16);
+  --wuji-polish-nav:rgba(24,25,30,.14);
+  --wuji-polish-reading:rgba(24,25,30,.36);
+  --wuji-polish-control:rgba(47,48,54,.86);
+  --wuji-polish-line:rgba(255,255,255,.13);
+  --wuji-polish-text:#f5f5f7;
+  --wuji-polish-sub:#b5b5bc;
+  --wuji-polish-chevron:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='m1 1.5 5 5 5-5' fill='none' stroke='%23b5b5bc' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+html,body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","PingFang SC","Microsoft YaHei UI","Segoe UI",sans-serif;color:var(--wuji-polish-text)}
+html[data-ui-font-scale="90"]{--wuji-font-scale:.9}
+html[data-ui-font-scale="100"]{--wuji-font-scale:1}
+html[data-ui-font-scale="110"]{--wuji-font-scale:1.1}
+body{font-size:calc(14px * var(--wuji-font-scale))}
+body :is(p,li,summary,td,th,dt,dd,legend,.hint,[role=status],.settings-row,.settings-footnote,.wb-note,.action-selection-note,.performance-status,.cr-details,.cg-sub,.cg-caption,.cg-timing,.hg-foot,.hg-note,.hg-hint,.hg-msg,.pe-footer p,.pe-settings p,.cr-cell-label,.hub-intro p,.connection-popover p){font-size:calc(13px * var(--wuji-font-scale))!important}
+body :is(button,.button,select,textarea,input:not([type=checkbox],[type=radio],[type=range],[type=color],[type=file],[type=hidden]),label,.settings-route strong,.settings-tabs button,.hub-tabs button,.pe-sheet h3,.float-panel-title,.wuji-language-switch button){font-size:calc(13px * var(--wuji-font-scale))!important}
+body :is(h1,.top h1){font-size:calc(16px * var(--wuji-font-scale))!important}
+body :is(h2,.page-heading h2){font-size:calc(24px * var(--wuji-font-scale))!important}
+body :is(h3,.hub-intro h3,.cg-title,.cg-guide-title,.hws-title,.pe-sheet .hws-title){font-size:calc(18px * var(--wuji-font-scale))!important}
+body :is(small,.settings-route small,.settings-section .settings-footnote,.pg-cap,.pg-state,.cr-cell-label,.hg-count,.hg-opt-desc,.pe-add-meta span,.pe-field>label,.pe-check,.pe-settings details,.pe-footer strong,.pr-number,.pr-field,.cg-pose-tag,.cg-finger-role,.cg-metric span,.hub-badges span,.hub-legend span,.hub-calib-state span){font-size:calc(11px * var(--wuji-font-scale))!important}
+html[data-external-backdrop=true],
+html[data-external-backdrop=true] body,
+html[data-external-backdrop=true] .app,
+html[data-theme=dark][data-external-backdrop=true] body,
+html[data-theme=dark][data-external-backdrop=true] .app{background:transparent}
+html[data-external-backdrop=true] .top,
+html[data-external-backdrop=true] .directory{background:var(--wuji-polish-nav)}
+html[data-external-backdrop=true] .page-area{background:var(--wuji-polish-reading)}
+html[data-theme=dark][data-external-backdrop=true] .page-area{background:var(--wuji-polish-reading)}
+
+/* Keep the complete titlebar clear of macOS traffic lights, then start the
+   independently scrolling reading surface below the toolbar. */
+@media(min-width:901px){
+  html .top{height:68px;min-height:68px;border-radius:22px}
+  html .directory{top:calc(var(--dg-frame,17px) + 80px);width:calc(var(--dg-rail,188px) - 22px);bottom:22px}
+  html .directory{border-radius:22px}
+  html .page-area{top:calc(var(--dg-frame,17px) + 80px);right:22px;bottom:22px;left:var(--dg-rail,188px);padding:24px;border-radius:22px;scroll-padding-top:20px}
+  html[data-platform=macos][data-desktop=true] .top{top:36px;height:68px;min-height:68px}
+  html[data-platform=macos][data-desktop=true] .directory,
+  html[data-platform=macos][data-desktop=true] .page-area{top:116px}
+  html[data-platform=macos][data-desktop=true] .directory{left:22px;width:calc(var(--dg-rail,188px) - 22px);bottom:22px}
+  html[data-platform=macos][data-desktop=true] .page-area{left:var(--dg-rail,188px);right:22px;bottom:22px}
+  .page-heading h2{line-height:1.32}
+  .workspace-page:not([hidden])>.page-heading{scroll-margin-block-start:18px}
+}
+@media(min-width:901px) and (max-width:1100px){:root{--dg-rail:174px}}
+html[data-theme=dark][data-external-backdrop=true] .app{background:transparent}
+
+/* One consistent control language across static pages and generated sheets. */
+body :is(button,.button):where(:not([class*=handle i],[class*=resize i])){
+  min-height:36px;border-radius:var(--wuji-polish-control-radius);font-size:13px;
+}
+body :is(button,.button):is(.primary,.btn-primary,[data-primary],[type=submit]):where(:not([class*=stop i],[id*=stop i])){
+  min-height:42px;border-radius:14px;
+}
+body :is(select,textarea,input):not([type=checkbox],[type=radio],[type=range],[type=color],[type=file],[type=button],[type=submit],[type=reset]){
+  min-height:36px;border-radius:12px;font-size:13px;
+}
+html body select:not([multiple],[size]){
+  appearance:none;-webkit-appearance:none;
+  border-radius:12px;
+  padding-right:34px;
+  background-image:var(--wuji-polish-chevron);
+  background-repeat:no-repeat;
+  background-position:right 12px center;
+  background-size:12px 8px;
+}
+body :is(button,a,input,select,textarea,summary):focus-visible{outline-offset:3px}
+body :is(button,.button):where(:not([class*=handle i],[class*=resize i])):hover:not(:disabled){transform:none}
+body :is(button,.button):where(:not([class*=handle i],[class*=resize i])):active:not(:disabled){transform:none}
+html[data-theme=dark] body :is(button,input,select,textarea){color:var(--wuji-polish-text)}
+
+.wuji-language-switch{display:inline-flex;align-items:center;gap:2px;flex:0 0 auto;padding:3px;border:1px solid var(--wuji-polish-line);border-radius:14px;background:rgba(255,255,255,.28)}
+html body .wuji-language-switch button{box-sizing:border-box;min-width:42px;min-height:32px;padding:5px 10px;border:0;border-radius:10px;background:transparent;color:var(--wuji-polish-sub);font-family:inherit;font-size:12px;font-weight:600;line-height:1.2;box-shadow:none;cursor:pointer}
+html body .wuji-language-switch button[aria-pressed=true]{background:var(--wuji-polish-accent);color:#fff;box-shadow:0 1px 3px rgba(20,40,80,.14)}
+html body .wuji-language-switch button:hover:not([aria-pressed=true]){background:rgba(127,127,135,.1)}
+.wuji-language-slot{display:inline-flex;align-items:center;flex:0 0 auto}
+.wuji-language-slot>.wuji-language-switch{margin-inline:2px}
+.settings-row>.wuji-language-switch{min-width:150px;justify-content:center}
+html[data-theme=dark] body .wuji-language-switch{background:rgba(255,255,255,.06)}
+html[data-theme=dark] body .wuji-language-switch button:not(.primary):not(.top-connection-action){background:transparent;color:var(--wuji-polish-sub)}
+html[data-theme=dark] body .wuji-language-switch button[aria-pressed=true]:not(.primary):not(.top-connection-action){background:var(--wuji-polish-accent);color:#141519;box-shadow:0 1px 3px rgba(0,0,0,.25)}
+/* Settings keep their existing cards and semantics, with slightly tighter rows. */
+.settings-section .wb-card{padding:18px 22px}
+.settings-row{min-height:58px;gap:16px;padding:10px 0}
+.settings-row>select{width:180px;min-width:150px}
+.settings-row.settings-discovery{min-height:64px}
+.settings-tabs{width:max-content;max-width:100%;gap:3px;padding:4px;border-radius:14px;background:var(--wb-group)}
+html body .settings-tabs button{min-height:36px;padding:7px 14px;border:0;border-radius:11px;background:transparent;color:var(--wb-sub);box-shadow:none;font-size:13px;white-space:nowrap}
+html body .settings-tabs[role=tablist] button[aria-selected=true]{background:var(--wuji-polish-accent);color:#fff;box-shadow:0 1px 3px rgba(0,0,0,.12);font-weight:600}
+html[data-theme=dark] body .settings-tabs button:not([aria-selected=true]){background:transparent;color:var(--wuji-polish-sub);border:0;box-shadow:none}
+html[data-theme=dark] body .settings-tabs[role=tablist] button[aria-selected=true]{background:var(--wuji-polish-accent);color:#141519;border:0;box-shadow:0 1px 3px rgba(0,0,0,.25)}
+html body :is(.wuji-language-slot,.settings-section) .wuji-language-switch button[aria-pressed=true]{background:var(--wuji-polish-accent);color:#fff}
+html[data-theme=dark] body :is(.wuji-language-slot,.settings-section) .wuji-language-switch button[aria-pressed=true]{background:var(--wuji-polish-accent);color:#141519}
+.settings-route{min-height:60px;padding:12px 0}
+
+/* Shared dialog surface for native dialogs, connection, symbol, playlist and
+   workbench sheets. Component-specific geometry and drag handles stay intact. */
+dialog{border-radius:22px;color:var(--wuji-polish-text)}
+dialog[open]{max-width:calc(100vw - 32px)}
+html[data-theme=dark] dialog{background:rgba(39,40,46,.94);border-color:var(--wuji-polish-line);color:var(--wuji-polish-text)}
+.connection-popover,.symbol-dialog,#desktop-menu,#desktop-close-dialog,.hws-dialog,.pe-sheet{
+  border-radius:22px;
+}
+.pe-sheet{max-width:calc(100vw - 32px)}
+.float-panel-bar{min-height:42px;font-size:13px}
+.float-panel-title{font-size:13px}
+#pose-console[data-floating=true]{border-radius:20px}
+
+@media(max-width:900px){
+  html .top{min-height:68px;row-gap:8px}
+  html .top-actions{gap:7px}
+  html .wuji-language-slot{margin-left:auto}
+  html .page-area{padding:22px 18px}
+  .settings-section .wb-card{padding:17px 18px}
+}
+@media(max-width:520px){
+  .settings-row{align-items:flex-start;flex-direction:column;gap:8px;padding:12px 0}
+  .settings-row>select,.settings-row>.wuji-language-switch{width:100%;min-width:0}
+  .settings-tabs{width:100%;box-sizing:border-box}
+  .settings-tabs button{flex:1 1 auto;padding-inline:8px}
+}
+@media(prefers-reduced-transparency:reduce){
+  html[data-external-backdrop=true] .page-area{background:#fff}
+  html[data-theme=dark][data-external-backdrop=true] .page-area{background:#222329}
+}
+html[data-reduce-transparency=true][data-external-backdrop=true] .page-area{background:#fff}
+html[data-theme=dark][data-reduce-transparency=true][data-external-backdrop=true] .page-area{background:#222329}
+@media(forced-colors:active){
+  .wuji-language-switch{border:1px solid ButtonText;background:Canvas}
+  .wuji-language-switch button{color:ButtonText}
+  .wuji-language-switch button[aria-pressed=true],.settings-tabs button[aria-selected=true]{background:Highlight!important;color:HighlightText!important;outline:1px solid Highlight}
+  html[data-external-backdrop=true] .page-area{background:Canvas}
+  html[data-theme=dark][data-external-backdrop=true] .page-area{background:Canvas}
+}

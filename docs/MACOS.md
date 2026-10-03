@@ -1,10 +1,10 @@
-# Hand Workbench on Mac / macOS 0.2.17
+# Hand Workbench on Mac / macOS 0.2.18
 
 非官方个人展示工具。0.2.17 基于 Windows `v0.2.16-windows`（`d8a9f49`），使用原生 Cocoa / WKWebView，保留节目单、顺序与随机播放、多手工作区、连接、官方校准和映射页面。
 
 ## 安装与启动
 
-Apple Silicon、macOS 13.5+。解压 `HandWorkbench-0.2.17-macos-arm64.zip`，核对配套 SHA-256，将 `HandWorkbench.app` 放入应用程序。无需另装 Python、Homebrew、VMware 或填写 SSH。安装包含 Lima 和 Ubuntu ARM64 磁盘，不代表 SDK 首次准备无需联网。
+Apple Silicon、macOS 13.5+。解压 `HandWorkbench-0.2.18-macos-arm64.zip`，核对配套 SHA-256，将 `HandWorkbench.app` 放入应用程序。无需另装 Python、Homebrew、VMware 或填写 SSH。安装包含 Lima 和 Ubuntu ARM64 磁盘，不代表 SDK 首次准备无需联网。
 
 本地包为 ad-hoc 签名，尚无 Apple Developer ID 签名或公证。来源和摘要核对后，如系统阻止启动，使用“隐私与安全性”明确允许；不要关闭 Gatekeeper 或批量删除隔离属性。GitHub 是否已有安装包，以实际 Release 附件为准。
 
@@ -12,13 +12,15 @@ Apple Silicon、macOS 13.5+。解压 `HandWorkbench-0.2.17-macos-arm64.zip`，�
 
 ## 原生磨砂玻璃
 
-macOS 26+ 使用 `NSGlassEffectView` 的 Regular（磨砂）样式，较旧系统回退 `NSVisualEffectView` 的 behind-window vibrancy。顶部及侧栏保留透明背景，避免遮住系统材质；主要内容保持可读。明暗主题与原生材质同步，减少透明时恢复实色，遵循系统辅助功能设置。
+macOS 26+ 使用 `NSGlassEffectView` 的 Clear 表层，底层是 `NSVisualEffectView` 的 `underWindowBackground + behindWindow` 磨砂材质，避免 Regular 全窗叠层再次遮住背景。较旧系统使用同一 behind-window vibrancy。顶部及侧栏保留透明背景，主要内容使用局部半透明阅读面。明暗主题与原生材质同步，减少透明时恢复实色，遵循系统辅助功能设置。材质用途见 [Apple 官方说明](https://developer.apple.com/documentation/appkit/nsvisualeffectview/material-swift.enum/underwindowbackground)。
 
 保留系统关闭、最小化、缩放和拖动行为。没有屏幕录制、其他窗口像素采集或自制外部折射。公开系统材质会处理背景，实际效果随系统、背景及窗口活跃状态变化，并不保证和 Windows Acrylic 逐像素一致。
 
 Mac 的透明 WebView 在重新附着窗口材质时可能停住装饰性 CSS 时间线，因此原生窗口关闭这类过渡，保证文字和选中状态立即可见；不影响 3D 帧、动作编排或控制频率。
 
 右上角设备标题统一为 `wuji hand`；型号、手性与序列号仍由设备连接信息确认。
+
+0.2.18 取消深色外围的重叠黑底，并统一语言胶囊、设置与弹窗控件。设置 → 外观可选择 90/100/110% 文字大小，仅改变界面排版。展示动作中新增三个“大幅度预览 · 仅预览”，用于观看模型关节范围，不能用于真实手播放或实机轨迹导出。数字手势是按官方几何精修的项目创作，不是官方真人录制、触碰认证或实物验收。
 
 ## Linux 与设备边界
 
@@ -49,7 +51,7 @@ open -n dist/HandWorkbench.app
 
 `scripts/workbenchctl.py` 只检查或操作应用自己的窗口和固定功能，不提供任意 shell/JavaScript 执行。Mac 桥使用闭包和 WebKit 公共接口，保持页面 `script-src 'self'`，不启用 unsafe-eval。
 
-架构、签名、镜像摘要、模型离线渲染、原生界面交互和实际硬件必须分别验收。验证记录见 [0.2.17 移植报告](MACOS_PORT_0.2.17.md)。
+架构、签名、镜像摘要、模型离线渲染、原生界面交互和实际硬件必须分别验收。验证记录见 [0.2.17 移植报告](MACOS_PORT_0.2.17.md) 和 [0.2.18 精修报告](MACOS_REFINEMENT_0.2.18.md)。
 
 ## English
 

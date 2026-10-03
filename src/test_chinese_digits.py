@@ -5,6 +5,7 @@ import mujoco as mj
 from chinese_digits import digit,THUMB_TUCK
 from gesture_library import poses,letter,route
 from performance_program import DANCES,program,real_points
+from performance_program import PREVIEW_ONLY_IDS
 from device_profiles import load_native_model
 from motion_timing import segment_position
 
@@ -42,10 +43,39 @@ class ChineseDigitsTests(unittest.TestCase):
                 if n==7:
                     for f in (1,2):self.assertLess(np.linalg.norm(d.site_xpos[0]-d.site_xpos[f]),.011)
 
+    def test_fist_hook_and_gathered_shapes_have_distinct_tip_geometry(self):
+        site_names=('thumb_tip','index_finger_tip','middle_finger_tip','ring_finger_tip','pinky_tip')
+        for side in ('left','right'):
+            m=load_native_model('hand2_'+side);d=mj.MjData(m)
+            sites=[mj.mj_name2id(m,mj.mjtObj.mjOBJ_SITE,('l_' if side=='left' else 'r_')+name) for name in site_names]
+            for n in (0,7,9):
+                d.qpos[:]=digit(n);mj.mj_forward(m,d)
+                tips=d.site_xpos[sites]
+                if n==0:
+                    # Thumb is tucked across the fist, near but not declared touching.
+                    self.assertLess(np.linalg.norm(tips[0]-tips[1]),.014)
+                    self.assertLess(np.linalg.norm(tips[1]-tips[4]),.065)
+                    legacy=digit(0);legacy[:4]=[.30,-.30,.70,.50]
+                    d.qpos[:]=legacy;mj.mj_forward(m,d)
+                    legacy_distance=np.linalg.norm(d.site_xpos[sites[0]]-d.site_xpos[sites[1]])
+                    self.assertGreater(legacy_distance-np.linalg.norm(tips[0]-tips[1]),.020)
+                elif n==7:
+                    self.assertLess(np.linalg.norm(tips[0]-tips[1]),.009)
+                    self.assertLess(np.linalg.norm(tips[0]-tips[2]),.011)
+                else:
+                    # The index forms a hook while the thumb stays beside curled fingers.
+                    self.assertLess(digit(9)[6],1.4)
+                    self.assertGreater(digit(9)[6],1.1)
+                    self.assertLess(np.linalg.norm(tips[0]-tips[2]),.010)
+                    legacy=digit(9);legacy[:4]=[.55,-.25,.70,.45]
+                    d.qpos[:]=legacy;mj.mj_forward(m,d)
+                    legacy_distance=np.linalg.norm(d.site_xpos[sites[0]]-d.site_xpos[sites[2]])
+                    self.assertGreater(legacy_distance-np.linalg.norm(tips[0]-tips[2]),.020)
+
     def test_every_dance_has_visible_s2_and_no_deep_intersection_at_100hz(self):
         for side in ('left','right'):
             m=load_native_model('hand2_'+side);d=mj.MjData(m)
-            for action in DANCES:
+            for action in set(DANCES)-PREVIEW_ONLY_IDS:
                 points=program(action)['points'];ranges=np.ptp(np.array([p['q'] for p in points]),axis=0)
                 self.assertTrue(np.all(ranges[1::4]>.10),action)
                 self.assertGreater(ranges[5],.30);self.assertGreater(ranges[17],.33)

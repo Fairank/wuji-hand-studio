@@ -45,6 +45,16 @@ class HTTPTests(unittest.TestCase):
             {'Content-Type':'application/json','X-Console-Token':self.server.controller.csrf,'Origin':'https://external.invalid'})
         self.assertEqual(code,403)
 
+    def test_viewer_styles_are_served_with_strict_csp(self):
+        for route, marker in (('/viewer', b'/viewer.css'), ('/viewer.css', b'.viewer-shell')):
+            c=http.client.HTTPConnection('127.0.0.1',self.server.server_port,timeout=3)
+            c.request('GET',route,headers={'Host':'127.0.0.1:8781'})
+            response=c.getresponse();body=response.read();c.close()
+            self.assertEqual(response.status,200)
+            self.assertIn(marker,body)
+            self.assertIn("style-src 'self';",response.getheader('Content-Security-Policy'))
+            if route=='/viewer':self.assertNotIn(b'<style>',body)
+
     def test_motion_not_exposed_and_record_requires_feedback(self):
         h={'Content-Type':'application/json','X-Console-Token':self.server.controller.csrf}
         for name in ['enable','joint_command','emergency_stop']:

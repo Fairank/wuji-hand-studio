@@ -5,6 +5,7 @@ import tempfile
 import unittest
 from types import SimpleNamespace
 from hardware_showcase import HardwareShowcase,validate_profile,NIDS
+from hardware_trial import LABELS
 from view_camera import validate_camera,DEFAULT,preview_selected
 
 
@@ -62,6 +63,10 @@ class HardwareTests(unittest.TestCase):
             with self.assertRaises(ValueError):validate_profile(p,'synthetic-left')
         p=profile();p['actions']['index']['points'][1]['q'][0]=2.
         with self.assertRaises(ValueError):validate_profile(p,'synthetic-left')
+        p=profile();p['actions']['preview_finger_limits']=dict(hardware_reviewed=True,points=[
+            dict(t=0.,q=[0.]*20),dict(t=1.,q=[.1]*20),dict(t=2.,q=[0.]*20)])
+        with self.assertRaisesRegex(ValueError,'未单独核验'):
+            validate_profile(p,'synthetic-left')
 
     def test_start_seeds_current_before_enable_and_slews(self):
         d=self.driver();self.start(d)
@@ -74,6 +79,18 @@ class HardwareTests(unittest.TestCase):
         self.assertTrue(all(abs(x-y)<=.0061 for a,b in zip(sent,sent[1:]) for x,y in zip(a,b)))
         d.stop('done');self.assertFalse(d.active)
         self.assertIn(('disable',),self.hand.calls)
+
+    def test_preview_only_range_action_is_rejected_before_any_device_command(self):
+        d=self.driver()
+        d.check_probe_ready=lambda row,diag,now:True
+        d.raw_position=lambda row,now:[0.]*20
+        self.hand.joints=lambda:[SimpleNamespace(index=i,label=label) for i,label in enumerate(LABELS)]
+        command=dict(action='preview_finger_limits',amplitude=.25,cycles=1,speed=1.,
+            workspace_clear=True,lease='a'*32)
+        with self.assertRaisesRegex(ValueError,'preview-only'):
+            d.start_trial(command,feedback(1.),diagnostics(1.),1.)
+        self.assertEqual(self.hand.calls,[])
+        self.assertFalse(d.active)
 
     def test_expired_browser_lease_stops_without_more_target_commands(self):
         d=self.driver();self.start(d)

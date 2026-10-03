@@ -42,9 +42,11 @@ def validate_profile(p, device_id):
     if not isinstance(actions,dict) or not 1<=len(actions)<=12:
         raise ValueError('没有已核验的实机动作')
     from demo_player import CATALOG
+    from gesture_library import CATALOG as GESTURE_CATALOG
+    preview_only={entry['id'] for entry in GESTURE_CATALOG if entry.get('hardware') is False}
     result={}
     for name,action in actions.items():
-        if name not in CATALOG or action.get('hardware_reviewed') is not True:
+        if name not in CATALOG or name in preview_only or action.get('hardware_reviewed') is not True:
             raise ValueError('动作未单独核验')
         points=action.get('points')
         if not isinstance(points,list) or not 2<=len(points)<=1000:

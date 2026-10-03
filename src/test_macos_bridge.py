@@ -3,7 +3,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import unittest
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 
 @unittest.skipUnless(shutil.which('node'), 'Node is required for the CSP bridge test')
@@ -87,6 +87,16 @@ bridge._jsApiCallback = (name, args, id) => {
         self.assertTrue(window.scripts[0].endswith(factory_call))
         self.assertEqual(window.scripts[1], 'document.title="unchanged"')
         self.assertEqual(window.scripts[2], window.scripts[0])
+
+    def test_preview_awaits_serializable_result_without_javascript_eval(self):
+        from macos_desktop import MacDesktop
+        desktop = MacDesktop()
+        desktop.window = MagicMock()
+        expected = dict(ok=True, hardware_motion=False, action='digit_0', speed=.5)
+        desktop.window.evaluate_js.return_value = expected
+        self.assertEqual(desktop.preview('digit_0', .5), expected)
+        desktop.window.evaluate_js.assert_called_once_with(
+            'window.WujiWorkbench.preview("digit_0",0.5)', await_promise=True)
 
 
 if __name__ == '__main__':

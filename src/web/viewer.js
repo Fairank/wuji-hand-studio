@@ -1,5 +1,34 @@
 import {cameraGesture} from './camera_gesture.mjs';
 const $=id=>document.getElementById(id);let state=null,camera=null,pointer=null,dirty=false,busy=false;
+const locale=window.WujiLocale,text=(zh,en)=>locale?.lang==='en'?en:zh;
+function applyLanguage(){
+ const english=locale?.lang==='en';document.documentElement.lang=english?'en':'zh-CN';
+ document.title=english?'MuJoCo · Hand Viewer':'MuJoCo · 灵巧手查看器';
+ $('viewer-title').textContent=english?'MuJoCo · Hand Viewer':'MuJoCo · 灵巧手查看器';
+ const labels=english?['Front','Side','Reset']:['正面','侧面','复位'];
+ document.querySelectorAll('[data-view]').forEach((button,index)=>button.textContent=labels[index]);
+ document.querySelector('.viewer-nav').setAttribute('aria-label',text('相机视角','Camera views'));
+ $('screen').setAttribute('aria-label',text('MuJoCo 三维查看器','MuJoCo 3D viewer'));
+ $('image').alt=text('手部实时姿态','Live hand pose');
+ $('viewer-help').textContent=text('拖动旋转 · 滚轮缩放 · Shift拖动平移。此窗口不持有电机控制会话。','Drag to orbit · Wheel to zoom · Shift-drag to pan. This window does not own a motor-control session.');
+}
+function applyTheme(){
+ let choice='system';try{choice=localStorage.getItem('wuji-workbench-theme')||'system';}catch{}
+ const dark=choice==='dark'||(choice==='system'&&matchMedia('(prefers-color-scheme: dark)').matches);
+ document.documentElement.dataset.theme=dark?'dark':'light';
+}
+function applyTextSize(){
+ let choice='100';try{const saved=localStorage.getItem('wuji-font-scale');if(['90','100','110'].includes(saved))choice=saved;}catch{}
+ document.documentElement.dataset.uiFontScale=choice;
+}
+applyLanguage();applyTheme();applyTextSize();
+window.addEventListener('wuji-language',applyLanguage);
+window.addEventListener('storage',event=>{
+ if(event.key==='wuji-language'&&['zh','en'].includes(event.newValue))locale?.setLanguage(event.newValue);
+ if(event.key==='wuji-workbench-theme')applyTheme();
+ if(event.key==='wuji-font-scale')applyTextSize();
+});
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change',applyTheme);
 const fallback=()=>({azimuth:90,elevation:-5,distance:.38,lookat:[0,0,.115]});
 async function flush(){if(busy||!dirty||!state?.csrf)return;busy=true;dirty=false;try{const r=await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json','X-Console-Token':state.csrf},body:JSON.stringify({name:'view_camera',camera}),signal:AbortSignal.timeout(2000)});if(!r.ok)throw Error('Camera request failed');}catch(e){$('notice').textContent=e.message;}finally{busy=false;if(dirty)setTimeout(flush,50);}}
 function move(kind,dx,dy){const r=$('screen').getBoundingClientRect();camera=cameraGesture(camera||fallback(),kind,kind==='zoom'?0:dx/Math.max(1,r.width),kind==='zoom'?dy*.001:dy/Math.max(1,r.height));dirty=true;setTimeout(flush,40);}
@@ -12,10 +41,10 @@ screen.addEventListener('keydown',e=>{if(['ArrowLeft','ArrowRight','ArrowUp','Ar
 document.querySelectorAll('[data-view]').forEach(b=>b.addEventListener('click',()=>{camera=fallback();if(b.dataset.view==='side')camera.azimuth=0;dirty=true;flush();}));
 async function poll(){try{
  const [s,v]=await Promise.all([fetch('/api/state',{cache:'no-store',signal:AbortSignal.timeout(2500)}),fetch('/api/view',{cache:'no-store',signal:AbortSignal.timeout(2500)})]);
- if(!s.ok||!v.ok)throw Error('Local service unavailable / 本机服务未连接');state=await s.json();const data=await v.json();if(!pointer&&!busy&&!dirty)camera=state.camera;
- if(!data.meta.ready||!data.image)throw Error(data.meta.message||'No live image');
+ if(!s.ok||!v.ok)throw Error(text('本机服务未连接','Local service unavailable'));state=await s.json();const data=await v.json();if(!pointer&&!busy&&!dirty)camera=state.camera;
+ if(!data.meta.ready||!data.image)throw Error(data.meta.message||text('没有可用的实时画面','No live image available'));
  const im=new Image();im.src=data.image;await im.decode();$('image').src=data.image;$('stale').hidden=true;
- const source=data.meta.mode==='demo'?'SCRIPTED PREVIEW / 编排预览':data.meta.source_seq==null?'MODEL PREVIEW / 模型预览':`MEASURED FRAME / 实测帧 ${data.meta.source_seq}`;
+ const source=data.meta.mode==='demo'?text('编排预览','Scripted preview'):data.meta.source_seq==null?text('模型预览','Model preview'):`${text('实测帧','Measured frame')} ${data.meta.source_seq}`;
  $('notice').textContent=`${source} · ${Number(data.meta.render_hz||0).toFixed(1)} fps · ${data.meta.message||''}`;
  }catch(e){$('stale').hidden=false;$('stale').textContent=e.message;}
  finally{setTimeout(poll,100);}}
