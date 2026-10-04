@@ -60,7 +60,12 @@
   setAppearance(key,value){if(key==='language'){window.WujiLocale.setLanguage(value);return;}if(key==='theme'){window.WujiTheme.set(value);return;}appearance(key,value);$(key==='reduceMotion'?'desktop-motion':'desktop-transparency').checked=value;},
   setMenu(opened){if(opened&&!menu.open){labels();menu.showModal();}else if(!opened)menu.close();},
   confirmClose(){menu.close();labels();$('desktop-close-status').textContent='';if(!closeDialog.open)closeDialog.showModal();}};
- async function ready(){native=window.pywebview?.api;if(!native)return;info=await native.info();document.documentElement.dataset.desktop='true';document.documentElement.dataset.platform=info.platform;if($('studio-desktop'))$('studio-desktop').hidden=true;await native.set_language(window.WujiLocale.lang);await applyMaterial();labels();}
+ function addMacDragStrip(){
+  if(info?.platform!=='macos'||document.querySelector('.mac-window-drag-strip'))return;
+  const strip=document.createElement('div');strip.className='mac-window-drag-strip';strip.setAttribute('aria-hidden','true');document.body.prepend(strip);
+  const logo=document.querySelector('.top .studio-brand');if(logo)logo.draggable=false;
+ }
+ async function ready(){native=window.pywebview?.api;if(!native)return;info=await native.info();document.documentElement.dataset.desktop='true';document.documentElement.dataset.platform=info.platform;addMacDragStrip();if($('studio-desktop'))$('studio-desktop').hidden=true;await native.set_language(window.WujiLocale.lang);await applyMaterial();labels();}
  window.addEventListener('pywebviewready',()=>ready().catch(e=>{$('desktop-menu-status').textContent=e.message;}));
  if(window.pywebview?.api)ready().catch(()=>{});
  window.addEventListener('wuji-language',()=>{labels();if(native)native.set_language(window.WujiLocale.lang).catch(()=>{});});

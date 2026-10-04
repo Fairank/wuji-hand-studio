@@ -13,7 +13,7 @@
   const slot = document.getElementById('visual-slot') || document.querySelector('main') || document.body;
   slot.append(host);
   const byId = id => document.getElementById(id);
-  let state = null, selected = null, mappingKey = '', mappingPending = false;
+  let state = null, selected = null, mappingKey = '', mappingPending = false, lastMeta = null, lastUnavailable = '';
   const cells = [];
   for (let f=0;f<5;f++) {
     const column = document.createElement('div'); column.className='finger-column';
@@ -36,14 +36,52 @@
     const result=await response.json();if(!response.ok||!result.ok)throw new Error(result.error||'操作未完成');
   }
   const fmt=(v,d=0)=>typeof v==='number'&&Number.isFinite(v)?v.toFixed(d):'—';
+  const text=(zh,en)=>window.WujiLocale?.lang==='en'?en:zh;
+  const fallbackEnglish={
+    '本机服务连接中断':'Local service connection lost','画面连接中断，请检查本机控制服务':'View connection lost; check the local service',
+    '画面连接中断':'View connection lost','三维画面暂不可用':'3D view unavailable',
+    '三维渲染已中断，画面不再代表当前姿态':'3D rendering stopped; this image no longer represents the current pose',
+    '实机同步 · 等待真实关节反馈':'Hardware sync · waiting for measured joint feedback',
+    '动作预览 · 请先选择并播放动作':'Motion preview · select and play an action',
+    '模型预览 · 等待连接与关节对应核对':'Model preview · waiting for connection and joint mapping check',
+    '正在载入原生左手模型':'Loading the native left-hand model','正在载入原生手部模型':'Loading the native hand model',
+    '画面过期 · 不代表当前姿态':'Stale image · does not represent the current pose','画面刷新 —':'View refresh —',
+    '无新反馈':'No fresh feedback','未接收实机反馈':'No measured feedback received','编排姿态':'Scripted pose',
+    '待核对':'Unverified','角度超出模型范围':'Angle is outside the model range'
+  };
+  const localized=(value)=>window.WujiLocale?.lang==='en'?(fallbackEnglish[value]||value):value;
+  function renderFrameLabels(meta) {
+    const en=window.WujiLocale?.lang==='en';
+    const playback=meta.playback||{};
+    const label=window.WujiLocale?.playbackLabel?.(playback.label,playback.action)||playback.label||'';
+    const messages={
+      '手套遥操作 · 实际机械手反馈':'Glove teleoperation · Measured hand feedback',
+      '手套映射预览 · 未驱动机械手':'Glove mapping preview · Hand not driven',
+      '手套遥操作 · 等待新鲜数据':'Glove teleoperation · Waiting for fresh data'
+    };
+    byId('pose-message').textContent=meta.mode==='demo'
+      ?`${text('仿真动作预览','Motion preview')} · ${label} · ${text(playback.running?'播放中':'已暂停或完成',playback.running?'Playing':'Paused or complete')}`
+    :en?(messages[meta.message]||localized(meta.message)):meta.message;
+    byId('render-rate').textContent=en?`MuJoCo render ${fmt(meta.render_hz,1)} fps`:`MuJoCo 渲染 ${fmt(meta.render_hz,1)} 帧/秒`;
+    byId('pose-frame').textContent=meta.mode==='glove_preview'
+      ?(en?`Glove mapping frame ${meta.glove_seq??'—'} · Target, not hand feedback`:`手套映射帧 ${meta.glove_seq??'—'} · 目标姿态，不是实机反馈`)
+      :meta.mode==='demo'?text('仿真编排 · 不驱动实机','Scripted motion · no hardware movement')
+      :meta.source_seq==null?text('模型预览 · 未接收实机姿态','Model preview · no measured pose received')
+      :en?`Measured feedback frame ${meta.source_seq} · chart and pose use the same frame`:`实机反馈帧 ${meta.source_seq} · 图表与姿态使用同一帧`;
+  }
   function clearVisual(message) {
-    byId('pose-message').textContent=message;
+    lastMeta=null;lastUnavailable=message;
+    renderUnavailableLabels();
     byId('pose-unavailable').hidden=false;
     byId('pose-image').classList.add('view-stale');
-    byId('pose-frame').textContent='画面过期 · 不代表当前姿态';
-    byId('render-rate').textContent='画面刷新 —';
-    for(const c of cells){c.value.textContent='—';c.status.textContent='无新反馈';c.bar.hidden=true;c.button.classList.remove('live','provisional');}
+    for(const c of cells){c.value.textContent='—';c.status.textContent=localized('无新反馈');c.bar.hidden=true;c.button.classList.remove('live','provisional');}
     byId('joint-detail-body').replaceChildren();
+  }
+  function renderUnavailableLabels(){
+    byId('pose-message').textContent=localized(lastUnavailable);
+    byId('pose-frame').textContent=localized('画面过期 · 不代表当前姿态');
+    byId('render-rate').textContent=localized('画面刷新 —');
+    byId('pose-unavailable').textContent=localized(lastUnavailable);
   }
   async function showFrame(payload) {
     const meta=payload.meta;
@@ -52,16 +90,15 @@
     byId('pose-image').src=payload.image;
     byId('pose-image').classList.remove('view-stale');
     byId('pose-unavailable').hidden=true;
-    const en=document.documentElement.lang==='en';
-    byId('pose-message').textContent=en?({'手套遥操作 · 实际机械手反馈':'Glove teleoperation · Measured hand feedback','手套映射预览 · 未驱动机械手':'Glove mapping preview · Hand not driven','手套遥操作 · 等待新鲜数据':'Glove teleoperation · Waiting for fresh data'}[meta.message]||meta.message):meta.message;
-    byId('render-rate').textContent=`MuJoCo 渲染 ${fmt(meta.render_hz,1)} 帧/秒`;
-    byId('pose-frame').textContent=meta.mode==='glove_preview'?(en?`Glove mapping frame ${meta.glove_seq??'—'} · Target, not hand feedback`:`手套映射帧 ${meta.glove_seq??'—'} · 目标姿态，不是实机反馈`):meta.mode==='demo'?'仿真编排 · 不驱动实机':meta.source_seq==null?'模型预览 · 未接收实机姿态':`实机反馈帧 ${meta.source_seq} · 图表与姿态使用同一帧`;
+    lastMeta=meta;
+    renderFrameLabels(meta);
     const rates=new Map((meta.feedback?.joint_rates||[]).map(r=>[r.nid,r]));
     const readings=new Map((meta.feedback?.latest?.joints||[]).map(r=>[r.nid,r]));
     for(const j of meta.joints) {
       const c=cells[j.index],r=rates.get(j.nid),live=['live','provisional'].includes(j.status);
       c.value.textContent=live?`${fmt(j.hz)} Hz`:'—';
-      c.status.textContent=live?`编号 ${j.nid}${j.status==='provisional'?' · 待核对':''}`:({demo:'编排姿态',unmapped:'待核对',stale:'无新反馈',out_of_range:'角度超出模型范围'}[j.status]||'待核对');
+      const statusZh=live?`编号 ${j.nid}${j.status==='provisional'?' · 待核对':''}`:({demo:'编排姿态',unmapped:'待核对',stale:'无新反馈',out_of_range:'角度超出模型范围'}[j.status]||'待核对');
+      c.status.textContent=localized(statusZh);
       c.button.classList.toggle('provisional',j.status==='provisional');
       c.button.classList.toggle('live',live);c.bar.hidden=!live||j.hz==null;if(!c.bar.hidden)c.bar.value=j.hz;
       c.button.title=`${j.label}，${c.status.textContent}，回报率 ${c.value.textContent}`;
@@ -111,6 +148,8 @@
     finally{mappingPending=false;}
   });
   window.addEventListener('console-state',event=>{state=event.detail;mappingForm(state);});
+  window.addEventListener('wuji-language',()=>{if(lastMeta)renderFrameLabels(lastMeta);else if(lastUnavailable)renderUnavailableLabels();});
+  window.addEventListener('wuji-locale-catalog',()=>{if(lastMeta)renderFrameLabels(lastMeta);});
   window.addEventListener('console-offline',()=>{state=null;byId('save-mapping').disabled=true;clearVisual('本机服务连接中断');});
   async function pollView(){
     try{const r=await fetch('/api/view',{cache:'no-store',signal:AbortSignal.timeout(2500)});if(!r.ok)throw Error();await showFrame(await r.json());}

@@ -53,7 +53,7 @@
   const acceptanceNote=history.previousElementSibling;
   if(acceptanceNote?.tagName==='P')acceptanceNote.textContent='指令完成不代表动作已验收，实际动作需另行确认。';
   const historyFold=document.createElement('details');historyFold.innerHTML='<summary>查看历次实机结果</summary>';history.before(historyFold);historyFold.append(history);
-  const previewFold=document.createElement('details');previewFold.className='panel folded-panel';previewFold.innerHTML='<summary>MuJoCo 动作预览 · 不驱动实机</summary>';panel.before(previewFold);previewFold.append(panel);panel.classList.remove('panel');
+  const previewFold=document.createElement('details');previewFold.className='panel folded-panel';previewFold.innerHTML='<summary data-i18n="simulationPreviewNoMotion">MuJoCo 动作预览 · 不驱动实机</summary>';panel.before(previewFold);previewFold.append(panel);panel.classList.remove('panel');
   const probeFold=document.createElement('details');probeFold.className='panel folded-panel';probeFold.innerHTML='<summary>单关节检查 · 3°往返</summary>';motionPanel.after(probeFold);probeFold.append(probe);
   const calibratedFold=document.createElement('details');calibratedFold.innerHTML='<summary>已验收动作通道（尚未开放）</summary>';hardware.before(calibratedFold);calibratedFold.append(hardware);
   const globalStop=document.createElement('button');globalStop.id='global-motion-stop';globalStop.className='stop-motion';globalStop.textContent='停止实机';globalStop.disabled=true;document.querySelector('.top-actions').prepend(globalStop);
@@ -172,7 +172,7 @@
     finally{setTimeout(beat,200);}
   }
   beat();
-  function render(){const p=state?.playback;get('play-start').disabled=!state||pending;get('play-pause').disabled=!p?.active||pending;get('play-stop').disabled=!p?.active||pending;get('play-pause').textContent=p?.running?tr('暂停','Pause'):tr('继续','Resume');get('play-status').textContent=p?.active?`${p.label} · ${tr('第','Cycle ')}${p.cycle}${p.cycles?'/'+p.cycles:''} ${tr('轮','')} · ${tr(p.running?'播放中':'暂停或完成',p.running?'Playing':'Paused or complete')} · ${p.elapsed_s.toFixed(1)}${tr('秒',' s')}`:tr('当前显示实机反馈或静态预览','Showing measured feedback or static preview');}
+  function render(){const p=state?.playback;get('play-start').disabled=!state||pending;get('play-pause').disabled=!p?.active||pending;get('play-stop').disabled=!p?.active||pending;get('play-pause').textContent=p?.running?tr('暂停','Pause'):tr('继续','Resume');get('play-status').textContent=p?.active?`${window.WujiLocale?.playbackLabel?.(p.label,p.action)||p.label} · ${tr('第','Cycle ')}${p.cycle}${p.cycles?'/'+p.cycles:''} ${tr('轮','')} · ${tr(p.running?'播放中':'已暂停或完成',p.running?'Playing':'Paused or complete')} · ${p.elapsed_s.toFixed(1)}${tr('秒',' s')}`:tr('当前显示实机反馈或静态预览','Showing measured feedback or static preview');}
   async function send(body){if(!state||pending)return;pending=true;render();let error='';try{const r=await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json','X-Console-Token':state.csrf},body:JSON.stringify(body),signal:AbortSignal.timeout(4000)});const d=await r.json();if(!r.ok||!d.ok)throw Error(d.error||'播放操作失败');}catch(e){error=e.message;}finally{pending=false;render();if(error)document.getElementById('service-error').textContent=error;document.getElementById('service-error').hidden=!error;}}
   get('play-start').addEventListener('click',()=>send({name:'demo_start',action:get('play-action').value,speed:Number(get('play-speed').value),cycles:Number(get('play-cycles').value),...(window.WujiPerformancePayload?.()||{})}));
   get('play-pause').addEventListener('click',()=>send({name:state.playback.running?'demo_pause':'demo_resume'}));
@@ -180,4 +180,5 @@
   window.addEventListener('console-state',e=>{state=e.detail;if(state.hardware?.active)leaseSeenActive=true;else if(ownedLease&&(leaseSeenActive||performance.now()>leaseDeadline))ownedLease=null;render();renderHardware();});
   window.addEventListener('console-offline',()=>{state=null;ownedLease=null;render();renderHardware();});
   window.addEventListener('wuji-language',()=>{render();renderHardware();});
+  window.addEventListener('wuji-locale-catalog',render);
 })();

@@ -8,6 +8,17 @@ import threading
 from runtime_paths import DATA, RESOURCE
 from native_desktop import NativeDesktop, DesktopAPI, same_origin
 
+# Full-size transparent content covers Cocoa's titlebar hit area. Use the
+# pinned host's documented drag-region support for empty chrome only; never
+# make an interactive control's ancestor an indirect drag target.
+MAC_DRAG_SELECTOR = ('.mac-window-drag-strip, .top, .top > div:first-child, '
+                     '.top h1, .top p, .top .studio-brand')
+
+
+def configure_window_drag(webview):
+    webview.settings['DRAG_REGION_SELECTOR'] = MAC_DRAG_SELECTOR
+    webview.settings['DRAG_REGION_DIRECT_TARGET_ONLY'] = True
+
 
 class MacDesktop(NativeDesktop):
     def __init__(self):
@@ -85,6 +96,11 @@ class MacDesktop(NativeDesktop):
     def info(self):
         result = super().info()
         result.update(platform='macos', engine='WKWebView', external_capture_supported=False)
+        # Read only this host window through pywebview's public properties.
+        # Useful for verifying drag/resize without inspecting other windows.
+        if result['ready']:
+            result['window_bounds'] = dict(x=self.window.x, y=self.window.y,
+                                          width=self.window.width, height=self.window.height)
         return result
 
     def preview(self, action, speed):
@@ -203,6 +219,7 @@ class MacDesktop(NativeDesktop):
         height = self.bounds.get('height', 900)
         if type(width) is not int or type(height) is not int:
             width, height = 1320, 900
+        configure_window_drag(webview)
         self.window = webview.create_window(self.title, origin + '/?desktop=1#library',
             js_api=DesktopAPI(self), width=max(960, min(width, 2560)), height=max(680, min(height, 1600)),
             min_size=(960, 680), background_color='#f5f5f7', transparent=True, text_select=True,

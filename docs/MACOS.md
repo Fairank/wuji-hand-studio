@@ -1,10 +1,10 @@
-# Hand Workbench on Mac / macOS 0.2.18
+# Hand Workbench on Mac / macOS 0.2.19
 
 非官方个人展示工具。0.2.17 基于 Windows `v0.2.16-windows`（`d8a9f49`），使用原生 Cocoa / WKWebView，保留节目单、顺序与随机播放、多手工作区、连接、官方校准和映射页面。
 
 ## 安装与启动
 
-Apple Silicon、macOS 13.5+。解压 `HandWorkbench-0.2.18-macos-arm64.zip`，核对配套 SHA-256，将 `HandWorkbench.app` 放入应用程序。无需另装 Python、Homebrew、VMware 或填写 SSH。安装包含 Lima 和 Ubuntu ARM64 磁盘，不代表 SDK 首次准备无需联网。
+Apple Silicon、macOS 13.5+。解压 `HandWorkbench-0.2.19-macos-arm64.zip`，核对配套 SHA-256，将 `HandWorkbench.app` 放入应用程序。无需另装 Python、Homebrew、VMware 或填写 SSH。安装包含 Lima 和 Ubuntu ARM64 磁盘，不代表 SDK 首次准备无需联网。
 
 本地包为 ad-hoc 签名，尚无 Apple Developer ID 签名或公证。来源和摘要核对后，如系统阻止启动，使用“隐私与安全性”明确允许；不要关闭 Gatekeeper 或批量删除隔离属性。GitHub 是否已有安装包，以实际 Release 附件为准。
 
@@ -19,6 +19,8 @@ macOS 26+ 使用 `NSGlassEffectView` 的 Clear 表层，底层是 `NSVisualEffec
 Mac 的透明 WebView 在重新附着窗口材质时可能停住装饰性 CSS 时间线，因此原生窗口关闭这类过渡，保证文字和选中状态立即可见；不影响 3D 帧、动作编排或控制频率。
 
 右上角设备标题统一为 `wuji hand`；型号、手性与序列号仍由设备连接信息确认。
+
+0.2.19 修复动作预览状态、动作名称和画面来源标识的英文切换，暂停时也立即同步。语言胶囊、三点菜单与打开的连接面板采用统一的浅深主题。Mac 顶部空白栏、WUJI 标志和工作台标题可以拖动窗口；按钮、下拉框、模型视角与浮窗拖动不受影响。使用 [pywebview 的公开拖动区域设置](https://pywebview.flowrl.com/api/)，不改系统全局鼠标设置或安全权限。
 
 0.2.18 取消深色外围的重叠黑底，并统一语言胶囊、设置与弹窗控件。设置 → 外观可选择 90/100/110% 文字大小，仅改变界面排版。展示动作中新增三个“大幅度预览 · 仅预览”，用于观看模型关节范围，不能用于真实手播放或实机轨迹导出。数字手势是按官方几何精修的项目创作，不是官方真人录制、触碰认证或实物验收。
 

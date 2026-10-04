@@ -17,7 +17,10 @@
     floating: '浮动', dock: '停靠', popout: '弹出', ready: '就绪', unavailable: '不可用',
     modelDecision: '模型决策', measuredFeedback: '实测反馈', rawSuggestion: '原始建议',
     appliedCommand: '已应用指令', readOnly: '只读', currentContact: '当前接触', recentTouch: '最近触碰',
-    copy: '复制', save: '保存', close: '关闭', search: '搜索', noResults: '未找到与“{query}”匹配的结果'
+    copy: '复制', save: '保存', close: '关闭', search: '搜索', noResults: '未找到与“{query}”匹配的结果',
+    simulationPreviewNoMotion: 'MuJoCo 动作预览 · 不驱动实机', simulatedMotionPreview: '仿真动作预览',
+    motionPlaying: '播放中', motionPausedOrComplete: '已暂停或完成',
+    previewFeedback: '当前显示实机反馈或静态预览', scriptedPreview: '编排预览'
   };
   var EN = {
     appTitle: 'Hand Workbench', motion: 'Motion', parameters: 'Parameters', feedback: 'Feedback', capture: 'Capture',
@@ -29,10 +32,23 @@
     floating: 'Floating', dock: 'Dock', popout: 'Pop out', ready: 'Ready', unavailable: 'Unavailable',
     modelDecision: 'Model decision', measuredFeedback: 'Measured feedback', rawSuggestion: 'Raw suggestion',
     appliedCommand: 'Applied command', readOnly: 'Read-only', currentContact: 'Current contact', recentTouch: 'Recent touch',
-    copy: 'Copy', save: 'Save', close: 'Close', search: 'Search', noResults: 'No results for "{query}"'
+    copy: 'Copy', save: 'Save', close: 'Close', search: 'Search', noResults: 'No results for "{query}"',
+    simulationPreviewNoMotion: 'MuJoCo preview · no hardware movement', simulatedMotionPreview: 'Motion preview',
+    motionPlaying: 'Playing', motionPausedOrComplete: 'Paused or complete',
+    previewFeedback: 'Showing measured feedback or static preview', scriptedPreview: 'Scripted preview'
   };
   var DICT = Object.freeze({ zh: Object.freeze(ZH), en: Object.freeze(EN) });
   var current = readStored();
+  var actionLabels = [];
+  var PLAYBACK_LABELS = Object.freeze({
+    '整套展示': 'Combined preview', '张开': 'Open', '握拳': 'Fist', '依次对指': 'Sequential opposition',
+    '左右侧摆': 'Side-to-side sway', '逐指屈伸': 'Finger wave', '逐关节活动': 'Per-joint movement',
+    '拇指活动': 'Thumb movement', '食指活动': 'Index finger movement', '中指活动': 'Middle finger movement',
+    '无名指活动': 'Ring finger movement', '小指活动': 'Little finger movement',
+    '官方左手对指录制': 'Official left-hand opposition recording', '轻触反应流程 · 编排预览': 'Touch response · scripted preview',
+    '准备': 'Ready', '返回': 'Return', '完成': 'Complete', '实测起点': 'Measured start',
+    '返回实测起点': 'Return to measured start', '实际起始姿态': 'Measured start pose', '稳定': 'Hold'
+  });
 
   function readStored() {
     try { return global.localStorage.getItem(STORAGE_KEY) === 'en' ? 'en' : 'zh'; } catch (err) { return 'zh'; }
@@ -49,6 +65,30 @@
       var value = hasOwn.call(params, field) ? params[field] : undefined;
       return value === undefined || value === null ? match : String(value);
     });
+  }
+
+  /* Playback labels arrive from the controller in Chinese. Prefer an existing
+     bilingual segment when present, then translate known catalog/phase labels. */
+  function registerActionLabels(actions) {
+    actionLabels = Array.isArray(actions) ? actions.filter(function (item) {
+      return item && typeof item.zh === 'string' && typeof item.en === 'string';
+    }).map(function (item) { return { id: item.id, zh: item.zh, en: item.en }; }) : [];
+    if (typeof global.CustomEvent === 'function' && typeof global.dispatchEvent === 'function') {
+      global.dispatchEvent(new global.CustomEvent('wuji-locale-catalog'));
+    }
+  }
+
+  function playbackLabel(label, actionId) {
+    var value = String(label || '');
+    if (current !== 'en') return value;
+    var action = actionLabels.find(function (item) { return item.id === actionId; });
+    if (!action) action = actionLabels.find(function (item) { return value === item.zh || value.indexOf(item.zh + ' · ') === 0; });
+    if (action && value.indexOf(action.zh) === 0) value = action.en + value.slice(action.zh.length);
+    return value.split(' · ').map(function (part) {
+      var bilingual = part.match(/^(.+?)\s*\/\s*([A-Za-z].*)$/);
+      if (bilingual) return bilingual[2].trim();
+      return hasOwn.call(PLAYBACK_LABELS, part) ? PLAYBACK_LABELS[part] : part;
+    }).join(' · ');
   }
 
   /* Text is only written to leaf elements whose text is not a form value. */
@@ -92,7 +132,7 @@
     return true;
   }
 
-  var api = { setLanguage: setLanguage, text: text, apply: apply, dictionary: DICT };
+  var api = { setLanguage: setLanguage, text: text, playbackLabel: playbackLabel, registerActionLabels: registerActionLabels, apply: apply, dictionary: DICT };
   Object.defineProperty(api, 'lang', { enumerable: true, get: function () { return current; } });
   global.WujiLocale = api;
 })(typeof window !== 'undefined' ? window : this);

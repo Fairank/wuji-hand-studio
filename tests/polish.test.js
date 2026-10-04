@@ -47,6 +47,7 @@ test('language switch stays synchronized, accessible, and keyboard operable', ()
   assert.equal(switcher.element.getAttribute('role'), 'group');
   assert.equal(switcher.element.getAttribute('aria-label'), '语言');
   assert.deepEqual(switcher.buttons.map(button => button.textContent), ['中文', 'EN']);
+  assert.deepEqual(switcher.buttons.map(button => button.type), ['button', 'button']);
   assert.equal(switcher.buttons[0].getAttribute('aria-pressed'), 'true');
   assert.equal(switcher.buttons[0].tabIndex, 0);
   assert.equal(switcher.buttons[1].tabIndex, -1);
@@ -110,6 +111,16 @@ test('entrypoint loads polish last and preserves the settings language ID', () =
   assert.match(css, /prefers-reduced-transparency:reduce/);
   assert.match(css, /--wuji-font-scale/);
   assert.match(css, /html body \.wuji-language-switch button\[aria-pressed=true\]/);
+  assert.match(css, /#desktop-menu-button[\s\S]*width:36px;height:36px;min-height:36px/);
+  assert.match(css, /wuji-language-switch--toolbar\{[\s\S]*height:36px/);
+  assert.match(css, /wuji-language-switch--toolbar button\[aria-pressed=true\][\s\S]*background:var\(--wuji-polish-accent-soft\)/);
+  assert.match(css, /html\[data-theme=dark\] body #desktop-menu-button/);
+  assert.match(css, /html\[data-theme=dark\] body \.wuji-language-slot>\.wuji-language-switch--toolbar button\[aria-pressed=true\]/);
+  assert.match(css, /html body #desktop-menu\{[\s\S]*background:var\(--wuji-polish-control\)/);
+  assert.match(css, /html body #desktop-menu \.desktop-menu-section\{[\s\S]*background:transparent/);
+  assert.match(css, /html body #desktop-menu button\.desktop-menu-row:hover:not\(:disabled\)/);
+  assert.match(css, /html body \.connection-popover\{[\s\S]*background:var\(--wuji-polish-control\)/);
+  assert.match(css, /html body \.connection-popover \.wa-row:hover:not\(:disabled\)/);
   assert.match(css, /html\[data-theme=dark\] body \.settings-tabs\[role=tablist\] button\[aria-selected=true\]/);
   assert.match(css, /html body select:not\(\[multiple\],\[size\]\)/);
   assert.match(css, /border-radius:12px/);

@@ -1,8 +1,27 @@
 import {cameraGesture} from './camera_gesture.mjs';
 const $=id=>document.getElementById(id);let state=null,camera=null,pointer=null,dirty=false,busy=false;
-const locale=window.WujiLocale,text=(zh,en)=>locale?.lang==='en'?en:zh;
+const text=(zh,en)=>window.WujiLocale?.lang==='en'?en:zh;
+let lastMeta=null;
+function viewMessage(meta){
+ if(meta.mode==='demo'){
+  const playback=meta.playback||{};
+  return `${text('仿真动作预览','Motion preview')} · ${window.WujiLocale?.playbackLabel?.(playback.label,playback.action)||playback.label||''} · ${text(playback.running?'播放中':'已暂停或完成',playback.running?'Playing':'Paused or complete')}`;
+ }
+ const messages={
+  '实机同步 · 等待真实关节反馈':['实机同步 · 等待真实关节反馈','Hardware sync · waiting for measured joint feedback'],
+  '动作预览 · 请先选择并播放动作':['动作预览 · 请先选择并播放动作','Motion preview · select and play an action'],
+  '模型预览 · 等待连接与关节对应核对':['模型预览 · 等待连接与关节对应核对','Model preview · waiting for connection and joint mapping check'],
+  '三维渲染已中断，画面不再代表当前姿态':['三维渲染已中断，画面不再代表当前姿态','3D rendering stopped; this image no longer represents the current pose'],
+  '正在载入原生左手模型':['正在载入原生左手模型','Loading the native left-hand model']
+ };
+ const pair=messages[meta.message];return pair?text(...pair):meta.message||'';
+}
+function renderNotice(meta){
+ const source=meta.mode==='demo'?text('编排预览','Scripted preview'):meta.source_seq==null?text('模型预览','Model preview'):`${text('实测帧','Measured frame')} ${meta.source_seq}`;
+ $('notice').textContent=`${source} · ${Number(meta.render_hz||0).toFixed(1)} fps · ${viewMessage(meta)}`;
+}
 function applyLanguage(){
- const english=locale?.lang==='en';document.documentElement.lang=english?'en':'zh-CN';
+ const english=window.WujiLocale?.lang==='en';document.documentElement.lang=english?'en':'zh-CN';
  document.title=english?'MuJoCo · Hand Viewer':'MuJoCo · 灵巧手查看器';
  $('viewer-title').textContent=english?'MuJoCo · Hand Viewer':'MuJoCo · 灵巧手查看器';
  const labels=english?['Front','Side','Reset']:['正面','侧面','复位'];
@@ -23,8 +42,10 @@ function applyTextSize(){
 }
 applyLanguage();applyTheme();applyTextSize();
 window.addEventListener('wuji-language',applyLanguage);
+window.addEventListener('wuji-language',()=>{if(lastMeta)renderNotice(lastMeta);});
+window.addEventListener('wuji-locale-catalog',()=>{if(lastMeta)renderNotice(lastMeta);});
 window.addEventListener('storage',event=>{
- if(event.key==='wuji-language'&&['zh','en'].includes(event.newValue))locale?.setLanguage(event.newValue);
+ if(event.key==='wuji-language'&&['zh','en'].includes(event.newValue))window.WujiLocale?.setLanguage(event.newValue);
  if(event.key==='wuji-workbench-theme')applyTheme();
  if(event.key==='wuji-font-scale')applyTextSize();
 });
@@ -44,8 +65,8 @@ async function poll(){try{
  if(!s.ok||!v.ok)throw Error(text('本机服务未连接','Local service unavailable'));state=await s.json();const data=await v.json();if(!pointer&&!busy&&!dirty)camera=state.camera;
  if(!data.meta.ready||!data.image)throw Error(data.meta.message||text('没有可用的实时画面','No live image available'));
  const im=new Image();im.src=data.image;await im.decode();$('image').src=data.image;$('stale').hidden=true;
- const source=data.meta.mode==='demo'?text('编排预览','Scripted preview'):data.meta.source_seq==null?text('模型预览','Model preview'):`${text('实测帧','Measured frame')} ${data.meta.source_seq}`;
- $('notice').textContent=`${source} · ${Number(data.meta.render_hz||0).toFixed(1)} fps · ${data.meta.message||''}`;
+ lastMeta=data.meta;renderNotice(lastMeta);
  }catch(e){$('stale').hidden=false;$('stale').textContent=e.message;}
  finally{setTimeout(poll,100);}}
+fetch('/api/catalog',{cache:'force-cache'}).then(r=>r.ok?r.json():null).then(catalog=>{if(catalog?.actions)window.WujiLocale?.registerActionLabels?.(catalog.actions);}).catch(()=>{});
 poll();

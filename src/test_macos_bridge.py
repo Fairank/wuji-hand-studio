@@ -4,6 +4,32 @@ import shutil
 import subprocess
 import unittest
 from unittest.mock import patch, MagicMock
+from types import SimpleNamespace
+
+
+class WindowDragTests(unittest.TestCase):
+    def test_info_reports_only_own_ready_window_bounds(self):
+        from macos_desktop import MacDesktop
+        from native_desktop import NativeDesktop
+        desktop = MacDesktop()
+        desktop.window = SimpleNamespace(x=20, y=40, width=960, height=680)
+        with patch.object(NativeDesktop, 'info', return_value={'ready': True}):
+            self.assertEqual(desktop.info()['window_bounds'],
+                             dict(x=20, y=40, width=960, height=680))
+        with patch.object(NativeDesktop, 'info', return_value={'ready': False}):
+            self.assertNotIn('window_bounds', desktop.info())
+
+    def test_drag_only_matches_empty_chrome_not_control_descendants(self):
+        from macos_desktop import configure_window_drag, MAC_DRAG_SELECTOR
+        host = SimpleNamespace(settings={'ALLOW_FILE_URLS': False})
+        configure_window_drag(host)
+        self.assertTrue(host.settings['DRAG_REGION_DIRECT_TARGET_ONLY'])
+        self.assertEqual(host.settings['DRAG_REGION_SELECTOR'], MAC_DRAG_SELECTOR)
+        self.assertFalse(host.settings['ALLOW_FILE_URLS'])
+        self.assertIn('.mac-window-drag-strip', MAC_DRAG_SELECTOR)
+        self.assertIn('.top h1', MAC_DRAG_SELECTOR)
+        self.assertNotIn('button', MAC_DRAG_SELECTOR)
+        self.assertNotIn('.top *', MAC_DRAG_SELECTOR)
 
 
 @unittest.skipUnless(shutil.which('node'), 'Node is required for the CSP bridge test')
