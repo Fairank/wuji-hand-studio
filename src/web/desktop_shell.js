@@ -65,7 +65,21 @@
   const strip=document.createElement('div');strip.className='mac-window-drag-strip';strip.setAttribute('aria-hidden','true');document.body.prepend(strip);
   const logo=document.querySelector('.top .studio-brand');if(logo)logo.draggable=false;
  }
- async function ready(){native=window.pywebview?.api;if(!native)return;info=await native.info();document.documentElement.dataset.desktop='true';document.documentElement.dataset.platform=info.platform;addMacDragStrip();if($('studio-desktop'))$('studio-desktop').hidden=true;await native.set_language(window.WujiLocale.lang);await applyMaterial();labels();}
+ let readiness=null;
+ function ready(){
+  const api=window.pywebview?.api;
+  if(typeof api?.info!=='function')return Promise.resolve();
+  // An already-injected bridge and pywebviewready may both notify startup.
+  // They share one initialization, rather than rehosting the Cocoa view twice.
+  if(readiness)return readiness;
+  native=api;
+  readiness=(async()=>{
+   info=await native.info();document.documentElement.dataset.desktop='true';document.documentElement.dataset.platform=info.platform;
+   addMacDragStrip();if($('studio-desktop'))$('studio-desktop').hidden=true;
+   await native.set_language(window.WujiLocale.lang);await applyMaterial();labels();
+  })().catch(error=>{readiness=null;throw error;});
+  return readiness;
+ }
  window.addEventListener('pywebviewready',()=>ready().catch(e=>{$('desktop-menu-status').textContent=e.message;}));
  if(window.pywebview?.api)ready().catch(()=>{});
  window.addEventListener('wuji-language',()=>{labels();if(native)native.set_language(window.WujiLocale.lang).catch(()=>{});});

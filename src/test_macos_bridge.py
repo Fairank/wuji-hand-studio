@@ -8,6 +8,21 @@ from types import SimpleNamespace
 
 
 class WindowDragTests(unittest.TestCase):
+    def test_first_material_attachment_uses_clear_not_regular_glass(self):
+        from macos_desktop import MacDesktop
+        desktop = MacDesktop()
+        desktop.window = SimpleNamespace(native=object())
+        with patch('macos_material.WindowMaterial') as factory:
+            material = factory.return_value
+            material.apply.return_value = {'ok': True, 'glass_style': 'clear'}
+            self.assertEqual(desktop.set_window_material(True)['glass_style'], 'clear')
+            factory.assert_called_once_with(desktop.window.native)
+            material.apply.assert_called_once_with('glass', glass_style='clear')
+            material.apply.reset_mock()
+            desktop.set_window_material(False)
+            factory.assert_called_once()
+            material.apply.assert_called_once_with('solid', glass_style='clear')
+
     def test_info_reports_only_own_ready_window_bounds(self):
         from macos_desktop import MacDesktop
         from native_desktop import NativeDesktop

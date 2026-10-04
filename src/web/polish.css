@@ -178,6 +178,16 @@ html body .wuji-language-slot>.wuji-language-switch--toolbar button[aria-pressed
   background:var(--wuji-polish-accent-soft);color:var(--wuji-polish-accent);box-shadow:none
 }
 html body .wuji-language-slot>.wuji-language-switch--toolbar button:hover:not([aria-pressed=true]){background:rgba(127,127,135,.1)}
+/* Keep the hand status and action as peer toolbar capsules; the wrapper is
+   layout-only so it cannot read as a larger white ring around both controls. */
+html body #connection-toolbar{gap:4px;padding:0;background:transparent;border:0;border-radius:0;box-shadow:none}
+html body #connection-toolbar button{box-sizing:border-box;min-height:36px;padding:0 11px;border:1px solid var(--wuji-polish-line);border-radius:12px;background:var(--wuji-polish-control);color:var(--wuji-polish-sub);box-shadow:none}
+html body #connection-toolbar button:hover:not(:disabled){background:var(--wuji-polish-accent-soft);border-color:var(--wuji-polish-line);color:var(--wuji-polish-text);box-shadow:none}
+html body #connection-toolbar #connection-details{padding-inline:10px;background:var(--wuji-polish-control);color:var(--wuji-polish-text)}
+html body #connection-toolbar #connection-toggle{background:var(--wuji-polish-control);color:var(--wuji-polish-text)}
+html body #connection-toolbar #connection-toggle:hover:not(:disabled){background:var(--wuji-polish-accent-soft);color:var(--wuji-polish-text)}
+html[data-theme=dark] body #connection-toolbar button{background:var(--wuji-polish-control);color:var(--wuji-polish-text)}
+html[data-theme=dark] body #connection-toolbar button:hover:not(:disabled){background:var(--wuji-polish-accent-soft);color:var(--wuji-polish-text)}
 html[data-theme=dark] body #desktop-menu-button{background:var(--wuji-polish-control);color:var(--wuji-polish-text)}
 html[data-theme=dark] body #desktop-menu-button:hover:not(:disabled){background:var(--wuji-polish-accent-soft);color:var(--wuji-polish-text)}
 html[data-theme=dark] body .wuji-language-slot>.wuji-language-switch--toolbar button:not(.primary):not(.top-connection-action){background:transparent;color:var(--wuji-polish-sub)}

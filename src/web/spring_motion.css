@@ -56,20 +56,12 @@ html .cg-chevron,html #wb-program .wb-program-summary svg {
 html .settings-row input[type=checkbox]:before {
   transition: transform 300ms var(--wb-spring);
 }
-.spring-preview-row { display:flex;align-items:center;justify-content:space-between;gap:18px;padding:16px 0;border-top:1px solid var(--ui-line); }
-.spring-preview-copy { min-width:0; }
-.spring-preview-copy strong { display:block;font-size:13px;font-weight:600;color:var(--ui-ink); }
-.spring-preview-copy p { margin:5px 0 0!important;font-size:12px!important;line-height:1.5;color:var(--ui-sub); }
-html #spring-preview { display:inline-flex;align-items:center;justify-content:center;gap:9px;flex:none;min-height:36px;padding:8px 12px;border:1px solid var(--ui-line);border-radius:10px;background:var(--ui-fill);color:var(--ui-ink);font-size:12px; }
-.spring-preview-dot { display:block;width:12px;height:12px;border-radius:50%;background:var(--ui-blue); }
-@media(max-width:600px){.spring-preview-row{align-items:flex-start;flex-direction:column;gap:10px}}
 /* Honor both preferences. Settling is immediate even during an active press. */
-html[data-reduce-motion=true] body :is(button,.button,.wa-row,.ui-link-button,.directory a),
-html[data-reduce-motion=true] .spring-preview-dot { scale:1!important;transform:none!important;transition:none!important;animation:none!important; }
+html[data-reduce-motion=true] body :is(button,.button,.wa-row,.ui-link-button,.directory a) { scale:1!important;transform:none!important;transition:none!important;animation:none!important; }
 html[data-reduce-motion=true] :is(dialog,.page-heading,.hub-section,.settings-section),
 html[data-reduce-motion=true] :is(summary:after,.cg-chevron,.settings-row input:before) { animation:none!important;transition:none!important; }
 @media(prefers-reduced-motion:reduce) {
-  html body :is(button,.button,.wa-row,.ui-link-button,.directory a),.spring-preview-dot { scale:1!important;transform:none!important;transition:none!important;animation:none!important; }
+  html body :is(button,.button,.wa-row,.ui-link-button,.directory a) { scale:1!important;transform:none!important;transition:none!important;animation:none!important; }
   html :is(dialog,.page-heading,.hub-section,.settings-section),
   html :is(summary:after,.cg-chevron,.settings-row input:before) { animation:none!important;transition:none!important; }
 }

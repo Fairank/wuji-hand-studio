@@ -1,10 +1,10 @@
-# Hand Workbench on Mac / macOS 0.2.19
+# Hand Workbench on Mac / macOS 0.2.20
 
 非官方个人展示工具。0.2.17 基于 Windows `v0.2.16-windows`（`d8a9f49`），使用原生 Cocoa / WKWebView，保留节目单、顺序与随机播放、多手工作区、连接、官方校准和映射页面。
 
 ## 安装与启动
 
-Apple Silicon、macOS 13.5+。解压 `HandWorkbench-0.2.19-macos-arm64.zip`，核对配套 SHA-256，将 `HandWorkbench.app` 放入应用程序。无需另装 Python、Homebrew、VMware 或填写 SSH。安装包含 Lima 和 Ubuntu ARM64 磁盘，不代表 SDK 首次准备无需联网。
+Apple Silicon、macOS 13.5+。解压 `HandWorkbench-0.2.20-macos-arm64.zip`，核对配套 SHA-256，将 `HandWorkbench.app` 放入应用程序。无需另装 Python、Homebrew、VMware 或填写 SSH。安装包含 Lima 和 Ubuntu ARM64 磁盘，不代表 SDK 首次准备无需联网。
 
 本地包为 ad-hoc 签名，尚无 Apple Developer ID 签名或公证。来源和摘要核对后，如系统阻止启动，使用“隐私与安全性”明确允许；不要关闭 Gatekeeper 或批量删除隔离属性。GitHub 是否已有安装包，以实际 Release 附件为准。
 
@@ -17,6 +17,8 @@ macOS 26+ 使用 `NSGlassEffectView` 的 Clear 表层，底层是 `NSVisualEffec
 保留系统关闭、最小化、缩放和拖动行为。没有屏幕录制、其他窗口像素采集或自制外部折射。公开系统材质会处理背景，实际效果随系统、背景及窗口活跃状态变化，并不保证和 Windows Acrylic 逐像素一致。
 
 Mac 的透明 WebView 在重新附着窗口材质时可能停住装饰性 CSS 时间线，因此原生窗口关闭这类过渡，保证文字和选中状态立即可见；不影响 3D 帧、动作编排或控制频率。
+
+0.2.20 首次构建玻璃视图时即采用 Clear，不再先挂载 Regular 再切换；桥已存在与启动事件共用一次初始化。设置的“减少透明效果”仍按本机保存值与系统辅助功能生效。连接状态和连接按钮不再有组合亮白外圈，设置中的“柔和回弹”演示已移除。
 
 右上角设备标题统一为 `wuji hand`；型号、手性与序列号仍由设备连接信息确认。
 

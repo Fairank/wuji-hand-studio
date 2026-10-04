@@ -100,9 +100,10 @@ test('entrypoint loads polish last and preserves the settings language ID', () =
   const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
   const settings = fs.readFileSync(path.join(root, 'settings.js'), 'utf8');
   const css = fs.readFileSync(path.join(root, 'polish.css'), 'utf8');
+  const springCss = fs.readFileSync(path.join(root, 'spring_motion.css'), 'utf8');
   const picker = fs.readFileSync(path.join(root, 'action_picker.js'), 'utf8');
   const playback = fs.readFileSync(path.join(root, 'playback.js'), 'utf8');
-  assert.ok(html.indexOf('/spring_motion.js') < html.indexOf('/polish.css'));
+  assert.doesNotMatch(html, /\/spring_motion\.js/);
   assert.ok(html.indexOf('/polish.css') < html.indexOf('/polish.js'));
   assert.match(settings, /language\.id='settings-language'/);
   assert.match(settings, /settings-font-size/);
@@ -121,9 +122,16 @@ test('entrypoint loads polish last and preserves the settings language ID', () =
   assert.match(css, /html body #desktop-menu button\.desktop-menu-row:hover:not\(:disabled\)/);
   assert.match(css, /html body \.connection-popover\{[\s\S]*background:var\(--wuji-polish-control\)/);
   assert.match(css, /html body \.connection-popover \.wa-row:hover:not\(:disabled\)/);
+  assert.match(css, /html body #connection-toolbar\{gap:4px;padding:0;background:transparent;border:0;border-radius:0;box-shadow:none\}/);
+  assert.match(css, /html body #connection-toolbar button\{[\s\S]*border-radius:12px/);
+  assert.match(css, /body :is\(button,a,input,select,textarea,summary\):focus-visible/);
   assert.match(css, /html\[data-theme=dark\] body \.settings-tabs\[role=tablist\] button\[aria-selected=true\]/);
   assert.match(css, /html body select:not\(\[multiple\],\[size\]\)/);
   assert.match(css, /border-radius:12px/);
+  assert.doesNotMatch(springCss, /spring-preview|#spring-preview/);
+  assert.match(springCss, /:not\(:disabled,[\s\S]*\):active/);
+  assert.match(springCss, /prefers-reduced-motion:reduce/);
+  assert.equal(fs.existsSync(path.join(root, 'spring_motion.js')), false);
   const polishJs = fs.readFileSync(path.join(root, 'polish.js'), 'utf8');
   assert.match(polishJs, /\.top-actions \.studio-tools select/);
   assert.match(picker, /isPreviewOnly\(id\)/);

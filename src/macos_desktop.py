@@ -114,7 +114,11 @@ class MacDesktop(NativeDesktop):
         from macos_material import WindowMaterial
         if self.mac_material is None:
             self.mac_material = WindowMaterial(self.window.native)
-        self.material = self.mac_material.apply('glass' if enabled else 'solid')
+        # Configure Clear BEFORE the first attachment. Creating a Regular
+        # surface and changing its style after hosting WKWebView can retain
+        # the initial opaque fill until the view is detached and reattached.
+        self.material = self.mac_material.apply('glass' if enabled else 'solid',
+                                               glass_style='clear')
         return self.material
 
     def set_window_appearance(self, theme):

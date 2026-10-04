@@ -1,6 +1,6 @@
 # 界面回弹 / Interface motion
 
-「设置 → 外观」中的“试一下”只播放一个圆点的回弹，不会连接设备。开启“减少动态效果”或系统减少动态偏好后，回弹关闭，正在播放的圆点立即复位；停止操作不等待动画。
+0.2.20 已移除「设置 → 外观」中的“柔和回弹 / 试一下”演示。正常控件的有限过渡保留；开启“减少动态效果”或系统减少动态偏好后关闭。停止操作不等待动画。
 
 ## 设计与范围
 
@@ -20,4 +20,4 @@
 
 ## English
 
-Settings → Appearance → Try it previews one short spring response. App and system Reduce Motion preferences disable movement and cancel any active preview. Button feedback, dialog entrance, local disclosure arrows and switches use finite compositor-friendly transforms. Scrolling, live 3D content, device command timing and all controller parameters are unchanged. Stop controls keep a stable target.
+The settings spring demo was removed in 0.2.20. App and system Reduce Motion preferences disable movement. Button feedback, dialog entrance, local disclosure arrows and switches retain finite compositor-friendly transforms. Scrolling, live 3D content, device command timing and all controller parameters are unchanged. Stop controls keep a stable target.
