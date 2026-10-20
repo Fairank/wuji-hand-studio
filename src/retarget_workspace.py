@@ -36,5 +36,5 @@ class RetargetWorkspace:
 
     def open_glove(self, command, profile, user):
         old=self.context(profile)['binding']
-        selected=dict(old,glove_serial=command['serial'],sdk_user=command.get('user_id') or user.get('user_id') or '')
+        selected=dict(old,glove_serial=command['serial'],sdk_user=command.get('user_id',user.get('user_id') or ''))
         return self.select(selected,profile)

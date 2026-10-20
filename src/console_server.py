@@ -69,7 +69,7 @@ class Controller:
         self.csrf = secrets.token_urlsafe(32)
         self.state = dict(connection='disconnected', message='接好机械手后，点击“自动连接”', devices=[],
             latest=None, metrics=dict(host_hz=None, device_hz=None, age_ms=None),
-            device_id=None, joint_rates=[], mapping=[], mapping_device_id=None, display_selected=None,
+            device_id=None, identified_device=None, joint_rates=[], mapping=[], mapping_device_id=None, display_selected=None,
             recording=dict(active=False, frames=0, elapsed_s=0, label='baseline', seconds=30),
             sessions=[], log=[], read_only=True, recognition_enabled=False,
             motion_enabled=False, instance='wuji-studio-v1',motion_history=[],
@@ -156,6 +156,7 @@ class Controller:
                 self.log(self.parameters.sync_status['message'])
 
     def clear_live(self):
+        self.state['identified_device']=None
         self.state['hardware']['probe_ready']=False
         self.state['hardware']['trial_ready']=False
         self.state['latest'] = None
@@ -174,7 +175,7 @@ class Controller:
         self.stdin.flush()
 
     def action(self, command):
-        if isinstance(command,dict) and command.get('name') in {'connect','runtime_select','bridge_config_save','bridge_password_save','bridge_password_forget','parameters_sync','doctor_version','doctor_run','device_profile_select','glove_connect'}:
+        if isinstance(command,dict) and command.get('name') in {'connect','runtime_select','bridge_config_save','bridge_password_save','bridge_password_forget','parameters_sync','doctor_version','doctor_run','doctor_support','device_profile_select','glove_connect'}:
             from managed_runtime import status as runtime_status
             if runtime_status()['busy']:
                 raise ValueError('内置控制环境正在安装，请等待完成 / Wait for controller setup to finish')
@@ -199,7 +200,7 @@ class Controller:
                 self.group.stop('手动停止 / Manually stopped')
             elif name not in {'session_keepalive','hardware_keepalive','view_camera','display_selected'}:
                 raise ValueError('请先停止编组 / Stop the group before changing this hand')
-        if self.calibration.run['running'] and name in {'program_start','connect','hardware_start','hardware_trial','hardware_probe','demo_start','glove_scan','glove_open','glove_prepare','glove_follow','doctor_run','doctor_version'}:
+        if self.calibration.run['running'] and name in {'program_start','connect','hardware_start','hardware_trial','hardware_probe','demo_start','glove_scan','glove_open','glove_prepare','glove_follow','doctor_run','doctor_version','doctor_support'}:
             raise ValueError('Finish hand-model calibration first / 请先结束手部模型标定')
         if name=='session_keepalive':
             if self.program.lease:self.program.keepalive(self.program.lease)
@@ -305,13 +306,14 @@ class Controller:
             if name in {'glove_scan','glove_open','glove_follow','glove_prepare'}:
                 self.player.command(dict(name='demo_stop'));self.state['view_source']='glove'
             return result
-        if self.glove.busy and name in {'connect','device_profile_select','bridge_config_save','parameters_sync','doctor_version','doctor_run','demo_start','hardware_start','hardware_probe','hardware_trial'}:
+        if self.glove.busy and name in {'connect','device_profile_select','bridge_config_save','parameters_sync','doctor_version','doctor_run','doctor_support','demo_start','hardware_start','hardware_probe','hardware_trial'}:
             raise ValueError('先断开手套遥操作会话 / Disconnect the glove session first')
-        if command.get('name') in {'doctor_version','doctor_run'}:
+        if command.get('name') in {'doctor_version','doctor_run','doctor_support'}:
             with self.lock:
                 if self.state['connection']!='disconnected' or self.state['hardware'].get('active') is not False or self.parameters.sync_status['busy']:
                     raise ValueError('先断开设备连接，再运行独立诊断 / Disconnect the SDK session before diagnostics')
-                return self.doctor.start('version' if command['name']=='doctor_version' else 'diagnose',command.get('serial',''))
+                if name=='doctor_support':return self.doctor.start_support(command.get('days',1),command.get('description',''))
+                return self.doctor.start('version' if command['name']=='doctor_version' else 'diagnose',command.get('serial',''),command.get('address',''))
         if self.doctor.snapshot()['running'] and command.get('name') in {'connect','bridge_config_save','parameters_sync','device_profile_select'}:
             raise ValueError('官方诊断正在运行，请稍候 / Official diagnostic in progress')
         if isinstance(command,dict) and command.get('name') == 'device_profile_select':
@@ -551,6 +553,7 @@ class Controller:
                 from device_profiles import save_profile
                 self.state['device_profile'] = save_profile(event['profile'])
                 self.state['device_id'] = event['device_id']
+                self.state['identified_device'] = dict(serial=event['device_id'],profile=event['profile'],source='sdk_identity')
                 self.state['mapping'] = []
                 self.state['mapping_device_id'] = None
                 self.state['display_selected'] = None
@@ -687,10 +690,32 @@ class Handler(BaseHTTPRequestHandler):
             required=('agent_directory','python')+(('host','username') if config['mode']=='ssh' else ())
             missing=[key for key in required if not config[key]]
             return self.reply(200,dict(edition=EDITION,version=EDITION['version'],optional_model=model_status(),local_controller_supported=sys.platform.startswith('linux'),bridge=config,controller_configured=runtime['ready'] if config['mode'] in ('wsl','macvm') else not missing,missing_controller_fields=missing,credential=credential_status(config),runtime=runtime,profiles=list(PROFILES.values()),selected_profile=self.server.controller.state['device_profile']['id'],unofficial=True))
+        if url.path=='/api/support':
+            from support_bundle import artifact
+            try:
+                query=parse_qs(url.query);path=artifact(query.get('id',[''])[0],query.get('kind',['all'])[0])
+            except (ValueError,FileNotFoundError) as error:return self.reply(404,dict(error=str(error)))
+            self.send_response(200)
+            self.send_header('Content-Type','application/zip' if path.suffix=='.zip' else 'text/plain; charset=utf-8')
+            self.send_header('Content-Length',str(path.stat().st_size))
+            self.send_header('Content-Disposition','attachment; filename="'+path.name+'"')
+            self.send_header('Cache-Control','no-store')
+            self.send_header('X-Content-Type-Options','nosniff')
+            self.end_headers()
+            import shutil
+            with path.open('rb') as stream:shutil.copyfileobj(stream,self.wfile,1024*1024)
+            return
         if url.path in ('/api/doctor','/api/doctor/report'):
             state=self.server.controller.doctor.snapshot()
             if url.path.endswith('/report'):
                 if not state.get('report'):return self.reply(404,dict(error='No completed diagnostic report'))
+                fmt=parse_qs(url.query).get('format',['json'])[0]
+                if fmt=='txt':
+                    from doctor_export import report_text
+                    return self.reply(200,report_text(state['report']).encode('utf-8-sig'),'text/plain; charset=utf-8',filename='wuji-doctor-report.txt')
+                if fmt=='raw':
+                    return self.reply(200,state['report']['stdout'].encode('utf-8'),'application/json; charset=utf-8',filename='wuji-doctor-official.json')
+                if fmt!='json':return self.reply(400,dict(error='Unknown report format'))
                 return self.reply(200,state['report'],filename='wuji-doctor-report.json')
             return self.reply(200,state)
         if url.path == '/api/state':

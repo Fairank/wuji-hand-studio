@@ -102,7 +102,10 @@ def _walk(node: Any, section: str, depth: int,
             "sn": _to_text(node.get("sn"), "sn"),
             "status": _normalize_status(node.get("status"), bool(children)),
             "summary": _to_text(node.get("summary"), "summary"),
-            "tip": _to_text(node.get("tip"), "tip"),
+            "tip": " · ".join(dict.fromkeys(filter(None, (
+                _to_text(node.get("tip"), "tip"),
+                _to_text(node.get("fix"), "fix"),
+            )))),
         }
     )
     for child in children:

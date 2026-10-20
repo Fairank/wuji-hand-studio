@@ -39,6 +39,13 @@ html,body{background:#fff;color:var(--ink);font-family:-apple-system,BlinkMacSys
 .doctor-badge[data-status="warn"]{background:#fff2cf;color:#826300}
 .doctor-badge[data-status="fail"]{background:#ffe9e7;color:#a52a26}
 .doctor-body #doctor-status{min-height:24px}
+.doctor-body .doctor-export{display:inline-flex;align-items:center;justify-content:center;min-height:38px;box-sizing:border-box;padding:9px 14px;border:1px solid var(--line,#dedee4);border-radius:11px;background:var(--surface,#f5f5f7);color:var(--text,#1d1d1f);font-weight:500;text-decoration:none;box-shadow:0 1px 2px #00000008}
+.doctor-body .doctor-export:hover{filter:brightness(.97)}
+.doctor-body .doctor-export:focus-visible{outline:3px solid #007aff77;outline-offset:2px}
+.doctor-body .doctor-support textarea{display:block;box-sizing:border-box;width:100%;margin:8px 0 14px;padding:12px;border:1px solid var(--line,#dedee4);border-radius:10px;background:var(--surface,#fff);color:inherit;font:inherit;resize:vertical}
+.doctor-body .doctor-support select{width:auto;min-width:75px}
+.doctor-body .doctor-exports{flex-wrap:wrap}
+.doctor-body .doctor-export[hidden]{display:none!important}
 .workspace-page[hidden] .viewer-dock:after{content:none!important}
 
 /* Clear glass: a neutral canvas, transparent lenses, crisp reflected edges.

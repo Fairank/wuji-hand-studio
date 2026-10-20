@@ -14,6 +14,18 @@ html .top{box-shadow:inset 0 1px 0 #ffffff66,0 3px 16px #00000004}
 html .top-actions .wsx-top{display:none}
 html .top-actions button,html .top-actions select{backdrop-filter:none;-webkit-backdrop-filter:none}
 html .page-area{padding:24px;background:var(--dg-canvas);scrollbar-width:thin;scrollbar-color:#8884 transparent}
+/* One OS backdrop, three translucent surfaces. Override the earlier gradient
+   AND its fill (background shorthand); nested white layers must not hide it.
+   Text/controls stay opaque; no CSS blur or external-pixel capture is added. */
+html[data-external-backdrop=true]:not([data-reduce-transparency=true]) :is(.top,.directory){background:rgba(249,250,252,.32);backdrop-filter:none;-webkit-backdrop-filter:none}
+html[data-external-backdrop=true]:not([data-reduce-transparency=true]) .page-area{background:rgba(255,255,255,.64)}
+html[data-theme=dark][data-external-backdrop=true]:not([data-reduce-transparency=true]) :is(.top,.directory){background:rgba(30,30,34,.72)}
+html[data-theme=dark][data-external-backdrop=true]:not([data-reduce-transparency=true]) .page-area{background:rgba(36,36,38,.84)}
+html[data-external-backdrop=true]:not([data-reduce-transparency=true]) #page-connection .cr-device-card{background:rgba(255,255,255,.42)}
+html[data-theme=dark][data-external-backdrop=true]:not([data-reduce-transparency=true]) #page-connection .cr-device-card{background:rgba(36,36,38,.42)}
+html[data-external-backdrop=true]:not([data-reduce-transparency=true]) .app{background:transparent}
+html[data-reduce-transparency=true] :is(.top,.directory,.page-area){background:var(--dg-canvas);backdrop-filter:none;-webkit-backdrop-filter:none}
+@media(prefers-reduced-transparency:reduce),(forced-colors:active){html[data-external-backdrop=true] :is(.top,.directory,.page-area){background:var(--dg-canvas)!important;backdrop-filter:none!important;-webkit-backdrop-filter:none!important}html[data-external-backdrop=true] #page-connection .cr-device-card{background:var(--dg-canvas)!important}}
 html .page-heading{display:flex;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:22px}
 html .page-heading h2{margin:0;font-size:24px}.page-heading>p{flex-basis:100%}
 .wc-heading-tools{display:flex;gap:8px;margin-left:auto}

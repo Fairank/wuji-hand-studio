@@ -112,8 +112,9 @@ def worker_glove(requests,events):
             nonlocal hands
             from device_discovery import candidates
             all_devices=list(manager.scan());hands=candidates(all_devices)
-            return [dict(serial=d.sn,address=str(d.address)) for d in all_devices
-                    if d.device_type==sdk.DeviceType.WujiGlove]
+            from glove_discovery import scan_gloves
+            from zenoh_route import managed_wsl
+            return scan_gloves(manager,sdk,all_devices,allow_direct=managed_wsl())
         devices=scan();state='ready';message='选择手套和标定用户 / Select glove and SDK user'
         while True:
             now=time.monotonic()
@@ -129,7 +130,7 @@ def worker_glove(requests,events):
                     elif name=='glove_open':
                         if glove is not None:raise ValueError('手套已连接，修改配置请先断开')
                         if c['serial'] not in {d['serial'] for d in devices}:raise ValueError('请先扫描并选择手套')
-                        user_id=c.get('user_id') or current['user_id']
+                        user_id=c.get('user_id',current['user_id'])
                         if user_id not in {u['user_id'] for u in users}:raise ValueError('Unknown SDK user')
                         candidate=None;selection_lease=None;switched=False
                         try:
@@ -141,7 +142,8 @@ def worker_glove(requests,events):
                                 glove_ownership=DeviceOwnership(c['serial'])
                             previous_user=manager.current_user()
                             manager.switch_user(user_id);switched=True;current=manager.current_user()
-                            candidate=manager.connect(sn=c['serial'],device_name='studio_glove')
+                            from glove_discovery import connect_glove
+                            candidate=connect_glove(manager,next(d for d in devices if d['serial']==c['serial']))
                             actual=str(candidate.hand_side().get()).lower()
                             if actual not in (selected['side'],'handedness.'+selected['side']):
                                 raise ValueError('手套左右与工作台所选型号不符 / Glove side differs from profile')

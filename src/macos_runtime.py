@@ -143,7 +143,7 @@ def args(command_args, user='workbench'):
     if not isinstance(command_args, list) or not command_args or not all(isinstance(v, str) and '\0' not in v for v in command_args):
         raise ValueError('Invalid controller command')
     # limactl shell accepts an argv and performs shell quoting itself.
-    return command('shell', '--workdir=' + AGENT, NAME, '--', *command_args)
+    return command('shell', '--workdir=' + AGENT, NAME, '--', '/usr/bin/env', 'WUJI_TELEMETRY_DISABLE=1', *command_args)
 
 
 def select():

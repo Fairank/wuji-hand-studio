@@ -58,7 +58,7 @@ def args(command,user='workbench'):
         return mac_args(command,user)
     if sys.platform!='win32':raise RuntimeError('Managed runtime requires Windows')
     if not isinstance(command,list) or not command or not all(isinstance(x,str) and '\0' not in x for x in command):raise ValueError('Invalid runtime command')
-    return ['wsl.exe','--distribution',NAME,'--user',user,'--cd',AGENT,'--exec',*command]
+    return ['wsl.exe','--distribution',NAME,'--user',user,'--cd',AGENT,'--exec','/usr/bin/env','WUJI_TELEMETRY_DISABLE=1',*command]
 
 def check_ready():
     state=status()
@@ -95,7 +95,14 @@ def start_install():
                 previous=json.loads(pending.read_text(encoding='utf-8')) if pending.is_file() else {}
                 marker=ROOT/'runtime-info.json'
                 saved=json.loads(marker.read_text(encoding='utf-8')) if marker.is_file() else {}
-                if saved.get('runtime_version')=='1.0.0' and manifest['runtime_version']=='1.0.1' and saved.get('sdk_version')==manifest['sdk_version']:
+                if saved.get('runtime_version') in ('1.0.0','1.0.1') and manifest['runtime_version']=='1.1.0':
+                    _state['stage']='upgrading'
+                    with Files() as files:
+                        files.path(AGENT+'/runtime_refresh.py').write_bytes((RESOURCE/'runtime_refresh.py').read_bytes())
+                    converted=subprocess.run(args(['/usr/bin/wslpath','-a',str(image)]),capture_output=True,check=True,timeout=10,creationflags=subprocess.CREATE_NO_WINDOW)
+                    upgraded=subprocess.run(args(['/usr/bin/python3',AGENT+'/runtime_refresh.py',_decode(converted.stdout),manifest['sha256']],user='root'),capture_output=True,timeout=180,creationflags=subprocess.CREATE_NO_WINDOW)
+                    if upgraded.returncode:raise RuntimeError('SDK/CLI update failed; previous environment retained: '+_decode(upgraded.stderr)[-600:])
+                elif saved.get('runtime_version')=='1.0.0' and manifest['runtime_version']=='1.0.1' and saved.get('sdk_version')==manifest['sdk_version']:
                     _state['stage']='upgrading'
                     with Files() as files:
                         files.path(AGENT+'/runtime_update.py').write_bytes((RESOURCE/'runtime_update.py').read_bytes())

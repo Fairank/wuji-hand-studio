@@ -38,8 +38,8 @@ def main():
     OUT.mkdir(parents=True, exist_ok=True)
     download(LIMA, OUT / 'lima.tar.gz', LIMA_SHA)
     download(IMAGE, OUT / 'ubuntu.qcow2', IMAGE_SHA)
-    download('https://github.com/wuji-technology/wuji-cli/releases/download/v2026.8.31/wuji_2026.8.31_aarch64-unknown-linux-gnu.tar.gz',
-             OUT / 'wuji-cli.tar.gz', 'c8ad80fe7fb39bc51d79206a13aa9da239648316c2a27681f38208c631fc1efa')
+    download('https://github.com/wuji-technology/wuji-cli/releases/download/v2026.10.12/wuji_2026.10.12_aarch64-unknown-linux-gnu.tar.gz',
+             OUT / 'wuji-cli.tar.gz', 'aea7f7527152f4f496190be0119bd2b57cf7b1ff417e99d328759a06af1bf534')
     lima = OUT / 'lima'
     lima.mkdir(exist_ok=True)
     with tarfile.open(OUT / 'lima.tar.gz') as archive:
@@ -54,7 +54,7 @@ def main():
         if path.is_file() and not path.is_symlink():
             subprocess.run(['codesign', '--force', '--sign', '-', '--entitlements', str(entitlements), str(path)], check=True)
     files = {p.relative_to(OUT).as_posix(): digest(p) for p in OUT.rglob('*') if p.is_file() and not p.is_symlink() and p.name != 'manifest.json'}
-    m = dict(schema=1, payload_id='mac-linux-1.0.0', arch='aarch64', sdk_version='2026.8.31',
+    m = dict(schema=1, payload_id='mac-linux-1.1.0', arch='aarch64', sdk_version='2026.10.12',
              lima_version='2.2.0', image='ubuntu.raw', files=files, first_setup_requires_internet=True,
              sources=[dict(url=LIMA, sha256=LIMA_SHA), dict(url=IMAGE, sha256=IMAGE_SHA)])
     (OUT / 'manifest.json').write_text(json.dumps(m, indent=2), encoding='utf-8')

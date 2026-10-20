@@ -34,7 +34,7 @@ class LocalController:
         if not agent.is_file():raise ValueError('Controller scripts not found in configured directory')
         self.agent_command=[config['python'],'-u',str(agent)]
         self.parameters_in_launch=agent==bootstrap
-        self.environment={**os.environ,'WUJI_HAND_PROFILE':profile_id}
+        self.environment={**os.environ,'WUJI_TELEMETRY_DISABLE':'1','WUJI_HAND_PROFILE':profile_id}
         if self.parameters_in_launch:
             from controller_launch import parameter_environment
             self.environment['WUJI_PARAMETERS_JSON']=parameter_environment().split('=',1)[1]

@@ -27,6 +27,7 @@
  const discovery=card(sections.devices,'自动发现','Automatic discovery','连接仅开启反馈或预览；设备跟随与动作播放仍由你启动。','Connecting starts feedback or preview. You start follow and motion separately.');
  for(const id of ['wb-auto-hand-label','wb-auto-glove-label']){const label=$(id),row=label.closest('.wb-row');row.classList.add('settings-row','settings-discovery');label.append(label.querySelector('input'));discovery.append(row);}
  discovery.append(el('p','发现多只设备时需要选择；网络或控制端未就绪时，在连接页查看具体原因。','Select a device when multiple are found. Connection details show network or controller issues.','settings-footnote'));
+ discovery.append(el('p','未识别时显示 Wuji Hand；SDK 确认真实身份后才显示代际、左右手和编号。默认地址探测只适用于未改 IP/端口的手套。','Shows Wuji Hand until the SDK verifies generation, side and serial. Factory-address fallback applies only to gloves with default network settings.','settings-footnote'));
  const appearanceRow=$('wb-theme').closest('.wb-row');appearanceRow.classList.add('settings-row');
  const languageRow=el('div',undefined,undefined,'wb-row settings-row'),languageLabel=el('label','语言','Language'),language=el('select');language.id='settings-language';languageLabel.htmlFor=language.id;
  language.append(new Option('简体中文','zh'),new Option('English','en'));language.value=L.lang;language.onchange=()=>L.setLanguage(language.value);languageRow.append(languageLabel,language);appearanceRow.after(languageRow);

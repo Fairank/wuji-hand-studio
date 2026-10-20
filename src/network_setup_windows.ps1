@@ -6,7 +6,7 @@ if([IO.Path]::GetFileName($ResultFile) -notmatch '^setup-[0-9a-f]{32}\.json$'){t
 $resultParent=Get-Item -LiteralPath ([IO.Path]::GetDirectoryName($ResultFile))
 if($resultParent.Attributes -band [IO.FileAttributes]::ReparsePoint){throw 'Result directory must not be a link'}
 try {
-    $adapter=@(Get-NetAdapter -Physical|Where-Object {$_.InterfaceGuid -eq $AdapterGuid -and $_.ifType -eq 6})
+    $adapter=@(Get-NetAdapter -Physical|Where-Object {([Guid]$_.InterfaceGuid) -eq $AdapterGuid -and $_.InterfaceType -eq 6})
     if($adapter.Count -ne 1 -or $adapter[0].Status -ne 'Up'){throw 'The selected Ethernet cable is not connected'}
     $index=$adapter[0].ifIndex
     if(Get-NetRoute -InterfaceIndex $index -AddressFamily IPv4 -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue){throw 'This adapter is used for another network; it was not changed'}

@@ -281,7 +281,7 @@ body button.desktop-menu-row{width:100%;justify-content:flex-start;border:0;box-
 html{scroll-padding-top:100px;scroll-padding-bottom:28px}
 
 /* System Acrylic beneath the WebView: the real desktop participates in DWM compositing.
-   CSS never obtains external pixels; the opaque reading canvas stays legible. */
+   CSS never obtains external pixels; the thick reading surface stays legible. */
 html[data-external-backdrop=true],html[data-external-backdrop=true] body,html[data-external-backdrop=true] .app{background:transparent}
 html[data-external-backdrop=true] .top,html[data-external-backdrop=true] .directory{background:rgba(255,255,255,.38);backdrop-filter:none;-webkit-backdrop-filter:none}
 html[data-external-backdrop=true] .page-area{background:#fff}
@@ -297,7 +297,7 @@ html[data-reduce-motion=true] .workspace-page>.page-heading,html[data-reduce-mot
 @media(prefers-reduced-motion:reduce){.workspace-page>.page-heading,dialog[open]{animation:none!important}}
 
 /* macOS uses OS-composited material behind the transparent WKWebView surround.
-   Keep the work canvas opaque for readability. No desktop screenshots. */
+   Reading-surface opacity is shared with Windows. No desktop screenshots. */
 html[data-platform=macos][data-external-backdrop=true],
 html[data-platform=macos][data-external-backdrop=true] body{background:transparent!important}
 html[data-platform=macos] body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",sans-serif}

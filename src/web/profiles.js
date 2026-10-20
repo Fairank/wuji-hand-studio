@@ -6,7 +6,7 @@
  ws.views.connection.prepend(control);let info=null,selected='hand2_left',busy=false,lastSideText='';
  const text=(zh,en)=>document.documentElement.lang==='en'?en:zh;
  function render(){
-  label.textContent=text('设备型号','Device');select.setAttribute('aria-label',label.textContent);
+  label.textContent=text('预览型号（连接后自动识别）','Preview model (auto-detected on connection)');select.setAttribute('aria-label',label.textContent);
   if(!info)return;
   const value=selected;select.replaceChildren(...info.profiles.map(p=>new Option(text(p.zh,p.en),p.id)));select.value=value;
   const first=selected.startsWith('hand1');

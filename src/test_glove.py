@@ -25,7 +25,7 @@ class GloveTests(unittest.TestCase):
         for actual in ('left','right'):
             calls=[];user=dict(user_id='user-1',display_name='Test user',is_default=False)
             frames=iter([SimpleNamespace(header=SimpleNamespace(seq=1,timestamp_us=1),joints=[SimpleNamespace(pose=SimpleNamespace(position=[.01,.02,.03])) for _ in range(21)]),None])
-            glove=SimpleNamespace(hand_side=lambda:SimpleNamespace(get=lambda:actual),disconnect=lambda:calls.append('disconnect-glove'),
+            glove=SimpleNamespace(serial_number='GLOVE',hand_side=lambda:SimpleNamespace(get=lambda:actual),disconnect=lambda:calls.append('disconnect-glove'),
                                   hand_skeleton=lambda:SimpleNamespace(subscribe=lambda:SimpleNamespace(recv=lambda:next(frames,None),close=lambda:None)))
             def connect(**k):calls.append(k['sn']);return glove
             manager=SimpleNamespace(current_user=lambda:user,list_users=lambda:[user],switch_user=lambda u:calls.append('user:'+u),
@@ -41,6 +41,46 @@ class GloveTests(unittest.TestCase):
             notices=[e['message'] for e in result if e['type']=='glove_notice']
             self.assertEqual(any('左右' in m for m in notices),actual=='right')
             self.assertEqual(calls.count('user:user-1'),2)
+
+    def test_default_sdk_user_can_open_read_only_preview(self):
+        command=dict(name='glove_open',serial='GLOVE',user_id='',timeout_ms=250)
+        self.assertEqual(validate(command),command)
+        user=dict(user_id='',display_name='Default',is_default=True)
+        prior=dict(user_id='prior-user',display_name='Prior',is_default=False)
+        current=[prior]
+        calls=[]
+        glove=SimpleNamespace(serial_number='GLOVE',hand_side=lambda:SimpleNamespace(get=lambda:'left'),
+            disconnect=lambda:calls.append('disconnect'),
+            hand_skeleton=lambda:SimpleNamespace(subscribe=lambda:SimpleNamespace(recv=lambda:None,close=lambda:None)))
+        def switch_user(user_id):
+            calls.append(('user',user_id));current[0]=user if user_id=='' else prior
+        manager=SimpleNamespace(current_user=lambda:current[0],list_users=lambda:[user,prior],switch_user=switch_user,
+            scan=lambda:[SimpleNamespace(sn='GLOVE',device_type='glove',address='example')],connect=lambda **k:glove)
+        sdk=SimpleNamespace(SdkManager=SimpleNamespace(instance=lambda:manager),DeviceType=SimpleNamespace(WujiGlove='glove'),
+            HandModel=SimpleNamespace(WujiHand2='hand2',WujiHand='hand1'),Handedness=SimpleNamespace(Left='left',Right='right'),
+            RetargetSession=SimpleNamespace(for_hand=lambda model,side:SimpleNamespace(step=lambda kp:[0.]*20)))
+        requests,events=queue.Queue(),queue.Queue();requests.put(command);requests.put(dict(name='disconnect'))
+        with patch.dict(sys.modules,{'wuji_sdk':sdk}),patch.dict('os.environ',{'WUJI_HAND_PROFILE':'hand2_left'}):
+            worker_glove(requests,events)
+        result=[]
+        while not events.empty():result.append(events.get())
+        self.assertIn('disconnect',calls,result)
+        self.assertEqual([c for c in calls if isinstance(c,tuple)],[('user',''),('user','prior-user')])
+        self.assertTrue(any(e.get('type')=='glove_state' and e['state']['connection']=='receiving' for e in result),result)
+
+    def test_explicit_default_user_binding_does_not_keep_previous_user(self):
+        from retarget_workspace import RetargetWorkspace
+        profile=dict(generation='hand2',side='left')
+        with tempfile.TemporaryDirectory() as tmp:
+            context=RetargetWorkspace(tmp).open_glove(dict(serial='GLOVE',user_id=''),profile,dict(user_id='prior-user'))
+            self.assertEqual(context['binding']['sdk_user'],'')
+
+    def test_default_user_exception_does_not_allow_empty_device_or_lease(self):
+        for command in (dict(name='glove_open',serial='',user_id='',timeout_ms=250),
+                        dict(name='glove_keepalive',lease=''),
+                        dict(name='glove_open',serial='GLOVE',user_id=None,timeout_ms=250),
+                        dict(name='glove_open',serial='GLOVE',user_id='not;an-id',timeout_ms=250)):
+            with self.subTest(command=command),self.assertRaises(ValueError):validate(command)
 
     def test_duplicate_reordered_and_old_timestamp_cannot_refresh_target(self):
         s=GloveSource(250);s.update([.1]*20,8,100,1.)

@@ -77,7 +77,7 @@ def read_windows():
     script = r"""
 $ErrorActionPreference='Stop'
 [Console]::OutputEncoding=[System.Text.UTF8Encoding]::new()
-$rows=@(Get-NetAdapter -Physical | Where-Object { $_.ifType -eq 6 } | ForEach-Object {
+$rows=@(Get-NetAdapter -Physical | Where-Object { $_.InterfaceType -eq 6 } | ForEach-Object {
   $a=$_
   $ips=@(Get-NetIPAddress -InterfaceIndex $a.ifIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue | ForEach-Object { "$($_.IPAddress)/$($_.PrefixLength)" })
   $gateway=@(Get-NetRoute -InterfaceIndex $a.ifIndex -AddressFamily IPv4 -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue).Count -gt 0
@@ -153,7 +153,9 @@ def configure(adapter_id, address='', side='left'):
     guid = str(uuid.UUID(adapter_id.strip('{}')))
     from runtime_paths import DATA, RESOURCE
     folder = DATA / 'network'; folder.mkdir(parents=True, exist_ok=True)
-    if folder.resolve() != DATA.resolve() / 'network':
+    # Packaged parent processes may virtualize LocalAppData. Validate the
+    # parent and actual reparse points, as the updater does, not a raw path.
+    if folder.parent.resolve() != DATA.resolve() or folder.is_symlink() or folder.is_junction():
         raise ValueError('Network record directory must not be a link')
     result_file = folder / ('setup-' + uuid.uuid4().hex + '.json')
     (folder / (result_file.stem + '-before.json')).write_text(json.dumps(status, ensure_ascii=False, indent=2), encoding='utf-8')

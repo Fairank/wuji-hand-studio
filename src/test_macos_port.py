@@ -22,7 +22,7 @@ class MacRuntimeTests(unittest.TestCase):
         with patch.object(runtime, 'supported', return_value=True), patch.object(runtime, 'payload', return_value=Path('/Applications/Hand Workbench.app/Contents/Resources/mac-runtime')):
             cmd = runtime.args(['/bin/echo', 'one two; $(echo nope)'])
         self.assertEqual(cmd[-1], 'one two; $(echo nope)')
-        self.assertEqual(cmd[-3], '--')
+        self.assertEqual(cmd[cmd.index('--')+1:], ['/usr/bin/env', 'WUJI_TELEMETRY_DISABLE=1', '/bin/echo', 'one two; $(echo nope)'])
         self.assertNotIn('/bin/sh', cmd)
         self.assertIn('hand-workbench', cmd)
 

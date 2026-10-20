@@ -68,9 +68,9 @@ def ssh_client(c):
             raise ValueError('多手 SSH 控制端需要新版独立启动程序 / Update SSH controller for multi-hand use')
         client.parameters_in_launch=bootstrap
         if bootstrap:
-            client.agent_command='env '+shlex.quote(parameter_environment())+' WUJI_HAND_PROFILE='+shlex.quote(selected_profile()['id'])+' '+shlex.quote(c['python'])+' -u '+shlex.quote(client.agent_directory+'/agent_bootstrap.py')
+            client.agent_command='env WUJI_TELEMETRY_DISABLE=1 '+shlex.quote(parameter_environment())+' WUJI_HAND_PROFILE='+shlex.quote(selected_profile()['id'])+' '+shlex.quote(c['python'])+' -u '+shlex.quote(client.agent_directory+'/agent_bootstrap.py')
         else:
-            client.agent_command='env WUJI_HAND_PROFILE='+shlex.quote(selected_profile()['id'])+' '+shlex.quote(c['python'])+' -u '+shlex.quote(client.agent_directory+'/console_agent.py')
+            client.agent_command='env WUJI_TELEMETRY_DISABLE=1 WUJI_HAND_PROFILE='+shlex.quote(selected_profile()['id'])+' '+shlex.quote(c['python'])+' -u '+shlex.quote(client.agent_directory+'/console_agent.py')
         client.get_transport().set_keepalive(10)
         return client
     except Exception:

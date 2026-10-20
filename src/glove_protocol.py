@@ -22,9 +22,13 @@ def validate(c):
         if solver['engine']=='official_open':
             from retarget_tuning import validate as validate_tuning
             validate_tuning(solver.get('values'))
-    for key in ('serial','user_id','lease'):
+    for key in ('serial','lease'):
         if key in c and (not isinstance(c[key],str) or not re.fullmatch(r'[A-Za-z0-9_.-]{1,100}',c[key])):
             raise ValueError('Invalid '+key)
+    # The SDK's built-in Default user has the legitimate ID ''. The worker
+    # still checks every selected ID against the SDK's current user list.
+    if 'user_id' in c and (not isinstance(c['user_id'],str) or not re.fullmatch(r'[A-Za-z0-9_.-]{0,100}',c['user_id'])):
+        raise ValueError('Invalid user_id')
     if c['name']=='glove_open':
         if 'retarget' in c:
             from retarget_settings import validate as validate_retarget

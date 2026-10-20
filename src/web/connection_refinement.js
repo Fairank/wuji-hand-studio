@@ -9,10 +9,10 @@
  function link(parent,zh,en,key){const b=text(node('button','cr-link',parent),zh,en);b.type='button';b.onclick=()=>window.WujiConnectionHub.show(key);return b}
  const device=$('hub-device'),mapping=$('rt-output');if(!device||!mapping)return;
  const cards=node('div','cr-device-grid');device.querySelector('.hub-intro').after(cards);
- const hand=node('section','cr-device-card',cards);text(node('h3','',hand),'机械手','Robot hand');
+ const hand=node('section','cr-device-card',cards);text(node('h3','',hand),'Wuji Hand','Wuji Hand');
  const connection=$('connect').closest('.panel'),profile=device.querySelector('.device-profile-control');
  hand.append(profile,connection);
- const glove=node('section','cr-device-card',cards);text(node('h3','',glove),'数据手套','Data glove');
+ const glove=node('section','cr-device-card',cards);text(node('h3','',glove),'Wuji Glove','Wuji Glove');
  const gloveControls=document.querySelector('.glove-controls'),steps=gloveControls?.querySelectorAll('.glove-step');
  if(steps?.length===2){
   const children=[...gloveControls.children];for(const child of children){if(child===steps[1])break;glove.append(child)}

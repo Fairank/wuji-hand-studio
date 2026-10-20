@@ -16,6 +16,7 @@ args=[sys.executable,'-m','PyInstaller','--noconfirm','--clean','--onedir','--na
     '--add-data','src/edition.json'+os.pathsep+'.','--add-data','LICENSE'+os.pathsep+'.',
     '--add-data','src/runtime_manifest.json'+os.pathsep+'.',
     '--add-data','src/runtime_update.py'+os.pathsep+'.',
+    '--add-data','src/runtime_refresh.py'+os.pathsep+'.',
     '--add-data','src/network_setup_windows.ps1'+os.pathsep+'.',
     '--add-data','THIRD_PARTY_NOTICES.md'+os.pathsep+'.']
 if (ROOT/'src/private_models').exists():raise RuntimeError('Private models are optional local data and must not be bundled')
