@@ -81,15 +81,12 @@ html #page-connection .cr-next .wa-row .wa-icon{background:var(--ui-fill)}
 html #hub-calibration .hub-calibration-setup{margin:14px 0;padding:0;border:1px solid var(--ui-line);background:var(--ui-card);border-radius:12px}
 html #hub-calibration .hub-calibration-setup[open]{padding-bottom:14px}
 html #hub-calibration .hub-calibration-setup>:not(summary){margin-left:12px;margin-right:12px}
-html #hub-calibration .hub-calibration-setup .wb-actions{display:grid;grid-template-columns:1fr;gap:8px}
-html #hub-calibration .cr-calibration-aside{padding:18px;background:var(--ui-fill);border:1px solid var(--ui-line);border-radius:18px}
-html #hub-calibration .cr-calibration-aside>.wb-actions{display:grid;grid-template-columns:1fr;gap:8px}
+html #hub-calibration .hub-calibration-setup .wb-actions{display:flex;flex-wrap:wrap;gap:8px}
 .ui-context-note{background:var(--ui-fill);border:1px solid var(--ui-line);padding:14px 16px;border-radius:12px;font-size:12px;line-height:1.6;color:var(--ui-sub)}
 .ui-context-note strong{display:block;color:var(--ui-ink);font-size:13px;margin-bottom:4px}
 .ui-context-note p{margin:0!important;font-size:12px!important;line-height:1.6!important}
 .ui-context-note details{margin-top:10px}.ui-context-note summary{cursor:pointer;color:var(--ui-ink)}
 .ui-context-note details p{margin-top:8px!important}
-html #hub-calibration .ui-context-note{margin:0 0 18px;background:var(--ui-card)}
 html #real-motion-panel .motion-progress progress{display:block;width:100%;appearance:none;-webkit-appearance:none;height:4px;border-radius:4px;overflow:hidden;background:var(--ui-line);color:var(--ui-blue)}
 html #real-motion-panel .motion-progress progress::-webkit-progress-bar{background:var(--ui-line);border-radius:4px}
 html #real-motion-panel .motion-progress progress::-webkit-progress-value{background:var(--ui-blue);border-radius:4px}

@@ -81,7 +81,7 @@ class HardwareShowcase:
     def __init__(self,hand,device_id,command_factory,profile_path=PROFILE):
         self.hand,self.command_factory=hand,command_factory
         self.profile,self.reason=load_profile(device_id,profile_path)
-        self.active=False;self.owned=False;self.paused=False;self.publisher=None
+        self.active=False;self.owned=False;self.paused=False;self.publisher=None;self.disable_confirmed=False
         self.phase='idle';self.lease='';self.last_beat=0.;self.last_send=0.
         self.elapsed=0.;self.cycles=1;self.action='';self.error=None
         self.run_profile=self.profile;self.probe=None;self.probe_result=None
@@ -98,7 +98,7 @@ class HardwareShowcase:
 
     def status(self):
         return dict(ready=self.profile is not None,active=None if self.owned and not self.active else self.active,
-            stop_confirmed=not self.owned,paused=self.paused,
+            stop_confirmed=self.disable_confirmed and not self.owned,paused=self.paused,
             phase=self.phase,reason=self.reason,action=self.action,elapsed_s=self.elapsed,
             actions=list(self.profile['actions']) if self.profile else [],
             source='supervised_low_current_trial' if self.trial else 'bounded_single_joint_check' if self.probe else 'calibrated_sdk_trajectory',feedback_source='real_joint_states',
@@ -292,7 +292,7 @@ class HardwareShowcase:
         self.pre_enable_seed=q[:]
         self.phase='enabling';self.paused=False;self.enable_deadline=now+5.;self.reason='正在启用低速展示'
         self.approach_deadline=now+30.
-        self.owned=True
+        self.owned=True;self.disable_confirmed=False
         try:
             self.hand.effort_limit().set(self.run_profile['current_limit_A'])
             expected_kp,expected_kd=(KP,KD) if self.probe or self.trial else (3.,.05)
@@ -351,7 +351,7 @@ class HardwareShowcase:
         if name=='hardware_start':return self.start(c,row,diag,now)
         if name=='hardware_probe':return self.start_probe(c,row,diag,now)
         if name=='hardware_trial':return self.start_trial(c,row,diag,now)
-        if name=='hardware_stop':return self.stop('用户停止实机展示')
+        if name=='hardware_stop':return self.stop('用户停止实机展示',force_disable=True)
         if name=='hardware_keepalive':
             if self.active and c.get('lease')==self.lease:self.last_beat=now
             return
@@ -478,19 +478,20 @@ class HardwareShowcase:
                 p['pose_checks'].append(dict(cycle=cycle+1,label=b['label'],max_error_deg=error,within_3deg=error<=3.))
                 p['checked_holds'].add(key)
 
-    def stop(self,reason,completed=False):
+    def stop(self,reason,completed=False,force_disable=False):
         was_active=self.active or self.owned
         stopped_phase=self.phase
         if self.trial and was_active:
             self.trial['stop_observation']=deepcopy(self.latest_observation)
         self.active=False;self.paused=False;self.phase='stopped';self.reason=reason
-        if self.owned:
+        if self.owned or force_disable:
+            self.owned=True;self.disable_confirmed=False
             try:self.hand.disable()
             except Exception as error:
                 self.reason += '；停用未确认：'+str(error)
                 self.phase='stop_unconfirmed'
                 # Keep ownership so final cleanup retries instead of reporting success.
-            else:self.owned=False
+            else:self.owned=False;self.disable_confirmed=True
         if self.publisher:
             try:self.publisher.close()
             except Exception as error:self.reason+='；指令通道关闭失败：'+str(error)

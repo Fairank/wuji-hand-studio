@@ -69,7 +69,8 @@ def apply(image,digest,root=Path('/')):
     for path in (current,staged,previous,cli,cli_pending,cli_previous):
         if path.is_symlink() or not path.parent.resolve().is_relative_to(root):
             raise ValueError('Runtime destination is redirected')
-    if not current.is_dir() or not cli.is_file():raise ValueError('Existing controller runtime missing')
+    if (current.exists() and not current.is_dir()) or (cli.exists() and not cli.is_file()):raise ValueError('Invalid controller component path')
+    current.parent.mkdir(parents=True,exist_ok=True);cli.parent.mkdir(parents=True,exist_ok=True)
     env_swapped=cli_swapped=False
     try:
         venv.EnvBuilder(with_pip=False,symlinks=True).create(staged)
@@ -89,20 +90,26 @@ def apply(image,digest,root=Path('/')):
         result=subprocess.run([str(cli_pending),'--version'],check=True,timeout=15,capture_output=True,text=True,env=environment)
         if SDK_VERSION not in result.stdout:raise ValueError('CLI version mismatch')
         assert_idle(root)
-        current.rename(previous)
+        if current.exists():current.rename(previous)
         try:staged.rename(current);env_swapped=True
-        except BaseException:previous.rename(current);raise
-        cli.rename(cli_previous)
+        except BaseException:
+            if previous.exists():previous.rename(current)
+            raise
+        if cli.exists():cli.rename(cli_previous)
         try:cli_pending.rename(cli);cli_swapped=True
-        except BaseException:cli_previous.rename(cli);raise
+        except BaseException:
+            if cli_previous.exists():cli_previous.rename(cli)
+            raise
         subprocess.run([str(current/'bin/python'),'-c',command[-1]],check=True,timeout=30,env=environment,capture_output=True)
         return dict(ok=True,sdk_version=SDK_VERSION,cli_version=SDK_VERSION,
-                    sdk_backup=str(previous),cli_backup=str(cli_previous),parameters_preserved=True,motion_started=False)
+                    sdk_backup=str(previous) if previous.exists() else None,cli_backup=str(cli_previous) if cli_previous.exists() else None,parameters_preserved=True,motion_started=False)
     except BaseException:
         if cli_swapped:
-            cli.rename(cli_pending);cli_previous.rename(cli)
+            cli.rename(cli_pending)
+            if cli_previous.exists():cli_previous.rename(cli)
         if env_swapped:
-            current.rename(staged);previous.rename(current)
+            current.rename(staged)
+            if previous.exists():previous.rename(current)
         raise
     finally:
         if staged.exists() and staged.parent==current.parent and not staged.is_symlink():shutil.rmtree(staged)

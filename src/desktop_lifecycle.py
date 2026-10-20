@@ -1,5 +1,6 @@
 """Desktop exit coordination; never disconnect before an active stop is confirmed."""
 import time
+from device_termination import unconfirmed
 
 def needs_confirmation(state):
     return (state.get('connection')!='disconnected' or state.get('glove',{}).get('busy',False)
@@ -7,7 +8,7 @@ def needs_confirmation(state):
             or state.get('official_studio',{}).get('active',False)
             or state.get('recording',{}).get('active',False)
             or state.get('calibration',{}).get('running',False)
-            or state.get('hardware',{}).get('active') is not False)
+            or state.get('hardware',{}).get('active') is not False or bool(unconfirmed(state)))
 
 def close_sessions(controller, timeout=6., clock=time.monotonic, sleep=time.sleep):
     state=controller.snapshot()
@@ -25,10 +26,14 @@ def close_sessions(controller, timeout=6., clock=time.monotonic, sleep=time.slee
         while controller.calibration.run.get('running') and clock()<deadline:sleep(.05)
         if controller.calibration.run.get('running'):
             return dict(ok=False,error='官方标定仍在退出，请稍后重试 / Official calibration is still releasing the device')
-    glove=state.get('glove',{}); hardware=glove.get('hardware',{}) if glove.get('busy') else state.get('hardware',{})
+    glove=state.get('glove',{})
+    hardware=glove.get('hardware',{}) if glove.get('busy') else state.get('hardware',{})
     active=hardware.get('active',False)
-    if active is not False:
-        controller.action(dict(name='hardware_stop'))
+    current_device=(glove.get('feedback') or {}).get('device_id') if glove.get('busy') else state.get('device_id')
+    pending_here=bool(current_device) and any(r.get('device_id')==current_device for r in unconfirmed(state))
+    if active is not False or pending_here:
+        try:controller.action(dict(name='hardware_stop'))
+        except ValueError as error:return dict(ok=False,error=str(error))
         deadline=clock()+timeout
         while clock()<deadline:
             state=controller.snapshot()
@@ -36,11 +41,20 @@ def close_sessions(controller, timeout=6., clock=time.monotonic, sleep=time.slee
             if hw.get('active') is False and hw.get('stop_confirmed') is True:break
             sleep(.05)
         else:return dict(ok=False,error='尚未确认机械手停用，请回到工作台检查连接。 / Hand disable is not confirmed; check the connection.')
+    pending=unconfirmed(state)
+    if pending:
+        devices=', '.join(str(r.get('device_id') or '未知设备 / Unknown device') for r in pending)
+        return dict(ok=False,error='仍有设备未确认停用：'+devices+' / Device disable acknowledgement is still missing')
     if glove.get('busy'):
         controller.action(dict(name='glove_disconnect'))
         deadline=clock()+timeout
         while controller.glove.busy and clock()<deadline:sleep(.05)
         if controller.glove.busy:return dict(ok=False,error='手套会话仍在结束，请稍后重试。 / Glove session is still closing; retry shortly.')
+        # Cleanup can itself fail after the earlier idle snapshot. Validate
+        # its final acknowledgement before closing the application.
+        state=controller.snapshot()
+        if unconfirmed(state):
+            return dict(ok=False,error='手套退出后仍未确认机械手停用，请核对对应设备 / Hand disable remains unconfirmed after glove cleanup; check the matching device')
     controller.player.command(dict(name='demo_stop'))
     controller.action(dict(name='disconnect'))
     # Existing SDK disconnect gives recording flush and disable a grace period.

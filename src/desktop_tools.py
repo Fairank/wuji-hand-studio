@@ -2,9 +2,10 @@
 import hashlib
 import re
 from pathlib import Path
+from device_termination import unconfirmed
 
 PAGES = ('library', 'feedback', 'parameters', 'connection', 'glove', 'doctor',
-         'interaction', 'capture', 'records', 'settings', 'devices', 'official-studio')
+         'interaction', 'capture', 'records', 'settings', 'devices', 'control-tools')
 OPERATIONS = ('inspect', 'capture', 'page', 'resize', 'appearance', 'menu',
               'viewer', 'close_idle', 'prepare_update', 'import_model', 'preview', 'picker', 'connection_panel', 'reload_ui')
 
@@ -19,7 +20,7 @@ def idle(state, doctor):
             and not state.get('official_studio', {}).get('reserved')
             and not state.get('official_studio', {}).get('active')
             and not state.get('official_studio', {}).get('busy')
-            and not doctor.get('running'))
+            and not doctor.get('running') and not unconfirmed(state))
 
 
 def version_tuple(version):

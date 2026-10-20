@@ -69,7 +69,14 @@ if sys.platform=='darwin':
         LSMinimumSystemVersion='13.5')
     plist.write_bytes(plistlib.dumps(info))
     subprocess.run(['codesign','--force','--sign','-',str(app)],check=True)
-subprocess.run([str(binary),'--self-check'],check=True)
+(ROOT/'build').mkdir(exist_ok=True)
+with tempfile.TemporaryDirectory(prefix='identity-',dir=ROOT/'build') as check_folder:
+    check_path=Path(check_folder)/'identity.json'
+    subprocess.run([str(binary),'--self-check','--self-check-output',str(check_path)],check=True)
+    identity=json.loads(check_path.read_text(encoding='utf-8'))
+if identity.get('ok') is not True or identity.get('edition')!=edition or identity.get('version')!=version:
+    raise RuntimeError('Cached executable differs from the selected edition/version; rebuild before packaging')
+print(json.dumps(identity))
 if '--binary-only' in sys.argv:raise SystemExit(0)
 if sys.platform=='darwin':
     archive=ROOT/'dist'/f'{name}-{version}-macos-arm64.zip'

@@ -32,12 +32,6 @@
  const checks=node('div','cr-device-checks',device);
  device.querySelectorAll(':scope > .folded-panel').forEach(x=>checks.append(x));
 
- const calib=$('hub-calibration').querySelector('.hub-calibration');
- const calibSpace=node('div','cr-calibration-workspace',calib),calibAside=node('aside','cr-calibration-aside',calibSpace);
- const guide=$('hub-calibration-guide');calibSpace.prepend(guide);
- for(const child of [...calib.children])if(child!==calibSpace&&!['hub-calib-title','hub-calib-description'].includes(child.id))calibAside.append(child);
- const poseFeedback=guide.querySelector('.cg-guide');if(poseFeedback)fold(guide.querySelector('.cg-main'),'当前姿势与采集反馈','Selected pose and capture feedback',[poseFeedback]);
-
  // A fixed workspace for editing, with contextual joint help rather than another long form.
  const workspace=node('div','cr-mapping-workspace',mapping),editor=node('div','cr-mapping-editor',workspace),aside=node('aside','cr-joint-aside',workspace);
  for(const child of [...mapping.children])if(child!==workspace)editor.append(child);

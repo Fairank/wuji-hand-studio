@@ -50,7 +50,7 @@ html .workspace-page:not([hidden])>.page-heading {
 html :is(.hub-section,.settings-section):not([hidden]) { animation:wb-micro-fade 140ms ease-out; }
 /* Chevron/switch motion stays inside its existing control. */
 html :is(.wc-options,.cr-details,.hub-calibration-setup,.rt-advanced,.rt-help,.folded-panel,.motion-notes,.library-reference)>summary:after,
-html .cg-chevron,html #wb-program .wb-program-summary svg {
+html #wb-program .wb-program-summary svg {
   transition: transform 320ms var(--wb-spring);
 }
 html .settings-row input[type=checkbox]:before {
@@ -67,9 +67,9 @@ html #spring-preview { display:inline-flex;align-items:center;justify-content:ce
 html[data-reduce-motion=true] body :is(button,.button,.wa-row,.ui-link-button,.directory a),
 html[data-reduce-motion=true] .spring-preview-dot { scale:1!important;transform:none!important;transition:none!important;animation:none!important; }
 html[data-reduce-motion=true] :is(dialog,.page-heading,.hub-section,.settings-section),
-html[data-reduce-motion=true] :is(summary:after,.cg-chevron,.settings-row input:before) { animation:none!important;transition:none!important; }
+html[data-reduce-motion=true] :is(summary:after,.settings-row input:before) { animation:none!important;transition:none!important; }
 @media(prefers-reduced-motion:reduce) {
   html body :is(button,.button,.wa-row,.ui-link-button,.directory a),.spring-preview-dot { scale:1!important;transform:none!important;transition:none!important;animation:none!important; }
   html :is(dialog,.page-heading,.hub-section,.settings-section),
-  html :is(summary:after,.cg-chevron,.settings-row input:before) { animation:none!important;transition:none!important; }
+  html :is(summary:after,.settings-row input:before) { animation:none!important;transition:none!important; }
 }

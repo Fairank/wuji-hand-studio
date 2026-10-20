@@ -1,6 +1,7 @@
 __pycache__/
 *.pyc
 .venv/
+.cli-download.*/
 .venv-macos/
 venv/
 build/

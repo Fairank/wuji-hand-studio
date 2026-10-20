@@ -69,10 +69,11 @@ def enforce_session_owner(command,folder=None):
 
 
 def require_idle(state,doctor=None):
+    from device_termination import unconfirmed
     if (state.get('connection')!='disconnected' or state.get('hardware',{}).get('active') is not False
         or state.get('glove',{}).get('busy') or state.get('calibration',{}).get('running')
         or state.get('recording',{}).get('active') or state.get('parameter_sync',{}).get('busy')
-        or state.get('program',{}).get('active') or state.get('group',{}).get('active') or (doctor or {}).get('running')):
+        or state.get('program',{}).get('active') or state.get('group',{}).get('active') or (doctor or {}).get('running') or unconfirmed(state)):
         raise ValueError('请先结束所有工作区中的设备、标定和诊断会话 / Finish device, calibration and diagnostic sessions in every workspace')
 
 

@@ -13,7 +13,7 @@
   const slot = document.getElementById('visual-slot') || document.querySelector('main') || document.body;
   slot.append(host);
   const byId = id => document.getElementById(id);
-  let state = null, selected = null, mappingKey = '', mappingPending = false;
+  let state = null, selected = null, mappingKey = '', mappingPending = false, decodedImage = null;
   const cells = [];
   for (let f=0;f<5;f++) {
     const column = document.createElement('div'); column.className='finger-column';
@@ -45,10 +45,13 @@
     for(const c of cells){c.value.textContent='—';c.status.textContent='无新反馈';c.bar.hidden=true;c.button.classList.remove('live','provisional');}
     byId('joint-detail-body').replaceChildren();
   }
-  async function showFrame(payload) {
+  async function showFrame(payload, current) {
+    if(!current())return;
     const meta=payload.meta;
     if(!meta.ready||!payload.image){clearVisual(meta.message||'三维画面暂不可用');return;}
-    const decoded=new Image();decoded.src=payload.image;await decoded.decode();
+    const decoded=new Image();decodedImage=decoded;decoded.src=payload.image;
+    try{await decoded.decode();}finally{if(decodedImage===decoded)decodedImage=null;}
+    if(!current())return;
     byId('pose-image').src=payload.image;
     byId('pose-image').classList.remove('view-stale');
     byId('pose-unavailable').hidden=true;
@@ -112,10 +115,32 @@
   });
   window.addEventListener('console-state',event=>{state=event.detail;mappingForm(state);});
   window.addEventListener('console-offline',()=>{state=null;byId('save-mapping').disabled=true;clearVisual('本机服务连接中断');});
-  async function pollView(){
-    try{const r=await fetch('/api/view',{cache:'no-store',signal:AbortSignal.timeout(2500)});if(!r.ok)throw Error();await showFrame(await r.json());}
-    catch{clearVisual('画面连接中断，请检查本机控制服务');}
-    finally{setTimeout(pollView,50);}
+  // Display work only. Device feedback and all control keepalives use separate lanes.
+  const embedded=new URLSearchParams(location.search).get('embedded')==='1';
+  let parentVisible=true,viewVisible=false,viewTimer=0,viewRequest=null,viewPolling=false,viewRevision=0;
+  function visible(){return parentVisible&&!document.hidden&&host.getClientRects().length>0&&getComputedStyle(host).visibility!=='hidden';}
+  function scheduleView(delay=0){clearTimeout(viewTimer);if(!viewPolling&&visible())viewTimer=setTimeout(pollView,delay);}
+  function syncView(){
+    const next=visible();if(next===viewVisible)return;
+    viewVisible=next;viewRevision++;clearTimeout(viewTimer);
+    if(!next){viewRequest?.abort();if(decodedImage)decodedImage.src='';}
+    else scheduleView();
   }
-  pollView();
+  async function pollView(){
+    if(viewPolling||!visible()){syncView();return;}
+    viewPolling=true;const revision=viewRevision,controller=new AbortController();viewRequest=controller;
+    const timeout=setTimeout(()=>controller.abort(),2500),current=()=>revision===viewRevision&&visible();
+    try{const r=await fetch('/api/view',{cache:'no-store',signal:controller.signal});if(!r.ok)throw Error();const payload=await r.json();if(current())await showFrame(payload,current);}
+    catch{if(current())clearVisual('画面连接中断，请检查本机控制服务');}
+    finally{clearTimeout(timeout);if(viewRequest===controller)viewRequest=null;viewPolling=false;if(visible())scheduleView(revision===viewRevision?50:0);else syncView();}
+  }
+  const updateVisibility=()=>queueMicrotask(syncView);
+  window.addEventListener('workspace-page',updateVisibility);window.addEventListener('workbench-session-visibility',updateVisibility);
+  window.addEventListener('hashchange',updateVisibility);window.addEventListener('resize',updateVisibility);document.addEventListener('visibilitychange',syncView);
+  new ResizeObserver(updateVisibility).observe(host);
+  window.addEventListener('message',event=>{
+    if(!embedded||event.source!==window.parent||!document.referrer||event.origin!==new URL(document.referrer).origin||event.data?.type!=='wb-visibility'||typeof event.data.visible!=='boolean')return;
+    parentVisible=event.data.visible;syncView();
+  });
+  updateVisibility();
 })();

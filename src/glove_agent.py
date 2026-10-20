@@ -95,7 +95,7 @@ def worker_glove(requests,events):
     glove_sn='';last_emit=0.;next_map=0.;last_source_seq=None
     from retarget_settings import OutputMapping, defaults
     mapping=OutputMapping(defaults())
-    sdk_q=None;latest_kp=None;glove_ownership=None;profile_lease=None;solver_engine='sdk'
+    sdk_q=None;latest_kp=None;glove_ownership=None;profile_lease=None;solver_engine='sdk';selected_user_active=False
     try:
         import numpy as np
         import wuji_sdk as sdk
@@ -141,7 +141,7 @@ def worker_glove(requests,events):
                                 selection_lease=ProfileLease(selection=True)
                                 glove_ownership=DeviceOwnership(c['serial'])
                             previous_user=manager.current_user()
-                            manager.switch_user(user_id);switched=True;current=manager.current_user()
+                            manager.switch_user(user_id);switched=True;selected_user_active=True;current=manager.current_user()
                             from glove_discovery import connect_glove
                             candidate=connect_glove(manager,next(d for d in devices if d['serial']==c['serial']))
                             actual=str(candidate.hand_side().get()).lower()
@@ -150,25 +150,32 @@ def worker_glove(requests,events):
                             session=new_solver(c.get('solver',{}));solver_engine=c.get('solver',{}).get('engine','sdk')
                             sub=candidate.hand_skeleton().subscribe()
                         except Exception:
-                            if hasattr(session,'close'):session.close()
+                            if sub:
+                                try:sub.close()
+                                except Exception:pass
+                                sub=None
+                            if hasattr(session,'close'):
+                                try:session.close()
+                                except Exception:pass
                             session=None
-                            if glove_ownership:glove_ownership.close();glove_ownership=None
-                            if candidate:candidate.disconnect()
-                            if profile_lease:profile_lease.close();profile_lease=None
+                            disconnected=candidate is None
+                            try:
+                                if candidate:candidate.disconnect();disconnected=True
+                            except Exception:
+                                # Retain the candidate and its leases for outer
+                                # cleanup; never switch a still-connected device.
+                                glove=candidate
+                            finally:
+                                if disconnected:
+                                    try:
+                                        if switched and previous_user is not None:
+                                            manager.switch_user(previous_user['user_id']);current=manager.current_user();selected_user_active=False
+                                    finally:
+                                        if glove_ownership:glove_ownership.close();glove_ownership=None
+                                        if profile_lease:profile_lease.close();profile_lease=None
                             raise
                         finally:
-                            try:
-                                if switched and previous_user:manager.switch_user(previous_user['user_id'])
-                            except Exception:
-                                if sub:sub.close();sub=None
-                                if hasattr(session,'close'):session.close()
-                                session=None
-                                if candidate:candidate.disconnect()
-                                if glove_ownership:glove_ownership.close();glove_ownership=None
-                                if profile_lease:profile_lease.close();profile_lease=None
-                                raise
-                            finally:
-                                if selection_lease:selection_lease.close()
+                            if selection_lease:selection_lease.close()
                         glove=candidate;glove_sn=c['serial'];source=GloveSource(c['timeout_ms'])
                         mapping=OutputMapping(c.get('retarget',defaults()));last_source_seq=None
                         state='receiving';message='已连接手套，机械手未启用 / Glove connected; hand not enabled'
@@ -258,12 +265,28 @@ def worker_glove(requests,events):
         if sub:
             try:sub.close()
             except Exception:pass
+        glove_disconnected=glove is None
         if glove:
-            try:glove.disconnect()
+            try:glove.disconnect();glove_disconnected=True
+            except Exception:
+                events.put(dict(type='glove_notice',message='手套断开未确认，保留当前用户选择 / Glove disconnect unconfirmed; current SDK user selection retained'))
+        if session is not None and hasattr(session,'close'):
+            try:session.close()
             except Exception:pass
-        if session is not None and hasattr(session,'close'):session.close()
         if glove_ownership:glove_ownership.close()
-        if profile_lease:profile_lease.close()
+        # Keep the chosen SDK user for the entire connected glove lifetime.
+        # Profile data remains leased while restoring the previous selection.
+        try:
+            if (manager is not None and selected_user_active and previous_user is not None and
+                    glove_disconnected and not (hand_thread and hand_thread.is_alive())):
+                from contextlib import nullcontext
+                from sdk_session import ProfileLease
+                with ProfileLease(selection=True) if sys.platform.startswith('linux') else nullcontext():
+                    manager.switch_user(previous_user['user_id'])
+        except Exception:
+            events.put(dict(type='glove_notice',message='手套已断开，旧用户选择未恢复 / Glove disconnected; previous SDK user selection was not restored'))
+        finally:
+            if profile_lease:profile_lease.close()
         final_hardware=copy.deepcopy(hand_state.get('hardware',{}))
         while True:
             try:e=hand_events.get_nowait()

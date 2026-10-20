@@ -84,6 +84,11 @@ Source: "{#ProjectRoot}\src\official_data\*"; DestDir: "{app}\controller\source\
 Source: "{#ProjectRoot}\controller\README.md"; DestDir: "{app}\controller"; Flags: ignoreversion
 
 [InstallDelete]
+; Retired duplicate pose browser. These are program assets, never user profiles.
+Type: files; Name: "{app}\_internal\web\calibration_guide.js"
+Type: files; Name: "{app}\_internal\web\calibration_guide.css"
+Type: files; Name: "{app}\_internal\web\pose_grid.js"
+Type: files; Name: "{app}\_internal\web\pose_grid.css"
 ; Retired application code only. Never touch per-user settings, models or records.
 Type: files; Name: "{app}\_internal\web\external_refraction.js"
 Type: files; Name: "{app}\_internal\web\refraction_health.js"

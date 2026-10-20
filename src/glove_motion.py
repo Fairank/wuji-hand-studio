@@ -31,7 +31,7 @@ class GloveMotion(HardwareShowcase):
         self.run_profile=dict(lower_rad=LOWER_RAD,upper_rad=UPPER_RAD,current_limit_A=CURRENT_LIMIT_A,
                               max_velocity_rad_s=min(COMMAND_SPEED_RAD_S,PATH_SPEED_RAD_S))
         self.action='glove_teleoperation';self.lease=c['lease'];self.elapsed=0.;self.last_beat=now
-        self.probe=self.trial=None;self.enabled_indices=list(range(20));self.owned=True
+        self.probe=self.trial=None;self.enabled_indices=list(range(20));self.owned=True;self.disable_confirmed=False
         from motion_timing import PublishTiming
         self.publish_timing=PublishTiming()
         try:

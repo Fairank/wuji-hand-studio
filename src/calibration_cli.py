@@ -275,10 +275,13 @@ class CalibrationCLI:
                 self.run['exit_code'] = code
                 if code == 0 and terminal=='result':
                     self.run['status'] = 'completed'
-                elif code == 0:
-                    self.run.update(status='unconfirmed',error='CLI exited without an official result / 官方流程结束但未返回成功结果')
+                elif terminal=='error':
+                    self.run['status'] = 'error'
+                    self.run['error'] = self.run['error'] or ''.join(stderr_parts)[-400:] or 'Official calibration failed'
                 elif code == 9 or terminal=='cancelled':
                     self.run['status'] = 'cancelled'
+                elif code == 0:
+                    self.run.update(status='unconfirmed',error='CLI exited without an official result / 官方流程结束但未返回成功结果')
                 else:
                     self.run['status'] = 'error'
                     self.run['error'] = self.run['error'] or ''.join(stderr_parts)[-400:] or 'Official calibration failed'

@@ -81,20 +81,33 @@ class PoseView:
         self.controller = controller
         self.lock = threading.Lock()
         self.jpeg = None
+        self.demand=threading.Event();self.requested_until=0.
         self.meta = dict(ready=False, mode='loading', message='正在载入原生左手模型', joints=[], render_hz=0)
         threading.Thread(target=self.run, daemon=True).start()
 
     def get(self):
         with self.lock:
+            self.requested_until=time.monotonic()+.5
+            self.demand.set()
             meta = dict(self.meta)
             if meta.get('ready') and time.monotonic()-meta.get('rendered_monotonic', 0) > 1:
                 meta.update(ready=False, mode='stale', message='三维渲染已中断，画面不再代表当前姿态')
             meta.pop('rendered_monotonic', None)
             return self.jpeg, meta
 
+    def wait_for_demand(self):
+        # Rendering alone follows viewer demand. SDK reception and control
+        # heartbeats run in their own workers and are never suspended here.
+        while True:
+            with self.lock:
+                if time.monotonic()<self.requested_until:return
+                self.demand.clear()
+            self.demand.wait()
+
     def run(self):
         renderer = None
         try:
+            self.wait_for_demand()
             import mujoco as mj
             import numpy as np
             from PIL import Image
@@ -126,6 +139,7 @@ class PoseView:
             starts = time.monotonic()
             frames = 0
             while True:
+                self.wait_for_demand()
                 tick = time.monotonic()
                 state = self.controller.snapshot()
                 new_profile=state.get('device_profile',{}).get('id','hand2_left')
@@ -157,8 +171,10 @@ class PoseView:
                     for marker in markers:marker.update(status='unmapped',hz=None)
                 glove_display=None
                 if state.get('view_source')=='glove':
-                    from glove_view import pose as glove_pose
-                    gq,gmode,gfeedback=glove_pose(state.get('glove',{}))
+                    from glove_view import pose as glove_pose,channel_ids
+                    glove_generation=state.get('device_profile',{}).get('generation')
+                    glove_channels=channel_ids(glove_generation)
+                    gq,gmode,gfeedback=glove_pose(state.get('glove',{}),glove_generation)
                     d.qpos[:]=0;active=0;latest=None
                     if gq is not None:
                         for i,jid in enumerate(ids):d.qpos[m.jnt_qposadr[jid]]=gq[i]
@@ -166,7 +182,7 @@ class PoseView:
                     rates={j['nid']:j for j in gfeedback.get('joint_rates') or []}
                     for i,marker in enumerate(markers):
                         marker.update(status='live' if active else 'demo' if gq is not None else 'unmapped',
-                                      hz=rates.get(i//4*5+i%4+1,{}).get('host_hz') if active else None)
+                                      hz=rates.get(glove_channels[i],{}).get('host_hz') if active and glove_channels else None)
                     glove_display=(gq,gmode,gfeedback)
                 mj.mj_forward(m, d)
                 renderer.update_scene(d, camera=camera, scene_option=option)

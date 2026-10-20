@@ -44,13 +44,17 @@ class Controller:
         self.factory, self.reports = factory, Path(reports)
         if self.reports == REPORTS: initialize()
         self.lock = threading.RLock()
+        from device_termination import TerminationJournal
+        self.termination=TerminationJournal(self.reports.parent/'device_termination.json')
+        self.session_devices={}
+        self.session_epochs={0:self.termination.new_session()};self.hardware_generation=0
         self.parameters=ParameterStore(parameter_path or self.reports.parent/'motion_parameters.py')
         self.parameter_worker=None
         self.player = DemoPlayer()
         from doctor import Doctor
         self.doctor=Doctor()
         from glove_bridge import GloveBridge
-        self.glove=GloveBridge(factory)
+        self.glove=GloveBridge(factory,self.termination)
         from calibration_cli import CalibrationCLI
         self.calibration=CalibrationCLI(self.reports.parent/'calibration_reports')
         from retarget_workspace import RetargetWorkspace
@@ -59,6 +63,8 @@ class Controller:
         self.tuning=TuningStore(self.retarget.folder/'official_tuning')
         from solver_runtime import SolverRuntime
         self.solver_runtime=SolverRuntime()
+        from official_tools import OfficialTools
+        self.official_tools=OfficialTools()
         from studio_component import StudioComponent
         self.studio=StudioComponent()
         from program_runner import ProgramRunner
@@ -135,6 +141,7 @@ class Controller:
             result['playback'] = self.player.snapshot()
             result['parameter_sync']=dict(self.parameters.sync_status)
             result['glove']=self.glove.snapshot()
+            result['unconfirmed_devices']=self.termination.snapshot()
             result['program']=self.program.snapshot()
             result['group']=self.group.snapshot()
             with self.calibration.lock:
@@ -170,6 +177,7 @@ class Controller:
             self.state['motion_enabled']=None
         else:
             self.state['hardware'].update(ready=False,actions=[])
+        self.termination.observe('hand',self.state.get('device_id'),self.state['hardware'],self.session_epochs.get(self.hardware_generation,0))
 
     def send(self, command):
         if self.stdin is None:
@@ -180,6 +188,22 @@ class Controller:
     def action(self, command):
         from studio_component import enforce_session_owner
         enforce_session_owner(command)
+        if isinstance(command,dict) and command.get('name')=='control_tools_check':
+            with self.lock:return self.official_tools.start_check()
+        if isinstance(command,dict) and command.get('name')=='session_close':
+            # The reader must acquire this lock to deliver a stop ACK. Reserve
+            # the transition, then wait outside the lock while starts are gated.
+            with self.lock:
+                if getattr(self,'desktop_closing',False):return dict(ok=False,error='会话正在结束 / Session is already closing')
+                self.desktop_closing=True
+            try:
+                from desktop_lifecycle import close_sessions
+                self.program.stop()
+                if self.group.active:self.group.stop('工作区正在关闭 / Workspace closing')
+                self.calibration.cancel()
+                return close_sessions(self)
+            finally:
+                with self.lock:self.desktop_closing=False
         if isinstance(command,dict) and command.get('name') in {'connect','runtime_select','bridge_config_save','bridge_password_save','bridge_password_forget','parameters_sync','doctor_version','doctor_run','doctor_support','device_profile_select','glove_connect'}:
             from managed_runtime import status as runtime_status
             if runtime_status()['busy']:
@@ -188,10 +212,14 @@ class Controller:
             from managed_runtime import start_install,select,status
             with self.lock:
                 enforce_session_owner(command)
+                if getattr(self,'desktop_closing',False):raise ValueError('会话正在结束 / Session is closing')
                 if self.state['connection']!='disconnected' or self.state['hardware'].get('active') is not False or self.glove.busy or self.doctor.snapshot()['running'] or self.parameters.sync_status['busy']:
                     raise ValueError('Disconnect devices before setting up the control environment / 请先断开设备再配置控制环境')
                 if command['name']=='runtime_select':select();return dict(runtime=status())
-                return dict(runtime=start_install())
+                checked=self.official_tools.snapshot()['check']
+                if checked['busy']:raise ValueError('请等待官方组件检查完成 / Wait for the component check')
+                repair=checked['status'] in {'ready','failed'} and not checked['compatible']
+                return dict(runtime=start_install(repair=repair))
         # Serialize starts and configuration changes with diagnostics. RLock
         # also covers existing command branches that take the same lock.
         with self.lock:
@@ -203,6 +231,8 @@ class Controller:
     def _action(self, command):
         if not isinstance(command,dict):raise ValueError('Invalid request')
         name=command.get('name','')
+        if getattr(self,'desktop_closing',False) and name not in {'disconnect','hardware_stop','glove_stop','glove_disconnect','glove_keepalive','hardware_keepalive','demo_stop','calibration_cancel','group_stop','program_stop'}:
+            raise ValueError('会话正在结束，请稍候 / Session is closing; please wait')
         if name.startswith('group_'):
             return dict(group=self.group.handle(command))
         if self.group.active and not self.group.internal:
@@ -232,11 +262,6 @@ class Controller:
                 raise ValueError('请先停止节目单 / Stop the active playlist first')
             if name in {'hardware_stop','disconnect','glove_stop','glove_disconnect'}:
                 self.program.stop()
-        if name=='session_close':
-            from desktop_lifecycle import close_sessions
-            if hasattr(self,'program'):self.program.stop()
-            self.calibration.cancel()
-            return close_sessions(self)
         if name=='calibration_cancel':
             return dict(calibration=self.calibration.cancel())
         if name in {'calibration_profile_create','calibration_profile_switch','calibration_start'}:
@@ -305,8 +330,6 @@ class Controller:
             serial=self.retarget.context(self.state['device_profile'])['binding']['hand_serial']
             if serial and command.get('serial') and command['serial']!=serial:raise ValueError('Hand differs from saved pairing / 机械手与保存配对不符')
             command=dict(command,serial=serial or command.get('serial',''))
-        if getattr(self,'desktop_closing',False) and name not in {'disconnect','hardware_stop','glove_stop','glove_disconnect','glove_keepalive','hardware_keepalive','demo_stop'}:
-            raise ValueError('工作台正在退出 / Workbench is closing')
         if name=='hardware_stop' and self.glove.busy:
             return self.glove.action(dict(name='glove_stop'))
         if isinstance(name,str) and name.startswith('glove_'):
@@ -489,11 +512,12 @@ class Controller:
                 if self.parameters.sync_status['busy']:raise ValueError('参数同步中，请完成后连接')
                 if self.state['connection'] in {'connected', 'connecting'}:
                     raise ValueError('已有连接正在进行')
+                self.clear_live()
                 self.generation += 1
                 generation = self.generation
+                self.session_epochs[generation]=self.termination.new_session();self.hardware_generation=generation
                 self.state['connection'] = 'connecting'
                 self.state['message'] = '正在重新发现设备并核对型号、左右手'
-                self.clear_live()
                 self.state['device_id'] = None
                 self.state['devices'] = []
                 self.state['hardware'] = dict(ready=False, active=False, actions=[], probe_ready=False, reason='正在识别新设备')
@@ -557,6 +581,16 @@ class Controller:
                 self.state['sessions'].insert(0, report)
                 self.state['sessions'] = self.state['sessions'][:20]
                 self.log(f"采集已保存：{report['frames']}帧，结束原因 {report['reason']}")
+            # Late close acknowledgements still belong to the old serial. They
+            # may confirm that stop, but must never revive the new connection.
+            if event.get('device_id'):self.session_devices[generation]=event['device_id']
+            if 'hardware' in event:
+                self.termination.observe('hand',event.get('device_id') or self.session_devices.get(generation),event['hardware'],self.session_epochs.get(generation,0))
+                if event['hardware'].get('active') is False and event['hardware'].get('stop_confirmed') is True:
+                    self.glove.confirm_termination(event.get('device_id') or self.session_devices.get(generation),self.session_epochs.get(generation,0))
+                if kind=='closed' and self.hardware_generation==generation and self.state['connection']=='disconnected' and self.state.get('device_id')==self.session_devices.get(generation):
+                    self.state['hardware']=event['hardware']
+                    self.state['motion_enabled']=event['hardware'].get('active')
             if generation != self.generation:
                 return
             if kind == 'identity':
@@ -578,7 +612,8 @@ class Controller:
                 self.last_update = time.monotonic()
                 for key in ('connection', 'message', 'latest', 'metrics', 'recording', 'device_id', 'joint_rates'):
                     self.state[key] = event[key]
-                if 'hardware' in event:self.state['hardware']=event['hardware']
+                if 'hardware' in event:
+                    self.state['hardware']=event['hardware'];self.hardware_generation=generation
                 if self.state['hardware'].get('active'):self.hardware_seen_active=True
                 elif self.hardware_lease and (self.hardware_seen_active or time.monotonic()-self.hardware_requested_at>3):
                     self.hardware_lease=None
@@ -594,6 +629,9 @@ class Controller:
                 self.log(self.state['message'])
             elif kind == 'notice':
                 self.log(str(event.get('message', ''))[:300])
+            elif kind == 'closed' and 'hardware' in event:
+                self.state['hardware']=event['hardware']
+                self.state['motion_enabled']=event['hardware'].get('active')
 
     def read_session(self, command, generation):
         client = None
@@ -664,6 +702,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(403, dict(error='Local host required'))
         url = urlsplit(self.path)
         if url.path=='/api/official-studio':return self.reply(200,self.server.studio.snapshot())
+        if url.path=='/api/control-tools':return self.reply(200,self.server.controller.official_tools.snapshot())
         if url.path.startswith('/studio-assets/'):
             try:path=self.server.studio.asset(url.path.removeprefix('/studio-assets/'))
             except (ValueError,OSError) as error:return self.reply(404,dict(error=str(error)))
@@ -787,13 +826,13 @@ class Handler(BaseHTTPRequestHandler):
         assets.update({'/workspace.js':('workspace.js','text/javascript; charset=utf-8'),
             '/workspace.css':('workspace.css','text/css; charset=utf-8'),
             '/parameters.js':('parameters.js','text/javascript; charset=utf-8')})
-        for name in ('studio.js','locale.js','floating_panel.js','viewer.js','action_picker.js','brand.js','installation.js','profiles.js','doctor.js','glove.js','desktop_shell.js','device_network.js','connection_toolbar.js','workbench_upgrade.js','connection_hub.js','calibration_guide.js','pose_grid.js','settings.js','group_panel.js','workspaces.js','group_view.js','workbench_sheet.js','workbench_clarity.js','numeric_grid.js','retarget_tuning.js','joint_inspector.js','connection_refinement.js','action_row.js','control_surfaces.js','spring_motion.js','playlist_rows.js','playlist_editor.js'):
+        for name in ('studio.js','locale.js','floating_panel.js','viewer.js','action_picker.js','brand.js','installation.js','profiles.js','doctor.js','glove.js','desktop_shell.js','device_network.js','connection_toolbar.js','workbench_upgrade.js','connection_hub.js','official_calibration.js','settings.js','group_panel.js','workspaces.js','group_view.js','workbench_sheet.js','workbench_clarity.js','numeric_grid.js','retarget_tuning.js','joint_inspector.js','connection_refinement.js','action_row.js','control_surfaces.js','spring_motion.js','playlist_rows.js','playlist_editor.js'):
             assets['/'+name]=(name,'text/javascript; charset=utf-8')
-        for name in ('studio.css','floating_panel.css','glass.css','glove.css','desktop_glass.css','desktop_refinement.css','glass_refresh.css','workbench_upgrade.css','connection_hub.css','calibration_guide.css','pose_grid.css','group_panel.css','workspaces.css','group_view.css','workbench_sheet.css','workbench_clarity.css','numeric_grid.css','retarget_tuning.css','joint_inspector.css','connection_refinement.css','control_surfaces.css','spring_motion.css','playlist_editor.css'):
+        for name in ('studio.css','floating_panel.css','glass.css','glove.css','desktop_glass.css','desktop_refinement.css','glass_refresh.css','workbench_upgrade.css','connection_hub.css','official_calibration.css','group_panel.css','workspaces.css','group_view.css','workbench_sheet.css','workbench_clarity.css','numeric_grid.css','retarget_tuning.css','joint_inspector.css','connection_refinement.css','control_surfaces.css','spring_motion.css','playlist_editor.css'):
             assets['/'+name]=(name,'text/css; charset=utf-8')
         assets['/viewer']=('viewer.html','text/html; charset=utf-8')
-        for name in ('official_studio.js','official_studio_viewer.js'):assets['/'+name]=(name,'text/javascript; charset=utf-8')
-        for name in ('official_studio.css','official_studio_viewer.css'):assets['/'+name]=(name,'text/css; charset=utf-8')
+        for name in ('official_tools.js','official_studio.js','official_studio_viewer.js'):assets['/'+name]=(name,'text/javascript; charset=utf-8')
+        for name in ('official_tools.css','official_studio.css','official_studio_viewer.css'):assets['/'+name]=(name,'text/css; charset=utf-8')
         assets['/official_studio_viewer.html']=('official_studio_viewer.html','text/html; charset=utf-8')
         assets['/favicon.ico']=('favicon.ico','image/x-icon')
         assets['/app-icon.png']=('app-icon.png','image/png')
@@ -826,6 +865,8 @@ class Handler(BaseHTTPRequestHandler):
             elif payload.get('name') in ('desktop_open','desktop_viewer') and getattr(self.server,'desktop',None):
                 result=self.server.desktop.open_viewer() if payload['name']=='desktop_viewer' else dict(ok=True,native_opened=True)
             elif str(payload.get('name','')).startswith('official_studio_'):
+                if payload.get('name') not in {'official_studio_close','official_studio_probe'}:
+                    raise ValueError('官方 Studio 已停用；请在设置中使用官方 CLI / SDK / Studio integration is retired; use official CLI / SDK in Settings')
                 if os.environ.get('WUJI_FLEET_PARENT'):raise ValueError('请在主工作台打开官方 Studio / Open official Studio in the main workbench')
                 result=self.server.studio.handle(payload)
             elif str(payload.get('name','')).startswith(('workspace_','ensemble_')):

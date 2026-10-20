@@ -65,14 +65,19 @@ def self_check():
         m=load_native_model(profile_id);assert m.nu==20
     validate(DEFAULT)
     assert len(catalog()['actions'])>=40
-    data=dict(ok=True,edition=EDITION['name'],joints=m.nu,profiles=list(PROFILES),actions=len(catalog()['actions']),hardware_connected=False)
+    data=dict(ok=True,edition=EDITION['name'],version=EDITION['version'],joints=m.nu,profiles=list(PROFILES),actions=len(catalog()['actions']),hardware_connected=False)
     if '--render-check' in sys.argv:
         import mujoco as mj
         d=mj.MjData(m);mj.mj_forward(m,d)
         with mj.Renderer(m,height=160,width=160) as r:
             r.update_scene(d);pic=r.render();assert pic.shape==(160,160,3) and np.isfinite(pic).all()
         data['render']=True
-    print(json.dumps(data));return 0
+    encoded=json.dumps(data)
+    if '--self-check-output' in sys.argv:
+        destination=Path(sys.argv[sys.argv.index('--self-check-output')+1])
+        destination.write_text(encoded,encoding='utf-8')
+    if sys.stdout is not None:print(encoded)
+    return 0
 
 def main():
     if '--recognizer-input' in sys.argv:

@@ -1,5 +1,5 @@
 """One owned WSL2 distribution. No SSH, passwords, global WSL settings or autostart motors."""
-import hashlib,json,os,shutil,subprocess,sys,threading,time
+import hashlib,json,os,secrets,shutil,subprocess,sys,threading,time
 from pathlib import Path,PurePosixPath
 from user_dirs import user_data_dir
 from runtime_paths import RESOURCE
@@ -78,7 +78,27 @@ def _image():
     if h.hexdigest()!=manifest['sha256']:raise ValueError('Control runtime image failed integrity verification')
     return found,manifest
 
-def start_install():
+def stage_image(image,manifest):
+    """Transfer to the owned Linux tree; /mnt/c is not a runtime contract."""
+    name=manifest['file']
+    if Path(name).name!=name:raise ValueError('Invalid runtime image name')
+    destination=AGENT+'/components/runtime/'+name
+    with Files() as files:
+        target=files.path(destination);target.parent.mkdir(parents=True,exist_ok=True)
+        if target.is_file():
+            with target.open('rb') as stream:
+                if hashlib.file_digest(stream,'sha256').hexdigest()==manifest['sha256']:return destination
+        stage=target.with_name(target.name+'.'+secrets.token_hex(8)+'.partial')
+        try:
+            with image.open('rb') as source,stage.open('xb') as output:shutil.copyfileobj(source,output)
+            with stage.open('rb') as stream:
+                if hashlib.file_digest(stream,'sha256').hexdigest()!=manifest['sha256']:raise ValueError('Transferred runtime image failed integrity verification')
+            stage.replace(target)
+        finally:stage.unlink(missing_ok=True)
+    return destination
+
+
+def start_install(repair=False):
     if sys.platform=='darwin':
         from macos_runtime import start_install as mac_install
         return mac_install()
@@ -91,23 +111,23 @@ def start_install():
             if probe.returncode:raise RuntimeError('请先安装 WSL 2 系统组件，可能需要重启 / Install WSL 2; a restart may be required')
             existing=registered();ROOT.mkdir(parents=True,exist_ok=True)
             pending=ROOT/'pending-install.json'
-            if existing and not status()['ready']:
+            if existing and (repair or not status()['ready']):
                 previous=json.loads(pending.read_text(encoding='utf-8')) if pending.is_file() else {}
                 marker=ROOT/'runtime-info.json'
                 saved=json.loads(marker.read_text(encoding='utf-8')) if marker.is_file() else {}
-                if saved.get('runtime_version') in ('1.0.0','1.0.1') and manifest['runtime_version']=='1.1.0':
+                if saved.get('runtime_version') in ('1.0.0','1.0.1','1.1.0') and manifest['runtime_version']=='1.1.0':
                     _state['stage']='upgrading'
                     with Files() as files:
                         files.path(AGENT+'/runtime_refresh.py').write_bytes((RESOURCE/'runtime_refresh.py').read_bytes())
-                    converted=subprocess.run(args(['/usr/bin/wslpath','-a',str(image)]),capture_output=True,check=True,timeout=10,creationflags=subprocess.CREATE_NO_WINDOW)
-                    upgraded=subprocess.run(args(['/usr/bin/python3',AGENT+'/runtime_refresh.py',_decode(converted.stdout),manifest['sha256']],user='root'),capture_output=True,timeout=180,creationflags=subprocess.CREATE_NO_WINDOW)
+                    transferred=stage_image(image,manifest)
+                    upgraded=subprocess.run(args(['/usr/bin/python3',AGENT+'/runtime_refresh.py',transferred,manifest['sha256']],user='root'),capture_output=True,timeout=180,creationflags=subprocess.CREATE_NO_WINDOW)
                     if upgraded.returncode:raise RuntimeError('SDK/CLI update failed; previous environment retained: '+_decode(upgraded.stderr)[-600:])
                 elif saved.get('runtime_version')=='1.0.0' and manifest['runtime_version']=='1.0.1' and saved.get('sdk_version')==manifest['sdk_version']:
                     _state['stage']='upgrading'
                     with Files() as files:
                         files.path(AGENT+'/runtime_update.py').write_bytes((RESOURCE/'runtime_update.py').read_bytes())
-                    converted=subprocess.run(args(['/usr/bin/wslpath','-a',str(image)]),capture_output=True,check=True,timeout=10,creationflags=subprocess.CREATE_NO_WINDOW)
-                    upgraded=subprocess.run(args(['/usr/bin/python3',AGENT+'/runtime_update.py',_decode(converted.stdout),manifest['sha256']],user='root'),capture_output=True,timeout=90,creationflags=subprocess.CREATE_NO_WINDOW)
+                    transferred=stage_image(image,manifest)
+                    upgraded=subprocess.run(args(['/usr/bin/python3',AGENT+'/runtime_update.py',transferred,manifest['sha256']],user='root'),capture_output=True,timeout=90,creationflags=subprocess.CREATE_NO_WINDOW)
                     if upgraded.returncode:raise RuntimeError('Controller update failed: '+_decode(upgraded.stderr)[-400:])
                 elif previous.get('sha256')!=manifest['sha256']:raise RuntimeError('Existing runtime version is not supported for automatic upgrade')
             if not existing:
@@ -116,8 +136,11 @@ def start_install():
                 result=subprocess.run(['wsl.exe','--import',NAME,str(target),str(image),'--version','2'],capture_output=True,timeout=180,creationflags=subprocess.CREATE_NO_WINDOW)
                 if result.returncode:raise RuntimeError('WSL import failed: '+_decode(result.stderr or result.stdout)[-600:])
             _state['stage']='verifying'
-            result=subprocess.run(args([PYTHON,'-c','from wuji_sdk import SdkManager;import console_agent']),capture_output=True,timeout=30,creationflags=subprocess.CREATE_NO_WINDOW)
+            expected=manifest['sdk_version']
+            result=subprocess.run(args([PYTHON,'-c',"import importlib.metadata,wuji_sdk;assert importlib.metadata.version('wuji-sdk')=="+repr(expected)]),capture_output=True,timeout=30,creationflags=subprocess.CREATE_NO_WINDOW)
             if result.returncode:raise RuntimeError('Control runtime import check failed: '+_decode(result.stderr)[-500:])
+            cli_result=subprocess.run(args(['/usr/bin/env','WUJI_NO_UPDATE_CHECK=1',CLI,'--version']),capture_output=True,timeout=20,creationflags=subprocess.CREATE_NO_WINDOW)
+            if cli_result.returncode or manifest['cli_version'] not in _decode(cli_result.stdout):raise RuntimeError('Official CLI version verification failed')
             (ROOT/'runtime-info.json').write_text(json.dumps(dict(runtime_version=manifest['runtime_version'],sdk_version=manifest['sdk_version'],installed=time.time())),encoding='utf-8')
             pending.unlink(missing_ok=True)
             select();_state['stage']='ready'

@@ -37,8 +37,11 @@ html[data-theme=dark][data-external-backdrop=true] .app{background:rgba(20,21,26
 #wb-device-list{grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));gap:16px}
 .wb-device-card{padding:20px;border:1px solid var(--wb-line);border-radius:18px;min-width:0;background:var(--wb-card)}
 .wb-device-card strong{font-size:17px}.wb-device-card p{margin:10px 0;overflow-wrap:anywhere}
-body.wb-child-active .directory,body.wb-child-active .page-area,body.wb-child-active .app>footer{visibility:hidden;pointer-events:none}
+body.wb-child-active .directory,body.wb-child-active .page-area,body.wb-child-active .app>footer{display:none!important}
 body.wb-child-active .top{z-index:30}
+.wb-session-bar{position:fixed;top:var(--wb-session-top,85px);left:17px;right:17px;min-height:44px;display:flex;align-items:center;gap:16px;padding:6px 12px;border:1px solid var(--dg-line);border-radius:14px;background:var(--dg-canvas);color:var(--dg-text);z-index:30;box-sizing:border-box}
+.wb-session-bar[hidden]{display:none!important}.wb-session-bar strong{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px}.wb-session-bar button{flex-shrink:0;min-height:30px;margin:0;font-size:12px}
+body.wb-child-active .wb-device-frame{top:calc(var(--wb-session-top,85px) + 52px);height:calc(100dvh - var(--wb-session-top,85px) - 60px)}
 html[data-embedded=true] .top{display:none}
 html[data-embedded=true] .directory{top:5px;bottom:5px}
 html[data-embedded=true] .page-area{margin-top:5px;min-height:calc(100vh - 10px)}

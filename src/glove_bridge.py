@@ -8,13 +8,18 @@ import time
 from glove_protocol import validate
 
 class GloveBridge:
-    def __init__(self,factory):
-        self.factory=factory;self.lock=threading.RLock();self.thread=None
+    def __init__(self,factory,termination=None):
+        self.factory=factory;self.lock=threading.RLock();self.thread=None;self.termination=termination;self.session=termination.new_session() if termination else 0
         self.client=self.stdin=None;self.stopping=False;self.last_update=0.;self.lease=None
         self.state=dict(connection='disconnected',message='',devices=[],users=[],stream={},hardware={},feedback={})
 
     @property
     def busy(self):return bool(self.thread and self.thread.is_alive())
+
+    def remember_termination(self):
+        if self.termination:
+            self.termination.observe('glove', (self.state.get('feedback') or {}).get('device_id'),
+                                     self.state.get('hardware') or {}, self.session)
 
     def snapshot(self):
         with self.lock:
@@ -30,6 +35,15 @@ class GloveBridge:
             s['feedback']=feedback
             return s
 
+    def confirm_termination(self,device,session):
+        # A later explicit stop of this serial can resolve an ended glove
+        # session, without treating an unrelated/new connection as evidence.
+        with self.lock:
+            if (device and not self.busy and self.session<=session and
+                    (self.state.get('feedback') or {}).get('device_id')==device):
+                self.state['hardware']=dict(active=False,stop_confirmed=True,ready=False,
+                                            reason='对应设备已确认停用 / Matching device disable acknowledged')
+
     def send(self,c):
         if not self.stdin:raise ValueError('控制端尚未就绪 / Controller not ready')
         self.stdin.write(json.dumps(c)+'\n');self.stdin.flush()
@@ -40,6 +54,7 @@ class GloveBridge:
             name=c['name']
             if name=='glove_session':raise ValueError('Use scan to open a session')
             if name=='glove_scan' and not self.busy:
+                self.remember_termination();self.session=self.termination.new_session() if self.termination else self.session+1
                 self.stopping=False;self.lease=None;self.last_update=0.
                 self.state=dict(connection='connecting',message='正在连接控制端 / Connecting controller',devices=[],users=[],stream={},hardware={},feedback={})
                 self.thread=threading.Thread(target=self.run,daemon=True);self.thread.start();return
@@ -78,6 +93,7 @@ class GloveBridge:
             elif kind=='glove_closed':
                 self.state['connection']='disconnected';self.state['hardware']=event.get('hardware',{})
                 self.state['stream']['fresh']=False;self.lease=None
+            self.remember_termination()
 
     def run(self):
         client=None;ready=False
@@ -113,3 +129,4 @@ class GloveBridge:
                     self.state['hardware'].update(active=None,stop_confirmed=False,reason='连接中断，停用结果未确认 / Disable not confirmed')
                 if self.state['connection'] not in ('disconnected','error'):
                     self.state.update(connection='error',message='控制端会话已结束，请手动重连 / Controller session ended')
+                self.remember_termination()

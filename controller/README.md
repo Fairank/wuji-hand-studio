@@ -6,11 +6,13 @@ Ubuntu 22+。Windows、Mac 的界面可以连接一台常驻 Linux 电脑，不�
 
 ## Ubuntu 本机使用
 
-1. 在 Ubuntu 准备 Python 3.10+，创建项目环境：`python3 -m venv ~/wuji-studio-venv`。
-2. 用该环境安装 SDK：`~/wuji-studio-venv/bin/pip install wuji-sdk numpy`。
+完整的 Ubuntu 24.04 x86_64 Git 克隆、配套 CLI 校验和项目 `.venv` 安装步骤见 [Linux 本机安装](../docs/LINUX.md)。普通 Linux 不运行专用于 WSL 的 `runtime-bootstrap.sh`。Ubuntu 22.04 需自行准备 Python 3.12。
+
+1. 在 Ubuntu 准备 Python 3.12，创建环境：`python3.12 -m venv ~/wuji-studio-venv`。
+2. 用该环境安装配套依赖：`~/wuji-studio-venv/bin/python -m pip install 'wuji-sdk==2026.10.12' 'numpy>=2.2,<3' 'eclipse-zenoh==1.9.0'`；官方 CLI 的固定版本安装见上述指南。
 3. 下载包完整解压后运行工作台。在“连接与校准 → 控制端与诊断设置”选“本机 Ubuntu”。
 4. 控制程序目录选下载包的 `controller/source`，或 Git 克隆的 `src`；填写绝对路径。
-   SDK Python 路径填 `~/wuji-studio-venv/bin/python` 对应的完整绝对路径，不能原样填 `~`。
+   SDK Python 路径填 `~/wuji-studio-venv/bin/python` 对应的完整绝对路径，不能原样填 `~`；官方 CLI 路径也填写其完整绝对路径。
 5. 保存设置，选择代数和左右手，再点击连接。无需 SSH 服务或虚拟机。
 
 控制目录需可写，用于用户明确执行的参数同步和采样。SDK 未安装或路径不正确时会显示
@@ -49,6 +51,8 @@ SSH**; select Local Ubuntu and provide the absolute controller and venv Python p
 Windows/macOS connect over SSH to a Linux SDK host, which can be a physical computer.
 No credentials or machine-specific configuration are shipped. Hardware still requires
 the official SDK, currently documented for Ubuntu 22+.
+
+Use Python 3.12 with SDK 2026.10.12 and Zenoh 1.9.0. See the [local Linux installation guide](../docs/LINUX.md) for Ubuntu 24.04 x86_64 source setup and the pinned CLI checksum. Ubuntu 22.04 needs a separately prepared Python 3.12 environment. The WSL-only `runtime-bootstrap.sh` is not a normal Linux installation script.
 
 Install the official CLI on the controller and enter its executable path. Diagnostics
 offers `wuji --version` and `wuji doctor --json` with an optional serial number.

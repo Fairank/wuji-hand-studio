@@ -1,14 +1,22 @@
 # 官方标定与参数表 / Calibration and tuning
 
-工作台是非官方界面。原有「连接与校准」页调用官方 CLI 标定。Windows 0.2.18 另增「Wuji Studio」，运行完整未修改的官方 Ubuntu 程序，两者档案与控制会话分开。官方仓库提供发行信息，没有可直接移植的完整应用源码；这里嵌入官方二进制，见 [完整 Studio 说明](OFFICIAL_STUDIO.md)。
+工作台是非官方个人工具。「连接与校准」页继续调用官方 CLI 采集和标定。0.2.19 按用户最终选择取消 Studio 嵌入，采用内置官方 CLI / SDK 2026.10.12、配套控制环境 1.1.0；保留一个工作台和原用户数据。Studio 最终版 2026.9.22 已停止维护，历史与旧档案边界见 [Studio 迁移说明](OFFICIAL_STUDIO.md)。
+
+## 先检查官方组件
+
+进入「设置 → 连接与设备 → 官方 CLI / SDK」。需要时安装或更新内置控制组件，再点击「检查 CLI / SDK」。环境记录只说明组件安装状态；实际版本来自本次 CLI 版本命令和 SDK 导入检查，分别显示检查时间与配套目标。未检查、检查失败或服务失联保持待核对，不能将目标版本当作实际运行结果。
+
+软件检查不扫描或连接手套、机械手，不开始标定、不使能电机，也不升级设备固件。Windows 系统支持不足时，系统组件安装可能要求管理员确认或重启；完成后返回同一卡片继续。校准仍是之后单独选择的设备操作。0.2.19 完整验证状态见 [验证记录](VALIDATION_0.2.19.md)。
 
 ## 在软件内标定
 
 打开「连接与校准 → 手套校准」，在「选择用户与手套」中选择命名 SDK 用户、捕获手套和左右侧。Default 不能保存人体模型。已有模型需要明确选择覆盖。开始调用 `wuji --jsonl calib hand-model`，并检查当前用户、设备侧与跨工作区占用；不发送机械手运动指令。
 
-官方步骤为拇指分别与食、中、无名、小指指尖相触，再四指弯曲约 90°，最后伸平并拢。页面使用三列两行六宫格（窄窗口自动换行），每格有示意与操作要求。已采集只来自官方 done 事件，进度满格或步骤跳转不等于完成。页面跟随官方姿势名称或已确认的六姿势编号，显示官方 `variance_ok` 稳定性和 `constraints_ok` 约束检查；诊断值、单位、误差与建议照原始反馈显示。缺字段显示等待，不按本地阈值补成通过。未知步骤保留原始诊断，不强行指向一个姿势。
+工作台不再提供额外的六姿势浏览器、示意图或可选择的姿势卡片。页面只显示本次官方 CLI 正在报告的步骤、进度、结果与错误；姿势名称是官方步骤的中文或英文标签，不是工作台另外编排的采集流程。未报告当前步骤时保持等待，不默认选择第一步，也不按经过时间推算进度。原始事件和官方诊断收在运行详情中。
 
 采集、稳定性判定、约束判定、求解和模型发布均由官方工具完成。当前姿势采集完成不代表整次标定成功；必须收到正式 result 且进程退出码为 0。页面刷新官方采集状态的间隔为 500 ms，不改变 SDK 采样频率。
+
+0.2.19 分开保留校准操作错误与状态读取错误。刷新失败时显示官方状态尚未确认，并禁用依赖旧状态的启动操作；刷新成功只清除本次读取错误，不抹掉之前的操作失败。服务恢复不能被记为标定完成。
 
 成功模型仍按 SDK 用户及左/右侧保存在官方目录。工作台保存 CLI 事件报告，但尚未实现 Studio 的全传感器 Calibration Debug 录制、完整人体 URDF 查看器或官方动作插图。官方插图通过页面链接查阅。新 UI 的反馈解析经过软件样例测试；真实手套的端到端标定仍需设备验收。
 
@@ -20,11 +28,17 @@
 
 这些文件在运行 SDK 的电脑/系统用户环境里，而不是靠手套上电记忆。Windows 内置 Linux、实体 Linux 与原来运行 Studio 的电脑可能是不同环境；换环境时需使用官方用户档案导入/导出。工作台的映射参数另外按设备配对保存，只改变骨架到机械手目标的换算，不改写原始传感器、官方人体手型或手套固件；只有明确开启实机跟随才发送相应动作。
 
-### 原版 Studio 与 Visualization 的接入范围
+手套连接使用所选 SDK 用户，并保持到该会话结束；断开设备和会话对象后才恢复先前用户。此修复避免初始化后立即切回另一个用户而重载错误的参数，不能替代真实手套的标定准确性验收。
 
-原有「连接与校准」页仍使用工作台姿势示意和官方 CLI。Windows 0.2.18 的独立 Studio 页保留原版完整窗口与功能入口；人体模型、触觉和录制的实际可用性取决于原版与所连接设备。离线显示验证不能当作设备流程已通过验收。
+Hand 1 的实测显示按设备编号 0–19 读取，Hand 2 按各指四关节编号读取。代际未知、反馈陈旧或缺关节时，不用映射目标填补实测姿态。隐藏页面停止图像请求、解码与无需求渲染；反馈接收、租约心跳和设备控制不随显示暂停。
 
-官方新的 `wuji viz` 文档提供 Rerun Web Viewer：手套骨架、EMF、触觉点云与原始矩阵，以及具备触觉传感器的机械手指尖显示。可使用 `--no-open --jsonl` 获取官方本地 Viewer URL，保留完整查询串且同一会话只打开一个 Viewer。后续集成需固定支持手套的 CLI 版本、处理与现有 SDK 的连接占用、显示独立数据失效状态；官方 Viewer 断流可能保留最后一帧，不能仅凭画面存在就称实时。本机已有 2026.8.31 CLI 的 help 仍以 Hand 2 描述可视化，尚未进行真实手套验收，因此本版没有增加一个未经验证的“已嵌入”按钮。
+断线、进程退出或收到停止请求，都不自动证明电机已经停用。停用未知按设备和会话保存；新连接、切换用户或另一只设备的停用确认不会清除旧记录。需要对应设备/会话的明确确认，相关退出或升级门槛才可解除。
+
+### 已取消的 Studio 嵌入与可视化边界
+
+工作台统一调用官方 CLI，不再维护重复的自制姿势示意功能。0.2.18 曾有完整 Studio 页面，0.2.19 已取消其入口、安装和打开功能；旧组件只保留状态核对及关闭兼容，不主动删除 Studio HOME 和标定档案。S1–S3 Studio 改造不作为本版功能或验收成果。原版人体模型、触觉和录制不能由当前工作台画面或历史离线显示结果推定为已经验收。
+
+官方另有 `wuji viz` 可视化工具；它不等于当前工作台的手套原始骨架、映射预览和机械手反馈。0.2.19 的 CLI / SDK 软件检查只检查版本与导入，不自动启动该 Viewer，不把它作为原版 Studio 的替代验收。画面存在也不能证明数据仍然新鲜。
 
 依据：[SDK 用户档案](https://docs.wuji.tech/docs/en/wuji-cli/latest/user/)、[触觉标定保存](https://docs.wuji.tech/docs/en/wuji-studio/latest/tactile-calibration/)、[官方实时可视化](https://docs.wuji.tech/docs/en/wuji-cli/latest/visualization/)。
 
@@ -70,6 +84,8 @@
 
 ## English
 
-Calibration executes the official CLI, with the Workbench displaying public SDK feedback fields. Stability and constraint checks are official booleans; missing values stay unknown. This is not the original Studio UI or its full-sensor debug recorder. Physical calibration acceptance remains separate from software tests.
+Version 0.2.19 uses bundled CLI / SDK 2026.10.12 and controller image 1.1.0. Settings → Connections → Official CLI / SDK separates the actual version/import check from installation records and bundled targets. That check does not connect devices or start calibration. Studio embedding is cancelled; its 0.2.18 implementation is historical, and existing Studio profiles are retained without automatic conversion.
+
+Calibration executes the official CLI. The duplicate six-pose browser and custom illustrations are removed; one compact view displays the CLI's current step, actual progress, result and error. Raw official events remain in run details. Missing fields stay unknown, and elapsed time never supplies progress. Refresh recovery clears refresh errors without erasing an operation failure. The chosen SDK user remains selected for the glove connection lifetime. Generation-specific measured feedback stays separate from mapped targets; hidden rendering does not pause device reception or heartbeats. Unconfirmed stops remain attached to their device/session. Physical calibration acceptance remains separate from software tests.
 
 Live output gain/offset adjustments and official solver parameters remain separate tabs. Version 0.2.12 embeds the pinned open retargeter as an optional engine in an isolated Linux x86_64/Python 3.12 environment. Prepare dependencies, apply in glove-only preview, then verify fresh output with the matching parameter digest. SDK fallback is explicit; hand follow remains a separate operator action. The SDK's built-in mapper does not accept these YAML values. This is not the complete original Studio, and physical glove/hand acceptance is still pending. Hand 2 uses the viewer-matched Beta 2 model; exported upstream YAML retains its original Beta 1 paths. Mac/ARM setup is not yet integrated.

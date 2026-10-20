@@ -1,0 +1,67 @@
+"""Inspect bundled official CLI/SDK software without opening a device.
+
+Installation uses managed_runtime's verified controller image. A saved install
+marker is never presented as this check's actual version/import result.
+"""
+import copy
+import json
+import re
+import subprocess
+import threading
+import time
+
+SDK_CHECK = "import importlib.metadata,json,wuji_sdk;print(json.dumps({'sdk_version':importlib.metadata.version('wuji-sdk'),'sdk_imported':True}))"
+
+
+class OfficialTools:
+    def __init__(self):
+        self.lock=threading.RLock()
+        self.check=dict(busy=False,status='unchecked',cli_version=None,sdk_version=None,
+                        error=None,checked_at=None,available=False,compatible=False)
+
+    def snapshot(self):
+        from managed_runtime import status,image_manifest
+        manifest=image_manifest() or {}
+        with self.lock:
+            return dict(target={key:manifest.get(key) for key in ('cli_version','sdk_version')},
+                        runtime=status(),check=copy.deepcopy(self.check))
+
+    def start_check(self):
+        from managed_runtime import status
+        runtime=status()
+        if runtime.get('busy'):raise ValueError('请等待内置组件安装完成 / Wait for the built-in component installation')
+        if not runtime.get('supported') or not runtime.get('installed'):
+            raise ValueError('请先安装内置官方组件 / Install the bundled official components first')
+        with self.lock:
+            if self.check['busy']:raise ValueError('组件检查正在进行 / Component check already running')
+            self.check.update(busy=True,status='checking',error=None,available=False,compatible=False,
+                              cli_version=None,sdk_version=None,checked_at=None)
+        threading.Thread(target=self.run,name='Official CLI SDK software check',daemon=True).start()
+        return self.snapshot()
+
+    def run(self):
+        from managed_runtime import args,PYTHON,CLI,image_manifest,_decode
+        flags=getattr(subprocess,'CREATE_NO_WINDOW',0)
+        versions={}
+        try:
+            # Neither command scans, connects, subscribes or sends motor data.
+            sdk=subprocess.run(args([PYTHON,'-c',SDK_CHECK]),capture_output=True,timeout=30,creationflags=flags)
+            if sdk.returncode:raise ValueError('SDK 导入检查失败 / SDK import check failed')
+            parsed=json.loads(_decode(sdk.stdout))
+            sdk_version=parsed.get('sdk_version')
+            if parsed.get('sdk_imported') is not True or not isinstance(sdk_version,str) or not re.fullmatch(r'[0-9A-Za-z.+_-]{1,80}',sdk_version):
+                raise ValueError('SDK 版本输出无效 / Invalid SDK version result')
+            versions['sdk_version']=sdk_version
+            cli=subprocess.run(args(['/usr/bin/env','WUJI_NO_UPDATE_CHECK=1',CLI,'--version']),capture_output=True,timeout=20,creationflags=flags)
+            if cli.returncode:raise ValueError('CLI 版本检查失败 / CLI version check failed')
+            match=re.search(r'\b(20\d{2}\.\d{1,2}\.\d{1,2}(?:[.+-][\w.-]+)?)\b',_decode(cli.stdout))
+            if not match:raise ValueError('CLI 版本输出无效 / Invalid CLI version result')
+            versions['cli_version']=match[1]
+            manifest=image_manifest() or {}
+            compatible=all(versions.get(key)==manifest.get(key) for key in ('cli_version','sdk_version'))
+            with self.lock:self.check.update(**versions,status='ready',available=True,compatible=compatible,error=None)
+        except Exception as error:
+            detail=str(error) if isinstance(error,ValueError) else '软件检查未完成，请重试 / Software check did not complete; retry'
+            with self.lock:self.check.update(**versions,status='failed',available=False,compatible=False,error=detail)
+        finally:
+            with self.lock:self.check.update(busy=False,checked_at=time.time())

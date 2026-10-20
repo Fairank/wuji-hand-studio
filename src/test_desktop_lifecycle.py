@@ -6,7 +6,7 @@ from native_desktop import same_origin
 def state(active=False,connected=False,confirmed=True,glove=False):
     hw=dict(active=active,stop_confirmed=confirmed)
     return dict(connection='connected' if connected else 'disconnected',hardware=hw,
-                glove=dict(busy=glove,hardware=hw),recording={},parameter_sync={})
+                glove=dict(busy=glove,hardware=hw if glove else {}),recording={},parameter_sync={})
 
 class ExitTests(unittest.TestCase):
     def controller(self,s):

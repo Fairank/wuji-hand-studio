@@ -116,16 +116,27 @@
  // Parent device switch keeps all loopback child frames mounted and their leases alive.
  const selector=document.createElement('select');selector.id='wb-device-switch';selector.setAttribute('aria-label',t('切换设备工作区','Switch device workspace'));
  if(!embedded)document.querySelector('.top-actions').prepend(selector);
- function switchTo(id){active=id;document.body.classList.toggle('wb-child-active',id!=='main');
-  for(const [key,frame] of frames)frame.hidden=key!==id;
+ const sessionBar=document.createElement('nav');sessionBar.id='wb-session-bar';sessionBar.className='wb-session-bar';sessionBar.hidden=true;
+ const sessionBack=document.createElement('button'),sessionName=document.createElement('strong');sessionBack.type='button';sessionBack.id='wb-session-back';sessionName.id='wb-session-name';
+ sessionBar.append(sessionBack,sessionName);if(!embedded)document.body.append(sessionBar);
+ function sessionLayout(){if(embedded||sessionBar.hidden)return;const top=document.querySelector('.top');document.documentElement.style.setProperty('--wb-session-top',Math.ceil(top.getBoundingClientRect().bottom+8)+'px');}
+ function sessionLabels(){const d=fleet.find(x=>x.id===active);sessionBar.hidden=active==='main';sessionBar.setAttribute('aria-label',t('当前设备工作区','Current hand workspace'));sessionBack.textContent=t('‹ 返回多手总览','‹ All hands');sessionName.textContent=d?.label||active;sessionLayout();}
+ function notifyFrame(frame,visible){frame.contentWindow?.postMessage({type:'wb-visibility',visible},new URL(frame.src).origin);}
+ function switchTo(id){
+  if(id!=='main'&&!fleet.some(x=>x.id===id))return;
+  active=id;document.body.classList.toggle('wb-child-active',id!=='main');
+  for(const [key,frame] of frames){frame.hidden=key!==id;notifyFrame(frame,key===id);}
   if(id!=='main'&&!frames.has(id)){
    const d=fleet.find(x=>x.id===id);if(!d)return;
    const frame=document.createElement('iframe');frame.id='wb-device-frame-'+id;frame.className='wb-device-frame';frame.title=d.label;
    frame.src=`http://127.0.0.1:${d.port}/?embedded=1&theme=${encodeURIComponent(themeChoice)}#library`;
+   frame.addEventListener('load',()=>notifyFrame(frame,active===id));
    document.body.append(frame);frames.set(id,frame);
   }
-  selector.value=id;
+  selector.value=id;sessionLabels();window.dispatchEvent(new Event('workbench-session-visibility'));
  }
+ sessionBack.onclick=()=>{switchTo('main');location.hash='#devices';ws.showPage();document.querySelector('.wsx-ws')?.focus();};
+ window.addEventListener('resize',sessionLayout);if(!embedded)new ResizeObserver(sessionLayout).observe(document.querySelector('.top'));
  selector.onchange=()=>switchTo(selector.value);
  window.HandSessions={show:switchTo,refresh:()=>fleetRefresh()};
  let fleetBusy=false,fleetViewKey='',fleetChoicesKey='';
@@ -141,6 +152,7 @@
    selector.value=fleet.some(x=>x.id===active)?active:'main';
   }
   if(active!=='main'&&!fleet.some(x=>x.id===active))switchTo('main');
+  sessionLabels();
   const viewKey=JSON.stringify([fleet.map(({id,label,profile,connection,hardware,glove,hand_serial,glove_serial,following,stale})=>({id,label,profile,connection,hardware,glove,hand_serial,glove_serial,following,stale})),L.lang]);
   if(viewKey===fleetViewKey)return;fleetViewKey=viewKey;
   $('wb-device-list')?.replaceChildren(...fleet.map(x=>{
@@ -172,6 +184,7 @@
   loadPreset.textContent=t('填入预设','Load preset');savePreset.textContent=t('保存为预设','Save preset');deletePreset.textContent=t('删除预设','Delete preset');applyMapping.textContent=t('应用到手套预览','Apply to glove preview');
   fleetStop.textContent=t('停止所有工作区动作','Stop motion in all workspaces');
   selector.setAttribute('aria-label',t('切换设备工作区','Switch device workspace'));
+  sessionLabels();
   $('wb-appearance-title').textContent=t('外观','Appearance');
   $('wb-appearance-note').textContent=t('使用系统原生磨砂；不采集桌面、不绘制外部折射。','Native frosted material. No desktop capture or external refraction.');
   $('wb-theme-label').textContent=t('显示主题','Theme');

@@ -1,6 +1,6 @@
 # 灵巧手工作台 / Hand Workbench
 
-[English](#english) · [更新记录 / Changelog](docs/CHANGELOG.md)
+[English](#english) · [Linux 安装 / Installation](docs/LINUX.md) · [Ubuntu CLI 操作指南](docs/UBUNTU_CLI_QUICKSTART_ZH.md) · [更新记录 / Changelog](docs/CHANGELOG.md)
 
 **非官方个人展示工具，不是舞肌科技发布、维护或背书的产品。** 官方名称、示例和标识仅说明兼容对象和来源。
 
@@ -8,15 +8,31 @@
 
 ## Windows 下载和启动
 
-在 [Releases](../../releases) 选择实际已上传的安装包。Windows 0.2.18 是同一软件的原位更新，当前用户安装，无需另装 Python。Windows 安装器检查微软 WebView2 运行时，缺少时联网安装。包暂未进行发布者代码签名，附有 SHA-256 校验文件。官方依赖与导出使用方式见下文，发布验证记录见对应 Release。
+在 [Releases](../../releases) 选择实际已上传的安装包。0.2.19 是本次更新目标，沿用同一 Windows 软件、安装身份和用户数据目录；是否已构建、安装或发布，以 [0.2.19 验证记录](docs/VALIDATION_0.2.19.md) 和实际 Release 为准。Windows 当前用户安装无需另装 Python；安装器检查微软 WebView2 运行时，缺少时联网安装。包暂未进行发布者代码签名，附有 SHA-256 校验文件。
 
-## 0.2.18 完整 Ubuntu Wuji Studio
+## 0.2.19 内置官方 CLI / SDK 与状态恢复
+
+当前采用工作台内置的官方 **CLI / SDK 2026.10.12**，配套控制环境为 **1.1.0**。打开「设置 → 连接与设备 → 官方 CLI / SDK」，安装或更新内置控制组件，再点击「检查 CLI / SDK」。卡片分别显示配套目标版本、环境安装记录，以及本次实际检查得到的版本和时间；实际检查会导入 SDK 并运行 CLI 的版本命令，不扫描、连接设备或使能电机。安装记录不能代替实际检查，检查通过也不代表设备连接、标定或实机动作已经通过。
+
+用户已取消 Studio 嵌入方向。0.2.19 移除 Studio 页面及安装、打开入口，不再提供完整原版显示或其 S1–S3 改造作为本版新功能。官方 Studio 最终版 2026.9.22 已停止维护。后端只保留旧组件状态查询、核对和关闭的迁移兼容；升级不主动删除原 Studio HOME、用户档案或标定数据，不自动将其转换为 CLI 档案。详见 [Studio 历史与迁移边界](docs/OFFICIAL_STUDIO.md)。
+
+多手独立设置增加始终可见的返回总览入口和当前设备名称；返回保留子会话，不代替操作员停止动作。校准操作错误和状态刷新错误分别显示，刷新恢复只清除对应刷新错误。隐藏主、子画面停止图像请求与解码，重新可见恢复显示；后台渲染按画面需求工作，设备反馈接收与控制心跳保持独立。桌面菜单和退出确认补充可访问名称。
+
+标定统一使用官方 CLI，移除额外的六姿势图卡和姿势选择器。工作台只展示当前官方步骤、真实进度、结果与错误，原始事件默认折叠；不重复维护 CLI 已提供的采集与求解功能。
+
+手套所选 SDK 用户保持到该连接结束，再在断开后恢复先前用户。Hand 1 实测显示使用其 0–19 编号；Hand 2 保留各指四关节的设备编号，代际未知或反馈不完整时不把目标姿态当作实测。断线后的停用未知按设备和会话保留，新的只读连接或另一只设备的确认不能把旧记录清为已停用。
+
+本机升级缓存支持在中断或校验失败后重新暂存完整安装器；构建会核对缓存可执行文件的版本与产品身份，避免把旧程序包装为新版本。提供 [Windows 隔离软件检查 CI 模板](ci/windows-checks.yml.example)，覆盖语法、模拟升级失败及选定回归。当前上传凭据没有修改 GitHub 工作流的权限，模板尚未启用为 Actions；本机实测结果与远端 CI 分开记录。源码、模拟界面、安装版与实机结果分别记录，不将其中一项代替其余验收。
+
+## 历史：0.2.18 完整 Ubuntu Wuji Studio
+
+以下 0.2.18 及更早段落保留当时实现记录，当前功能以 0.2.19 说明为准。0.2.18 的嵌入入口已取消，以下内容不是 0.2.19 的安装或使用指引。
 
 Windows 侧栏新增「Wuji Studio」，在工作台内部显示完整、未修改的官方 Ubuntu 应用，保留官方连接、Visualization、标定和隐私提示。首次使用从官方 GitHub 下载经 SHA-256 核对的程序，在已有内置 Linux 中安装专属图形组件，不另建大型虚拟机，不采集 Windows 桌面。
 
 「组件设置」独立检查、安装和切换 Studio 版本，保留旧程序；用户档案与程序分开保存。查询失败明确显示缓存或随包已核验版本，不声称已确认最新。回退只切换程序，不自动降级档案。官方最终版为 **2026.9.22，已经停止维护**，版本管理不会凭空提供新的官方版本。
 
-Studio 与工作台单手、多手设备会话互斥。「离线查看」隔离原程序的设备网络，正常打开沿用已有设备网络。工作台不能读取原版内部电机状态，关闭前请在 Studio 内停止并断开。已有 CLI 标定和映射不自动改写成 Studio 档案，需使用官方导入/导出。详见 [嵌入与更新说明](docs/OFFICIAL_STUDIO.md)。本轮不新增 Ubuntu/Mac 的嵌套 Studio，不把离线显示测试当作真实标定或动作验收。
+当时 Studio 与工作台单手、多手设备会话互斥，「离线查看」隔离原程序的设备网络。工作台不能读取原版内部电机状态，原程序退出不代表已确认电机停用。已有 CLI 标定和映射不自动改写成 Studio 档案。历史边界见 [Studio 说明](docs/OFFICIAL_STUDIO.md)；离线显示测试不等于真实标定或动作验收。
 
 ## 0.2.17 官方 SDK/CLI 更新与故障导出
 
@@ -190,7 +206,13 @@ Windows 的[内置轻量控制环境](docs/BUILT_IN_CONTROLLER.md)随安装包�
 
 Python 3.12：`python -m pip install -r requirements.txt`，然后 `python src/desktop.py`。
 
+Ubuntu 24.04 x86_64 从 Git 克隆后，可在项目 `.venv` 安装官方 CLI / SDK 2026.10.12，并选择「本机 Ubuntu」，无需 SSH、虚拟机或 Studio。完整的固定版本下载、校验、配置路径，以及官方 `viz --sn SN --no-zero` 和 `calib hand-model --sn SN` 示例见 [Linux 本机安装](docs/LINUX.md)。当前工作台未嵌入完整 CLI Viewer；本轮尚未实测新的 Linux 安装。
+
+只想先在另一台 Ubuntu 装好官方工具、找手套、做手型标定和备份，可逐段照着 [Ubuntu CLI / SDK 操作指南](docs/UBUNTU_CLI_QUICKSTART_ZH.md) 执行；工作台的本机接入继续使用这些配套工具。
+
 离线检查：`python src/desktop.py --self-check --render-check`。测试：`python -m unittest discover -s src`。
+
+0.2.19 的 `--self-check` 输出包含产品身份与版本；构建器读取独立自检文件，二者与当前版本配置不符就拒绝打包。`.github/workflows/windows-checks.yml` 是 Windows 软件检查子集，使用独立临时数据、模拟安装器和模拟进程，不启动 SDK、设备、原版 Studio 或 GUI；它不代表全套测试、安装版或实机验收通过。
 
 Windows 构建需要先按 `src/runtime_manifest.json` 准备对应压缩镜像到 `runtime_payload/`（发布包附带镜像），不把运行环境提交到 Git。然后安装 `requirements-build.txt` 后运行 `python build.py`，再使用 `python build_installer.py --iscc PATH_TO_ISCC --webview-bootstrap PATH_TO_SIGNED_MICROSOFT_BOOTSTRAP --zh-language PATH_TO_CHINESE_ISL`。安装器使用 Inno Setup 6.4.3 和对应版本中文翻译。
 
@@ -200,7 +222,13 @@ Ubuntu 已有历史 0.1.3 包。macOS 的原生构建在 GitHub Mac runner 上�
 
 ## English
 
-Windows 0.2.18 embeds the complete, unmodified Ubuntu Wuji Studio in a dedicated workbench page. The optional program is downloaded from the official release with SHA-256 verification; graphics run in the existing managed Linux environment without Windows desktop capture. Component settings manage versions separately, retaining previous programs and persistent profiles. Offline viewing isolates device networks; all Workbench device workspaces relinquish control while Studio runs. Closing its GUI does not confirm motor disable. The final vendor release is 2026.9.22 and is no longer maintained. See the [component guide](docs/OFFICIAL_STUDIO.md); actual device workflows require separate acceptance.
+For a source installation on Ubuntu 24.04 x86_64 with Python 3.12 and the pinned official CLI / SDK, see [Local Linux installation](docs/LINUX.md). Linux can run locally without SSH or a VM. The guide also covers official visualization and calibration commands; the complete CLI Viewer is not embedded in the current workbench, and a fresh Linux installation has not been tested in this round.
+
+The 0.2.19 update uses the bundled official CLI and SDK 2026.10.12 with controller image 1.1.0. Open Settings → Connections → Official CLI / SDK to install or select the components and run the software check. Actual CLI version and SDK import results are separate from the installation record and bundled target. These checks do not connect devices or enable motors. Build, installation and publication status must be confirmed in the [0.2.19 validation record](docs/VALIDATION_0.2.19.md).
+
+Studio embedding has been cancelled. Its final vendor release, 2026.9.22, is no longer maintained. The 0.2.19 interface provides no Studio installation or open action; only legacy backend query/probe/close compatibility remains. Existing Studio HOME, calibration and profile files are retained without automatic conversion. The 0.2.18 section above is historical; its embedded UI and the cancelled S1–S3 work are not new 0.2.19 features. See the [migration notes](docs/OFFICIAL_STUDIO.md).
+
+This update adds a persistent return path from a child hand workspace, separates calibration operation and refresh errors, and suspends hidden-view image requests/decoding while retaining feedback and control heartbeats. It also corrects generation-specific feedback numbering, holds the selected SDK user for the glove connection lifetime, preserves unconfirmed stop records per device/session, repairs interrupted installer caches, and verifies cached build identity. The new Windows CI definition runs isolated software checks; no installed-build or hardware success is implied.
 
 Version 0.2.9 adds logical multi-hand workspaces, explicit discovery-to-workspace assignment, shared same-action playback, eight authored left/right pair routines and actual per-session MuJoCo views. Real group playback currently requires native Hand 2 devices using the same Linux clock domain. Hardware acceptance and mechanical synchronization accuracy remain unverified. See [multi-hand guide](docs/MULTI_HAND_GROUPS.md) and [validation record](docs/VALIDATION_0.2.9.md).
 
@@ -208,7 +236,7 @@ Version 0.2.9 adds logical multi-hand workspaces, explicit discovery-to-workspac
 
 Features include Chinese/English, minimalist glass chrome, four native hand profiles, text sequences, numbers, clock poses, authored finger dances, configurable parameters, feedback, recording, diagnostics and glove integration. Windows now bundles an optional minimal WSL 2 controller (~128 MB compressed), removing VMware and SSH setup from everyday use. Windows component setup may require administrator approval and a reboot. An external Linux controller remains available; native Windows SDK control and automatic Hand 1 USB passthrough are not claimed. New UI tests and synthetic mapping checks are not real hardware acceptance. The optional left-hand model is for offline simulation feedback only and cannot enable real-device grasping.
 
-Use the [code-only maintenance interface](docs/DESKTOP_API.md) for inspecting the app, capturing its own WebView and applying a verified local installer. The maintenance interface never controls the computer's mouse/keyboard; its screenshots redact opt-in external refraction tiles. User data is preserved across upgrades. Packages are unsigned; check the trusted release and published SHA-256. Windows is the current release target; macOS validation remains pending.
+Use the [code-only maintenance interface](docs/DESKTOP_API.md) for inspecting the app, capturing its own WebView and applying a verified local installer. It never controls the computer's mouse/keyboard or captures other applications or the desktop. User data is preserved across upgrades. Packages are unsigned; check the trusted release and published SHA-256. Windows is the current release target; macOS validation remains pending.
 
 Version 0.1.8 adds an always-visible connection control, discovered-device selection, refreshed translucent navigation and compact action layout. It pairs with controller image 1.0.1; upgrading the owned 1.0.0 environment preserves user parameters and records. No motor gains or trajectory settings are changed by this UI update.
 

@@ -1,5 +1,6 @@
 """Guardrails around official named-user hand-model calibration."""
 import io
+import json
 import time
 import unittest
 from unittest.mock import patch
@@ -95,6 +96,30 @@ class CalibrationTest(unittest.TestCase):
         with patch.object(calibration_cli,'load_config',return_value=self.config),patch.object(calibration_cli,'cli_json',side_effect=self.cli),patch.object(calibration_cli.subprocess,'Popen',return_value=p):
             service=calibration_cli.CalibrationCLI();service.start('left','WG123');service.thread.join(2)
             self.assertEqual(service.run['status'],'unconfirmed')
+            self.assertIsNone(service.run['result'])
+
+    def test_later_official_error_keeps_failure_even_with_zero_exit(self):
+        p=FakeProcess([])
+        events=[dict(schema_version=2,calibration='hand_model',event='result',result={'path':'synthetic.urdf'}),
+                dict(schema_version=2,calibration='hand_model',event='error',error='Official model publication failed')]
+        p.stdout=io.StringIO(''.join(json.dumps(event)+'\n' for event in events))
+        with patch.object(calibration_cli,'load_config',return_value=self.config),patch.object(calibration_cli,'cli_json',side_effect=self.cli),patch.object(calibration_cli.subprocess,'Popen',return_value=p):
+            service=calibration_cli.CalibrationCLI();service.start('left','WG123');service.thread.join(2)
+            self.assertFalse(service.thread.is_alive())
+            self.assertEqual(service.run['exit_code'],0)
+            self.assertEqual(service.run['status'],'error')
+            self.assertEqual(service.run['error'],'Official model publication failed')
+            self.assertIsNotNone(service.run['result'])
+            self.assertEqual(service.run['event']['event'],'error')
+
+    def test_official_cancel_with_zero_exit_is_cancelled_not_completed(self):
+        p=FakeProcess([])
+        p.stdout=io.StringIO(json.dumps(dict(schema_version=2,calibration='hand_model',event='cancelled'))+'\n')
+        with patch.object(calibration_cli,'load_config',return_value=self.config),patch.object(calibration_cli,'cli_json',side_effect=self.cli),patch.object(calibration_cli.subprocess,'Popen',return_value=p):
+            service=calibration_cli.CalibrationCLI();service.start('left','WG123');service.thread.join(2)
+            self.assertFalse(service.thread.is_alive())
+            self.assertEqual(service.run['exit_code'],0)
+            self.assertEqual(service.run['status'],'cancelled')
             self.assertIsNone(service.run['result'])
 
     def test_glove_side_mismatch_does_not_spawn(self):

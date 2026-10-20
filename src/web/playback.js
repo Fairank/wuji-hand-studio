@@ -55,6 +55,28 @@
   const probeFold=document.createElement('details');probeFold.className='panel folded-panel';probeFold.innerHTML='<summary>单关节检查 · 3°往返</summary>';motionPanel.after(probeFold);probeFold.append(probe);
   const calibratedFold=document.createElement('details');calibratedFold.innerHTML='<summary>已验收动作通道（尚未开放）</summary>';hardware.before(calibratedFold);calibratedFold.append(hardware);
   const globalStop=document.createElement('button');globalStop.id='global-motion-stop';globalStop.className='stop-motion';globalStop.textContent='停止实机';globalStop.disabled=true;document.querySelector('.top-actions').prepend(globalStop);
+  function pendingStops(){
+    const rows=Array.isArray(state?.unconfirmed_devices)?state.unconfirmed_devices.filter(row=>row&&typeof row==='object').slice():[];
+    const latest=new Map();
+    for(const row of rows){
+      if(!Number.isSafeInteger(row.session)||row.session<0)continue;
+      const key=JSON.stringify([row.source,row.device_id]);latest.set(key,Math.max(latest.get(key)??-1,row.session));
+    }
+    const stops=rows.filter(row=>{
+      if(!Number.isSafeInteger(row.session)||row.session<0)return true;
+      const serial=row.source==='hand'?state?.device_id:row.source==='glove'?state?.glove?.feedback?.device_id:null;
+      const active=row.source==='hand'?state?.hardware?.active:row.source==='glove'?state?.glove?.hardware?.active:null;
+      return !(serial&&row.device_id===serial&&active===true&&row.session===latest.get(JSON.stringify([row.source,row.device_id])));
+    });
+    if(state?.glove?.hardware?.active===null&&!stops.some(row=>row.source==='glove'&&row.device_id===state.glove.feedback?.device_id))stops.push({source:'glove',device_id:state.glove.feedback?.device_id});
+    return stops;
+  }
+  function currentStopPending(){return state?.connection==='connected'&&!!state.device_id&&pendingStops().some(row=>row.device_id===state.device_id);}
+  function pendingStopNote(){
+    const serials=[...new Set(pendingStops().map(row=>row.device_id||tr('未识别设备','Unidentified device')))];
+    if(!serials.length)return '';
+    return tr('停用待确认：','Disable unconfirmed: ')+serials.join(' · ')+(currentStopPending()?tr('。点击“停止实机”，核对当前设备 '+state.device_id+' 的停用结果。','. Click Stop hand to verify disable for the current device '+state.device_id+'.'):tr('。重连对应设备后点击“停止实机”。','. Reconnect the matching device, then click Stop hand.'));
+  }
   function renderMotionPanel(h,connected){
     const timing=h?.command_timing;
     const timingValue=(v,d=1)=>Number.isFinite(v)?v.toFixed(d):'—';
@@ -78,10 +100,11 @@
     const elapsed=Number.isFinite(h?.elapsed_s)?h.elapsed_s:0, duration=Number.isFinite(h?.planned_duration_s)?h.planned_duration_s:0;
     const fraction=duration>0?Math.min(100,elapsed/duration*100):0;
     get('trial-progress').value=fraction;
-    const phase={waiting_ready:'等待稳定（未启用）',enabling:'准备启用',approach:'过渡到起点',playing:'播放',returning:'检查回位',stopped:'已停止'}[h?.phase]||'尚未开始';
-    get('trial-progress-text').textContent=duration>0?`${connected?'':'上次记录 · '}${phase} · ${elapsed.toFixed(1)} / ${duration.toFixed(1)} 秒 · ${fraction.toFixed(0)}%`:'尚未开始';
+    const stopNote=pendingStopNote(),unconfirmed=!!stopNote&&h?.active!==true;
+    const phase=unconfirmed?tr('停用待确认','Disable unconfirmed'):{waiting_ready:'等待稳定（未启用）',enabling:'准备启用',approach:'过渡到起点',playing:'播放',returning:'检查回位',stopped:'已停止'}[h?.phase]||'尚未开始';
+    get('trial-progress-text').textContent=duration>0?`${connected?'':'上次记录 · '}${phase} · ${elapsed.toFixed(1)} / ${duration.toFixed(1)} 秒 · ${fraction.toFixed(0)}%`:unconfirmed?phase:'尚未开始';
     let message=!state?'本机服务未连接':!connected?'设备反馈未连接，先连接设备':h?.active===null?'电机停用待确认，请先检查停止状态':state.recording?.active?'先停止数据采集':busy?(h?.reason||'准备动作'):!h?.trial_ready?(h?.probe_reason||'等待完整反馈与诊断'):!get('trial-clear').checked?'确认底座固定、周围清空后可启动':'可以开始所选动作';
-    get('motion-blocker').textContent=message;
+    get('motion-blocker').textContent=unconfirmed?stopNote:message;
     const warnings=Array.isArray(h?.warnings)?h.warnings:[];
     const groups=new Map();for(const w of warnings){const key=`${w.code}:${w.name}`;const group=groups.get(key)||{...w,nodes:[]};group.nodes.push(w.nid);groups.set(key,group);}
     get('motion-warnings').textContent=!connected?'当前无新鲜设备诊断；旧告警不作为放行依据。':!warnings.length?'本次诊断未报告设备告警。':Array.from(groups.values()).map(w=>{
@@ -110,7 +133,7 @@
     get('hardware-start').disabled=!connected||!h?.ready||!supported||h.active||ownedLease||state?.recording?.active||hardwarePending;
     get('hardware-pause').disabled=!h?.active||!ownedLease||hardwarePending;
     get('hardware-pause').textContent=h?.paused?'继续实机':'暂停实机';
-    get('hardware-stop').disabled=!state||(h?.active===false&&!ownedLease&&!hardwarePending&&!state?.glove?.busy);
+    get('hardware-stop').disabled=!state||(h?.active===false&&!ownedLease&&!hardwarePending&&!state?.glove?.busy&&!currentStopPending());
     get('probe-start').disabled=!connected||!h?.probe_ready||h?.active!==false||ownedLease||state?.recording?.active||hardwarePending||!get('probe-clear').checked;
     get('probe-status').textContent=!connected?'实机未连接':h?.active?`实机执行中 · ${h.reason}`:h?.probe_reason||'等待完整反馈与诊断';
     const r=h?.probe_result;
@@ -130,8 +153,8 @@
         item.textContent=`${date} · ${name} · ${r.amplitude*100}% · ${r.accepted?'通过':'未通过'} · 完成 ${r.finished_cycles}/${r.requested_cycles} 轮 · ${returnText(r)} · ${stopExplanation(r.reason)}`;
         if(stopExplanation(r.reason)!==r.reason){const raw=document.createElement('details');const title=document.createElement('summary');title.textContent='原始停止文本（保留）';const text=document.createElement('p');text.textContent=r.reason;raw.append(title,text);item.append(raw);}
         get('motion-history').append(item);}}
-    get('hardware-status').textContent=!connected?'实机未连接，不能同步执行':h?.active?`${h.paused?'暂停':'执行中'} · ${h.trial_phase||h.action} · ${h.elapsed_s.toFixed(1)}秒 · ${h.reason}`:!h?.ready?(h?.reason||'等待实机动作校准'):!supported?'所选动作尚未完成实机核验':h.reason||'已就绪';
-    get('runtime-mode').textContent=h?.active?'当前模式：实机展示':h?.active===null?'当前模式：实机状态待确认':'当前模式：只读';
+    get('hardware-status').textContent=pendingStops().length&&h?.active!==true?pendingStopNote():!connected?'实机未连接，不能同步执行':h?.active?`${h.paused?'暂停':'执行中'} · ${h.trial_phase||h.action} · ${h.elapsed_s.toFixed(1)}秒 · ${h.reason}`:!h?.ready?(h?.reason||'等待实机动作校准'):!supported?'所选动作尚未完成实机核验':h.reason||'已就绪';
+    get('runtime-mode').textContent=h?.active?'当前模式：实机展示':h?.active===null||pendingStops().length?'当前模式：实机状态待确认':'当前模式：只读';
     if(h?.active)get('play-start').disabled=true;
     renderMotionPanel(h,connected);
   }

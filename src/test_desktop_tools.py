@@ -31,6 +31,11 @@ class DesktopToolsTests(unittest.TestCase):
         with self.assertRaises(ValueError):dispatch(host,dict(operation='connection_panel',state='execute'))
         host.server.controller.action.assert_not_called()
 
+    def test_official_tools_page_only_navigates(self):
+        host=Mock();dispatch(host,dict(operation='page',page='control-tools'))
+        host.navigate.assert_called_once_with('control-tools');host.server.controller.action.assert_not_called()
+        with self.assertRaises(ValueError):dispatch(host,dict(operation='page',page='official-studio'))
+
     def test_playlist_picker_only_opens_editor(self):
         host=Mock()
         dispatch(host,dict(operation='picker',kind='playlist'))

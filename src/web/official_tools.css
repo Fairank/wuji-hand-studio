@@ -1,0 +1,39 @@
+.official-tools{min-width:0;scroll-margin-top:18px}
+.official-tools .ot-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:18px;margin-bottom:14px}
+.official-tools .ot-heading h3{margin:0 0 5px}
+.official-tools .ot-heading p{margin:0;font-size:12px}
+.official-tools .ot-badge{border:1px solid var(--wb-line);border-radius:999px;padding:6px 10px;font-size:12px;line-height:1.4;white-space:nowrap;color:var(--wb-sub);background:var(--wb-group,#f5f5f7)}
+.official-tools[data-status=ready] .ot-badge{color:#26734d;background:rgba(39,128,82,.08);border-color:rgba(39,128,82,.18)}
+.official-tools[data-status=failed] .ot-badge{color:#a43d32;background:rgba(164,61,50,.06);border-color:rgba(164,61,50,.18)}
+.official-tools .ot-table{border:1px solid var(--wb-line);border-radius:12px;overflow:hidden;margin:18px 0 0}
+.official-tools .ot-table-head,.official-tools .ot-component{display:grid;grid-template-columns:minmax(66px,.7fr) minmax(120px,1fr) minmax(120px,1fr);align-items:center;gap:14px;padding:12px 16px;font-size:13px}
+.official-tools .ot-table-head{background:var(--wb-group,#f5f5f7);font-size:12px;color:var(--wb-sub)}
+.official-tools .ot-component{border-top:1px solid var(--wb-line);font-variant-numeric:tabular-nums}
+.official-tools .ot-component strong{font-weight:600}
+.official-tools .ot-runtime{padding:16px 0 0;margin-top:2px}
+.official-tools .ot-runtime>div{display:flex;align-items:baseline;justify-content:space-between;gap:16px;font-size:13px;margin-bottom:7px}
+.official-tools .ot-runtime strong{font-weight:500}
+.official-tools .ot-runtime span{color:var(--wb-sub);text-align:right}
+.official-tools .ot-runtime p,.official-tools .ot-meta{font-size:12px;line-height:1.6}
+.official-tools .ot-meta{margin-top:14px;font-variant-numeric:tabular-nums}
+.official-tools #ot-status{margin-bottom:0;font-size:12px;line-height:1.6}
+.official-tools #ot-error{color:#a43d32;white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;margin:10px 0 0}
+.official-tools #ot-error:empty{display:none}
+.official-tools .ot-actions{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin-top:18px}
+.official-tools .ot-actions button{min-height:36px;padding:8px 14px;font-size:13px}
+.official-tools #ot-system{margin-top:20px;border-top:1px solid var(--wb-line);padding-top:14px;font-size:12px}
+.official-tools #ot-system summary{cursor:pointer;color:var(--wb-sub)}
+.official-tools #ot-system p{font-size:12px;line-height:1.6;margin:12px 0}
+.official-tools #ot-system button{font-size:12px;min-height:32px;padding:6px 11px}
+.installation>#bridge-official-tools{margin:0 0 16px}
+html[data-theme=dark] .official-tools[data-status=ready] .ot-badge{color:#9cdbb8}
+html[data-theme=dark] .official-tools[data-status=failed] .ot-badge,html[data-theme=dark] .official-tools #ot-error{color:#ffb0a6}
+@media(max-width:700px){
+ .official-tools .ot-heading{gap:10px}
+ .official-tools .ot-badge{max-width:150px;white-space:normal;text-align:center}
+ .official-tools .ot-table-head,.official-tools .ot-component{grid-template-columns:72px minmax(0,1fr) minmax(0,1fr);gap:10px;padding:10px 12px;font-size:12px;overflow-wrap:anywhere}
+ .official-tools .ot-table-head{font-size:11px}
+ .official-tools .ot-runtime>div{align-items:flex-start;font-size:12px}
+ .official-tools .ot-actions{align-items:stretch}
+ .official-tools .ot-actions button{flex:1 1 190px}
+}

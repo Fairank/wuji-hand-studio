@@ -18,13 +18,6 @@
  // Documentation is secondary, but is still a recognizable control, not a loose URL.
  for(const id of ['hub-calib-doc','rt-doc','glove-config','glove-parameters-link','glove-sdk-doc','glove-calib-doc','performance-export'])$(id)?.classList.add('ui-link-button');
  document.querySelector('.cr-joint-aside a')?.classList.add('ui-link-button');
- const aside=document.querySelector('.cr-calibration-aside');
- if(aside){
-  const box=note(aside,'官方采集与求解','Official capture & solver','按当前用户及左右手保存标定，重启手套后仍保留。','Calibration is saved per user and hand side and survives glove restarts.');
-  const details=document.createElement('details');box.append(details);
-  details.append(copy(document.createElement('summary'),'档案与触觉有什么区别？','Profiles and tactile calibration'));
-  details.append(copy(document.createElement('p'),'手型结果保存在运行 SDK 的控制环境中。换电脑或控制环境，需要导入原档案。触觉标定另外按用户与手套编号保存；当前页执行六姿势手型标定。','The hand model is stored in the SDK controller environment. Import the profile when changing computers or runtimes. Tactile calibration is separate and belongs to a user and glove serial. This page runs six-pose hand-model calibration.'));
- }
  const editor=document.querySelector('.cr-mapping-editor');
  if(editor)note(editor,'调整机械手的目标动作','Adjust the robot hand target','比例、偏移和平滑作用于映射输出；不会改写手套的原始测量或手型标定。保存后需要应用，实机跟随单独开启。','Gain, offset and smoothing modify mapped targets, not raw glove measurements or hand calibration. Apply after saving; real-hand follow is enabled separately.');
  const official=$('rt-official');

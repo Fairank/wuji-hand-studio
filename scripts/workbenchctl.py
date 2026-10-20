@@ -13,6 +13,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from urllib.request import Request, urlopen
 from urllib.error import URLError, HTTPError
@@ -62,9 +63,19 @@ def upgrade(client, source, digest, apply):
     folder.mkdir(exist_ok=True)
     destination=folder/source.name
     if destination.is_symlink() or destination.is_junction():raise ValueError('Invalid installer destination')
-    if not destination.exists():
-        # Exclusive creation avoids overwriting an earlier staged installer.
-        with source.open('rb') as src,destination.open('xb') as dst:shutil.copyfileobj(src,dst)
+    if not destination.exists() or checksum(destination)!=digest:
+        # An interrupted copy is a repairable cache, never a trusted release.
+        # Publish only complete, verified bytes; a failed copy leaves the old
+        # file intact and no final-path partial installer.
+        fd,temporary=tempfile.mkstemp(prefix=source.name+'.',suffix='.partial',dir=folder)
+        staged=Path(temporary)
+        try:
+            with os.fdopen(fd,'wb') as dst,source.open('rb') as src:
+                shutil.copyfileobj(src,dst);dst.flush();os.fsync(dst.fileno())
+            if checksum(staged)!=digest:raise ValueError('Installer changed while staging')
+            if destination.is_symlink() or destination.is_junction():raise ValueError('Invalid installer destination')
+            os.replace(staged,destination)
+        finally:staged.unlink(missing_ok=True)
     result=client.call('prepare_update',version=match[1],sha256=digest)
     if not apply:return result
     client.call('close_idle')

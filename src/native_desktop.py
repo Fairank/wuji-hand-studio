@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import socket
 import sys
+import tempfile
 import threading
 from urllib.parse import urlsplit
 from runtime_paths import DATA, RESOURCE, EDITION
@@ -40,6 +41,7 @@ class NativeDesktop:
     def __init__(self):
         self.server=None;self.window=None;self.viewer=None;self.allow_close=False;self.closing=False
         self.language='zh';self.session_lock=threading.Lock();self.origin='';self.bounds={}
+        self.bounds_lock=threading.Lock()
         self.title='灵巧手工作台 · Hand Workbench'
         self.data_dir=DATA;self.edition=EDITION;self.inspect_lock=threading.Lock()
         self.material=dict(mode='opaque',external_backdrop=False,refraction=False,desktop_capture=False)
@@ -121,7 +123,8 @@ class NativeDesktop:
         return dict(ok=True,desktop=self.info(),ui=self.window.evaluate_js((RESOURCE/'web/desktop_inspect.js').read_text(encoding='utf-8')))
 
     def navigate(self,page):
-        self.window.evaluate_js('location.hash='+json.dumps('#'+page)+';window.WujiWorkspace.showPage()')
+        if page=='control-tools':self.window.evaluate_js('window.WujiOfficialTools.open()')
+        else:self.window.evaluate_js('location.hash='+json.dumps('#'+page)+';window.WujiWorkspace.showPage()')
         return dict(ok=True,page=page)
 
     def appearance(self,key,value):
@@ -263,10 +266,24 @@ class NativeDesktop:
         window.native.Invoke(Action(bind))
 
     def save_bounds(self):
-        try:
-            state=dict(width=max(960,min(2560,self.window.width)),height=max(680,min(1600,self.window.height)),port=self.server.server_port)
-            (DATA/'native-window.json').write_text(json.dumps(state),encoding='utf-8')
-        except Exception:logging.exception('Could not persist window size')
+        # Resize callbacks run on separate threads. Read the current pair while
+        # holding the write lock so a delayed callback cannot save an old pair.
+        with self.bounds_lock:
+            pending=None
+            try:
+                width,height=self.window.gui.get_size(self.window.uid)
+                state=dict(width=max(960,min(2560,width)),height=max(680,min(1600,height)),port=self.server.server_port)
+                path=DATA/'native-window.json'
+                with tempfile.NamedTemporaryFile(mode='w',encoding='utf-8',dir=path.parent,prefix=path.name+'.',suffix='.tmp',delete=False) as stream:
+                    pending=Path(stream.name)
+                    json.dump(state,stream)
+                    stream.flush();os.fsync(stream.fileno())
+                os.replace(pending,path)
+            except Exception:logging.exception('Could not persist window size')
+            finally:
+                if pending is not None:
+                    try:pending.unlink(missing_ok=True)
+                    except OSError:logging.exception('Could not remove temporary window size')
 
     def run(self):
         import webview
