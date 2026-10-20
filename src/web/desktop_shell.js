@@ -31,6 +31,7 @@
   $('desktop-model').textContent=t('导入私有模型包…','Import private model pack…');
   $('desktop-about').textContent=info?`Hand Workbench ${info.version}\n${t('灵巧手工作台 · 非官方个人工具','Unofficial personal hand workbench')}`:t('界面预览 · 桌面菜单在软件窗口中可用','Interface preview · Desktop commands are available in the app');
   $('desktop-close-title').textContent=t('结束会话并退出？','End session and quit?');$('desktop-close-note').textContent=t('将停止实机动作、保存正在采集的记录并断开设备。','Stops hand motion, saves the current recording and disconnects devices.');
+  if(state?.official_studio?.active)$('desktop-close-note').textContent=t('将关闭官方 Studio。请先在 Studio 内停止动作并断开设备；工作台不能确认它内部的电机状态。','Closes official Studio. Stop motion and disconnect inside Studio first; Workbench cannot confirm its internal motor state.');
   $('desktop-close-cancel').textContent=t('返回工作台','Back to workbench');$('desktop-close-confirm').textContent=t('停止并退出','Stop and quit');
  }
  button.onclick=()=>{labels();if(!menu.open)menu.showModal();};$('desktop-menu-close').onclick=()=>menu.close();

@@ -36,6 +36,8 @@ class DeviceFleet:
                 except (OSError,ValueError):pass
 
     def create(self, label, profile, _ident=None, _port=None):
+        from studio_component import lease_state
+        if lease_state().get('reserved'):raise ValueError('请先关闭官方 Studio 再创建设备工作区 / Close official Studio before adding a workspace')
         from device_profiles import PROFILES
         if not isinstance(label, str) or not 1 <= len(label.strip()) <= 40:
             raise ValueError('设备工作区名称需为1–40字 / Workspace name: 1–40 characters')

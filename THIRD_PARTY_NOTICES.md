@@ -1,5 +1,11 @@
 # Attribution / 来源
 
+## Optional original Ubuntu Studio component (0.2.18)
+
+Wuji Studio is a separately licensed vendor application. Workbench downloads the unmodified `wuji-studio_2026.9.22_amd64.deb` from the official GitHub release on demand, verifies its SHA-256 and extracts it to a dedicated directory. The binary is not redistributed by this repository or installer. Its UI, names and assets remain the vendor's property and are not covered by Workbench's MIT license. The final release is no longer maintained. See [component guide](docs/OFFICIAL_STUDIO.md).
+
+TigerVNC, Openbox, Websockify, noVNC, WebKitGTK, GTK and fonts are separately installed from Ubuntu's sources, retaining copyright files under `/usr/share/doc`. noVNC is MPL-2.0 licensed; its unmodified local client includes `/studio-assets/COPYRIGHT.txt`. TigerVNC/Openbox include GPL-licensed components; applicable notices and corresponding package sources remain available through Ubuntu. These optional graphical packages are not bundled in the Workbench installer.
+
 This is an unofficial personal tool. Original application code is MIT licensed; third-party components retain their own licenses. Trademarks/logos are not licensed by the application's MIT grant and do not imply vendor endorsement.
 
 - Official retargeting YAML templates: [wuji-retargeting](https://github.com/wuji-technology/wuji-retargeting), commit `531f6ed4250b475d2e9231f54e988fc9b1c5b4ea`. Four upstream configurations remain unmodified under `src/official_data/retarget`, with their manifest/checksums and original MIT LICENSE. The Workbench editor exports selected field changes; version 0.2.12 also embeds the optional optimizer described below. PyYAML is MIT licensed; its distribution notice is included in packaged dependency notices.

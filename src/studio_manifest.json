@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "repository": "wuji-technology/wuji-studio",
+  "version": "2026.9.22",
+  "tag": "v2026.9.22",
+  "asset": "wuji-studio_2026.9.22_amd64.deb",
+  "bytes": 44134360,
+  "sha256": "81d8fc95f3e78eddaa61547b1e3f2502dbce8790fd4af56586ee02881569a946",
+  "url": "https://github.com/wuji-technology/wuji-studio/releases/download/v2026.9.22/wuji-studio_2026.9.22_amd64.deb",
+  "upstream_maintenance": "archived",
+  "dependencies": ["tigervnc-standalone-server", "tigervnc-tools", "novnc", "websockify", "openbox", "dbus-x11", "libwebkit2gtk-4.1-0", "libgtk-3-0t64", "libgl1-mesa-dri", "libglx-mesa0", "x11-utils", "xauth", "wmctrl", "fonts-noto-cjk", "fonts-dejavu-core"]
+}

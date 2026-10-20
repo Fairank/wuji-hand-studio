@@ -3,12 +3,20 @@ import time
 
 def needs_confirmation(state):
     return (state.get('connection')!='disconnected' or state.get('glove',{}).get('busy',False)
+            or state.get('official_studio',{}).get('reserved',False) or state.get('official_studio',{}).get('busy',False)
+            or state.get('official_studio',{}).get('active',False)
             or state.get('recording',{}).get('active',False)
             or state.get('calibration',{}).get('running',False)
             or state.get('hardware',{}).get('active') is not False)
 
 def close_sessions(controller, timeout=6., clock=time.monotonic, sleep=time.sleep):
     state=controller.snapshot()
+    studio=state.get('official_studio',{})
+    if studio.get('busy') and not studio.get('active'):
+        return dict(ok=False,error='请等待 Studio 组件操作完成 / Wait for the Studio component operation')
+    if studio.get('active') or studio.get('reserved'):
+        try:controller.studio.stop()
+        except ValueError as error:return dict(ok=False,error=str(error))
     if state.get('parameter_sync',{}).get('busy') or controller.doctor.snapshot().get('running'):
         return dict(ok=False,error='请等待参数同步或诊断结束。 / Wait for parameter sync or diagnostics.')
     if state.get('calibration',{}).get('running'):

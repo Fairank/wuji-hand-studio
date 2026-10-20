@@ -11,6 +11,7 @@
    heading:document.querySelector('.workspace-page:not([hidden]) h2')?.textContent,
    closedLayoutBoxes:[...document.querySelectorAll('details:not([open])>:not(summary),dialog:not([open])')].filter(e=>e.getClientRects().length).map(e=>({id:e.id,tag:e.tagName,bounds:bounds(e)})),
    surfaces:{header:surface('.top'),navigation:surface('.directory'),content:surface('.page-area'),menu:surface('#desktop-menu')},
+   officialStudio:(()=>{const e=document.getElementById('page-official-studio'),f=document.getElementById('os-frame');return e?{visible:!e.hidden,status:document.getElementById('os-state')?.textContent,viewer:e.dataset.viewer,frameLoaded:!!f?.hasAttribute('src'),bounds:bounds(e)}:null})(),
    controls:nodes.map(e=>({id:e.id,tag:e.tagName,label:e.getAttribute('aria-label')||e.getAttribute('title')||(e.tagName==='INPUT'?'':e.textContent.trim().slice(0,100)),disabled:!!e.disabled,bounds:bounds(e)})),
    connection:(()=>{const e=document.getElementById('connection-toggle'),g=document.getElementById('connection-toolbar');if(!e)return null;const c=getComputedStyle(e);return {label:e.textContent,disabled:e.disabled,state:g.dataset.state,background:c.backgroundColor,color:c.color,bounds:bounds(g),panelOpen:!!document.getElementById('connection-popover')?.open};})(),
    errors:window.WujiDesktop?.errors||[]};

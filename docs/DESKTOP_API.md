@@ -4,6 +4,8 @@ Windows 0.1.4 使用独立原生窗口，内嵌 WebView2。检视接口仅处理
 
 本机端口记录在用户数据目录的 `native-window.json`。服务只监听 `127.0.0.1`；预览服务不会伪装成原生窗口。`GET /api/desktop` 返回版本、版本类型、窗口就绪状态和支持的操作。
 
+0.2.18 的 `page official-studio` 仅切换到完整 Studio 页，不打开或连接设备。`inspect` 提供组件状态与画面边界，不输出会话密码。`GET /api/official-studio` 是不含凭据的组件快照；受相同本机 CSRF/Origin 校验的 `/api/action` 仅支持明确的 `official_studio_probe`、`check_updates`、`install`、`select`、`open`、`view`、`close` 后缀操作。`open` 的 `offline:true` 隔离原程序设备网络；默认正常打开沿用原网络，不应拿它进行无设备隔离的软件测试。原程序退出不代表已确认电机停用。详见 [组件说明](OFFICIAL_STUDIO.md)。
+
 ```powershell
 python scripts/workbenchctl.py --port 8792 info
 python scripts/workbenchctl.py --port 8792 inspect

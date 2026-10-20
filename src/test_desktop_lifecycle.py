@@ -30,6 +30,19 @@ class ExitTests(unittest.TestCase):
     def test_parameter_transfer_is_not_cut_off(self):
         s=state();s['parameter_sync']['busy']=True;c=self.controller(s)
         self.assertFalse(close_sessions(c)['ok']);c.action.assert_not_called()
+    def test_studio_installation_is_not_interrupted_by_window_exit(self):
+        s=state();s['official_studio']=dict(busy=True,active=False,reserved=True);c=self.controller(s)
+        self.assertTrue(needs_confirmation(s));self.assertFalse(close_sessions(c)['ok'])
+        c.studio.stop.assert_not_called();c.action.assert_not_called()
+    def test_unconfirmed_studio_exit_keeps_workbench_open(self):
+        s=state();s['official_studio']=dict(active=True,reserved=True);c=self.controller(s)
+        c.studio.stop.side_effect=ValueError('Studio exit not confirmed')
+        self.assertFalse(close_sessions(c)['ok']);c.action.assert_not_called()
+    def test_studio_close_does_not_become_a_motor_disable_claim(self):
+        s=state();s['official_studio']=dict(active=True,reserved=True);c=self.controller(s)
+        c.studio.stop.return_value=dict(component_closed=True,device_disable_confirmed=False)
+        self.assertTrue(close_sessions(c,sleep=lambda _:None)['ok']);c.studio.stop.assert_called_once()
+        self.assertEqual([x.args[0]['name'] for x in c.action.call_args_list],['disconnect'])
     def test_active_calibration_must_release_before_exit(self):
         s=state();s['calibration']={'running':True};c=self.controller(s);c.calibration.run={'running':True}
         self.assertTrue(needs_confirmation(s))

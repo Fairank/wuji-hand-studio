@@ -40,6 +40,7 @@
     group.dataset.state=fresh?'connected':connecting?'connecting':connected||s?.connection==='error'?'error':'disconnected';
     toggle.textContent=busy?text('请稍候','Please wait'):connecting?text('取消','Cancel'):connected?(s.hardware?.active?text('停止并断开','Stop & disconnect'):text('断开','Disconnect')):text('连接','Connect');
     toggle.disabled=busy||!online||!!s?.glove?.busy;
+    if(s?.official_studio?.reserved){subtitle.textContent=text('Studio 管理中','Managed by Studio');toggle.disabled=true;toggle.title=text('请先关闭官方 Studio 再连接工作台','Close official Studio before connecting here');}
     toggle.setAttribute('aria-label',toggle.textContent+' '+text('机械手','hand'));
     heading.textContent=text('设备与连接','Devices & connections');dismiss.setAttribute('aria-label',text('关闭连接面板','Close connection panel'));dismiss.title=dismiss.getAttribute('aria-label');
     routes.setAttribute('aria-label',text('设备操作入口','Device destinations'));

@@ -59,6 +59,8 @@ class Controller:
         self.tuning=TuningStore(self.retarget.folder/'official_tuning')
         from solver_runtime import SolverRuntime
         self.solver_runtime=SolverRuntime()
+        from studio_component import StudioComponent
+        self.studio=StudioComponent()
         from program_runner import ProgramRunner
         self.program=ProgramRunner(self)
         from group_participant import GroupParticipant
@@ -106,6 +108,7 @@ class Controller:
         with self.lock:
             result = copy.deepcopy(self.state)
             result['solver_runtime']=self.solver_runtime.snapshot()
+            result['official_studio']=self.studio.snapshot()
             # The user explicitly requested a live visual preview before full
             # calibration. This observed node-group profile is provisional and
             # display-only; it must never authorize hardware command mapping.
@@ -175,6 +178,8 @@ class Controller:
         self.stdin.flush()
 
     def action(self, command):
+        from studio_component import enforce_session_owner
+        enforce_session_owner(command)
         if isinstance(command,dict) and command.get('name') in {'connect','runtime_select','bridge_config_save','bridge_password_save','bridge_password_forget','parameters_sync','doctor_version','doctor_run','doctor_support','device_profile_select','glove_connect'}:
             from managed_runtime import status as runtime_status
             if runtime_status()['busy']:
@@ -182,13 +187,18 @@ class Controller:
         if isinstance(command,dict) and command.get('name') in {'runtime_install','runtime_select'}:
             from managed_runtime import start_install,select,status
             with self.lock:
+                enforce_session_owner(command)
                 if self.state['connection']!='disconnected' or self.state['hardware'].get('active') is not False or self.glove.busy or self.doctor.snapshot()['running'] or self.parameters.sync_status['busy']:
                     raise ValueError('Disconnect devices before setting up the control environment / 请先断开设备再配置控制环境')
                 if command['name']=='runtime_select':select();return dict(runtime=status())
                 return dict(runtime=start_install())
         # Serialize starts and configuration changes with diagnostics. RLock
         # also covers existing command branches that take the same lock.
-        with self.lock:return self._action(command)
+        with self.lock:
+            # A Studio reservation may have appeared while this request was
+            # waiting for the controller lock. Recheck at the actual handover.
+            enforce_session_owner(command)
+            return self._action(command)
 
     def _action(self, command):
         if not isinstance(command,dict):raise ValueError('Invalid request')
@@ -637,7 +647,10 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header('X-Content-Type-Options', 'nosniff')
         parent=os.environ.get('WUJI_FLEET_PARENT','')
         ancestor=parent if re.fullmatch(r'http://127\.0\.0\.1:[0-9]{4,5}',parent) else "'none'"
-        self.send_header('Content-Security-Policy', "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src 'self'; frame-src http://127.0.0.1:*; frame-ancestors "+ancestor+"; base-uri 'none'; form-action 'self'")
+        studio_view=urlsplit(self.path).path=='/official_studio_viewer.html'
+        connect="'self' ws://127.0.0.1:*" if studio_view else "'self'"
+        if studio_view:ancestor="'self'"
+        self.send_header('Content-Security-Policy', "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src "+connect+"; frame-src http://127.0.0.1:*; frame-ancestors "+ancestor+"; base-uri 'none'; form-action 'self'")
         if filename:
             self.send_header('Content-Disposition', f'attachment; filename="{filename}"')
         self.end_headers()
@@ -650,6 +663,12 @@ class Handler(BaseHTTPRequestHandler):
         if not self.allowed_host():
             return self.reply(403, dict(error='Local host required'))
         url = urlsplit(self.path)
+        if url.path=='/api/official-studio':return self.reply(200,self.server.studio.snapshot())
+        if url.path.startswith('/studio-assets/'):
+            try:path=self.server.studio.asset(url.path.removeprefix('/studio-assets/'))
+            except (ValueError,OSError) as error:return self.reply(404,dict(error=str(error)))
+            mime={'.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.txt':'text/plain; charset=utf-8','.svg':'image/svg+xml','.png':'image/png'}[path.suffix]
+            return self.reply(200,path.read_bytes(),mime)
         if url.path=='/api/workspaces':
             if os.environ.get('WUJI_FLEET_PARENT'):return self.reply(403,dict(error='Use the main window'))
             return self.reply(200,self.server.workspaces.snapshot())
@@ -773,6 +792,9 @@ class Handler(BaseHTTPRequestHandler):
         for name in ('studio.css','floating_panel.css','glass.css','glove.css','desktop_glass.css','desktop_refinement.css','glass_refresh.css','workbench_upgrade.css','connection_hub.css','calibration_guide.css','pose_grid.css','group_panel.css','workspaces.css','group_view.css','workbench_sheet.css','workbench_clarity.css','numeric_grid.css','retarget_tuning.css','joint_inspector.css','connection_refinement.css','control_surfaces.css','spring_motion.css','playlist_editor.css'):
             assets['/'+name]=(name,'text/css; charset=utf-8')
         assets['/viewer']=('viewer.html','text/html; charset=utf-8')
+        for name in ('official_studio.js','official_studio_viewer.js'):assets['/'+name]=(name,'text/javascript; charset=utf-8')
+        for name in ('official_studio.css','official_studio_viewer.css'):assets['/'+name]=(name,'text/css; charset=utf-8')
+        assets['/official_studio_viewer.html']=('official_studio_viewer.html','text/html; charset=utf-8')
         assets['/favicon.ico']=('favicon.ico','image/x-icon')
         assets['/app-icon.png']=('app-icon.png','image/png')
         assets['/wuji-logo.png']=('wuji-logo.png','image/png')
@@ -803,6 +825,9 @@ class Handler(BaseHTTPRequestHandler):
                 result=dispatch(host,payload)
             elif payload.get('name') in ('desktop_open','desktop_viewer') and getattr(self.server,'desktop',None):
                 result=self.server.desktop.open_viewer() if payload['name']=='desktop_viewer' else dict(ok=True,native_opened=True)
+            elif str(payload.get('name','')).startswith('official_studio_'):
+                if os.environ.get('WUJI_FLEET_PARENT'):raise ValueError('请在主工作台打开官方 Studio / Open official Studio in the main workbench')
+                result=self.server.studio.handle(payload)
             elif str(payload.get('name','')).startswith(('workspace_','ensemble_')):
                 if os.environ.get('WUJI_FLEET_PARENT'):raise ValueError('Open workspaces in the main window')
                 result=self.server.workspaces.action(payload)
@@ -841,6 +866,19 @@ class Handler(BaseHTTPRequestHandler):
 class ConsoleHTTPServer(ThreadingHTTPServer):
     allow_reuse_address = False
     allow_reuse_port = False
+
+    @property
+    def studio(self):
+        def all_idle():
+            from studio_component import require_idle
+            require_idle(self.controller.snapshot(),self.controller.doctor.snapshot())
+            if hasattr(self,'_fleet'):
+                with self.fleet.lock:records=list(self.fleet.children.values())
+                for row in records:
+                    try:require_idle(self.fleet.get(row,'/api/state'),self.fleet.get(row,'/api/doctor'))
+                    except OSError:raise ValueError('无法确认其他工作区状态，请先结束其会话 / Another workspace state is unavailable') from None
+        self.controller.studio.idle_check=all_idle
+        return self.controller.studio
 
     @property
     def workspaces(self):

@@ -8,7 +8,15 @@
 
 ## Windows 下载和启动
 
-在 [Releases](../../releases) 选择实际已上传的安装包。Windows 0.2.17 是同一软件的原位更新，当前用户安装，无需另装 Python。Windows 安装器检查微软 WebView2 运行时，缺少时联网安装。包暂未进行发布者代码签名，附有 SHA-256 校验文件。官方依赖与导出使用方式见下文，发布验证记录见对应 Release。
+在 [Releases](../../releases) 选择实际已上传的安装包。Windows 0.2.18 是同一软件的原位更新，当前用户安装，无需另装 Python。Windows 安装器检查微软 WebView2 运行时，缺少时联网安装。包暂未进行发布者代码签名，附有 SHA-256 校验文件。官方依赖与导出使用方式见下文，发布验证记录见对应 Release。
+
+## 0.2.18 完整 Ubuntu Wuji Studio
+
+Windows 侧栏新增「Wuji Studio」，在工作台内部显示完整、未修改的官方 Ubuntu 应用，保留官方连接、Visualization、标定和隐私提示。首次使用从官方 GitHub 下载经 SHA-256 核对的程序，在已有内置 Linux 中安装专属图形组件，不另建大型虚拟机，不采集 Windows 桌面。
+
+「组件设置」独立检查、安装和切换 Studio 版本，保留旧程序；用户档案与程序分开保存。查询失败明确显示缓存或随包已核验版本，不声称已确认最新。回退只切换程序，不自动降级档案。官方最终版为 **2026.9.22，已经停止维护**，版本管理不会凭空提供新的官方版本。
+
+Studio 与工作台单手、多手设备会话互斥。「离线查看」隔离原程序的设备网络，正常打开沿用已有设备网络。工作台不能读取原版内部电机状态，关闭前请在 Studio 内停止并断开。已有 CLI 标定和映射不自动改写成 Studio 档案，需使用官方导入/导出。详见 [嵌入与更新说明](docs/OFFICIAL_STUDIO.md)。本轮不新增 Ubuntu/Mac 的嵌套 Studio，不把离线显示测试当作真实标定或动作验收。
 
 ## 0.2.17 官方 SDK/CLI 更新与故障导出
 
@@ -26,7 +34,7 @@ Windows 内置控制环境更新到官方 SDK 和 CLI **2026.10.12**，公共出
 
 上游依据：[SDK v2026.10.12](https://github.com/wuji-technology/wuji-sdk/releases/tag/v2026.10.12)、[CLI v2026.10.12](https://github.com/wuji-technology/wuji-cli/releases/tag/v2026.10.12)。Studio 已在 v2026.9.22 宣布停止维护，当前接入以 SDK/CLI 为准。macOS 的准备脚本同步版本与校验值，本轮没有制作或验证 Mac 安装包。
 
-本版没有内嵌完整原版 Wuji Studio，也不以 CLI/Rerun 查看器代替它。完整 Ubuntu Studio 在 Windows 工作台内运行的方案留待后续；Ubuntu 版工作台无需再嵌套 Studio。
+0.2.17 当时尚未内嵌完整原版 Studio；此项由后续 0.2.18 实施，Ubuntu 版无需再嵌套。
 
 本轮检查本地 Claude CLI 入口时未找到可用安装，没有新模型调用或 Claude 产出；实现与验收由主助手完成。通用辅助的历史贡献保持原记录。
 
@@ -191,6 +199,8 @@ Ubuntu 已有历史 0.1.3 包。macOS 的原生构建在 GitHub Mac runner 上�
 0.2.0 的本地 Claude 按用户当时偏好使用 `claude-opus-5-5 --effort max`，仅辅助边界明确的播放列表基础设计；实际返回模型为 `claude-opus-5-5`。输出经主维护者审核，控制逻辑、设备边界和真实结果由主维护者核验。代码接口用于检视软件，不操作桌面。来源和许可证见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
 ## English
+
+Windows 0.2.18 embeds the complete, unmodified Ubuntu Wuji Studio in a dedicated workbench page. The optional program is downloaded from the official release with SHA-256 verification; graphics run in the existing managed Linux environment without Windows desktop capture. Component settings manage versions separately, retaining previous programs and persistent profiles. Offline viewing isolates device networks; all Workbench device workspaces relinquish control while Studio runs. Closing its GUI does not confirm motor disable. The final vendor release is 2026.9.22 and is no longer maintained. See the [component guide](docs/OFFICIAL_STUDIO.md); actual device workflows require separate acceptance.
 
 Version 0.2.9 adds logical multi-hand workspaces, explicit discovery-to-workspace assignment, shared same-action playback, eight authored left/right pair routines and actual per-session MuJoCo views. Real group playback currently requires native Hand 2 devices using the same Linux clock domain. Hardware acceptance and mechanical synchronization accuracy remain unverified. See [multi-hand guide](docs/MULTI_HAND_GROUPS.md) and [validation record](docs/VALIDATION_0.2.9.md).
 
