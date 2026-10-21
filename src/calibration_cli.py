@@ -47,7 +47,8 @@ def controller_args(config, args):
 
 
 def cli_json(config, *args):
-    command = [config['cli'] or 'wuji', '--json', *args]
+    from official_cli import cli_path
+    command = [cli_path(config), '--json', *args]
     if len(args)>1 and args[0]=='user' and args[1] in ('create','switch'):
         command = runner_command(config, 'profile', command)
         code, out, err = local_run(command)
@@ -214,7 +215,8 @@ class CalibrationCLI:
             if found_side in ('left','right') and found_side!=side:
                 raise ValueError('Selected glove side does not match calibration side / 手套与标定左右手不符')
             config = load_config()
-            args = [config['cli'] or 'wuji', '--jsonl', 'calib', 'hand-model',
+            from official_cli import cli_path
+            args = [cli_path(config), '--jsonl', 'calib', 'hand-model',
                     '--sn', serial, '--handedness', side, '--timeout-s', str(timeout_s)]
             command = runner_command(config, 'calibrate', args, current['name'], replace)
             flags = getattr(subprocess, 'CREATE_NO_WINDOW', 0) | getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0)

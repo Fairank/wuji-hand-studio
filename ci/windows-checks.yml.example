@@ -17,6 +17,8 @@ jobs:
       PYTHONDONTWRITEBYTECODE: '1'
       WUJI_STUDIO_DATA: ${{ runner.temp }}\hand-workbench-ci-data
       WUJI_RELEASE_QA_ROOT: ${{ runner.temp }}\hand-workbench-ci-qa\release
+      WUJI_OFFICIAL_CLI_DATA: ${{ runner.temp }}\hand-workbench-ci-cli
+      WUJI_CLI_AUTO_CHECK: '0'
       WUJI_TELEMETRY_DISABLE: '1'
       WUJI_NO_UPDATE_CHECK: '1'
     steps:
@@ -47,3 +49,7 @@ jobs:
           test_device_termination test_control_recovery test_official_tools
           test_runtime_repair test_glove_view test_glove_user_lifetime
           test_calibration_cli test_native_bounds -v
+      - name: Test official CLI release and visualization recovery with mocks
+        run: >-
+          python -m unittest test_cli_release_store test_official_cli_runtime
+          test_official_viz_runner test_official_viz_recovery -v

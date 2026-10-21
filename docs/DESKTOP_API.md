@@ -4,6 +4,8 @@
 
 本机端口记录在用户数据目录的 `native-window.json`。服务只监听 `127.0.0.1`；预览服务不会伪装成原生窗口。`GET /api/desktop` 返回版本、版本类型、窗口就绪状态和支持的操作。
 
+0.2.20 新增 `page official-viz`，仅导航到「连接与校准 → 官方可视化」，不会自动查找或连接设备。`GET /api/official-viz?theme=light|dark` 返回进程和会话状态；`GET /api/official-cli` 返回版本及更新状态。明确的查找、打开、停止和更新动作仍经过现有 Origin / CSRF 校验；检视接口没有任意命令或脚本执行能力。原版 iframe 的内部页面保持官方实现。
+
 0.2.19 取消 Studio 页面、安装及打开入口，`page official-studio` 不再是受支持页面。当前官方组件入口是「设置 → 连接与设备 → 官方 CLI / SDK」；维护接口可使用 `page settings` 打开设置，但没有任意点击或脚本执行能力。历史 Studio 后端只保留不含凭据的 `GET /api/official-studio` 快照，以及经过 CSRF/Origin 校验的 `official_studio_probe`、`official_studio_close` 迁移兼容。其他 `official_studio_*` 动作被拒绝。查询或旧软件退出均不代表电机停用已确认，详见 [历史与迁移说明](OFFICIAL_STUDIO.md)。
 
 ```powershell

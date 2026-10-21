@@ -70,6 +70,7 @@ class NativeDesktop:
         console_server.PORT=port
         console_server.ORIGIN=self.origin
         self.server.controller=Controller();self.server.pose=PoseView(self.server.controller)
+        self.server.configure_official_cli()
         self.server.desktop=self
         self.service_thread=threading.Thread(target=self.server.serve_forever,name='Wuji local service',daemon=True)
         self.service_thread.start()
@@ -124,6 +125,7 @@ class NativeDesktop:
 
     def navigate(self,page):
         if page=='control-tools':self.window.evaluate_js('window.WujiOfficialTools.open()')
+        elif page=='official-viz':self.window.evaluate_js('window.WujiConnectionHub.show("official")')
         else:self.window.evaluate_js('location.hash='+json.dumps('#'+page)+';window.WujiWorkspace.showPage()')
         return dict(ok=True,page=page)
 

@@ -17,7 +17,8 @@ def doctor_args(config,operation,serial='',address=''):
     if operation not in ('version','diagnose'):raise ValueError('Unsupported diagnostic operation')
     if not isinstance(serial,str) or (serial and not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_-]{0,79}',serial)):raise ValueError('Invalid device serial number')
     if not isinstance(address,str) or len(address)>80:raise ValueError('Invalid device address')
-    args=[config['cli'] or 'wuji']
+    from official_cli import cli_path
+    args=[cli_path(config)]
     if operation=='version':return args+['--version']
     args+=['doctor','--json']
     if address:

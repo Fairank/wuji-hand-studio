@@ -8,9 +8,17 @@
 
 ## Windows 下载和启动
 
-在 [Releases](../../releases) 选择实际已上传的安装包。0.2.19 是本次更新目标，沿用同一 Windows 软件、安装身份和用户数据目录；是否已构建、安装或发布，以 [0.2.19 验证记录](docs/VALIDATION_0.2.19.md) 和实际 Release 为准。Windows 当前用户安装无需另装 Python；安装器检查微软 WebView2 运行时，缺少时联网安装。包暂未进行发布者代码签名，附有 SHA-256 校验文件。
+在 [Releases](../../releases) 选择实际已上传的安装包。0.2.20 沿用同一 Windows 软件、安装身份和用户数据目录；构建、安装和发布结果见 [验证记录](docs/VALIDATION_0.2.20.md) 和实际 Release。Windows 当前用户安装无需另装 Python；安装器检查微软 WebView2 运行时，缺少时联网安装。包暂未进行发布者代码签名，附有 SHA-256 校验文件。
 
-## 0.2.19 内置官方 CLI / SDK 与状态恢复
+## 0.2.20 官方原版可视化与独立 CLI 更新
+
+打开「连接与校准 → 官方可视化」，查找设备、选择序列号后打开完整的官方 `wuji viz` Viewer。Hand 2 的关节与触觉、Glove 的骨架与原始矩阵使用原版界面；外围工具栏和明暗主题与工作台衔接。不再重复绘制手套骨架，工作台独有的映射目标与 MuJoCo 反馈预览仍保留。官方 Viewer 当前支持 Hand 2 和 Glove，Hand 1 仍使用工作台原有预览。
+
+主窗口每次启动在后台检查官方 CLI 发布，自动克隆公开仓库记录版本来源，下载实际官方发布包并核对 SHA-256。版本和所需帮助接口通过检查后，等待所有设备工作区闲置再切换；保留上一版并支持回退。SDK、固件和标定档案不会随 CLI 自动升级。查找、打开、标定、Doctor 和日志导出直接使用官方 CLI；启动不会自行扫描或连接设备。
+
+原版画面通过单一 iframe 显示，专注查看不新开第二个 Viewer。隐藏页面时卸载画面，CLI 会话单独停止。`--no-zero` 跳过触觉清零，不启用电机；Glove Viewer 仍设置数据流频率。CLI 没有持续反馈新鲜度信息，画面存在不代表设备当前在线。详见 [官方 CLI / Viewer 使用与更新说明](docs/OFFICIAL_CLI_VIEWER.md)。自动源码克隆使用 Git；缺少 Git、网络或官方摘要时明确报错并保留当前可用 CLI，不用未校验版本替换。
+
+## 历史：0.2.19 内置官方 CLI / SDK 与状态恢复
 
 当前采用工作台内置的官方 **CLI / SDK 2026.10.12**，配套控制环境为 **1.1.0**。打开「设置 → 连接与设备 → 官方 CLI / SDK」，安装或更新内置控制组件，再点击「检查 CLI / SDK」。卡片分别显示配套目标版本、环境安装记录，以及本次实际检查得到的版本和时间；实际检查会导入 SDK 并运行 CLI 的版本命令，不扫描、连接设备或使能电机。安装记录不能代替实际检查，检查通过也不代表设备连接、标定或实机动作已经通过。
 
@@ -26,7 +34,7 @@
 
 ## 历史：0.2.18 完整 Ubuntu Wuji Studio
 
-以下 0.2.18 及更早段落保留当时实现记录，当前功能以 0.2.19 说明为准。0.2.18 的嵌入入口已取消，以下内容不是 0.2.19 的安装或使用指引。
+以下 0.2.18 及更早段落保留当时实现记录，当前功能以 0.2.20 说明为准。0.2.18 的 Studio 嵌入入口已取消，以下内容不是当前版本的安装或使用指引。
 
 Windows 侧栏新增「Wuji Studio」，在工作台内部显示完整、未修改的官方 Ubuntu 应用，保留官方连接、Visualization、标定和隐私提示。首次使用从官方 GitHub 下载经 SHA-256 核对的程序，在已有内置 Linux 中安装专属图形组件，不另建大型虚拟机，不采集 Windows 桌面。
 
@@ -212,7 +220,7 @@ Ubuntu 24.04 x86_64 从 Git 克隆后，可在项目 `.venv` 安装官方 CLI / 
 
 离线检查：`python src/desktop.py --self-check --render-check`。测试：`python -m unittest discover -s src`。
 
-0.2.19 的 `--self-check` 输出包含产品身份与版本；构建器读取独立自检文件，二者与当前版本配置不符就拒绝打包。`.github/workflows/windows-checks.yml` 是 Windows 软件检查子集，使用独立临时数据、模拟安装器和模拟进程，不启动 SDK、设备、原版 Studio 或 GUI；它不代表全套测试、安装版或实机验收通过。
+`--self-check` 输出包含产品身份与版本；构建器读取独立自检文件，二者与当前版本配置不符就拒绝打包。`ci/windows-checks.yml.example` 是尚未启用的 Windows 软件检查模板，使用独立临时数据、模拟安装器和模拟进程；模板本身不代表远端 CI、全套测试、安装版或实机验收通过。
 
 Windows 构建需要先按 `src/runtime_manifest.json` 准备对应压缩镜像到 `runtime_payload/`（发布包附带镜像），不把运行环境提交到 Git。然后安装 `requirements-build.txt` 后运行 `python build.py`，再使用 `python build_installer.py --iscc PATH_TO_ISCC --webview-bootstrap PATH_TO_SIGNED_MICROSOFT_BOOTSTRAP --zh-language PATH_TO_CHINESE_ISL`。安装器使用 Inno Setup 6.4.3 和对应版本中文翻译。
 
@@ -221,6 +229,8 @@ Ubuntu 已有历史 0.1.3 包。macOS 的原生构建在 GitHub Mac runner 上�
 0.2.0 的本地 Claude 按用户当时偏好使用 `claude-opus-5-5 --effort max`，仅辅助边界明确的播放列表基础设计；实际返回模型为 `claude-opus-5-5`。输出经主维护者审核，控制逻辑、设备边界和真实结果由主维护者核验。代码接口用于检视软件，不操作桌面。来源和许可证见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
 ## English
+
+Version 0.2.20 embeds the original official `wuji viz` Viewer under Connection → Visualization. The outer controls follow Workbench styling; the vendor renderer remains unmodified. The main app checks CLI releases on startup, records the official git tag, verifies the release archive SHA-256, checks the required software interfaces and switches only while all workspaces are idle. Prior versions are retained for rollback. CLI updates do not update the SDK or device firmware. See the [CLI / Viewer guide](docs/OFFICIAL_CLI_VIEWER.md) and [0.2.20 validation](docs/VALIDATION_0.2.20.md). Physical-device acceptance remains separate from software tests.
 
 For a source installation on Ubuntu 24.04 x86_64 with Python 3.12 and the pinned official CLI / SDK, see [Local Linux installation](docs/LINUX.md). Linux can run locally without SSH or a VM. The guide also covers official visualization and calibration commands; the complete CLI Viewer is not embedded in the current workbench, and a fresh Linux installation has not been tested in this round.
 

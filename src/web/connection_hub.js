@@ -9,12 +9,13 @@
  const old=[...body.children];
  const tabs=document.createElement('div');tabs.className='hub-tabs';tabs.setAttribute('role','tablist');tabs.setAttribute('aria-label',t('连接与校准分区','Connection sections'));
  const sections={};
- const definitions=[['device','设备连接','Devices'],['calibration','手套校准','Calibration'],['retarget','映射调校','Mapping'],['visual','遥操作预览','Teleoperation']];
+ const definitions=[['device','设备连接','Devices'],['official','官方可视化','Visualization'],['calibration','手套校准','Calibration'],['retarget','映射调校','Mapping'],['visual','遥操作预览','Teleoperation']];
  for(const [key,zh,en] of definitions){
   const button=document.createElement('button');button.type='button';button.id='hub-tab-'+key;button.dataset.hubTab=key;button.setAttribute('role','tab');button.setAttribute('aria-controls','hub-'+key);button.textContent=t(zh,en);tabs.append(button);
   const section=document.createElement('section');section.className='hub-section';section.id='hub-'+key;section.setAttribute('role','tabpanel');section.setAttribute('aria-labelledby',button.id);section.hidden=true;sections[key]=section;
  }
  body.replaceChildren(tabs,...Object.values(sections));
+ const officialViz=window.WujiOfficialViz?.mount(sections.official);
  sections.device.append(...old);
  const glovePage=$('page-glove'),gloveBody=glovePage?.querySelector('.page-body');
  if(gloveBody)sections.visual.append(...[...gloveBody.children]);
@@ -29,9 +30,6 @@
  const visualIntro=document.createElement('div');visualIntro.className='hub-intro';
  visualIntro.innerHTML='<h3 id="hub-visual-title"></h3><p id="hub-visual-note"></p><div class="hub-legend"><span id="hub-real-label"></span><span id="hub-preview-label"></span></div>';
  sections.visual.prepend(visualIntro);
- const skeleton=document.createElement('div');skeleton.className='hub-skeleton wb-card';
- skeleton.innerHTML='<div class="hub-skeleton-heading"><h3 id="hub-skeleton-title"></h3><span id="hub-skeleton-state"></span></div><svg id="hub-skeleton-svg" viewBox="0 0 320 320" role="img" aria-label="Glove skeleton"><g id="hub-skeleton-lines"></g><g id="hub-skeleton-points"></g></svg><p id="hub-skeleton-note"></p>';
- const viewerDock=$('glove-viewer-dock');if(viewerDock)viewerDock.after(skeleton);
  const calib=document.createElement('div');calib.className='hub-calibration wb-card';
  calib.innerHTML=`<h3 id="hub-calib-title"></h3><p id="hub-calib-description"></p>
  <p id="hub-calib-cli" class="hub-calib-availability"></p>
@@ -60,6 +58,7 @@
   else if(window.wujiFloating?.isFloating()!==true)ws.viewerHome()?.append($('pose-console'));
   if(key==='calibration')refresh(true);
   document.body.dataset.hubTab=key;
+  officialViz?.syncVisibility();
  }
  tabs.addEventListener('click',event=>{const key=event.target.closest('[data-hub-tab]')?.dataset.hubTab;if(key)select(key)});
  tabs.addEventListener('keydown',event=>{const index=definitions.findIndex(x=>x[0]===active),delta=event.key==='ArrowRight'?1:event.key==='ArrowLeft'?-1:0;if(!delta)return;event.preventDefault();const key=definitions[(index+delta+definitions.length)%definitions.length][0];select(key);$('hub-tab-'+key).focus()});
@@ -67,23 +66,9 @@
  window.addEventListener('workspace-page',event=>{if(event.detail==='connection')select(active)});
  if(location.hash==='#glove'){location.hash='#connection';active='visual'}
 
- const bones=[[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[0,9],[9,10],[10,11],[11,12],[0,13],[13,14],[14,15],[15,16],[0,17],[17,18],[18,19],[19,20],[5,9],[9,13],[13,17]];
- function draw(points){const lines=$('hub-skeleton-lines'),dots=$('hub-skeleton-points');lines.replaceChildren();dots.replaceChildren();
-  if(!Array.isArray(points)||points.length!==21||points.some(p=>!Array.isArray(p)||p.length<3||p.slice(0,3).some(x=>typeof x!=='number'||!Number.isFinite(x)))){
-   skeleton.classList.remove('is-live');
-   $('hub-skeleton-state').textContent=t('未接收数据','Not receiving data');return;
-  }
-  skeleton.classList.add('is-live');
-  const xy=points.map(p=>[p[0]+.28*p[2],-p[1]+.18*p[2]]),xs=xy.map(p=>p[0]),ys=xy.map(p=>p[1]);
-  const left=Math.min(...xs),top=Math.min(...ys),range=Math.max(Math.max(...xs)-left,Math.max(...ys)-top,1e-4),mapped=xy.map(p=>[160+(p[0]-(left+Math.max(...xs))/2)*260/range,160+(p[1]-(top+Math.max(...ys))/2)*260/range]);
-  const svg='http://www.w3.org/2000/svg';for(const [a,b] of bones){const line=document.createElementNS(svg,'line');line.setAttribute('x1',mapped[a][0]);line.setAttribute('y1',mapped[a][1]);line.setAttribute('x2',mapped[b][0]);line.setAttribute('y2',mapped[b][1]);lines.append(line)}
-  mapped.forEach((p,i)=>{const dot=document.createElementNS(svg,'circle');dot.setAttribute('cx',p[0]);dot.setAttribute('cy',p[1]);dot.setAttribute('r',i%4===0?4:2.5);dots.append(dot)});
-  $('hub-skeleton-state').textContent=t('正在接收 · 21 个关键点','Receiving · 21 landmarks');
- }
  function renderStatus(){const hand=consoleState?.connection,glove=consoleState?.glove?.connection;
   $('hub-hand-badge').textContent=t('机械手：','Hand: ')+(hand==='connected'?t('已连接','Connected'):hand==='connecting'?t('连接中','Connecting'):hand==='disconnected'?t('离线','Offline'):t('未知','Unknown'));
   $('hub-glove-badge').textContent=t('手套：','Glove: ')+(glove==='receiving'?t('接收中','Receiving'):glove==='ready'?t('已发现','Discovered'):glove==='connecting'?t('连接中','Connecting'):glove==='disconnected'?t('离线','Offline'):t('未知','Unknown'));
-  draw(consoleState?.glove?.stream?.fresh?consoleState.glove.stream.keypoints:null);
  }
  async function refresh(force=false){if(busy||refreshPending||(!force&&active!=='calibration'))return;refreshPending=true;renderCalibration();try{const response=await fetch('/api/calibration'+(force?'?refresh=1':''),{cache:'no-store',signal:AbortSignal.timeout(5000)});if(!response.ok)throw Error(t('无法读取官方校准状态','Calibration status unavailable'));const next=await response.json();if(!next||typeof next.available!=='boolean')throw Error(t('官方校准状态无效','Invalid calibration status'));calibration=next;calibrationFresh=true;refreshError='';}catch(error){calibrationFresh=false;refreshError=error.message;}finally{refreshPending=false;renderCalibration()}}
  async function action(name,extra={}){if(busy)return;busy=true;actionError='';renderCalibration();try{
@@ -130,10 +115,9 @@
  window.addEventListener('console-offline',()=>{consoleState=null;renderStatus();renderCalibration()});
  function labels(){for(const [key,zh,en] of definitions)$('hub-tab-'+key).textContent=t(zh,en);
   $('hub-intro-note').textContent=t('先连接设备，再校准与调校。连接状态与标定结果分别显示。','Connect first, then calibrate and tune. Connection and calibration are shown separately.');
-  $('hub-visual-title').textContent=t('两路独立反馈','Two independent feedback views');
-  $('hub-visual-note').textContent=t('三维画面显示机械手反馈或当前预览源；下方骨架仅显示手套原始 21 关键点。两者不代表已通过联动遥操作验收。','The 3D viewer shows hand feedback or the selected preview source. The skeleton below shows only 21 raw glove landmarks. Together they do not establish validated teleoperation.');
-  $('hub-real-label').textContent=t('三维：机械手 / 映射预览','3D: hand / mapped preview');$('hub-preview-label').textContent=t('骨架：手套原始数据','Skeleton: raw glove data');
-  $('hub-skeleton-title').textContent=t('手套骨架','Glove skeleton');$('hub-skeleton-note').textContent=t('仅作实时可视化；姿态按相对坐标缩放。','Live visualization only; pose scaled from relative coordinates.');
+  $('hub-visual-title').textContent=t('映射与机械手预览','Mapping and hand preview');
+  $('hub-visual-note').textContent=t('此处显示工作台独有的映射目标与机械手反馈；手套骨架和触觉数据请使用官方可视化。','View workbench mapping targets and hand feedback here. Use the original visualization for glove skeleton and tactile data.');
+  $('hub-real-label').textContent=t('三维：机械手 / 映射预览','3D: hand / mapped preview');$('hub-preview-label').textContent='';
   $('hub-calib-title').textContent=t('手型标定','Hand-model calibration');
   $('hub-calib-setup-label').textContent=t('选择用户与手套','Select user and glove');
   $('hub-calib-description').textContent=t('通过 Wuji CLI 标定，结果按命名用户和左右手保存。此流程不驱动机械手。','Calibrate through Wuji CLI. Results are saved per named user and hand side. This flow does not drive the robot hand.');

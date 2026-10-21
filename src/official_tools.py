@@ -13,6 +13,15 @@ import time
 SDK_CHECK = "import importlib.metadata,json,wuji_sdk;print(json.dumps({'sdk_version':importlib.metadata.version('wuji-sdk'),'sdk_imported':True}))"
 
 
+def target_versions():
+    from managed_runtime import image_manifest
+    from official_cli import selected
+    manifest=image_manifest() or {};current=selected().get('current') or {}
+    target={key:manifest.get(key) for key in ('cli_version','sdk_version')}
+    if current.get('validated') and current.get('mode')=='wsl':target['cli_version']=current.get('version')
+    return target
+
+
 class OfficialTools:
     def __init__(self):
         self.lock=threading.RLock()
@@ -22,8 +31,9 @@ class OfficialTools:
     def snapshot(self):
         from managed_runtime import status,image_manifest
         manifest=image_manifest() or {}
+        target=target_versions()
         with self.lock:
-            return dict(target={key:manifest.get(key) for key in ('cli_version','sdk_version')},
+            return dict(target=target,
                         runtime=status(),check=copy.deepcopy(self.check))
 
     def start_check(self):
@@ -52,13 +62,16 @@ class OfficialTools:
             if parsed.get('sdk_imported') is not True or not isinstance(sdk_version,str) or not re.fullmatch(r'[0-9A-Za-z.+_-]{1,80}',sdk_version):
                 raise ValueError('SDK 版本输出无效 / Invalid SDK version result')
             versions['sdk_version']=sdk_version
-            cli=subprocess.run(args(['/usr/bin/env','WUJI_NO_UPDATE_CHECK=1',CLI,'--version']),capture_output=True,timeout=20,creationflags=flags)
+            from official_cli import cli_path
+            actual_cli=cli_path(dict(mode='wsl',cli=CLI))
+            cli=subprocess.run(args(['/usr/bin/env','WUJI_NO_UPDATE_CHECK=1',actual_cli,'--version']),capture_output=True,timeout=20,creationflags=flags)
             if cli.returncode:raise ValueError('CLI 版本检查失败 / CLI version check failed')
             match=re.search(r'\b(20\d{2}\.\d{1,2}\.\d{1,2}(?:[.+-][\w.-]+)?)\b',_decode(cli.stdout))
             if not match:raise ValueError('CLI 版本输出无效 / Invalid CLI version result')
             versions['cli_version']=match[1]
             manifest=image_manifest() or {}
-            compatible=all(versions.get(key)==manifest.get(key) for key in ('cli_version','sdk_version'))
+            target=target_versions()
+            compatible=all(versions.get(key)==target.get(key) for key in ('cli_version','sdk_version'))
             with self.lock:self.check.update(**versions,status='ready',available=True,compatible=compatible,error=None)
         except Exception as error:
             detail=str(error) if isinstance(error,ValueError) else '软件检查未完成，请重试 / Software check did not complete; retry'

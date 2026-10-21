@@ -6,12 +6,18 @@ def needs_confirmation(state):
     return (state.get('connection')!='disconnected' or state.get('glove',{}).get('busy',False)
             or state.get('official_studio',{}).get('reserved',False) or state.get('official_studio',{}).get('busy',False)
             or state.get('official_studio',{}).get('active',False)
+            or state.get('official_viz',{}).get('active',False) or state.get('official_viz',{}).get('busy',False)
+            or state.get('official_viz',{}).get('reserved',False)
             or state.get('recording',{}).get('active',False)
             or state.get('calibration',{}).get('running',False)
             or state.get('hardware',{}).get('active') is not False or bool(unconfirmed(state)))
 
 def close_sessions(controller, timeout=6., clock=time.monotonic, sleep=time.sleep):
     state=controller.snapshot()
+    if hasattr(controller,'official_cli'):controller.official_cli.closed.set()
+    if state.get('official_viz',{}).get('active') or state.get('official_viz',{}).get('busy') or state.get('official_viz',{}).get('reserved'):
+        try:controller.official_viz.stop()
+        except ValueError as error:return dict(ok=False,error=str(error))
     studio=state.get('official_studio',{})
     if studio.get('busy') and not studio.get('active'):
         return dict(ok=False,error='请等待 Studio 组件操作完成 / Wait for the Studio component operation')
@@ -59,4 +65,6 @@ def close_sessions(controller, timeout=6., clock=time.monotonic, sleep=time.slee
     controller.action(dict(name='disconnect'))
     # Existing SDK disconnect gives recording flush and disable a grace period.
     if state.get('connection')!='disconnected':sleep(3.1)
+    if hasattr(controller,'official_cli') and not controller.official_cli.cancel_and_wait():
+        return dict(ok=False,error='CLI 下载正在取消，当前设备会话已结束，请稍后重试 / CLI download is cancelling; device sessions have ended, retry shortly')
     return dict(ok=True)

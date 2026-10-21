@@ -49,7 +49,8 @@ def export_support(config,days,description,report,run_local,run_remote):
     output=folder/'official-wuji-support.zip'
     remote='/tmp/hand-workbench-support-'+token+'.zip'
     destination=str(output) if mode=='local' else remote
-    command=sdk_command(config,[config.get('cli') or 'wuji','--json','logs','export','--days',str(days),
+    from official_cli import cli_path
+    command=sdk_command(config,[cli_path(config),'--json','logs','export','--days',str(days),
                                 '--source','sdk,studio,stderr,cli','--output',destination])
     if mode=='wsl':
         from managed_runtime import args,check_ready,NAME

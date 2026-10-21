@@ -67,6 +67,10 @@ class Controller:
         self.official_tools=OfficialTools()
         from studio_component import StudioComponent
         self.studio=StudioComponent()
+        from official_cli import OfficialCLI
+        from official_visualization import OfficialVisualization
+        self.official_cli=OfficialCLI()
+        self.official_viz=OfficialVisualization()
         from program_runner import ProgramRunner
         self.program=ProgramRunner(self)
         from group_participant import GroupParticipant
@@ -115,6 +119,8 @@ class Controller:
             result = copy.deepcopy(self.state)
             result['solver_runtime']=self.solver_runtime.snapshot()
             result['official_studio']=self.studio.snapshot()
+            result['official_viz']=self.official_viz.snapshot()
+            result['official_cli']=self.official_cli.snapshot()
             # The user explicitly requested a live visual preview before full
             # calibration. This observed node-group profile is provisional and
             # display-only; it must never authorize hardware command mapping.
@@ -186,6 +192,27 @@ class Controller:
         self.stdin.flush()
 
     def action(self, command):
+        if isinstance(command,dict) and command.get('name') in {'connect','runtime_select','bridge_config_save','bridge_password_save','bridge_password_forget','parameters_sync','doctor_version','doctor_run','doctor_support','device_profile_select','glove_connect'}:
+            from managed_runtime import status as runtime_status
+            if runtime_status()['busy']:raise ValueError('内置控制环境正在安装，请等待完成 / Wait for controller setup to finish')
+        if isinstance(command,dict) and command.get('name') in {'official_cli_check','official_cli_update','official_cli_rollback','official_viz_scan','official_viz_start','official_viz_stop'}:
+            if getattr(self,'desktop_closing',False) and command['name']!='official_viz_stop':raise ValueError('Session is closing')
+            name=command['name']
+            if name=='official_cli_check':return dict(official_cli=self.official_cli.start(check_only=True))
+            if name=='official_cli_update':return dict(official_cli=self.official_cli.start())
+            if name=='official_cli_rollback':return dict(official_cli=self.official_cli.rollback())
+            if name=='official_viz_scan':return dict(official_viz=self.official_viz.scan())
+            if name=='official_viz_start':return dict(official_viz=self.official_viz.start(command.get('serial'),command.get('theme','light')))
+            return dict(official_viz=self.official_viz.stop())
+        from cli_coordination import gate,enforce
+        # Stop/close must remain available while a component owns the gate.
+        if isinstance(command,dict) and command.get('name') in {'session_close','disconnect','hardware_stop','glove_stop','glove_disconnect','calibration_cancel','program_stop','group_stop'}:
+            return self._coordinated_action(command)
+        with gate():
+            enforce(command)
+            return self._coordinated_action(command)
+
+    def _coordinated_action(self, command):
         from studio_component import enforce_session_owner
         enforce_session_owner(command)
         if isinstance(command,dict) and command.get('name')=='control_tools_check':
@@ -703,6 +730,8 @@ class Handler(BaseHTTPRequestHandler):
         url = urlsplit(self.path)
         if url.path=='/api/official-studio':return self.reply(200,self.server.studio.snapshot())
         if url.path=='/api/control-tools':return self.reply(200,self.server.controller.official_tools.snapshot())
+        if url.path=='/api/official-cli':return self.reply(200,self.server.controller.official_cli.snapshot())
+        if url.path=='/api/official-viz':return self.reply(200,self.server.controller.official_viz.snapshot(parse_qs(url.query).get('theme',[None])[0]))
         if url.path.startswith('/studio-assets/'):
             try:path=self.server.studio.asset(url.path.removeprefix('/studio-assets/'))
             except (ValueError,OSError) as error:return self.reply(404,dict(error=str(error)))
@@ -831,8 +860,8 @@ class Handler(BaseHTTPRequestHandler):
         for name in ('studio.css','floating_panel.css','glass.css','glove.css','desktop_glass.css','desktop_refinement.css','glass_refresh.css','workbench_upgrade.css','connection_hub.css','official_calibration.css','group_panel.css','workspaces.css','group_view.css','workbench_sheet.css','workbench_clarity.css','numeric_grid.css','retarget_tuning.css','joint_inspector.css','connection_refinement.css','control_surfaces.css','spring_motion.css','playlist_editor.css'):
             assets['/'+name]=(name,'text/css; charset=utf-8')
         assets['/viewer']=('viewer.html','text/html; charset=utf-8')
-        for name in ('official_tools.js','official_studio.js','official_studio_viewer.js'):assets['/'+name]=(name,'text/javascript; charset=utf-8')
-        for name in ('official_tools.css','official_studio.css','official_studio_viewer.css'):assets['/'+name]=(name,'text/css; charset=utf-8')
+        for name in ('official_tools.js','official_studio.js','official_studio_viewer.js','official_viz.js'):assets['/'+name]=(name,'text/javascript; charset=utf-8')
+        for name in ('official_tools.css','official_studio.css','official_studio_viewer.css','official_viz.css'):assets['/'+name]=(name,'text/css; charset=utf-8')
         assets['/official_studio_viewer.html']=('official_studio_viewer.html','text/html; charset=utf-8')
         assets['/favicon.ico']=('favicon.ico','image/x-icon')
         assets['/app-icon.png']=('app-icon.png','image/png')
@@ -908,6 +937,23 @@ class ConsoleHTTPServer(ThreadingHTTPServer):
     allow_reuse_address = False
     allow_reuse_port = False
 
+    def configure_official_cli(self,startup=True):
+        def all_idle():
+            from studio_component import require_idle
+            from managed_runtime import status as runtime_status
+            if runtime_status().get('busy'):raise ValueError('Wait for control environment installation')
+            if getattr(self.controller,'desktop_closing',False):raise ValueError('Workbench is closing')
+            require_idle(self.controller.snapshot(),self.controller.doctor.snapshot())
+            if self.controller.official_tools.snapshot()['check']['busy']:raise ValueError('Wait for official software checks')
+            if hasattr(self,'_fleet'):
+                with self.fleet.lock:records=list(self.fleet.children.values())
+                for row in records:
+                    try:require_idle(self.fleet.get(row,'/api/state'),self.fleet.get(row,'/api/doctor'))
+                    except OSError:raise ValueError('无法确认另一个工作区状态 / Another workspace state is unavailable') from None
+        self.controller.official_cli.idle_check=all_idle
+        self.controller.official_viz.idle_check=all_idle
+        if startup:self.controller.official_cli.startup()
+
     @property
     def studio(self):
         def all_idle():
@@ -948,6 +994,7 @@ def main():
     server = ConsoleHTTPServer(('127.0.0.1', PORT), Handler)
     server.controller = Controller()
     server.pose = PoseView(server.controller)
+    server.configure_official_cli()
     try:
         server.serve_forever()
     finally:

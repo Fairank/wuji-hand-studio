@@ -38,7 +38,7 @@ Hand 1 的实测显示按设备编号 0–19 读取，Hand 2 按各指四关节�
 
 工作台统一调用官方 CLI，不再维护重复的自制姿势示意功能。0.2.18 曾有完整 Studio 页面，0.2.19 已取消其入口、安装和打开功能；旧组件只保留状态核对及关闭兼容，不主动删除 Studio HOME 和标定档案。S1–S3 Studio 改造不作为本版功能或验收成果。原版人体模型、触觉和录制不能由当前工作台画面或历史离线显示结果推定为已经验收。
 
-官方另有 `wuji viz` 可视化工具；它不等于当前工作台的手套原始骨架、映射预览和机械手反馈。0.2.19 的 CLI / SDK 软件检查只检查版本与导入，不自动启动该 Viewer，不把它作为原版 Studio 的替代验收。画面存在也不能证明数据仍然新鲜。
+0.2.20 在「连接与校准 → 官方可视化」嵌入原版 `wuji viz`，移除重复的手套骨架显示，保留工作台独有的映射与机械手预览。软件版本检查不自动启动 Viewer；设备需明确选择后打开。画面存在不能证明数据仍然新鲜，使用和独立 CLI 更新见 [原版 Viewer 说明](OFFICIAL_CLI_VIEWER.md)。
 
 依据：[SDK 用户档案](https://docs.wuji.tech/docs/en/wuji-cli/latest/user/)、[触觉标定保存](https://docs.wuji.tech/docs/en/wuji-studio/latest/tactile-calibration/)、[官方实时可视化](https://docs.wuji.tech/docs/en/wuji-cli/latest/visualization/)。
 

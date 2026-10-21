@@ -27,6 +27,22 @@ class ExitTests(unittest.TestCase):
         c=self.controller(state(glove=True))
         self.assertTrue(close_sessions(c,sleep=lambda _:None)['ok'])
         self.assertEqual([x.args[0]['name'] for x in c.action.call_args_list],['glove_disconnect','disconnect'])
+    def test_background_cli_cancel_waits_only_after_device_stop(self):
+        s=state(True,True,False);s['official_cli']={'update':{'preparing':True}}
+        c=self.controller(s);c.snapshot.side_effect=[s,state(False,True,True)]
+        events=[]
+        c.official_cli.closed.set.side_effect=lambda:events.append('cancel')
+        c.action.side_effect=lambda command:events.append(command['name'])
+        c.official_cli.cancel_and_wait.side_effect=lambda:events.append('wait') or True
+        self.assertTrue(close_sessions(c,sleep=lambda _:None)['ok'])
+        self.assertEqual(events,['cancel','hardware_stop','disconnect','wait'])
+    def test_background_download_can_cancel_on_an_idle_exit(self):
+        from desktop_tools import idle
+        s=state();s['official_cli']={'update':{'preparing':True}}
+        self.assertFalse(needs_confirmation(s));self.assertTrue(idle(s,{}))
+        c=self.controller(s);c.official_cli.cancel_and_wait.return_value=True
+        self.assertTrue(close_sessions(c,sleep=lambda _:None)['ok'])
+        c.official_cli.closed.set.assert_called_once();c.official_cli.cancel_and_wait.assert_called_once()
     def test_parameter_transfer_is_not_cut_off(self):
         s=state();s['parameter_sync']['busy']=True;c=self.controller(s)
         self.assertFalse(close_sessions(c)['ok']);c.action.assert_not_called()
