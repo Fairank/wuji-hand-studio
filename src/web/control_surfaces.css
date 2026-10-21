@@ -125,4 +125,22 @@ html[data-reduce-motion=true] body input[type=checkbox]{transition:none!importan
 }
 
 html body :is(.page-body,.hws-body,dialog) input[type=checkbox]:not(.settings-row input):not(.di-auto input):disabled:indeterminate{background-color:#8e8e93;border-color:#8e8e93}
+
+/* Style the browser's existing scrollbars; retain native scrolling and hit areas. */
+:root{--ui-scroll-thumb:rgba(60,60,67,.28);--ui-scroll-thumb-hover:rgba(60,60,67,.45)}
+html[data-theme=dark]{--ui-scroll-thumb:rgba(235,235,245,.3);--ui-scroll-thumb-hover:rgba(235,235,245,.5)}
+html body :is(.page-area,.directory,.hws-body,.float-panel,.symbol-dialog,.connection-popover),html body #desktop-menu{scrollbar-width:auto;scrollbar-color:auto;--ui-scroll-inset:12px}
+html body .page-area{scrollbar-gutter:stable both-edges;--ui-scroll-inset:20px}
+html body .directory{--ui-scroll-inset:16px}
+html body .hws-body{scrollbar-gutter:stable;--ui-scroll-inset:8px}
+html::-webkit-scrollbar,body::-webkit-scrollbar,body ::-webkit-scrollbar{width:12px;height:12px;background:transparent}
+html::-webkit-scrollbar-thumb,body::-webkit-scrollbar-thumb,body ::-webkit-scrollbar-thumb{min-height:32px;min-width:32px;border:4px solid transparent;border-radius:999px;background-color:var(--ui-scroll-thumb);background-clip:padding-box}
+html::-webkit-scrollbar-thumb:hover,body::-webkit-scrollbar-thumb:hover,body ::-webkit-scrollbar-thumb:hover{background-color:var(--ui-scroll-thumb-hover)}
+html::-webkit-scrollbar-track,body::-webkit-scrollbar-track,body ::-webkit-scrollbar-track{background:transparent}
+body ::-webkit-scrollbar-track:vertical{margin-block:var(--ui-scroll-inset,8px)}
+body ::-webkit-scrollbar-track:horizontal{margin-inline:var(--ui-scroll-inset,8px)}
+html::-webkit-scrollbar-button,body::-webkit-scrollbar-button,body ::-webkit-scrollbar-button{display:none;width:0;height:0}
+html::-webkit-scrollbar-corner,body::-webkit-scrollbar-corner,body ::-webkit-scrollbar-corner{background:transparent}
+@media(pointer:coarse){html::-webkit-scrollbar,body::-webkit-scrollbar,body ::-webkit-scrollbar{width:16px;height:16px}}
+@media(forced-colors:active){html::-webkit-scrollbar-thumb,body::-webkit-scrollbar-thumb,body ::-webkit-scrollbar-thumb{background-color:ButtonText}}
 html :is(#page-home,#page-connection) .di-root button.primary:disabled{opacity:1!important;background:var(--ui-fill)!important;color:var(--ui-sub)!important;border-color:var(--ui-line)!important;box-shadow:none!important}
