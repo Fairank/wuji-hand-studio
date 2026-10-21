@@ -52,4 +52,4 @@ jobs:
       - name: Test official CLI release and visualization recovery with mocks
         run: >-
           python -m unittest test_cli_release_store test_official_cli_runtime
-          test_official_viz_runner test_official_viz_recovery -v
+          test_official_viz_runner test_official_viz_recovery test_official_viewer -v

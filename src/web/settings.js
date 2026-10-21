@@ -38,7 +38,7 @@
  const menuLink=el('button','设置…','Settings…','desktop-menu-row');menuLink.id='desktop-settings';menuLink.type='button';
  menuLink.onclick=()=>{$('desktop-menu').close();location.hash='#settings';window.WujiWorkspace.showPage();};$('desktop-viewer').before(menuLink);
  appearance.append(el('p','系统不支持透明材质时使用实色背景。减少动态效果会关闭界面过渡。','A solid background is used when native transparency is unavailable. Reduce motion disables interface transitions.','settings-footnote'));
- function route(parent,zh,en,noteZh,noteEn,callback){const button=el('button',undefined,undefined,'settings-route');button.type='button';const copy=el('span');copy.append(el('strong',zh,en),el('small',noteZh,noteEn));const arrow=el('span','›','›');arrow.setAttribute('aria-hidden','true');button.append(copy,arrow);button.onclick=callback;parent.append(button);return button;}
+ function route(parent,zh,en,noteZh,noteEn,callback){const button=el('button',undefined,undefined,'settings-route');button.type='button';const copy=el('span');copy.append(el('strong',zh,en),el('small',noteZh,noteEn));const arrow=document.createElementNS('http://www.w3.org/2000/svg','svg');arrow.setAttribute('viewBox','0 0 16 16');arrow.setAttribute('aria-hidden','true');arrow.innerHTML='<path d="m6 3 5 5-5 5"/>';button.append(copy,arrow);button.onclick=callback;parent.append(button);return button;}
  const openPage=key=>{location.hash='#'+key;window.WujiWorkspace.showPage();};
  const connections=card(sections.devices,'设备工作流','Device workflow');
  route(connections,'手与手套连接','Hand & glove connections','设备识别、控制端与实时反馈','Discovery, controller and live feedback',()=>window.WujiConnectionHub.show('device'));
@@ -47,9 +47,16 @@
  route(connections,'手套 → 手映射','Glove → hand mapping','各关节幅度、偏移与平滑','Per-joint gain, offset and smoothing',()=>window.WujiConnectionHub.show('retarget'));
  if($('page-devices'))route(connections,'多手工作区','Multiple hands','为每只设备保留独立连接与节目单','Independent connections and playlists',()=>openPage('devices'));
  const controls=card(sections.tools,'控制与记录','Control & records');
+ route(controls,'实时反馈','Live feedback','查看关节角度、电流与反馈率','Joint angles, current and feedback rates',()=>openPage('feedback'));
  route(controls,'动作参数','Motion parameters','Kp / Kd、发送频率、轨迹速度与电流','Kp / Kd, command rate, trajectory speed and current',()=>openPage('parameters'));
  route(controls,'官方诊断','Official diagnostics','运行检查并查看设备报告','Run checks and review device reports',()=>openPage('doctor'));
  route(controls,'运行记录','Session records','查看记录与导出数据','Review records and export data',()=>openPage('records'));
+ const research=el('details',undefined,undefined,'settings-research');
+ research.append(el('summary','触碰实验','Touch research'));
+ research.append(el('p','用于采集与离线识别研究；自动轻扣尚未通过实机验收。','For data collection and offline recognition research. Automatic grasp response has not passed hardware acceptance.','settings-footnote'));
+ route(research,'触碰采集','Touch capture','按手指标注并保存反馈','Label a finger and record feedback',()=>openPage('capture'));
+ route(research,'触碰识别研究','Touch recognition research','查看模型状态与流程预览','Model status and workflow preview',()=>openPage('interaction'));
+ sections.tools.append(research);
  const tools=card(sections.tools,'本机数据','Local data','设置和私人模型保存在本机；公开程序不包含私人训练权重。','Preferences and private models stay on this computer. The public app contains no private weights.');
  // Existing desktop actions retain their native availability and status handling.
  for(const [target,zh,en,noteZh,noteEn] of [

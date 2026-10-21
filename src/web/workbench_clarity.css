@@ -9,6 +9,19 @@ dialog:not([open]){display:none!important}
 html .directory{gap:3px;box-shadow:inset 0 1px 0 #ffffff55,0 4px 16px #00000005}
 html .directory a{min-height:40px;font-size:13px;padding:9px 11px}
 html .nav-advanced{margin-top:18px}.nav-tool-links a{font-size:12px!important}
+html .directory a[hidden]{display:none!important}
+html .directory a span{white-space:nowrap;overflow-wrap:normal}
+html .nav-advanced>summary{list-style:none;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 11px;min-height:36px;box-sizing:border-box;font-size:12px;font-weight:500}
+html .nav-advanced>summary::-webkit-details-marker{display:none}
+html .nav-advanced>summary:after{content:'';width:6px;height:6px;flex:none;border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;transform:rotate(-45deg);transition:transform 220ms ease}
+html .nav-advanced[open]>summary:after{transform:rotate(45deg)}
+html .settings-research{padding:14px 0;margin:18px 0;border-top:1px solid var(--ui-line)}
+html .settings-research>summary{cursor:pointer;font-size:13px;font-weight:500;color:var(--ui-sub);padding:8px 0}
+html .settings-research .settings-footnote{margin-bottom:14px}
+html body .settings-route{padding:15px 10px;border-radius:10px;transition:background-color 140ms ease}
+html body .settings-route:hover{background:var(--dg-fill)!important}
+html body .settings-route:hover strong{text-decoration:none}
+html body .settings-route>svg{width:14px;height:14px;flex:none;fill:none;stroke:var(--ui-sub);stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
 html .directory a[data-page=settings]{margin-top:12px}
 html .top{box-shadow:inset 0 1px 0 #ffffff66,0 3px 16px #00000004}
 html .top-actions .wsx-top{display:none}

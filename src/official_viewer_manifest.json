@@ -1,0 +1,53 @@
+{
+  "version": "0.36.0",
+  "source": "https://github.com/rerun-io/rerun/tree/0.36.0",
+  "files": {
+    "LICENSE-MIT": {
+      "url": "https://raw.githubusercontent.com/rerun-io/rerun/0.36.0/LICENSE-MIT",
+      "bytes": 1087,
+      "sha256": "7d3db59468f92d70f176170deacf8ac6858b6d78010a30ae01eba42bac302940",
+      "mime": "text/plain; charset=utf-8"
+    },
+    "LICENSE-APACHE": {
+      "url": "https://raw.githubusercontent.com/rerun-io/rerun/0.36.0/LICENSE-APACHE",
+      "bytes": 10850,
+      "sha256": "8173d5c29b4f956d532781d2b86e4e30f83e6b7878dce18c919451d6ba707c90",
+      "mime": "text/plain; charset=utf-8"
+    },
+    "index.html": {
+      "url": "https://app.rerun.io/version/0.36.0/index.html",
+      "bytes": 16079,
+      "sha256": "16fd8752f67e15640229b96aedf2b7545e775b5cddd58ee4324a6cb3f8c28666",
+      "mime": "text/html; charset=utf-8"
+    },
+    "re_viewer.js": {
+      "url": "https://app.rerun.io/version/0.36.0/re_viewer.js",
+      "bytes": 227616,
+      "sha256": "14135916b9b3124e9b8d33d15cec2f2a2a705fee585d94ac727f5a120bfa1361",
+      "mime": "text/javascript; charset=utf-8"
+    },
+    "re_viewer_bg.wasm": {
+      "url": "https://app.rerun.io/version/0.36.0/re_viewer_bg.wasm",
+      "bytes": 41717993,
+      "sha256": "2ff43a1f99a6ea0fd54f5f04e36d140e7ad2fb06b4078b11654779b6ab5e519e",
+      "mime": "application/wasm"
+    },
+    "favicon.ico": {
+      "url": "https://app.rerun.io/version/0.36.0/favicon.ico",
+      "bytes": 7970,
+      "sha256": "506e422f735a2106562bde25aa1cdce20807917e7b7ae23dff78cfb374bfb654",
+      "mime": "image/x-icon"
+    },
+    "apple-touch-icon.png": {
+      "url": "https://app.rerun.io/version/0.36.0/apple-touch-icon.png",
+      "bytes": 47459,
+      "sha256": "3433618f942581a0417b0cfa542f3b7d6b8c1f68a6608a0f4b1f5cdf03c54099",
+      "mime": "image/png"
+    }
+  },
+  "host_shell_changes": [
+    "Remove external Google Fonts links"
+  ],
+  "renderer_modified": false,
+  "note": "Official versioned Rerun assets. HTML and JavaScript match the CLI embedded assets; CDN WASM is not byte-identical to the CLI build."
+}

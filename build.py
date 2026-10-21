@@ -5,6 +5,8 @@ from pathlib import Path
 ROOT=Path(__file__).resolve().parent
 os.chdir(ROOT)
 config=json.loads((ROOT/'src/edition.json').read_text(encoding='utf-8'))
+from prepare_official_viewer import verify as verify_official_viewer
+verify_official_viewer()
 edition=config['name'];version=config['version']
 name='HandWorkbench'
 args=[sys.executable,'-m','PyInstaller','--noconfirm','--clean','--onedir','--name',name,'--paths','src',
@@ -14,6 +16,8 @@ args=[sys.executable,'-m','PyInstaller','--noconfirm','--clean','--onedir','--na
     '--add-data','src/official_data'+os.pathsep+'official_data',
     '--add-data','src/trial_sdk_poses.json'+os.pathsep+'.','--add-data','src/motion_parameters.py'+os.pathsep+'.',
     '--add-data','src/edition.json'+os.pathsep+'.','--add-data','LICENSE'+os.pathsep+'.',
+    '--add-data','src/official_viewer_manifest.json'+os.pathsep+'.',
+    '--add-data','runtime_payload/official-viewer'+os.pathsep+'official-viewer',
     '--add-data','src/runtime_manifest.json'+os.pathsep+'.',
     '--add-data','src/runtime_update.py'+os.pathsep+'.',
     '--add-data','src/runtime_refresh.py'+os.pathsep+'.',

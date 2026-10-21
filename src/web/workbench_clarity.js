@@ -41,8 +41,13 @@
   const runningActions=document.createElement('div');runningActions.className='wc-program-actions';runningActions.append(playlistPause,playlistStop);
   running.append(runningTitle,runningText,runningDetail,runningActions,playlistOpen);controls.before(running);
   const nav=document.querySelector('.directory'),advanced=nav.querySelector('.nav-tool-links');
-  for(const key of ['feedback','parameters','doctor','interaction','capture','records']){
+  for(const key of ['feedback','parameters','doctor']){
    const link=nav.querySelector(`[data-page="${key}"]`);if(link)advanced.append(link);
+  }
+  // Logs belong with local data. Unvalidated touch experiments are available
+  // from the research disclosure in Settings, rather than the daily sidebar.
+  for(const key of ['interaction','capture','records']){
+   const link=nav.querySelector(`[data-page="${key}"]`);if(link)link.hidden=true;
   }
   for(const key of ['library','devices','glove','connection']){
    const link=nav.querySelector(`[data-page="${key}"]`);if(link)nav.insertBefore(link,nav.querySelector('.nav-advanced'));
@@ -58,7 +63,7 @@
    for(const [key,pair]of Object.entries(names)){
     const link=nav.querySelector(`[data-page="${key}"] span`);if(link){link.removeAttribute('data-i18n');link.textContent=t(...pair);}
    }
-   const navTitle=$('nav-tools-title');if(navTitle)navTitle.textContent=t('调试工具','Tools');
+   const navTitle=$('nav-tools-title');if(navTitle)navTitle.textContent=t('设备工具','Device tools');
    window.WujiLocale.apply(heading);
   }
   function mode(){

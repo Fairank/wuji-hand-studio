@@ -732,6 +732,9 @@ class Handler(BaseHTTPRequestHandler):
         if url.path=='/api/control-tools':return self.reply(200,self.server.controller.official_tools.snapshot())
         if url.path=='/api/official-cli':return self.reply(200,self.server.controller.official_cli.snapshot())
         if url.path=='/api/official-viz':return self.reply(200,self.server.controller.official_viz.snapshot(parse_qs(url.query).get('theme',[None])[0]))
+        if url.path=='/api/official-viewer':
+            from official_viewer import snapshot
+            return self.reply(200,snapshot(parent_port=self.server.server_address[1]))
         if url.path.startswith('/studio-assets/'):
             try:path=self.server.studio.asset(url.path.removeprefix('/studio-assets/'))
             except (ValueError,OSError) as error:return self.reply(404,dict(error=str(error)))
@@ -855,9 +858,9 @@ class Handler(BaseHTTPRequestHandler):
         assets.update({'/workspace.js':('workspace.js','text/javascript; charset=utf-8'),
             '/workspace.css':('workspace.css','text/css; charset=utf-8'),
             '/parameters.js':('parameters.js','text/javascript; charset=utf-8')})
-        for name in ('studio.js','locale.js','floating_panel.js','viewer.js','action_picker.js','brand.js','installation.js','profiles.js','doctor.js','glove.js','desktop_shell.js','device_network.js','connection_toolbar.js','workbench_upgrade.js','connection_hub.js','official_calibration.js','settings.js','group_panel.js','workspaces.js','group_view.js','workbench_sheet.js','workbench_clarity.js','numeric_grid.js','retarget_tuning.js','joint_inspector.js','connection_refinement.js','action_row.js','control_surfaces.js','spring_motion.js','playlist_rows.js','playlist_editor.js'):
+        for name in ('studio.js','locale.js','floating_panel.js','viewer.js','action_picker.js','brand.js','installation.js','profiles.js','doctor.js','glove.js','desktop_shell.js','device_network.js','connection_toolbar.js','workbench_upgrade.js','connection_hub.js','official_calibration.js','settings.js','group_panel.js','workspaces.js','group_view.js','workbench_sheet.js','workbench_clarity.js','numeric_grid.js','retarget_tuning.js','joint_inspector.js','connection_refinement.js','action_row.js','control_surfaces.js','spring_motion.js','navigation_motion.js','playlist_rows.js','playlist_editor.js'):
             assets['/'+name]=(name,'text/javascript; charset=utf-8')
-        for name in ('studio.css','floating_panel.css','glass.css','glove.css','desktop_glass.css','desktop_refinement.css','glass_refresh.css','workbench_upgrade.css','connection_hub.css','official_calibration.css','group_panel.css','workspaces.css','group_view.css','workbench_sheet.css','workbench_clarity.css','numeric_grid.css','retarget_tuning.css','joint_inspector.css','connection_refinement.css','control_surfaces.css','spring_motion.css','playlist_editor.css'):
+        for name in ('studio.css','floating_panel.css','glass.css','glove.css','desktop_glass.css','desktop_refinement.css','glass_refresh.css','workbench_upgrade.css','connection_hub.css','official_calibration.css','group_panel.css','workspaces.css','group_view.css','workbench_sheet.css','workbench_clarity.css','numeric_grid.css','retarget_tuning.css','joint_inspector.css','connection_refinement.css','control_surfaces.css','spring_motion.css','navigation_motion.css','playlist_editor.css'):
             assets['/'+name]=(name,'text/css; charset=utf-8')
         assets['/viewer']=('viewer.html','text/html; charset=utf-8')
         for name in ('official_tools.js','official_studio.js','official_studio_viewer.js','official_viz.js'):assets['/'+name]=(name,'text/javascript; charset=utf-8')

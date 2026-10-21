@@ -1,6 +1,6 @@
 # 独立官方 CLI 与原版 Viewer
 
-本文说明同一个非官方个人工作台中的实现行为。Windows 0.2.20 已完成本地构建、安装和软件验收，具体范围与证据见文末。
+本文说明同一个非官方个人工作台中的实现行为。Windows 0.2.20 的构建、安装记录保留在文末；0.2.21 新增本地原版空 Viewer，其已完成验证和待验收范围见 [0.2.21 验证记录](VALIDATION_0.2.21.md)。
 
 ## CLI 与 SDK 分开维护
 
@@ -43,7 +43,17 @@ SHA-256 必须来自官方资产元数据的 `sha256` digest，或该 release �
 
 独立版本只接管受管理的默认 CLI 路径。自定义路径或 SSH 控制端继续使用原配置；没有通过独立版本验证的记录不能任意指定外部可执行文件。
 
-## 原版可视化
+## 不接设备打开空窗口
+
+进入“连接与校准 → 官方可视化”的“直接打开”，可打开完整原版 Rerun 0.36.0 空 Viewer。此入口不运行 `wuji viz`，不扫描、连接设备或加载 SDK；没有模拟骨架、传感器数据或实测反馈。需要设备实时画面时，再切换“设备画面”。
+
+Viewer 使用固定官方 CDN 的 HTML、JS、WASM、图标和许可文件，随本地资源提供。仅从 HTML 壳移除外网 Google Fonts 标签，JS 与 WASM 不修改。HTML、JS 与所用 CLI 的内嵌资源字节一致；CDN WASM 不与 CLI 内嵌版本字节一致，不能称为从 CLI 完整提取。来源、大小和 SHA-256 固定在 `src/official_viewer_manifest.json`，`prepare_official_viewer.py` 准备和校验资源，构建前再次校验。
+
+空 Viewer 由独立回环地址和临时端口提供，只允许静态资源，不提供工作台 API。HTML 响应以 `Clear-Site-Data: "storage"` 清除此独立地址的存储；不依赖该版本实际忽略的 `persist=0`，也不清理工作台设置。隐藏欢迎示例，不传入记录或数据流地址，CSP 限制联网请求。
+
+已在真实 Edge 中启动原版 WASM 和空 canvas，重载后存储哨兵删除，实际外部请求和页面异常均为零。原版遥测请求被 CSP 拦截，控制台仍保留对应提示，不能把“零页面异常”写成“零控制台错误”。0.2.21 的安装版 WebView2、完整界面、构建与发布验收仍待最终记录。
+
+## 设备实时画面
 
 入口位于“连接与校准”中的“官方可视化”。先查找并选择官方设备列表中实际返回的序列号，再由用户明确打开。当前启动入口支持 Windows 内置 Linux 或本机 Linux；远程 SSH Viewer 的独立隧道接入尚未实现。设备范围为 Hand 2 和 Glove，Hand 1 会被拒绝。
 
@@ -83,4 +93,4 @@ Windows 0.2.20 的本地安装包已完成并实际安装。159 个 Web 资产�
 
 安装版证据：`outputs/workbench-cli-0220/native-final-0220.json`、`native-download-cancel.json`、`native-cli-roundtrip/rollback-confirmed.json`、`native-cli-roundtrip/restore.json`、`userdata-preservation-confirmed.json` 与 `frozen-source-verification.json`。
 
-原版 Viewer 外层的单 iframe、隐藏恢复、主题与失败恢复已做全模拟界面 QA；iframe 内容为 mock，真实设备与原版 WASM 加载尚未验证。用户本轮只要求软件验收，因此没有执行设备连接、扫描、触觉清零、标定或运动；实机功能留待后续独立验收。
+0.2.20 的单 iframe、隐藏恢复、主题与失败恢复使用 mock 内容验证，当时没有验证真实原版 WASM。0.2.21 已补充上述 Edge 原版空 Viewer 验证；它仍不证明设备数据流或安装版 WebView2 已通过。用户本轮只要求软件验收，没有执行设备连接、扫描、触觉清零、标定或运动；实机功能留待后续独立验收。

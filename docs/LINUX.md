@@ -62,6 +62,7 @@ python3.12 -m venv .venv
 ## 3. 启动并选择本机控制端
 
 ```sh
+.venv/bin/python prepare_official_viewer.py
 .venv/bin/python src/desktop.py
 ```
 

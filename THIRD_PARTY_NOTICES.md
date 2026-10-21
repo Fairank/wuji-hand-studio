@@ -1,5 +1,20 @@
 # Attribution / 来源
 
+## Device-free original Viewer (0.2.21)
+
+The local empty Viewer uses the original Rerun 0.36.0 JavaScript and WebAssembly
+from https://app.rerun.io/version/0.36.0/, under MIT / Apache-2.0. Both upstream
+license texts are bundled with the static resources. Pinned URLs, sizes and
+SHA-256 hashes are in src/official_viewer_manifest.json; use
+prepare_official_viewer.py to reproduce the payload before building. Renderer
+JavaScript and WASM are unmodified. The HTML host removes external Google Fonts
+links so it can open without an Internet connection. It runs on a separate
+static-only loopback origin whose storage is cleared on each HTML load; this
+does not clear Workbench preferences. It contains no simulated device recording.
+Live Wuji visualization still runs the selected official CLI independently.
+The CDN WASM is a Rerun release build, not byte-identical to the build embedded
+in the Wuji CLI; HTML and JavaScript were compared and matched.
+
 ## Optional original Ubuntu Studio component (0.2.18)
 
 Wuji Studio is a separately licensed vendor application. Workbench downloads the unmodified `wuji-studio_2026.9.22_amd64.deb` from the official GitHub release on demand, verifies its SHA-256 and extracts it to a dedicated directory. The binary is not redistributed by this repository or installer. Its UI, names and assets remain the vendor's property and are not covered by Workbench's MIT license. The final release is no longer maintained. See [component guide](docs/OFFICIAL_STUDIO.md).

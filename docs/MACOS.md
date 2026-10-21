@@ -32,6 +32,7 @@ Lima 管理自己的内部密钥和本地传输，不导入个人 SSH 密钥、�
 
 ```sh
 python scripts/prepare_macos_payload.py
+python prepare_official_viewer.py
 python build.py
 python scripts/verify_macos_bundle.py
 open -n dist/HandWorkbench.app
