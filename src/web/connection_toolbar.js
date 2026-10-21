@@ -21,10 +21,11 @@
   const devices=document.createElement('div');devices.className='connection-device-summary';
   function deviceCard(id){const card=document.createElement('div');card.className='connection-device-card';card.id=id;const name=document.createElement('strong'),value=document.createElement('span');card.append(name,value);devices.append(card);return {card,name,value};}
   const handCard=deviceCard('connection-hand-summary'),gloveCard=deviceCard('connection-glove-summary');
+  const gloveCli=document.createElement('small');gloveCli.id='connection-glove-cli';gloveCli.className='connection-cli-status';gloveCard.card.append(gloveCli);
   const routes=document.createElement('nav');routes.className='connection-routes';
-  const routeSpecs=[['device','connection','连接设备','Connect devices','机械手与数据手套','Robot hands and data gloves'],['calibration','calibration','手套标定','Calibrate glove','用户档案与官方六姿势流程','User profiles and six official poses'],['retarget','mapping','手套映射','Glove mapping','调整关键点比例与关节输出','Tune landmark scales and joint output']];
+  const routeSpecs=[['device','connection','连接设备','Connect devices','机械手反馈与手套 SDK 预览','Hand feedback and glove SDK preview'],['official','glove','手套官方画面','Official glove view','查找手套，打开原版实时可视化','Find a glove and open the original live Viewer'],['calibration','calibration','手套标定','Calibrate glove','用户档案与官方六姿势流程','User profiles and six official poses'],['retarget','mapping','手套映射','Glove mapping','调整关键点比例与关节输出','Tune landmark scales and joint output']];
   const routeRows=routeSpecs.map(([tab,icon,label,en,detail,detailEn])=>{
-    const row=window.WorkbenchActionRow.create({kind:'link',href:'#connection',icon,label,detail,onActivate:()=>{close();window.WujiConnectionHub.show(tab);document.getElementById('hub-tab-'+tab)?.focus();}});
+    const row=window.WorkbenchActionRow.create({kind:'link',href:'#connection',icon,label,detail,onActivate:()=>{close();window.WujiConnectionHub.show(tab);if(tab==='official')window.WujiOfficialViz?.showDeviceMode();else document.getElementById('hub-tab-'+tab)?.focus();}});
     routes.append(row.element);return {row,label,en,detail,detailEn};
   });
   pop.append(header,devices,summary,pendingNote,legacyNote,candidates,routes);document.body.append(pop);
@@ -69,20 +70,25 @@
     if(fresh&&Number.isFinite(s.metrics?.device_hz))subtitle.textContent+=' · '+Math.round(s.metrics.device_hz)+' Hz';
     if(stops.length)subtitle.textContent+=text(' · 停用待确认',' · Disable unconfirmed');
     group.dataset.state=fresh?'connected':connecting?'connecting':connected||s?.connection==='error'?'error':'disconnected';
-    toggle.textContent=busy?text('请稍候','Please wait'):connecting?text('取消','Cancel'):connected?(s.hardware?.active?text('停止并断开','Stop & disconnect'):text('断开','Disconnect')):text('连接','Connect');
+    toggle.textContent=busy?text('请稍候','Please wait'):connecting?text('取消连接','Cancel connection'):connected?(s.hardware?.active?text('停止并断开','Stop & disconnect'):text('断开机械手','Disconnect hand')):text('连接机械手','Connect hand');
     toggle.disabled=busy||!online||!!s?.glove?.busy;
-    toggle.title='';
+    toggle.title=connected?text('断开机械手；如有动作正在运行，沿用现有停止并确认流程。','Disconnect the hand; active motion follows the existing stop-and-confirm flow.'):connecting?text('取消本次机械手连接。','Cancel this hand connection.'):text('此按钮连接机械手反馈；手套请使用设备面板中的“手套官方画面”。','This button connects hand feedback. For a glove, use Official glove view in the device panel.');
     pendingNote.hidden=!stops.length;pendingNote.textContent=stops.length?text('停用待确认：','Disable unconfirmed: ')+serials(stops).join(' · ')+text('。重连对应设备后，点击“停止实机”等待确认。','. Reconnect the matching device, then click Stop hand and wait for confirmation.'):'';
     legacyNote.hidden=!s?.official_studio?.reserved;legacyNote.textContent=s?.official_studio?.reserved?text('旧软件会话尚未结束，请先结束该会话后重试。','A legacy software session is still open. End that session before retrying.'):'';
-    toggle.setAttribute('aria-label',toggle.textContent+' '+text('机械手','hand'));
+    toggle.setAttribute('aria-label',toggle.textContent);
     heading.textContent=text('设备与连接','Devices & connections');dismiss.setAttribute('aria-label',text('关闭连接面板','Close connection panel'));dismiss.title=dismiss.getAttribute('aria-label');
     routes.setAttribute('aria-label',text('设备操作入口','Device destinations'));
     handCard.name.textContent=handName;handCard.value.textContent=subtitle.textContent+(identified?' · '+s.device_id:'');handCard.card.dataset.state=group.dataset.state;
     gloveCard.name.textContent='Wuji Glove';
     const glove=s?.glove||{};
     const gloveFresh=online&&glove.connection==='receiving'&&glove.stream?.fresh===true;
-    gloveCard.value.textContent=!online?text('服务离线','Service offline'):glove.connection==='receiving'?(gloveFresh?text('正在接收','Receiving'):text('等待有效数据','Waiting for valid data')):glove.connection==='connecting'?text('正在连接','Connecting'):glove.connection==='ready'?text('已发现','Discovered'):glove.connection==='disconnected'||!glove.connection?text('未连接','Not connected'):text('连接未完成','Connection incomplete');
+    gloveCard.value.textContent=text('SDK 预览：','SDK preview: ')+(!online?text('服务离线','Service offline'):glove.connection==='receiving'?(gloveFresh?text('正在接收','Receiving'):text('等待有效数据','Waiting for valid data')):glove.connection==='connecting'?text('正在连接','Connecting'):glove.connection==='ready'?text('已发现','Discovered'):glove.connection==='disconnected'||!glove.connection?text('未接入','Not connected'):text('连接未完成','Connection incomplete'));
     gloveCard.card.dataset.state=gloveFresh?'connected':glove.connection==='receiving'?'error':'disconnected';
+    const viz=s?.official_viz||{},vizDevice=viz.device||{},vizSerial=String(vizDevice.sn||vizDevice.serial||''),vizKind=['model','type','device_type','device_name'].map(k=>typeof vizDevice[k]==='string'?vizDevice[k]:'').join(' ');
+    const gloveSession=/^WG/i.test(vizSerial)||/glove/i.test(vizKind);
+    const cliLabels={starting:['正在启动','Starting'],running:['CLI 运行中，数据新鲜度未报告','CLI running; data freshness not reported'],stopping:['正在停止','Stopping'],error:['需要处理，请查看官方画面','Needs attention; see the official view'],exited:['已退出','Exited']};
+    gloveCli.textContent=text('官方手套画面：','Official glove view: ')+(!online||gloveSession&&viz.phase==='running'&&viz.active!==true?text('状态未核对','Status unverified'):gloveSession&&cliLabels[viz.phase]?text(...cliLabels[viz.phase]):text('未运行','Not running'));
+    gloveCli.dataset.phase=online&&gloveSession&&typeof viz.phase==='string'?viz.phase:'unknown';
     const gloveStops=stops.filter(row=>row.source==='glove');
     if(gloveStops.length){
       gloveCard.value.textContent+=text(' · 停用待确认',' · Disable unconfirmed');gloveCard.card.dataset.state='error';

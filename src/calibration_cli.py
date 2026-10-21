@@ -47,6 +47,9 @@ def controller_args(config, args):
 
 
 def cli_json(config, *args):
+    if args==('devices',):
+        from official_device_discovery import use_native,native_devices
+        if use_native(config):return native_devices()
     from official_cli import cli_path
     command = [cli_path(config), '--json', *args]
     if len(args)>1 and args[0]=='user' and args[1] in ('create','switch'):
@@ -67,7 +70,7 @@ def cli_json(config, *args):
     return value
 
 
-def runner_command(config, mode, args, expected_user=None, replace=False):
+def runner_command(config, mode, args, expected_user=None, replace=False, expected_device=None, expected_side=None):
     """Deploy the same verified controller bundle used by the device sessions."""
     if config['mode']=='wsl':
         from managed_runtime import WslController, PYTHON
@@ -83,9 +86,10 @@ def runner_command(config, mode, args, expected_user=None, replace=False):
     else:
         raise ValueError('Guided calibration requires the built-in or local controller')
     prefix=[mode]
-    if mode=='calibrate':
+    if mode in ('calibrate','calibrate_address'):
         if not isinstance(expected_user,str) or not expected_user:raise ValueError('Expected calibration user required')
         prefix.extend([expected_user,'replace' if replace else 'keep'])
+        if mode=='calibrate_address':prefix.extend([expected_device,expected_side])
     return controller_args(config,[python,'-u',directory+'/calibration_runner.py',*prefix,*args])
 
 
@@ -216,9 +220,16 @@ class CalibrationCLI:
                 raise ValueError('Selected glove side does not match calibration side / 手套与标定左右手不符')
             config = load_config()
             from official_cli import cli_path
-            args = [cli_path(config), '--jsonl', 'calib', 'hand-model',
-                    '--sn', serial, '--handedness', side, '--timeout-s', str(timeout_s)]
-            command = runner_command(config, 'calibrate', args, current['name'], replace)
+            from official_device_discovery import use_native
+            if use_native(config):
+                from calibration_address import network_address
+                address=network_address(device.get('address') or device.get('ip'))
+                args=[cli_path(config),'--jsonl','calib','hand-model','--address',address,'--timeout-s',str(timeout_s)]
+                command=runner_command(config,'calibrate_address',args,current['name'],replace,serial,side)
+            else:
+                args = [cli_path(config), '--jsonl', 'calib', 'hand-model',
+                        '--sn', serial, '--handedness', side, '--timeout-s', str(timeout_s)]
+                command = runner_command(config, 'calibrate', args, current['name'], replace)
             flags = getattr(subprocess, 'CREATE_NO_WINDOW', 0) | getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0)
             process = subprocess.Popen(command, stdin=subprocess.PIPE,
                                        stdout=subprocess.PIPE, stderr=subprocess.PIPE,

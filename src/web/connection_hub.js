@@ -41,6 +41,8 @@
  <div class="wb-actions hub-calibration-actions"><button type="button" id="hub-calib-start" class="primary" aria-describedby="hub-current-profile hub-calib-setup-summary"></button><button type="button" id="hub-calib-cancel"></button></div>
  </div><div class="hub-calibration-session"><div id="hub-calibration-guide"></div></div></div>`;
  sections.calibration.append(calib);
+ const endPreview=document.createElement('button');endPreview.id='hub-calib-end-preview';endPreview.type='button';endPreview.hidden=true;calib.querySelector('.hub-calibration-actions').append(endPreview);
+ const previewOnly=s=>s?.glove?.busy===true&&s?.connection==='disconnected'&&s?.hardware?.active===false&&!s.glove.feedback?.device_id&&s.glove.hardware?.active!==true&&s.glove.hardware?.active!==null&&!(s.unconfirmed_devices||[]).length;
  const setup=calib.querySelector('.hub-calibration-setup'),profileModels=$('hub-calib-models'),guideHost=$('hub-calibration-guide');
  const guide=window.OfficialCalibration?.mount(guideHost,{language:()=>window.WujiLocale?.lang||'zh'});
  window.WujiConnectionHub={show(key){location.hash='#connection';ws.showPage();select(key)}};
@@ -79,6 +81,7 @@
    calibration=data.calibration||calibration;if(name==='calibration_start')$('hub-replace').checked=false;
   }catch(error){actionError=error.message}finally{busy=false;renderCalibration();refresh(true)}}
  function renderCalibration(){
+  endPreview.hidden=!previewOnly(consoleState);endPreview.disabled=busy||!!calibration?.run?.running;endPreview.textContent=t('关闭手套预览以标定','Close glove preview for calibration');
   const form=JSON.stringify([busy,refreshPending,calibrationFresh,actionError,refreshError,consoleState?.connection,!!consoleState?.glove?.busy,$('hub-profile').value,$('hub-calib-device').value,$('hub-new-profile').value,$('hub-side').value,$('hub-replace').checked,window.WujiLocale?.lang]);
   if(renderedCalibration===calibration&&renderedForm===form)return;renderedCalibration=calibration;renderedForm=form;
   const c=calibration||{},available=calibrationFresh&&c.available,run=c.run||{},users=(c.users||[]).filter(x=>x&&typeof x==='object'),devices=(c.devices||[]).filter(x=>x&&typeof x==='object');
@@ -117,6 +120,7 @@
  }
  $('hub-calib-refresh').onclick=()=>refresh(true);$('hub-profile-switch').onclick=()=>action('calibration_profile_switch',{profile:$('hub-profile').value});$('hub-profile-create').onclick=()=>action('calibration_profile_create',{profile:$('hub-new-profile').value.trim()});
  $('hub-calib-start').onclick=()=>action('calibration_start',{side:$('hub-side').value,serial:$('hub-calib-device').value,replace:$('hub-replace').checked});$('hub-calib-cancel').onclick=()=>action('calibration_cancel');
+ endPreview.onclick=async()=>{try{const response=await fetch('/api/state',{cache:'no-store',signal:AbortSignal.timeout(5000)});if(!response.ok)throw Error(t('无法核对设备状态','Cannot verify device state'));const state=await response.json();consoleState=state;if(!previewOnly(state))throw Error(t('设备会话已改变，请在原工作区结束。','The device session changed. End it in its owning workspace.'));await action('glove_disconnect');}catch(error){actionError=error.message;renderCalibration();}};
  for(const id of ['hub-new-profile','hub-side','hub-replace','hub-profile','hub-calib-device'])$(id).addEventListener('input',renderCalibration);
  window.addEventListener('console-state',event=>{consoleState=event.detail;renderStatus();renderCalibration()});
  window.addEventListener('console-offline',()=>{consoleState=null;renderStatus();renderCalibration()});

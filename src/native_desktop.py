@@ -126,6 +126,7 @@ class NativeDesktop:
     def navigate(self,page):
         if page=='control-tools':self.window.evaluate_js('window.WujiOfficialTools.open()')
         elif page=='official-viz':self.window.evaluate_js('window.WujiConnectionHub.show("official")')
+        elif page=='official-viz-device':self.window.evaluate_js('window.WujiConnectionHub.show("official");window.WujiOfficialViz.showDeviceMode()')
         else:self.window.evaluate_js('location.hash='+json.dumps('#'+page)+';window.WujiWorkspace.showPage()')
         return dict(ok=True,page=page)
 

@@ -1,5 +1,23 @@
 # Attribution / 来源
 
+## Original Windows CLI on demand (0.2.23)
+
+The Windows host-network path downloads the unmodified official Wuji CLI
+2026.10.12 x86_64 executable on explicit first use, from
+[the official release asset](https://github.com/wuji-technology/wuji-cli/releases/download/v2026.10.12/wuji_2026.10.12_x86_64-pc-windows-msvc.zip).
+The repository and installer do not redistribute this Windows executable.
+The ZIP SHA-256 is
+`1c9a902386432c9afda160c28a438f4710e74f3c0329f2b9d52216456747bfe0`;
+the extracted `wuji.exe` SHA-256 is
+`5a2325310040085bb3cb93d3711738eb2fbf456f33426f498aa0b6b6f3826b01`.
+The original archive, release metadata and local preparation manifest remain in
+the per-user `WujiStudio/official-cli-native/versions/2026.10.12` store.
+Upstream code, embedded Viewer resources, names and any applicable license terms
+remain the upstream authors' property and are not relicensed by Workbench's MIT
+grant. The native pin is separate from the Linux CLI updater. This does not
+install Studio or establish device/calibration acceptance. See
+[Windows glove networking](docs/Windows-glove-network.md).
+
 ## Device-free original Viewer (0.2.21)
 
 The local empty Viewer uses the original Rerun 0.36.0 JavaScript and WebAssembly

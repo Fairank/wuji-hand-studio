@@ -13,7 +13,7 @@ import threading
 def run(argv):
     from sdk_session import ProfileLease
     from device_ownership import DeviceOwnership
-    if len(argv) < 2 or argv[0] not in ('profile', 'calibrate'):
+    if len(argv) < 2 or argv[0] not in ('profile', 'calibrate','calibrate_address'):
         raise ValueError('Unsupported official CLI wrapper operation')
     mode, command = argv[0], argv[1:]
     if mode == 'profile':
@@ -25,9 +25,18 @@ def run(argv):
         raise ValueError('Expected calibration user and overwrite choice')
     expected_user,overwrite,command=command[0],command[1]=='replace',command[2:]
     if not expected_user or expected_user.lower()=='default':raise ValueError('Named calibration user required')
-    if len(command) != 10 or command[1:4] != ['--jsonl', 'calib', 'hand-model'] or command[4] != '--sn' or command[6] != '--handedness' or command[8] != '--timeout-s':
-        raise ValueError('Expected official hand-model calibration arguments')
-    with ProfileLease(exclusive=True), DeviceOwnership(command[5]):
+    if mode=='calibrate_address':
+        if len(command)<2:raise ValueError('Expected calibration identity')
+        expected_serial,side,command=command[0],command[1],command[2:]
+        if len(command)!=8 or command[1:4]!=['--jsonl','calib','hand-model'] or command[4]!='--address' or command[6]!='--timeout-s':raise ValueError('Expected official address calibration arguments')
+        from calibration_address import network_address
+        network_address(command[5])
+        if side not in ('left','right'):raise ValueError('Invalid calibration side')
+    else:
+        if len(command) != 10 or command[1:4] != ['--jsonl', 'calib', 'hand-model'] or command[4] != '--sn' or command[6] != '--handedness' or command[8] != '--timeout-s':
+            raise ValueError('Expected official hand-model calibration arguments')
+        expected_serial,side=command[5],command[7]
+    with ProfileLease(exclusive=True), DeviceOwnership(expected_serial):
         # Preflight on the host can race another workspace changing SDK user.
         # Recheck under the exclusive Linux lease before any capture starts.
         check=subprocess.run([command[0],'--json','user','show'],capture_output=True,text=True,timeout=20)
@@ -35,11 +44,14 @@ def run(argv):
         current=json.loads(check.stdout)
         if not isinstance(current,dict) or current.get('name')!=expected_user or current.get('is_default'):
             raise ValueError('SDK user changed before capture; refresh and select again / 标定用户已变更，请刷新后重新选择')
-        model=current.get(command[7]+'_hand')
+        model=current.get(side+'_hand')
         if not isinstance(model,dict) or type(model.get('calibrated')) is not bool:
             raise ValueError('Official calibration state is unknown; refresh first')
         if model['calibrated'] and not overwrite:
             raise ValueError('Calibration now exists; explicit replacement consent required / 已有标定，请重新确认是否覆盖')
+        if mode=='calibrate_address':
+            from calibration_address import verify_glove
+            verify_glove(command[5],expected_serial,side)
         process = subprocess.Popen(command, stdin=subprocess.DEVNULL)
         cancelled = threading.Event()
         def cancel(*_):

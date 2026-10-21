@@ -2,6 +2,8 @@
 
 本文说明同一个非官方个人工作台中的实现行为。Windows 0.2.20 的构建、安装记录保留在文末；0.2.21 新增本地原版空 Viewer，其已完成验证和待验收范围见 [0.2.21 验证记录](VALIDATION_0.2.21.md)。
 
+**0.2.23 Windows 路径变更：** Windows 内置 WSL 的默认设备发现与实时 Viewer 改用独立固定版本的主机原生 CLI；Linux 标定及用户档案仍保留。下文的 Linux runner 与自动更新说明不代表原生 pin 会同步升级。当前使用方式见 [Windows 手套连接与官方画面](Windows-glove-network.md)。
+
 ## CLI 与 SDK 分开维护
 
 工作台从固定的官方仓库 [wuji-technology/wuji-cli](https://github.com/wuji-technology/wuji-cli) 检查 CLI 发布版本。CLI 独立更新不会同时升级内置 SDK、替换整个控制环境或迁移用户的校准档案。

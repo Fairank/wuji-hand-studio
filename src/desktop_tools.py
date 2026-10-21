@@ -5,7 +5,7 @@ from pathlib import Path
 from device_termination import unconfirmed
 
 PAGES = ('library', 'feedback', 'parameters', 'connection', 'glove', 'doctor',
-         'interaction', 'capture', 'records', 'settings', 'devices', 'control-tools', 'official-viz')
+         'interaction', 'capture', 'records', 'settings', 'devices', 'control-tools', 'official-viz','official-viz-device')
 OPERATIONS = ('inspect', 'capture', 'page', 'resize', 'appearance', 'menu',
               'viewer', 'close_idle', 'prepare_update', 'import_model', 'preview', 'picker', 'connection_panel', 'reload_ui')
 

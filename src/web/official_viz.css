@@ -7,6 +7,11 @@
 .ov-modes{display:inline-flex;width:auto;max-width:100%;margin:0 0 18px;padding:4px;gap:4px}
 .ov-modes button{min-height:34px;padding:7px 18px;white-space:nowrap}
 .ov-root>.ov-display-actions{margin:0 0 12px;justify-content:flex-end}
+.ov-source-info{display:flex;align-items:center;flex-wrap:wrap;gap:10px 18px;min-width:0;margin:8px 0 12px}
+.ov-source-info #ov-message{flex:1 1 280px;margin:0}
+.ov-root[data-view-mode=offline]>.ov-source-info{padding:12px 14px;border:1px solid var(--wb-line);border-radius:12px;background:var(--wb-group);margin:0 0 14px}
+html #page-connection #ov-connect-device{flex:0 0 auto;width:auto;min-height:35px;padding:8px 13px;border:0;border-radius:9px;background:#007aff;color:#fff;font-size:12px;font-weight:550;box-shadow:none;white-space:nowrap}
+html #page-connection #ov-connect-device:not(:disabled):hover{background:#0068dc}
 .ov-root[data-view-mode=offline]>.ov-heading{margin-bottom:12px}
 .ov-root[data-view-mode=offline] .ov-stage{height:calc(100dvh - 350px);min-height:280px}
 .ov-root[data-view-mode=offline] .ov-logs{display:none}
@@ -23,3 +28,7 @@ body[data-official-viz-focus=true] .top,body[data-official-viz-focus=true] .dire
 @media(max-width:600px){.ov-root{grid-template-columns:minmax(0,1fr)}.ov-root>.ov-display-actions{grid-column:1;grid-row:3;justify-content:flex-start}.ov-root>.ov-modes{grid-column:1}.ov-root[data-view-mode=offline] .ov-stage{height:55dvh;min-height:260px}}
 body[data-official-viz-focus=true] .ov-root{align-items:stretch}
 body[data-official-viz-focus=true] .ov-root>.ov-modes{align-self:flex-start}
+/* Empty-mode context stays visible even when the renderer is focused. */
+body[data-official-viz-focus=true] .ov-root[data-view-mode=offline] #ov-message{display:block}
+#connection-popover .connection-cli-status{display:block;font-size:11px;font-weight:400;line-height:1.5;color:var(--ui-sub,var(--wb-sub));overflow-wrap:anywhere}
+@media(forced-colors:active){.ov-root[data-view-mode=offline]>.ov-source-info{background:Canvas;border-color:CanvasText}html #page-connection #ov-connect-device{background:ButtonFace;color:ButtonText;border:1px solid ButtonText}}
