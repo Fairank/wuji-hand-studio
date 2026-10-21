@@ -8,9 +8,27 @@
 
 ## Windows 下载和启动
 
-在 [Releases](../../releases) 选择实际已上传的安装包，各版本沿用同一 Windows 软件、安装身份和用户数据目录；0.2.25 的验证范围见 [验证记录](docs/VALIDATION_0.2.25.md)，公开安装包以实际 Release 为准。Windows 当前用户安装无需另装 Python；安装器检查微软 WebView2 运行时，缺少时联网安装。包暂未进行发布者代码签名，附有 SHA-256 校验文件。
+在 [Releases](../../releases) 选择实际已上传的安装包，各版本沿用同一 Windows 软件、安装身份和用户数据目录；0.2.26 的验证范围见 [验证记录](docs/VALIDATION_0.2.26.md)，公开安装包以实际 Release 为准。Windows 当前用户安装无需另装 Python；安装器检查微软 WebView2 运行时，缺少时联网安装。包暂未进行发布者代码签名，附有 SHA-256 校验文件。
 
-## 0.2.25 统一设备发现与选择
+## 0.2.26 设备中心、统一展示与简单模式
+
+首页改为“设备”中心，左侧为最近连接，右侧为当前发现，不再使用欢迎大卡片、黑色大按钮和手绘手形。最近连接只记录实际接入事实，在本机按设备编号去重，最多保留12条；记录存在不等于当前在线。当前设备在页面可见、会话允许时每5秒自动扫描，可关闭自动扫描或手动扫描，不重叠扫描、不打断已占用会话。
+
+侧栏统一为“灵巧手展示 / Hand demonstrations”，页面内选择“单手 / 多手”；简单模式也能使用多手。复用原有展示、节目单和多手控制，切换保留活动会话、画面与输入，不开始或停止动作。无设备也可先选择动作和预览。
+
+顶部 Hand 与 Glove 分开显示，未接入时进入对应的统一设备目录，按实际编号选择；不会直接连接第一台设备。身份核对后才补充可确认的型号与左右手，SDK 新鲜数据和官方 Viewer 运行状态分别显示。
+
+语言切换只保留在设置；轻柔回弹默认用于日常控件，删除设置中的试用演示。模式选择只绘制一个移动底层，英文侧栏为完整单词留出空间。
+
+本版中文设备名称统一使用“灵巧手”，覆盖页面、按钮、连接状态和服务端可见提示；保留官方 Hand / Glove 产品名。
+
+首次默认简单模式，侧栏及设置中可切换到完整模式，展开参数、设备工具及高级配置。切换保留已有会话、控件与草稿，不发送连接、使能、标定或动作命令；偏好在本机保存。移除侧栏及工作区常驻声明，“关于”、许可证和本页的非官方身份说明继续保留。
+
+Windows 原生磨砂增加事件恢复：回到窗口、还原窗口或系统外观变化后，按已有透明偏好重新应用，无需再次拨动开关。事件合并处理，普通拖动不逐帧重设；不轮询、不采集桌面，也不改变焦点或系统偏好。Windows 背景 Acrylic 在窗口失去焦点时可以退为实色，这仍由系统决定，不承诺失焦后持续透明。[微软 Acrylic 说明](https://learn.microsoft.com/en-us/windows/apps/design/style/acrylic)
+
+使用方法见 [设备首页与工作台模式](docs/SIMPLE_MODE.md)，既有要求及待验收项目见 [用户要求与验收清单](docs/REQUESTS_AND_ACCEPTANCE.md)。软件验证、构建及本机安装范围见 [0.2.26 验证记录](docs/VALIDATION_0.2.26.md)；早期安装候选保留为历史，不作为最终交付证据。公开安装包以上方实际 Release 为准。
+
+## 历史：0.2.25 统一设备发现与选择
 
 “连接与校准 → 设备连接”先显示统一设备目录，区分左、右机械手与手套，按实际序列号选择后再进入需要的功能。可见且空闲时自动发现，扫描与预览、标定及动作分开；选择卡片不启动机械手。
 
@@ -250,7 +268,7 @@ Windows 的[内置轻量控制环境](docs/BUILT_IN_CONTROLLER.md)随安装包�
 
 Python 3.12：`python -m pip install -r requirements.txt`，然后 `python src/desktop.py`。
 
-Ubuntu 24.04 x86_64 从 Git 克隆后，可在项目 `.venv` 安装官方 CLI / SDK 2026.10.12，并选择「本机 Ubuntu」，无需 SSH、虚拟机或 Studio。完整的固定版本下载、校验、配置路径，以及官方 `viz --sn SN --no-zero` 和 `calib hand-model --sn SN` 示例见 [Linux 本机安装](docs/LINUX.md)。当前工作台未嵌入完整 CLI Viewer；本轮尚未实测新的 Linux 安装。
+Ubuntu 24.04 x86_64 从 Git 克隆后，可在项目 `.venv` 安装官方 CLI / SDK 2026.10.12，并选择「本机 Ubuntu」，无需 SSH、虚拟机或 Studio。完整的固定版本下载、校验、配置路径，以及官方 `viz --sn SN --no-zero` 和 `calib hand-model --sn SN` 示例见 [Linux 本机安装](docs/LINUX.md)。当前工作台已嵌入完整原版 CLI Viewer；新的 Linux 安装与实机画面仍需在目标系统验收。
 
 只想先在另一台 Ubuntu 装好官方工具、找手套、做手型标定和备份，可逐段照着 [Ubuntu CLI / SDK 操作指南](docs/UBUNTU_CLI_QUICKSTART_ZH.md) 执行；工作台的本机接入继续使用这些配套工具。
 
@@ -268,7 +286,7 @@ Ubuntu 已有历史 0.1.3 包。macOS 的原生构建在 GitHub Mac runner 上�
 
 Version 0.2.20 embeds the original official `wuji viz` Viewer under Connection → Visualization. The outer controls follow Workbench styling; the vendor renderer remains unmodified. The main app checks CLI releases on startup, records the official git tag, verifies the release archive SHA-256, checks the required software interfaces and switches only while all workspaces are idle. Prior versions are retained for rollback. CLI updates do not update the SDK or device firmware. See the [CLI / Viewer guide](docs/OFFICIAL_CLI_VIEWER.md) and [0.2.20 validation](docs/VALIDATION_0.2.20.md). Physical-device acceptance remains separate from software tests.
 
-For a source installation on Ubuntu 24.04 x86_64 with Python 3.12 and the pinned official CLI / SDK, see [Local Linux installation](docs/LINUX.md). Linux can run locally without SSH or a VM. The guide also covers official visualization and calibration commands; the complete CLI Viewer is not embedded in the current workbench, and a fresh Linux installation has not been tested in this round.
+For a source installation on Ubuntu 24.04 x86_64 with Python 3.12 and the pinned official CLI / SDK, see [Local Linux installation](docs/LINUX.md). Linux can run locally without SSH or a VM. The guide also covers official visualization and calibration commands; the workbench embeds the complete original CLI Viewer. A fresh Linux installation and physical-device view still require acceptance on the target system.
 
 The 0.2.19 update uses the bundled official CLI and SDK 2026.10.12 with controller image 1.1.0. Open Settings → Connections → Official CLI / SDK to install or select the components and run the software check. Actual CLI version and SDK import results are separate from the installation record and bundled target. These checks do not connect devices or enable motors. Build, installation and publication status must be confirmed in the [0.2.19 validation record](docs/VALIDATION_0.2.19.md).
 

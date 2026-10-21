@@ -84,6 +84,8 @@ Source: "{#ProjectRoot}\src\official_data\*"; DestDir: "{app}\controller\source\
 Source: "{#ProjectRoot}\controller\README.md"; DestDir: "{app}\controller"; Flags: ignoreversion
 
 [InstallDelete]
+; Retired settings-only motion demo. Default spring styles remain.
+Type: files; Name: "{app}\_internal\web\spring_motion.js"
 ; Retired duplicate pose browser. These are program assets, never user profiles.
 Type: files; Name: "{app}\_internal\web\calibration_guide.js"
 Type: files; Name: "{app}\_internal\web\calibration_guide.css"

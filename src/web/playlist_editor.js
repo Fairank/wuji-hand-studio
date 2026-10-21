@@ -64,7 +64,7 @@
   if(!state)return t('正在读取工作台状态。','Reading workbench status.');
   if(state.hardware?.active!==false||state.glove?.busy)return t('请先结束当前实机动作或手套会话。','Finish the current hand action or glove session first.');
   if(mode==='preview')return '';
-  if(state?.connection!=='connected')return t('机械手未连接。请先使用右上角的「连接」。','Hand disconnected. Use Connect in the top bar first.');
+  if(state?.connection!=='connected')return t('灵巧手未连接。请先使用右上角的「连接」。','Hand disconnected. Use Connect in the top bar first.');
   if(state?.stale)return t('正在等待最新设备反馈。','Waiting for fresh device feedback.');
   if(state?.device_profile?.generation!=='hand2')return t('当前节目单实机播放支持二代手。','Playlist playback on hardware supports Hand 2.');
   if(!$('pe-clear').checked)return t('确认工作区已清空后，即可开始。','Confirm that the workspace is clear to start.');
@@ -85,7 +85,7 @@
   $('wb-dance-all').disabled=busy||!catalog.length||entries.length>=64||catalog.every(a=>entries.some(e=>e.action===a.id));
   for(const m of ['preview','hardware']){$('pe-mode-'+m).setAttribute('aria-pressed',String(mode===m));$('wb-program-'+m).hidden=active||mode!==m;$('wb-program-'+m).disabled=busy||!!reason;}
   $('pe-hardware-options').hidden=mode!=='hardware';
-  $('pe-destination-note').textContent=mode==='preview'?t('仅播放屏幕里的手部模型。','Plays the hand model on screen.'):t('使用当前连接的机械手与参数。','Uses the connected hand and its current parameters.');
+  $('pe-destination-note').textContent=mode==='preview'?t('仅播放屏幕里的手部模型。','Plays the hand model on screen.'):t('使用当前连接的灵巧手与参数。','Uses the connected hand and its current parameters.');
   $('wb-program-pause').hidden=$('wb-program-stop').hidden=!active;
   $('wb-program-pause').disabled=pending||!active;
   // Stop remains available throughout a pending pause/resume request.

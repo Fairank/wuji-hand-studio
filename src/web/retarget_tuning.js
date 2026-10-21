@@ -55,11 +55,11 @@
   if(!alpha||!delta||![Number(alpha),Number(delta)].every(Number.isFinite))throw Error(t('请完整填写数值','Complete every numeric field'));
   return {segment_scaling:Object.fromEntries(fingers.map((f,i)=>[f,matrix[i]])),pinch_thresholds:Object.fromEntries(fingers.slice(1).map((f,i)=>[f,{d1:pins[i][0],d2:pins[i][1]}])),lp_alpha:Number(alpha),norm_delta:Number(delta)};
  }
- function binding(){if(context){const x=context.binding;$('rt-binding').textContent=`${x.generation} · ${x.side} · ${t('手套','Glove')} ${x.glove_serial||'—'} · ${t('机械手','Hand')} ${x.hand_serial||'—'} · ${t('用户','User')} ${x.sdk_user||'—'} · v${context.revision}`}}
+ function binding(){if(context){const x=context.binding;$('rt-binding').textContent=`${x.generation} · ${x.side} · ${t('手套','Glove')} ${x.glove_serial||'—'} · ${t('灵巧手','Hand')} ${x.hand_serial||'—'} · ${t('用户','User')} ${x.sdk_user||'—'} · v${context.revision}`}}
  async function load(){if(busy)return;busy=true;controls();try{context=(await request('retarget_tuning_context')).tuning;fill(context.values);stale=dirty=false;binding();$('rt-status').textContent=t('参数已载入。保存与应用分别操作。','Parameters loaded. Save and apply are separate actions.');$('rt-export-result').hidden=true;}catch(e){$('rt-status').textContent=e.message}finally{busy=false;controls()}}
  async function save(exporting){if(busy||!context||stale)return;busy=true;controls();try{
   const v=values(),result=await request(exporting?'retarget_tuning_export':'retarget_tuning_save',{binding:context.binding,values:v,revision:context.revision});
-  if(exporting){$('rt-yaml').value=result.tuning_export.yaml;$('rt-export-result').hidden=false;$('rt-export-result').open=true;$('rt-status').textContent=t('已生成 YAML；尚未应用到当前手套或机械手。','YAML generated; not applied to the current glove or hand.');}
+  if(exporting){$('rt-yaml').value=result.tuning_export.yaml;$('rt-export-result').hidden=false;$('rt-export-result').open=true;$('rt-status').textContent=t('已生成 YAML；尚未应用到当前手套或灵巧手。','YAML generated; not applied to the current glove or hand.');}
   else{context=result.tuning;dirty=false;binding();$('rt-status').textContent=t('参数已保存。点击“应用开源映射”才会请求切换预览。','Saved. Apply open mapper to request the preview switch.');}
  }catch(e){$('rt-status').textContent=e.message}finally{busy=false;controls()}}
  $('rt-reload').onclick=()=>{if(!dirty||confirm(t('放弃未保存修改并重新载入？','Discard unsaved edits and reload?')))load()};
@@ -83,7 +83,7 @@
   else if(context)current=t('下次连接使用：','For the next connection: ')+(context.engine==='official_open'?t('官方开源映射','Official open mapper'):'SDK')+' · '+t('暂无新帧确认','Not yet confirmed by a fresh frame');
   else current=t('载入当前配对后显示配置','Load the current pairing to inspect its configuration');
   $('rt-runtime-selection').textContent=current;
-  $('rt-runtime-reason').textContent=attached?t('切换求解器前，请先断开机械手反馈。','Disconnect hand feedback before switching the solver.'):'';
+  $('rt-runtime-reason').textContent=attached?t('切换求解器前，请先断开灵巧手反馈。','Disconnect hand feedback before switching the solver.'):'';
   $('rt-runtime-reason').hidden=!attached;
   const draft=$('rt-draft-state');draft.textContent=stale?t('配对已改变','Pairing changed'):dirty?t('未保存','Unsaved'):context?t('已保存 · v','Saved · v')+context.revision:t('尚未载入','Not loaded');draft.dataset.state=stale?'stale':dirty?'dirty':'saved';
 

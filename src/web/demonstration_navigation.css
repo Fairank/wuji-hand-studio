@@ -1,0 +1,104 @@
+/* A quiet native-style choice; the shared motion layer supplies one moving fill. */
+html body .directory a[data-page="devices"][data-demonstration-hidden="true"] {
+  display: none !important;
+}
+
+html body .directory a[data-page="library"] {
+  min-width: 0;
+  max-width: 100%;
+}
+html body .directory a[data-page="library"] > span {
+  min-width: 0;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: normal;
+  word-break: normal;
+  line-height: 1.35;
+}
+/* The longest English word must fit inside the actual navigation hit area. */
+@media (min-width: 901px) {
+  html[lang="en"] {
+    --hw-rail: 220px;
+    --dg-rail: var(--hw-rail);
+  }
+  html[lang="en"] .page-area {
+    left: var(--hw-rail);
+  }
+}
+@media (max-width: 900px) {
+  html body .directory a[data-page="library"] {
+    flex-shrink: 1;
+  }
+}
+
+html body .demonstration-navigation.hub-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  width: min(100%, 256px);
+  max-width: 100%;
+  gap: 2px;
+  padding: 3px;
+  margin: 0 0 24px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--dg-fill, var(--wb-group, rgba(127, 127, 127, .08)));
+  overflow: visible;
+  --nm-radius: 8px;
+  --nm-fill: var(--wb-card, rgba(255, 255, 255, .9));
+  --nm-edge: rgba(0, 0, 0, .025);
+  --nm-shadow: 0 1px 3px rgba(0, 0, 0, .08);
+}
+
+html body .demonstration-navigation.hub-tabs > button {
+  min-width: 0;
+  min-height: 34px;
+  padding: 7px 13px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  box-shadow: none;
+  background: transparent;
+  color: var(--dg-text-2, var(--wb-sub, #63636c));
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+html body .demonstration-navigation.hub-tabs > button[aria-selected="true"] {
+  color: var(--dg-text, var(--wb-ink, #1d1d1f));
+  background: var(--nm-fill);
+  box-shadow: var(--nm-shadow);
+  font-weight: 600;
+}
+
+html body .demonstration-navigation.hub-tabs > button:focus-visible {
+  outline: 2px solid var(--wb-accent, #007aff);
+  outline-offset: 3px;
+}
+
+html body #page-devices .wsx-root > .demonstration-navigation {
+  margin-bottom: 4px;
+}
+
+html[data-theme="dark"] body .demonstration-navigation.hub-tabs {
+  --nm-fill: rgba(255, 255, 255, .12);
+  --nm-edge: rgba(255, 255, 255, .07);
+  --nm-shadow: 0 1px 3px rgba(0, 0, 0, .16);
+}
+
+html[data-reduce-motion="true"] body .demonstration-navigation > button {
+  transition: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html body .demonstration-navigation > button { transition: none !important; }
+}
+
+@media (forced-colors: active) {
+  html body .demonstration-navigation.hub-tabs > button[aria-selected="true"] {
+    color: HighlightText;
+    background: Highlight;
+    border-color: Highlight;
+    box-shadow: none;
+  }
+}

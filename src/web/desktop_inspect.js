@@ -4,7 +4,7 @@
  const bounds = el => {const r=el.getBoundingClientRect();return {x:Math.round(r.x),y:Math.round(r.y),width:Math.round(r.width),height:Math.round(r.height)};};
  const nodes = [...document.querySelectorAll('button,a[data-page],input,select,textarea,dialog')].filter(visible);
  const surface = s => {const e=document.querySelector(s);if(!e)return null;const c=getComputedStyle(e);return {bounds:bounds(e),background:c.backgroundColor,blur:c.backdropFilter,radius:c.borderRadius};};
- return {page:document.body.dataset.page,language:window.WujiLocale?.lang,
+ return {page:document.body.dataset.page,language:window.WujiLocale?.lang,experience:document.documentElement.dataset.experience,
    native:document.documentElement.dataset.desktop === 'true',
    viewport:{width:innerWidth,height:innerHeight},scroll:{x:scrollX,y:scrollY},overflow:document.documentElement.scrollWidth>innerWidth,
    appearance:{reduceTransparency:document.documentElement.dataset.reduceTransparency,reduceMotion:document.documentElement.dataset.reduceMotion},

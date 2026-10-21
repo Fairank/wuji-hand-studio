@@ -19,9 +19,9 @@
  for(const id of ['hub-calib-doc','rt-doc','glove-config','glove-parameters-link','glove-sdk-doc','glove-calib-doc','performance-export'])$(id)?.classList.add('ui-link-button');
  document.querySelector('.cr-joint-aside a')?.classList.add('ui-link-button');
  const editor=document.querySelector('.cr-mapping-editor');
- if(editor)note(editor,'调整机械手的目标动作','Adjust the robot hand target','比例、偏移和平滑作用于映射输出；不会改写手套的原始测量或手型标定。保存后需要应用，实机跟随单独开启。','Gain, offset and smoothing modify mapped targets, not raw glove measurements or hand calibration. Apply after saving; real-hand follow is enabled separately.');
+ if(editor)note(editor,'调整灵巧手的目标动作','Adjust the robot hand target','比例、偏移和平滑作用于映射输出；不会改写手套的原始测量或手型标定。保存后需要应用，实机跟随单独开启。','Gain, offset and smoothing modify mapped targets, not raw glove measurements or hand calibration. Apply after saving; real-hand follow is enabled separately.');
  const official=$('rt-official');
- if(official)note(official,'调整手套到机械手的求解','Tune glove-to-hand solving','此表作用于工作台内的开源映射引擎，不写入手套。关键点缩放和对指参数在“应用到开源映射”后生效；SDK 内置引擎不读取此表。','This table configures the Workbench open mapping engine, not glove firmware. Landmark scaling and pinch parameters take effect after applying to that engine; the built-in SDK mapper does not read this table.');
+ if(official)note(official,'调整手套到灵巧手的求解','Tune glove-to-hand solving','此表作用于工作台内的开源映射引擎，不写入手套。关键点缩放和对指参数在“应用到开源映射”后生效；SDK 内置引擎不读取此表。','This table configures the Workbench open mapping engine, not glove firmware. Landmark scaling and pinch parameters take effect after applying to that engine; the built-in SDK mapper does not read this table.');
  function translate(){for(const [el,zh,en] of labels)el.textContent=t(zh,en);for(const [row,zh,en,detail,detailEn] of rows)row.setLabels({label:t(zh,en),detail:t(detail,detailEn)});for(const id of ['choose-letter','choose-digit']){const el=$(id);if(el)el.setAttribute('aria-label',el.textContent)}}
  window.addEventListener('wuji-language',translate);
  translate();

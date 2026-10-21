@@ -432,7 +432,7 @@ def main():
                 break
             if process and not received_feedback and time.monotonic()-started > 15:
                 halt()
-                emit(dict(type='error', message='15秒内未收到机械手反馈；请检查电源、网线和设备地址'))
+                emit(dict(type='error', message='15秒内未收到灵巧手反馈；请检查电源、网线和设备地址'))
                 break
     finally:
         halt()

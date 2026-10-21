@@ -1,4 +1,4 @@
-/* One connection control, present on every page; feedback only until explicit playback. */
+/* Two device entrances. Unconnected devices always open the shared directory. */
 (() => {
   'use strict';
   const host=document.querySelector('.top-actions'),old=document.getElementById('shell-connection');if(!host||!old)return;
@@ -8,7 +8,13 @@
   const dot=document.createElement('span');dot.className='connection-dot';dot.setAttribute('aria-hidden','true');
   const copy=document.createElement('span'),title=document.createElement('strong'),subtitle=document.createElement('small');copy.append(title,subtitle);status.append(dot,copy);
   const toggle=document.createElement('button');toggle.type='button';toggle.id='connection-toggle';toggle.className='top-connection-action';
-  group.append(status,toggle);host.prepend(group);
+  group.append(status,toggle);
+  const gloveGroup=document.createElement('div');gloveGroup.className='top-connection top-glove-connection';gloveGroup.id='glove-connection-toolbar';
+  const gloveStatus=document.createElement('button');gloveStatus.type='button';gloveStatus.className='top-connection-status';gloveStatus.id='glove-connection-details';
+  const gloveDot=document.createElement('span');gloveDot.className='connection-dot';gloveDot.setAttribute('aria-hidden','true');
+  const gloveCopy=document.createElement('span'),gloveTitle=document.createElement('strong'),gloveSubtitle=document.createElement('small');gloveCopy.append(gloveTitle,gloveSubtitle);gloveStatus.append(gloveDot,gloveCopy);
+  const gloveToggle=document.createElement('button');gloveToggle.type='button';gloveToggle.className='top-connection-action';gloveToggle.id='glove-connection-toggle';gloveGroup.append(gloveStatus,gloveToggle);
+  const cluster=document.createElement('div');cluster.className='top-device-cluster';cluster.append(group,gloveGroup);host.prepend(cluster);
   const pop=document.createElement('dialog');pop.id='connection-popover';pop.className='connection-popover';pop.setAttribute('aria-labelledby','connection-popover-title');
   const header=document.createElement('div');header.className='connection-popover-head';
   const heading=document.createElement('h3');heading.id='connection-popover-title';
@@ -23,13 +29,13 @@
   const handCard=deviceCard('connection-hand-summary'),gloveCard=deviceCard('connection-glove-summary');
   const gloveCli=document.createElement('small');gloveCli.id='connection-glove-cli';gloveCli.className='connection-cli-status';gloveCard.card.append(gloveCli);
   const routes=document.createElement('nav');routes.className='connection-routes';
-  const routeSpecs=[['device','connection','连接设备','Connect devices','机械手反馈与手套 SDK 预览','Hand feedback and glove SDK preview'],['official','glove','手套官方画面','Official glove view','查找手套，打开原版实时可视化','Find a glove and open the original live Viewer'],['calibration','calibration','手套标定','Calibrate glove','用户档案与官方六姿势流程','User profiles and six official poses'],['retarget','mapping','手套映射','Glove mapping','调整关键点比例与关节输出','Tune landmark scales and joint output']];
+  const routeSpecs=[['device','connection','连接设备','Connect devices','灵巧手反馈与手套 SDK 预览','Hand feedback and glove SDK preview'],['official','glove','手套官方画面','Official glove view','查找手套，打开原版实时可视化','Find a glove and open the original live Viewer'],['calibration','calibration','手套标定','Calibrate glove','用户档案与官方六姿势流程','User profiles and six official poses'],['retarget','mapping','手套映射','Glove mapping','调整关键点比例与关节输出','Tune landmark scales and joint output']];
   const routeRows=routeSpecs.map(([tab,icon,label,en,detail,detailEn])=>{
     const row=window.WorkbenchActionRow.create({kind:'link',href:'#connection',icon,label,detail,onActivate:()=>{close();window.WujiConnectionHub.show(tab);if(tab==='official')window.WujiOfficialViz?.showDeviceMode();else document.getElementById('hub-tab-'+tab)?.focus();}});
     routes.append(row.element);return {row,label,en,detail,detailEn};
   });
   pop.append(header,devices,summary,pendingNote,legacyNote,candidates,routes);document.body.append(pop);
-  let state=null,busy=false,online=false,key='',candidateRows=[],announcedDevices='';
+  let state=null,busy=false,online=false,key='',candidateRows=[];
   const text=(zh,en)=>document.documentElement.lang==='en'?en:zh;
   function pendingStops(){
     const rows=Array.isArray(state?.unconfirmed_devices)?state.unconfirmed_devices.filter(row=>row&&typeof row==='object').slice():[];
@@ -50,7 +56,7 @@
   const serials=rows=>[...new Set(rows.map(row=>row.device_id||text('未识别设备','Unidentified device')))];
   function gloveStopNote(stops=pendingStops()){
     const rows=stops.filter(row=>row.source==='glove');if(!rows.length)return;
-    const note=text('机械手停用待确认：','Hand disable unconfirmed: ')+serials(rows).join(' · ')+text('。重连对应设备后点击“停止实机”。','. Reconnect the matching device, then click Stop hand.');
+    const note=text('灵巧手停用待确认：','Hand disable unconfirmed: ')+serials(rows).join(' · ')+text('。重连对应设备后点击“停止实机”。','. Reconnect the matching device, then click Stop hand.');
     const command=document.getElementById('glove-command-status');if(command&&command.textContent!==note)command.textContent=note;
     const label=document.getElementById('glove-status');if(!state?.glove?.busy&&label&&label.textContent!==note)label.textContent=note;
   }
@@ -60,19 +66,43 @@
   for(const id of ['glove-status','glove-command-status']){const node=document.getElementById(id);if(node)gloveStatusObserver.observe(node,{childList:true,characterData:true,subtree:true});}
   function close(){pop.close();status.setAttribute('aria-expanded','false');}
   function open(){if(!pop.open)pop.show();status.setAttribute('aria-expanded','true');render();}
+  function routeInventory(kind){
+    close();const directory=window.WujiDeviceInventory;
+    if(typeof directory?.show==='function'){directory.show(kind);return true;}
+    window.WujiConnectionHub?.show('device');
+    document.querySelector('.di-filters [data-filter="'+kind+'"]')?.click();
+    document.getElementById('di-scan')?.focus();return true;
+  }
+  function gloveOwner(){
+    const s=state,g=s?.glove||{},v=s?.official_viz||{},device=v.device||{};
+    if(online&&g.busy)return 'sdk';
+    const serial=String(device.sn||device.serial||''),kind=['model','type','device_type','device_name'].map(k=>typeof device[k]==='string'?device[k]:'').join(' ');
+    return online&&(/^WG/i.test(serial)||/glove/i.test(kind))&&(v.active===true||v.reserved||['starting','stopping'].includes(v.phase))?'official':null;
+  }
+  function routeGlove(){
+    close();const owner=gloveOwner();
+    if(owner==='official'){window.WujiConnectionHub?.show('official');window.WujiOfficialViz?.showDeviceMode();return true;}
+    if(owner==='sdk'){window.WujiConnectionHub?.show('device');window.WujiDeviceInventory?.showSettings('glove');return true;}
+    return routeInventory('glove');
+  }
+  function pairedHand(){const g=state?.glove;return online&&g?.busy===true&&!!g.feedback?.device_id;}
   function render(){
     const s=state,connected=online&&s?.connection==='connected',connecting=online&&s?.connection==='connecting',fresh=connected&&!s.stale;
     const stops=pendingStops();
     const identity=s?.identified_device,identified=connected&&identity?.source==='sdk_identity'&&identity.serial===s.device_id&&identity.profile===s.device_profile?.id;
-    const handName=identified?'Wuji Hand '+(s.device_profile.generation==='hand1'?'1':'2')+' · '+text(s.device_profile.side==='left'?'左手':'右手',s.device_profile.side==='left'?'Left':'Right'):'Wuji Hand';
-    title.textContent=handName;status.title=identified?s.device_id:'';
+    const paired=pairedHand(),pair=s?.glove?.feedback,pairIdentity=pair?.identified_device,pairProfile=s?.glove?.profile;
+    const verifiedPair=paired&&pair?.connection==='connected'&&pairIdentity?.source==='sdk_identity'&&pairIdentity.serial===pair.device_id&&pairIdentity.profile===pairProfile&&/^hand[12]_(left|right)$/.test(pairProfile||'');
+    const handName=identified?'Hand '+(s.device_profile.generation==='hand1'?'1':'2')+' · '+text(s.device_profile.side==='left'?'左':'右',s.device_profile.side==='left'?'Left':'Right'):verifiedPair?'Hand '+(pairProfile.startsWith('hand1')?'1':'2')+' · '+text(pairProfile.endsWith('left')?'左':'右',pairProfile.endsWith('left')?'Left':'Right'):'Hand';
+    title.textContent=handName;status.title=identified?s.device_id:verifiedPair?pair.device_id:'';
     subtitle.textContent=!online?text('软件服务离线','Service offline'):connecting?text('正在识别…','Discovering…'):connected?(fresh?text('已连接','Connected'):text('反馈已过期','Feedback stale')):s?.connection==='error'?text('连接未完成','Connection incomplete'):text('未连接','Not connected');
+    if(paired&&!connected&&!connecting)subtitle.textContent=text('手套会话','Glove session');
     if(fresh&&Number.isFinite(s.metrics?.device_hz))subtitle.textContent+=' · '+Math.round(s.metrics.device_hz)+' Hz';
     if(stops.length)subtitle.textContent+=text(' · 停用待确认',' · Disable unconfirmed');
-    group.dataset.state=fresh?'connected':connecting?'connecting':connected||s?.connection==='error'?'error':'disconnected';
-    toggle.textContent=busy?text('请稍候','Please wait'):connecting?text('取消连接','Cancel connection'):connected?(s.hardware?.active?text('停止并断开','Stop & disconnect'):text('断开机械手','Disconnect hand')):text('连接机械手','Connect hand');
-    toggle.disabled=busy||!online||!!s?.glove?.busy;
-    toggle.title=connected?text('断开机械手；如有动作正在运行，沿用现有停止并确认流程。','Disconnect the hand; active motion follows the existing stop-and-confirm flow.'):connecting?text('取消本次机械手连接。','Cancel this hand connection.'):text('此按钮连接机械手反馈；手套请使用设备面板中的“手套官方画面”。','This button connects hand feedback. For a glove, use Official glove view in the device panel.');
+    group.dataset.state=fresh||verifiedPair&&!pair.stale?'connected':connecting?'connecting':connected||paired||s?.connection==='error'?'error':'disconnected';
+    toggle.textContent=busy?text('请稍候','Wait'):connecting?text('取消','Cancel'):connected?(s.hardware?.active?text('停止并断开','End session'):text('断开','Disconnect')):paired?text('查看','View'):text('接入','Set up');
+    toggle.dataset.compactLabel=busy?text('稍候','Wait'):connecting?text('取消','Cancel'):connected?text('断开','End'):paired?text('查看','View'):text('接入','Set up');
+    toggle.disabled=busy||!online||((connected||connecting)&&!!s?.glove?.busy);
+    toggle.title=connected?text('断开灵巧手；如有动作正在运行，沿用现有停止并确认流程。','Disconnect the hand; active motion follows the existing stop-and-confirm flow.'):connecting?text('取消本次灵巧手连接。','Cancel this hand connection.'):paired?text('查看拥有此灵巧手的手套会话；请在原会话中停止或断开。','View the glove session that owns this hand. Stop or disconnect in that session.'):text('前往设备目录选择灵巧手，不会自动连接。','Choose a hand in the device directory. This does not connect automatically.');
     pendingNote.hidden=!stops.length;pendingNote.textContent=stops.length?text('停用待确认：','Disable unconfirmed: ')+serials(stops).join(' · ')+text('。重连对应设备后，点击“停止实机”等待确认。','. Reconnect the matching device, then click Stop hand and wait for confirmation.'):'';
     legacyNote.hidden=!s?.official_studio?.reserved;legacyNote.textContent=s?.official_studio?.reserved?text('旧软件会话尚未结束，请先结束该会话后重试。','A legacy software session is still open. End that session before retrying.'):'';
     toggle.setAttribute('aria-label',toggle.textContent);
@@ -86,6 +116,17 @@
     gloveCard.card.dataset.state=gloveFresh?'connected':glove.connection==='receiving'?'error':'disconnected';
     const viz=s?.official_viz||{},vizDevice=viz.device||{},vizSerial=String(vizDevice.sn||vizDevice.serial||''),vizKind=['model','type','device_type','device_name'].map(k=>typeof vizDevice[k]==='string'?vizDevice[k]:'').join(' ');
     const gloveSession=/^WG/i.test(vizSerial)||/glove/i.test(vizKind);
+    const owner=gloveOwner(),gloveProfile=glove.profile||'',gloveSerial=typeof glove.glove_serial==='string'?glove.glove_serial:'',gloveRecord=window.WujiDeviceInventory?.snapshot()?.devices?.find(d=>(d.sn||d.serial)===gloveSerial&&d.kind==='glove');
+    const side=owner==='sdk'&&gloveSerial&&/^hand[12]_(left|right)$/.test(gloveProfile)?gloveProfile.split('_')[1]:owner==='official'?vizDevice.handedness||vizDevice.side:null;
+    const generation=owner==='sdk'&&gloveRecord?.generation==='glove1'?' 1':owner==='official'&&/\bglove\s*1\b/i.test(vizKind)?' 1':'';
+    const gloveName='Glove'+generation+(['left','right'].includes(side)?' · '+text(side==='left'?'左':'右',side==='left'?'Left':'Right'):'');
+    gloveTitle.textContent=gloveName;gloveStatus.title=owner==='sdk'?gloveSerial:owner==='official'?vizSerial:text('打开手套设备目录','Open glove device directory');
+    gloveSubtitle.textContent=!online?text('服务离线','Service offline'):owner==='sdk'?glove.connection==='receiving'?(gloveFresh?text('数据中','Streaming'):text('等待数据','Waiting for data')):glove.connection==='connecting'?text('准备中…','Preparing…'):glove.connection==='ready'?text('已发现','Discovered'):text('需要处理','Needs attention'):owner==='official'?viz.phase==='running'&&viz.active===true?text('画面运行','Viewer running'):viz.phase==='starting'?text('画面准备中','Viewer starting'):text('查看会话','View session'):text('未接入','Not connected');
+    gloveGroup.dataset.state=gloveFresh?'connected':owner==='sdk'&&glove.connection==='receiving'?'error':owner?'connecting':'disconnected';
+    gloveToggle.textContent=owner?text('查看','View'):text('接入','Set up');gloveToggle.disabled=!online;
+    gloveToggle.title=owner==='official'?text('查看官方画面会话；CLI 未报告数据新鲜度。','View the official Viewer session. The CLI does not report data freshness.'):owner==='sdk'?text('查看当前手套会话；停止与断开仍在原工作区。','View the current glove session. Stop and disconnect remain in its workspace.'):text('前往设备目录选择手套，不会自动接入或断开其他设备。','Choose a glove in the device directory. No device connects or disconnects automatically.');
+    gloveStatus.setAttribute('aria-label',gloveName+' · '+gloveSubtitle.textContent);gloveToggle.setAttribute('aria-label',(owner?text('查看手套会话','View glove session'):text('接入手套','Set up glove')));
+    gloveCard.name.textContent=gloveName;
     const cliLabels={starting:['正在启动','Starting'],running:['CLI 运行中，数据新鲜度未报告','CLI running; data freshness not reported'],stopping:['正在停止','Stopping'],error:['需要处理，请查看官方画面','Needs attention; see the official view'],exited:['已退出','Exited']};
     gloveCli.textContent=text('官方手套画面：','Official glove view: ')+(!online||gloveSession&&viz.phase==='running'&&viz.active!==true?text('状态未核对','Status unverified'):gloveSession&&cliLabels[viz.phase]?text(...cliLabels[viz.phase]):text('未运行','Not running'));
     gloveCli.dataset.phase=online&&gloveSession&&typeof viz.phase==='string'?viz.phase:'unknown';
@@ -95,31 +136,32 @@
       gloveStopNote(stops);
     }
     for(const r of routeRows)r.row.setLabels({label:text(r.label,r.en),detail:text(r.detail,r.detailEn)});
-    summary.textContent=s?.devices?.length?text('请选择要连接的机械手。','Select a hand to connect.'):connected?[s.device_profile?.[document.documentElement.lang==='en'?'en':'zh'],s.device_id].filter(Boolean).join(' · '):s?.connection==='error'?s.message:connecting?text('正在核对设备身份与反馈。','Checking device identity and feedback.'):'';
+    summary.textContent=s?.devices?.length?text('请选择要连接的灵巧手。','Select a hand to connect.'):connected?[s.device_profile?.[document.documentElement.lang==='en'?'en':'zh'],s.device_id].filter(Boolean).join(' · '):s?.connection==='error'?s.message:connecting?text('正在核对设备身份与反馈。','Checking device identity and feedback.'):'';
     summary.hidden=!summary.textContent;
     const next=JSON.stringify([s?.devices||[],document.documentElement.lang]);
-    if(next!==key){key=next;candidateRows=(s?.devices||[]).map(d=>{const b=document.createElement('button');b.type='button';b.textContent=d.serial+' · '+d.generation+(d.side_hint?' · '+text(d.side_hint==='left'?'左手':'右手',d.side_hint):'');b.onclick=()=>run('connect',d.serial);return b;});candidates.replaceChildren(...candidateRows);}
+    if(next!==key){key=next;candidateRows=(s?.devices||[]).map(d=>{const b=document.createElement('button');b.type='button';b.textContent=d.serial+' · '+d.generation+(d.side_hint?' · '+text(d.side_hint==='left'?'左手':'右手',d.side_hint):'');b.onclick=()=>{routeInventory('hand');window.WujiDeviceInventory?.select(d.serial);};return b;});candidates.replaceChildren(...candidateRows);}
     candidates.hidden=!candidateRows.length;
     candidateRows.forEach(b=>b.disabled=busy||connecting||connected);
   }
   async function run(operation,serial=''){
+    if(operation==='connect')return routeInventory('hand');
     if(busy||!online)return false;busy=true;render();
     try{
-      if(operation==='connect'&&state?.devices?.length&&!serial){open();return false;}
       const api=window.WujiConnection;
-      const ok=operation==='connect'?await api.connect(document.getElementById('device-address').value.trim(),serial):await api.disconnect();
+      const ok=await api.disconnect();
       if(!ok)open();return ok;
     }finally{busy=false;state=window.WujiConnection.state();render();}
   }
-  toggle.onclick=()=>run(['connected','connecting'].includes(state?.connection)?'disconnect':'connect');
+  toggle.onclick=()=>!['connected','connecting'].includes(state?.connection)&&pairedHand()?routeGlove():run(['connected','connecting'].includes(state?.connection)?'disconnect':'connect');
+  gloveStatus.onclick=gloveToggle.onclick=routeGlove;
   status.onclick=()=>pop.open?close():open();
   pop.addEventListener('cancel',()=>status.setAttribute('aria-expanded','false'));
-  document.addEventListener('pointerdown',e=>{if(pop.open&&!pop.contains(e.target)&&!group.contains(e.target))close();});
+  document.addEventListener('pointerdown',e=>{if(pop.open&&!pop.contains(e.target)&&!cluster.contains(e.target))close();});
   document.addEventListener('keydown',e=>{if(e.key==='Escape'&&pop.open){close();status.focus();}});
-  window.addEventListener('console-state',e=>{state=e.detail;online=true;render();const devices=JSON.stringify(state.devices||[]);if(state.devices?.length&&devices!==announcedDevices)open();announcedDevices=devices;});
+  window.addEventListener('console-state',e=>{state=e.detail;online=true;render();});
   window.addEventListener('console-offline',()=>{online=false;render();});
   window.addEventListener('wuji-language',render);
   // Fixed app-only test interface; the native dispatcher only allows open/closed/primary.
-  window.WujiConnectionToolbar={open,close,primary:()=>run(['connected','connecting'].includes(state?.connection)?'disconnect':'connect')};
+  window.WujiConnectionToolbar={open,close,primary:()=>!['connected','connecting'].includes(state?.connection)&&pairedHand()?routeGlove():run(['connected','connecting'].includes(state?.connection)?'disconnect':'connect'),routeHand:()=>routeInventory('hand'),routeGlove};
   state=window.WujiConnection?.state();online=!!state;render();
 })();

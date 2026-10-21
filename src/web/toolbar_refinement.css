@@ -1,0 +1,44 @@
+/* Compact device entrances share the window's existing native frosted material. */
+html .top-device-cluster{display:flex;align-items:center;gap:6px;min-width:0}
+html .top-device-cluster .top-connection{padding:3px 4px 3px 9px;gap:4px;min-height:42px;min-width:0;border:1px solid var(--wb-line);border-radius:13px;background:var(--wb-card);box-shadow:none;backdrop-filter:none}
+html .top-device-cluster .top-connection-status{gap:7px;padding:0 6px 0 0;min-height:34px;min-width:0;flex:1;background:transparent!important;border:0;box-shadow:none;backdrop-filter:none;color:var(--wb-ink)!important;border-radius:8px}
+.top-device-cluster .top-connection-status>span:last-child{min-width:0;gap:2px}
+.top-device-cluster .top-connection-status strong{font-size:11px;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:105px;letter-spacing:-.1px}
+.top-device-cluster .top-connection-status small{font-size:10px;line-height:1.25;max-width:125px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--wb-sub)}
+.top-device-cluster .connection-dot{width:5px;height:5px;box-shadow:none!important}
+html .top-device-cluster button.top-connection-action{min-height:31px;padding:6px 10px;flex:none;border:0;border-radius:9px;background:#007aff!important;color:#fff!important;box-shadow:none;backdrop-filter:none;font-size:11px;font-weight:600;white-space:nowrap}
+html .top-device-cluster .top-connection[data-state=connected] button.top-connection-action,html .top-device-cluster .top-connection[data-state=error] button.top-connection-action,html .top-device-cluster .top-glove-connection[data-state=connecting] button.top-connection-action{background:var(--wb-group)!important;color:var(--wb-ink)!important}
+html[data-theme=dark] .top-device-cluster button.top-connection-action{background:#0a84ff!important}
+html .top-device-cluster .top-connection-status:focus-visible,html .top-device-cluster .top-connection-action:focus-visible{outline:2px solid #007aff;outline-offset:3px}
+html .top-actions #global-motion-stop{flex:none;min-height:34px;padding:7px 11px;font-size:12px;white-space:nowrap}
+@media(min-width:901px) and (max-width:1150px){
+ html .top{gap:9px;padding-inline:14px}html .top-actions{gap:6px}
+ html .top-device-cluster{gap:5px}
+ html .top-device-cluster .top-connection{padding-left:7px}
+ .top-device-cluster .top-connection-status strong{max-width:88px}.top-device-cluster .top-connection-status small{max-width:100px}
+ html .top-device-cluster button.top-connection-action{padding-inline:8px;font-size:10px}
+ html .top-actions .studio-tools select{width:76px;min-width:76px;max-width:76px;min-height:34px;padding:6px 9px;font-size:11px}
+ html .top-actions #global-motion-stop{padding-inline:9px;font-size:11px}
+ html .top-actions .desktop-tools{padding-left:5px;margin-left:0}html .top-actions .app-menu-button{width:32px;min-height:34px;height:34px}
+}
+@media(max-width:900px){
+ html .top{align-items:center;gap:10px}
+ html .top-actions{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-start;gap:7px;width:100%;max-width:none}
+ html .top-device-cluster{flex:1 1 100%;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));width:100%;gap:7px}
+ html .top-device-cluster .top-connection{padding-left:9px}
+ .top-device-cluster .top-connection-status strong{max-width:100%;font-size:11px}.top-device-cluster .top-connection-status small{max-width:100%;font-size:10px}
+ html .top-device-cluster .top-connection-action{padding:6px 9px;min-height:31px;font-size:10px}
+ html .top-actions #global-motion-stop{order:1;margin-right:auto;font-size:11px}
+ html .top-actions .studio-tools{order:2;margin-left:0}html .top-actions .studio-tools select{width:82px;min-width:82px;min-height:32px;padding:5px 9px;font-size:11px}
+ html .top-actions .desktop-tools{order:3;margin-left:0;padding-left:5px}
+ html .connection-popover{top:185px;max-height:calc(100dvh - 200px)}
+}
+@media(max-width:420px){
+ html .top-device-cluster .top-connection{padding-left:7px;gap:2px}
+ html .top-device-cluster .top-connection-status{gap:5px;padding-right:3px}
+ html .top-device-cluster .top-connection-action{padding-inline:7px}
+ .top-device-cluster .top-connection-status strong{font-size:10px}
+ html .top-device-cluster #connection-toggle{font-size:0}
+ html .top-device-cluster #connection-toggle:after{content:attr(data-compact-label);font-size:10px}
+}
+@media(forced-colors:active){html .top-device-cluster .top-connection{background:Canvas;border:1px solid CanvasText}html .top-device-cluster button{forced-color-adjust:auto}}

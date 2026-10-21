@@ -69,7 +69,7 @@ class GloveBridge:
                 if self.lease:raise ValueError('已有启动请求 / Start already requested')
                 if not s['stream'].get('fresh'):raise ValueError('等待新鲜手套数据 / Wait for fresh glove data')
                 if s['feedback']['stale'] or not s['hardware'].get('probe_ready') or s['hardware'].get('active') is not False:
-                    raise ValueError('等待完整机械手反馈 / Wait for ready hand feedback')
+                    raise ValueError('等待完整灵巧手反馈 / Wait for ready hand feedback')
                 self.lease=secrets.token_hex(16);c=dict(c,lease=self.lease)
                 self.requested=time.monotonic();self.seen_active=False
                 try:self.send(c)

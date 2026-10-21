@@ -7,7 +7,7 @@ from zenoh_route import DeviceRoute, endpoint, managed_wsl
 
 class SelectionRequired(RuntimeError):
     def __init__(self, devices):
-        super().__init__('发现多只机械手，请选择设备 / Select one of the discovered hands')
+        super().__init__('发现多只灵巧手，请选择设备 / Select one of the discovered hands')
         self.devices = devices
 
 
@@ -85,7 +85,7 @@ def connect_discovered(manager, address='', serial='', use_routes=None):
             if ready or time.monotonic() >= deadline:break
             time.sleep(.1)
         if not devices:
-            raise RuntimeError('未发现机械手，请检查电源、网线或填写自定义地址 / No hand discovered')
+            raise RuntimeError('未发现灵巧手，请检查电源、网线或填写自定义地址 / No hand discovered')
         if serial:
             selected = next((d for d in devices if d['serial'] == serial), None)
             if selected is None:raise RuntimeError('所选设备已离线，请重新发现 / Selected device is no longer available')

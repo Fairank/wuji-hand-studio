@@ -45,6 +45,7 @@ class NativeDesktop:
         self.title='灵巧手工作台 · Hand Workbench'
         self.data_dir=DATA;self.edition=EDITION;self.inspect_lock=threading.Lock()
         self.material=dict(mode='opaque',external_backdrop=False,refraction=False,desktop_capture=False)
+        self.material_lifecycle=None
 
     def start_service(self):
         from console_server import ConsoleHTTPServer,Handler,Controller
@@ -111,11 +112,19 @@ class NativeDesktop:
         if type(enabled) is not bool:raise ValueError('Expected boolean material preference')
         from System import Action
         from native_material import apply
+        from native_material_lifecycle import MaterialLifecycle
+        def publish(result):
+            self.material=result
+            # ExecuteScriptAsync is non-blocking on the UI thread. Only our
+            # local document receives this fixed event; no desktop is read.
+            core=self.window.native.webview.CoreWebView2
+            if core is not None:
+                try:core.ExecuteScriptAsync('window.dispatchEvent(new CustomEvent("native-material-change",{detail:'+json.dumps(result)+'}))')
+                except Exception:logging.exception('Could not publish backdrop recovery to the local window')
         def update():
-            try:self.material=apply(self.window.native,enabled)
-            except Exception as error:
-                logging.exception('System backdrop unavailable')
-                self.material=dict(mode='opaque',external_backdrop=False,refraction=False,desktop_capture=False,error=type(error).__name__)
+            if self.material_lifecycle is None:
+                self.material_lifecycle=MaterialLifecycle(self.window.native,apply,publish)
+            self.material=self.material_lifecycle.request(enabled)
         self.window.native.Invoke(Action(update))
         return dict(ok=True,**self.material)
 
@@ -295,7 +304,7 @@ class NativeDesktop:
         if type(width) is not int or type(height) is not int:width,height=1320,900
         width=max(960,min(width,2560));height=max(680,min(height,1600))
         # Native caption and resizing preserve Windows snapping and keyboard controls.
-        self.window=webview.create_window(self.title,self.origin+'/?desktop=1#library',js_api=DesktopAPI(self),
+        self.window=webview.create_window(self.title,self.origin+'/?desktop=1',js_api=DesktopAPI(self),
             width=width,height=height,min_size=(960,680),background_color='#f5f5f7',text_select=True,zoomable=False)
         self.window.events.closing+=self.on_closing
         self.window.events.loaded+=lambda:self.secure_window(self.window)

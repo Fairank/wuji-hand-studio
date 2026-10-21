@@ -17,7 +17,7 @@
    window.WujiConnectionHub.show('official');window.WujiOfficialViz.showDeviceMode();await window.WujiOfficialViz.selectDevice(serial);return;
   }
   if(mode==='hand'){
-   if(found.kind!=='hand')throw Error(t('所选设备不是机械手','Selected device is not a hand'));
+   if(found.kind!=='hand')throw Error(t('所选设备不是灵巧手','Selected device is not a hand'));
    // Preserve an advertised Ethernet locator, including changed factory IPs.
    // USB and serial URIs stay on the existing discovery route; never invent IPs.
    const locators=[found.address,...(Array.isArray(found.addresses)?found.addresses:[])];
@@ -29,7 +29,7 @@
   if(mode==='calibration'){window.WujiConnectionHub.show('calibration');return;}
   if(mode!=='preview')throw Error('Unknown device workflow');
   let s=await state();
-  if(s.connection!=='disconnected'||s.hardware?.active!==false)throw Error(t('先结束机械手会话，再设置手套预览。','End the hand session before setting up glove preview.'));
+  if(s.connection!=='disconnected'||s.hardware?.active!==false)throw Error(t('先结束灵巧手会话，再设置手套预览。','End the hand session before setting up glove preview.'));
   const side=found.side,profile=s.device_profile;
   if(['left','right'].includes(side)&&profile?.side!==side){
    if(s.glove?.busy)throw Error(t('当前手套会话属于另一侧，请先断开。','The glove session uses the other side. Disconnect it first.'));

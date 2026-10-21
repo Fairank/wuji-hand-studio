@@ -9,7 +9,7 @@
     <div id="joint-grid"></div>
     <p class="rate-note">回报率按每个关节实际收到的数据统计。三维渲染目标20帧/秒，与设备反馈频率分开显示。</p>
     <details id="joint-detail" open><summary>每关节反馈与完整性</summary><p class="rate-note">缺项：收到整帧却没有该关节；序号缺口：包括传输中缺失的整帧。统计窗口为最近1秒。</p><div class="joint-table-scroll"><table><thead><tr><th>设备关节</th><th>收到 Hz</th><th>时间戳 Hz</th><th>新鲜度 ms</th><th>缺项 / 缺口</th><th>位置 rad</th><th>速度 rad/s</th><th>电流 A</th></tr></thead><tbody id="joint-detail-body"></tbody></table></div></details>
-    <details id="mapping-editor"><summary>核对三维关节对应 · 只影响画面</summary><p>首次连接后，逐个核对设备编号对应哪个模型关节、运动方向和零位，再勾选保存。橙色为尚待核对的角度预览，灰色为缺少对应或反馈。此设置不向机械手发送动作。</p><p id="mapping-device">连接设备后可配置，映射按设备分别保存。</p><div class="joint-table-scroll"><table><thead><tr><th>模型关节</th><th>设备编号</th><th>方向</th><th>偏移 rad</th><th>已核对</th></tr></thead><tbody id="mapping-rows"></tbody></table></div><button id="save-mapping" type="button" disabled>保存显示映射</button><p id="mapping-notice" role="status"></p></details>`;
+    <details id="mapping-editor"><summary>核对三维关节对应 · 只影响画面</summary><p>首次连接后，逐个核对设备编号对应哪个模型关节、运动方向和零位，再勾选保存。橙色为尚待核对的角度预览，灰色为缺少对应或反馈。此设置不向灵巧手发送动作。</p><p id="mapping-device">连接设备后可配置，映射按设备分别保存。</p><div class="joint-table-scroll"><table><thead><tr><th>模型关节</th><th>设备编号</th><th>方向</th><th>偏移 rad</th><th>已核对</th></tr></thead><tbody id="mapping-rows"></tbody></table></div><button id="save-mapping" type="button" disabled>保存显示映射</button><p id="mapping-notice" role="status"></p></details>`;
   const slot = document.getElementById('visual-slot') || document.querySelector('main') || document.body;
   slot.append(host);
   const byId = id => document.getElementById(id);
@@ -56,7 +56,7 @@
     byId('pose-image').classList.remove('view-stale');
     byId('pose-unavailable').hidden=true;
     const en=document.documentElement.lang==='en';
-    byId('pose-message').textContent=en?({'手套遥操作 · 实际机械手反馈':'Glove teleoperation · Measured hand feedback','手套映射预览 · 未驱动机械手':'Glove mapping preview · Hand not driven','手套遥操作 · 等待新鲜数据':'Glove teleoperation · Waiting for fresh data'}[meta.message]||meta.message):meta.message;
+    byId('pose-message').textContent=en?({'手套遥操作 · 实际灵巧手反馈':'Glove teleoperation · Measured hand feedback','手套映射预览 · 未驱动灵巧手':'Glove mapping preview · Hand not driven','手套遥操作 · 等待新鲜数据':'Glove teleoperation · Waiting for fresh data'}[meta.message]||meta.message):meta.message;
     byId('render-rate').textContent=`MuJoCo 渲染 ${fmt(meta.render_hz,1)} 帧/秒`;
     byId('pose-frame').textContent=meta.mode==='glove_preview'?(en?`Glove mapping frame ${meta.glove_seq??'—'} · Target, not hand feedback`:`手套映射帧 ${meta.glove_seq??'—'} · 目标姿态，不是实机反馈`):meta.mode==='demo'?'仿真编排 · 不驱动实机':meta.source_seq==null?'模型预览 · 未接收实机姿态':`实机反馈帧 ${meta.source_seq} · 图表与姿态使用同一帧`;
     const rates=new Map((meta.feedback?.joint_rates||[]).map(r=>[r.nid,r]));
@@ -109,7 +109,7 @@
         if(get('nid').value==='')throw new Error(`第${index+1}个模型关节尚未选择设备编号`);
         entries.push({index,nid:Number(get('nid').value),sign:Number(get('sign').value),offset:Number(get('offset').value),verified:true});
       });
-      await action({name:'display_mapping',entries});byId('mapping-notice').textContent=`已保存${entries.length}个显示对应，没有发送机械手动作。`;
+      await action({name:'display_mapping',entries});byId('mapping-notice').textContent=`已保存${entries.length}个显示对应，没有发送灵巧手动作。`;
     }catch(e){byId('mapping-notice').textContent=e.message;}
     finally{mappingPending=false;}
   });

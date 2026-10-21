@@ -2,7 +2,7 @@
   'use strict';
   const el=id=>document.getElementById(id);
   const deviceChoice=document.createElement('select');deviceChoice.id='discovered-device';deviceChoice.hidden=true;
-  deviceChoice.setAttribute('aria-label','选择发现的机械手 / Select discovered hand');el('device-address').after(deviceChoice);
+  deviceChoice.setAttribute('aria-label','选择发现的灵巧手 / Select discovered hand');el('device-address').after(deviceChoice);
   let deviceChoiceKey='';
   const labels={baseline:'无触碰基线',thumb:'拇指轻触',index:'食指轻触',middle:'中指轻触',ring:'无名指轻触',little:'小指轻触',withdrawal:'轻触后抽离'};
   const reasons={completed:'时长完成',user_stop:'手动停止',disconnected:'连接断开',feedback_error:'反馈中断'};
@@ -73,7 +73,7 @@
       }
       return action({name:'disconnect'});
     }};
-  el('connect').addEventListener('click',()=>{if(!deviceChoice.hidden&&!deviceChoice.value){showError('请选择一只机械手 / Select a hand');return;}action({name:'connect',auto_detect:true,serial:deviceChoice.hidden?'':deviceChoice.value,address:el('device-address').value.trim()});});
+  el('connect').addEventListener('click',()=>{if(!deviceChoice.hidden&&!deviceChoice.value){showError('请选择一只灵巧手 / Select a hand');return;}action({name:'connect',auto_detect:true,serial:deviceChoice.hidden?'':deviceChoice.value,address:el('device-address').value.trim()});});
   el('disconnect').addEventListener('click',()=>action({name:'disconnect'}));
   el('record').addEventListener('click',()=>action({name:'record',label:el('annotation').value,seconds:Number(el('duration').value)}));
   el('stop').addEventListener('click',()=>action({name:'stop'}));

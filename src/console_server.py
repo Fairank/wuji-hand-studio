@@ -79,7 +79,7 @@ class Controller:
         self.generation = 0
         self.last_update = 0.
         self.csrf = secrets.token_urlsafe(32)
-        self.state = dict(connection='disconnected', message='接好机械手后，点击“自动连接”', devices=[],
+        self.state = dict(connection='disconnected', message='接好灵巧手后，点击“自动连接”', devices=[],
             latest=None, metrics=dict(host_hz=None, device_hz=None, age_ms=None),
             device_id=None, identified_device=None, joint_rates=[], mapping=[], mapping_device_id=None, display_selected=None,
             recording=dict(active=False, frames=0, elapsed_s=0, label='baseline', seconds=30),
@@ -347,7 +347,7 @@ class Controller:
             return dict(calibration=self.calibration.cancel())
         if name in {'calibration_profile_create','calibration_profile_switch','calibration_start'}:
             if self.program.snapshot()['active'] or self.glove.busy or self.state['connection']!='disconnected' or self.state['hardware'].get('active') is not False or self.doctor.snapshot()['running']:
-                raise ValueError('End glove, hand and diagnostic sessions before calibration / 标定前请结束手套、机械手和诊断会话')
+                raise ValueError('End glove, hand and diagnostic sessions before calibration / 标定前请结束手套、灵巧手和诊断会话')
             if name=='calibration_profile_create':
                 return dict(calibration=self.calibration.profile('create',command.get('profile')))
             if name=='calibration_profile_switch':
@@ -366,7 +366,7 @@ class Controller:
             if engine not in ('sdk','official_open'):raise ValueError('Unknown solver engine')
             g=self.glove.snapshot()
             if (g.get('feedback') or {}).get('device_id') or self.glove.lease or self.state['connection']!='disconnected':
-                raise ValueError('先断开机械手反馈再切换求解器 / Disconnect hand feedback before switching solver')
+                raise ValueError('先断开灵巧手反馈再切换求解器 / Disconnect hand feedback before switching solver')
             context=self.tuning.context(binding)
             if command.get('revision')!=context['revision']:raise ValueError('Tuning changed; reload first')
             if self.glove.busy and g.get('connection') not in ('receiving','ready','error'):
@@ -396,7 +396,7 @@ class Controller:
             elif name=='retarget_apply':
                 g=self.glove.snapshot()
                 if g.get('connection')!='receiving' or (g.get('feedback') or {}).get('device_id') or self.glove.lease:
-                    raise ValueError('只在未连接机械手的手套预览中应用；已有反馈时请重新连接 / Apply in glove-only preview or reconnect')
+                    raise ValueError('只在未连接灵巧手的手套预览中应用；已有反馈时请重新连接 / Apply in glove-only preview or reconnect')
                 self.glove.action(dict(name='glove_retarget',retarget=context['settings']))
             else:
                 self.retarget.library.save(context['binding'],validate(command.get('values')),command.get('revision'))
@@ -409,7 +409,7 @@ class Controller:
             command=dict(command,retarget=context['settings'],solver=dict(engine=tuning['engine'],values=tuning['values']))
         if name=='glove_prepare':
             serial=self.retarget.context(self.state['device_profile'])['binding']['hand_serial']
-            if serial and command.get('serial') and command['serial']!=serial:raise ValueError('Hand differs from saved pairing / 机械手与保存配对不符')
+            if serial and command.get('serial') and command['serial']!=serial:raise ValueError('Hand differs from saved pairing / 灵巧手与保存配对不符')
             command=dict(command,serial=serial or command.get('serial',''))
         if name=='hardware_stop' and self.glove.busy:
             return self.glove.action(dict(name='glove_stop'))
@@ -582,7 +582,7 @@ class Controller:
                 self.reports.parent.mkdir(parents=True, exist_ok=True)
                 (self.reports.parent/'display_mapping.json').write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding='utf-8')
                 self.state['mapping'], self.state['mapping_device_id'] = entries, config['device_id']
-                self.log(f'保存{len(entries)}个显示关节对应；没有向机械手发送命令')
+                self.log(f'保存{len(entries)}个显示关节对应；没有向灵巧手发送命令')
             return
         validate_command(command)
         with self.lock:
@@ -914,15 +914,16 @@ class Handler(BaseHTTPRequestHandler):
         assets.update({'/workspace.js':('workspace.js','text/javascript; charset=utf-8'),
             '/workspace.css':('workspace.css','text/css; charset=utf-8'),
             '/parameters.js':('parameters.js','text/javascript; charset=utf-8')})
-        for name in ('studio.js','locale.js','floating_panel.js','viewer.js','action_picker.js','brand.js','installation.js','profiles.js','doctor.js','glove.js','desktop_shell.js','device_network.js','connection_toolbar.js','workbench_upgrade.js','connection_hub.js','official_calibration.js','settings.js','group_panel.js','workspaces.js','group_view.js','workbench_sheet.js','workbench_clarity.js','numeric_grid.js','retarget_tuning.js','joint_inspector.js','connection_refinement.js','action_row.js','control_surfaces.js','spring_motion.js','navigation_motion.js','playlist_rows.js','playlist_editor.js'):
+        for name in ('studio.js','locale.js','floating_panel.js','viewer.js','action_picker.js','brand.js','installation.js','profiles.js','doctor.js','glove.js','desktop_shell.js','device_network.js','connection_toolbar.js','workbench_upgrade.js','connection_hub.js','official_calibration.js','settings.js','group_panel.js','workspaces.js','group_view.js','workbench_sheet.js','workbench_clarity.js','numeric_grid.js','retarget_tuning.js','joint_inspector.js','connection_refinement.js','action_row.js','control_surfaces.js','navigation_motion.js','playlist_rows.js','playlist_editor.js'):
             assets['/'+name]=(name,'text/javascript; charset=utf-8')
         for name in ('studio.css','floating_panel.css','glass.css','glove.css','desktop_glass.css','desktop_refinement.css','glass_refresh.css','workbench_upgrade.css','connection_hub.css','official_calibration.css','group_panel.css','workspaces.css','group_view.css','workbench_sheet.css','workbench_clarity.css','numeric_grid.css','retarget_tuning.css','joint_inspector.css','connection_refinement.css','control_surfaces.css','spring_motion.css','navigation_motion.css','playlist_editor.css'):
             assets['/'+name]=(name,'text/css; charset=utf-8')
         assets['/viewer']=('viewer.html','text/html; charset=utf-8')
         for name in ('official_tools.js','official_studio.js','official_studio_viewer.js','official_viz.js'):assets['/'+name]=(name,'text/javascript; charset=utf-8')
         for name in ('official_tools.css','official_studio.css','official_studio_viewer.css','official_viz.css'):assets['/'+name]=(name,'text/css; charset=utf-8')
-        for name in ('device_inventory.js','device_workflows.js'):assets['/'+name]=(name,'text/javascript; charset=utf-8')
+        for name in ('device_inventory.js','device_workflows.js','device_history.js','simple_mode.js','demonstration_navigation.js'):assets['/'+name]=(name,'text/javascript; charset=utf-8')
         assets['/device_inventory.css']=('device_inventory.css','text/css; charset=utf-8')
+        for name in ('simple_mode.css','toolbar_refinement.css','demonstration_navigation.css'):assets['/'+name]=(name,'text/css; charset=utf-8')
         assets['/official_studio_viewer.html']=('official_studio_viewer.html','text/html; charset=utf-8')
         assets['/favicon.ico']=('favicon.ico','image/x-icon')
         assets['/app-icon.png']=('app-icon.png','image/png')

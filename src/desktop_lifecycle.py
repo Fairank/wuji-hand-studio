@@ -46,7 +46,7 @@ def close_sessions(controller, timeout=6., clock=time.monotonic, sleep=time.slee
             hw=state.get('glove',{}).get('hardware',{}) if glove.get('busy') else state.get('hardware',{})
             if hw.get('active') is False and hw.get('stop_confirmed') is True:break
             sleep(.05)
-        else:return dict(ok=False,error='尚未确认机械手停用，请回到工作台检查连接。 / Hand disable is not confirmed; check the connection.')
+        else:return dict(ok=False,error='尚未确认灵巧手停用，请回到工作台检查连接。 / Hand disable is not confirmed; check the connection.')
     pending=unconfirmed(state)
     if pending:
         devices=', '.join(str(r.get('device_id') or '未知设备 / Unknown device') for r in pending)
@@ -60,7 +60,7 @@ def close_sessions(controller, timeout=6., clock=time.monotonic, sleep=time.slee
         # its final acknowledgement before closing the application.
         state=controller.snapshot()
         if unconfirmed(state):
-            return dict(ok=False,error='手套退出后仍未确认机械手停用，请核对对应设备 / Hand disable remains unconfirmed after glove cleanup; check the matching device')
+            return dict(ok=False,error='手套退出后仍未确认灵巧手停用，请核对对应设备 / Hand disable remains unconfirmed after glove cleanup; check the matching device')
     controller.player.command(dict(name='demo_stop'))
     controller.action(dict(name='disconnect'))
     # Existing SDK disconnect gives recording flush and disable a grace period.

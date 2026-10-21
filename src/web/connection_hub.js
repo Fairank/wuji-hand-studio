@@ -110,7 +110,7 @@
   $('hub-calib-cancel').disabled=busy||!run.running;
   let notice=available&&!c.calibration_supported?t('远程 SSH 可查看标定状态；请改用工作台内置或本机 Linux 控制端执行官方标定。','SSH can read calibration status. Use the built-in or local Linux controller for official calibration.'):'';
   if(!run.running&&!actionError&&!refreshError&&!c.error&&available&&c.calibration_supported&&(!run.status||run.status==='idle')){
-   const reason=!consoleState?t('工作台服务离线，恢复后再操作。','Workbench service offline; wait for reconnection.'):consoleState.connection!=='disconnected'?t('先断开机械手反馈，再校准手套。','Disconnect hand feedback before glove calibration.'):
+   const reason=!consoleState?t('工作台服务离线，恢复后再操作。','Workbench service offline; wait for reconnection.'):consoleState.connection!=='disconnected'?t('先断开灵巧手反馈，再校准手套。','Disconnect hand feedback before glove calibration.'):
     consoleState.glove?.busy?t('先退出手套预览或跟随，再开始标定。','Close the glove preview or follow session before calibration.'):
     defaultUser?t('在“准备标定”中创建或选择一个命名用户。','Create or select a named user in calibration setup.'):
     !$('hub-calib-device').value?t('请选择手套；未发现时，到“设备连接”重新查找。','Select a glove; use Devices to find it if none are listed.'):
@@ -127,10 +127,10 @@
  window.addEventListener('console-state',event=>{consoleState=event.detail;renderStatus();renderCalibration()});
  window.addEventListener('console-offline',()=>{consoleState=null;renderStatus();renderCalibration()});
  function labels(){for(const [key,zh,en] of definitions)$('hub-tab-'+key).textContent=t(zh,en);
-  $('hub-intro-note').textContent=t('机械手与手套独立连接，也可以只使用其中一种。','Connect a hand, a glove, or both. Each connection is independent.');
-  $('hub-visual-title').textContent=t('映射与机械手预览','Mapping and hand preview');
-  $('hub-visual-note').textContent=t('此处显示工作台独有的映射目标与机械手反馈；手套骨架和触觉数据请使用官方可视化。','View workbench mapping targets and hand feedback here. Use the original visualization for glove skeleton and tactile data.');
-  $('hub-real-label').textContent=t('三维：机械手 / 映射预览','3D: hand / mapped preview');$('hub-preview-label').textContent='';
+  $('hub-intro-note').textContent=t('灵巧手与手套独立连接，也可以只使用其中一种。','Connect a hand, a glove, or both. Each connection is independent.');
+  $('hub-visual-title').textContent=t('映射与灵巧手预览','Mapping and hand preview');
+  $('hub-visual-note').textContent=t('此处显示工作台独有的映射目标与灵巧手反馈；手套骨架和触觉数据请使用官方可视化。','View workbench mapping targets and hand feedback here. Use the original visualization for glove skeleton and tactile data.');
+  $('hub-real-label').textContent=t('三维：灵巧手 / 映射预览','3D: hand / mapped preview');$('hub-preview-label').textContent='';
   $('hub-calib-title').textContent=t('手型标定','Hand-model calibration');
   $('hub-calib-setup-label').textContent=t('准备标定','Calibration setup');
   $('hub-calib-description').textContent=t('官方 CLI 采集手套数据，结果按用户和左右手保存。','Official glove capture, saved per user and hand side.');

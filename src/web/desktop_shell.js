@@ -12,13 +12,35 @@
  const closeDialog=document.createElement('dialog');closeDialog.id='desktop-close-dialog';
  closeDialog.setAttribute('aria-labelledby','desktop-close-title');closeDialog.setAttribute('aria-describedby','desktop-close-note');
  closeDialog.innerHTML=`<h2 id="desktop-close-title"></h2><p id="desktop-close-note"></p><p id="desktop-close-status" role="status"></p><div class="desktop-close-actions"><button id="desktop-close-cancel"></button><button id="desktop-close-confirm" class="primary"></button></div>`;document.body.append(closeDialog);
- async function applyMaterial(){
-  if(!native)return;
-  const reduce=document.documentElement.dataset.reduceTransparency==='true'||matchMedia('(prefers-reduced-transparency: reduce)').matches||matchMedia('(forced-colors: active)').matches;
-  const result=await native.set_window_material(!reduce);
+ let materialRevision=0,materialQueue=Promise.resolve(),materialRefreshTimer=0,materialCount=-1;
+ const reduceMaterial=()=>document.documentElement.dataset.reduceTransparency==='true'||matchMedia('(prefers-reduced-transparency: reduce)').matches||matchMedia('(forced-colors: active)').matches;
+ function paintMaterial(result){
+  if(Number.isSafeInteger(result.recovery_count)){
+   if(result.recovery_count<materialCount)return;
+   materialCount=result.recovery_count;
+  }
   document.documentElement.dataset.externalBackdrop=String(result.external_backdrop===true);
   document.documentElement.dataset.nativeMaterial=result.mode||'solid';if(info)info.material=result;
  }
+ function applyMaterial(){
+  if(!native)return Promise.resolve();
+  const revision=++materialRevision,enabled=!reduceMaterial();
+  // The bridge runs calls on separate Python threads. Serialize fast toggles so
+  // an older result cannot replace the user's latest preference.
+  materialQueue=materialQueue.catch(()=>{}).then(async()=>{
+   if(revision!==materialRevision)return;
+   const result=await native.set_window_material(enabled);
+   if(revision===materialRevision)paintMaterial(result);
+  });return materialQueue;
+ }
+ window.addEventListener('native-material-change',event=>{
+  const result=event.detail;
+  if(result&&typeof result.external_backdrop==='boolean'&&result.requested===!reduceMaterial())paintMaterial(result);
+ });
+ document.addEventListener('visibilitychange',()=>{
+  clearTimeout(materialRefreshTimer);
+  if(native&&!document.hidden)materialRefreshTimer=setTimeout(()=>applyMaterial().catch(()=>{}),150);
+ });
  function appearance(key,value){document.documentElement.dataset[key]=String(value);try{localStorage.setItem('wuji-'+key,String(value));}catch{}if(key==='reduceTransparency')applyMaterial().catch(()=>{});}
  for(const [key,id] of [['reduceTransparency','desktop-transparency'],['reduceMotion','desktop-motion']]){
   let saved=false;try{saved=localStorage.getItem('wuji-'+key)==='true';}catch{}

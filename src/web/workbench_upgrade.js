@@ -92,7 +92,7 @@
  for(const button of [loadPreset,savePreset,deletePreset,applyMapping])button.type='button';
  presetRow.append(presetSelect,loadPreset,presetName,savePreset,deletePreset);mappingCard.append(presetRow);$('wb-retarget-save').after(applyMapping);
  function renderMappingBinding(){if(!mappingContext)return;
-  const b=mappingContext.binding;bindingNote.textContent=`${b.generation} · ${b.side} · ${t('手套','Glove')} ${b.glove_serial||'—'} → ${t('机械手','Hand')} ${b.hand_serial||t('连接时选择','Select on connect')} · ${t('用户','User')} ${b.sdk_user||'—'} · v${mappingContext.revision}`;
+  const b=mappingContext.binding;bindingNote.textContent=`${b.generation} · ${b.side} · ${t('手套','Glove')} ${b.glove_serial||'—'} → ${t('灵巧手','Hand')} ${b.hand_serial||t('连接时选择','Select on connect')} · ${t('用户','User')} ${b.sdk_user||'—'} · v${mappingContext.revision}`;
  }
  function showContext(value,replace=true){mappingContext=value;if(replace){retarget=value.settings;retargetRender()}
   renderMappingBinding();
@@ -162,7 +162,7 @@
    const row=document.createElement('article');row.className='wb-device-card';
    const name=document.createElement('strong');name.textContent=x.label;
    const detail=document.createElement('p');detail.textContent=`${x.profile} · ${x.following===true?t('手套跟随中','Glove following'):x.hardware===true?t('动作中','Moving'):x.connection==='connected'?t('反馈在线','Feedback online'):x.glove==='receiving'?t('手套预览','Glove preview'):t('未连接','Disconnected')}`;
-   const pair=document.createElement('p');pair.textContent=t('机械手：','Hand: ')+(x.hand_serial||'—')+' · '+t('手套：','Glove: ')+(x.glove_serial||'—');
+   const pair=document.createElement('p');pair.textContent=t('灵巧手：','Hand: ')+(x.hand_serial||'—')+' · '+t('手套：','Glove: ')+(x.glove_serial||'—');
    const actions=document.createElement('div');actions.className='wb-actions';
    const button=document.createElement('button');button.textContent=t('打开','Open');button.onclick=()=>switchTo(x.id);
    const remove=document.createElement('button');remove.textContent=t('移除','Remove');
@@ -192,10 +192,10 @@
   $('wb-appearance-note').textContent=t('使用系统原生磨砂；不采集桌面、不绘制外部折射。','Native frosted material. No desktop capture or external refraction.');
   $('wb-theme-label').textContent=t('显示主题','Theme');
   for(const [id,zh,en] of [['system','跟随系统','System'],['light','白色','Light'],['dark','黑色','Dark']])$('wb-theme').querySelector(`[value=${id}]`).textContent=t(zh,en);
-  $('wb-auto-hand-label').querySelector('span').textContent=t('自动发现并连接单只机械手（只读反馈）','Find and connect a single hand automatically (feedback only)');
+  $('wb-auto-hand-label').querySelector('span').textContent=t('自动发现并连接单只灵巧手（只读反馈）','Find and connect a single hand automatically (feedback only)');
   $('wb-auto-glove-label').querySelector('span').textContent=t('自动发现并连接单只手套（仅预览）','Find and connect a single glove automatically (preview only)');
   $('wb-retarget-title').textContent=t('映射输出调整','Mapper output adjustment');
-  $('wb-retarget-note').textContent=t('所选求解器将 21 个关键点映射为 20 个关节角，再应用下方幅度、角度偏移和平滑。配置按左右手、代际、手套、机械手与标定用户分别保存。默认保持官方输出。','The selected solver maps 21 landmarks to 20 joint angles, followed by gain, offset and smoothing. Settings are separate for side, generation, glove, hand and SDK user. Defaults preserve SDK output.');
+  $('wb-retarget-note').textContent=t('所选求解器将 21 个关键点映射为 20 个关节角，再应用下方幅度、角度偏移和平滑。配置按左右手、代际、手套、灵巧手与标定用户分别保存。默认保持官方输出。','The selected solver maps 21 landmarks to 20 joint angles, followed by gain, offset and smoothing. Settings are separate for side, generation, glove, hand and SDK user. Defaults preserve SDK output.');
   $('wb-smoothing-label').textContent=t('输出平滑','Output smoothing');$('wb-retarget-default').textContent=t('恢复默认','Reset defaults');$('wb-retarget-save').textContent=t('保存映射','Save mapping');
   $('wb-glove-settings-link').textContent=t('调整手套映射 →','Adjust retargeting →');
   if(devices){$('wb-device-title').textContent=t('独立设备会话','Independent hand sessions');$('wb-device-note').textContent=t('多手可加入同一个工作区，也可分开使用。','Hands can share a workspace or work independently.');$('wb-device-name-label').textContent=t('名称','Name');$('wb-device-profile-label').textContent=t('型号','Model');$('wb-device-add').textContent=t('添加工作区','Add workspace')}

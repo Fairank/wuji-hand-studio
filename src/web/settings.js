@@ -31,6 +31,9 @@
  const appearanceRow=$('wb-theme').closest('.wb-row');appearanceRow.classList.add('settings-row');
  const languageRow=el('div',undefined,undefined,'wb-row settings-row'),languageLabel=el('label','语言','Language'),language=el('select');language.id='settings-language';languageLabel.htmlFor=language.id;
  language.append(new Option('简体中文','zh'),new Option('English','en'));language.value=L.lang;language.onchange=()=>L.setLanguage(language.value);languageRow.append(languageLabel,language);appearanceRow.after(languageRow);
+ // Keep one visible language control. Studio retains its detached select reference
+ // for async rendering; changing the locale remains owned by this settings row.
+ for(const tools of document.querySelectorAll('.top-actions .studio-tools')){for(const select of tools.querySelectorAll('select'))select.remove();if(!tools.children.length)tools.remove();}
  // Move, do not clone: checked state, native callbacks and persistence stay intact.
  const oldPreferenceSection=$('desktop-transparency').closest('.desktop-menu-section');
  for(const id of ['desktop-transparency','desktop-motion']){const label=$(id).closest('label');label.className='settings-row settings-toggle';appearance.append(label);}

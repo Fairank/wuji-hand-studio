@@ -56,7 +56,7 @@ class ParameterStore:
         if self.sync_status['busy']:raise ValueError('已有参数同步正在进行')
         source=self.source();parse_parameters(source)
         if revision!=digest(source):raise ValueError('本机参数有更新，请重新读取后同步')
-        self.sync_status=dict(busy=True,state='syncing',message='正在同步参数文件；不会启动机械手',revision=None)
+        self.sync_status=dict(busy=True,state='syncing',message='正在同步参数文件；不会启动灵巧手',revision=None)
         return source
 
     def transfer(self,client,source):

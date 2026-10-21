@@ -40,7 +40,7 @@ class ProgramRunner:
             raise ValueError('先结束当前动作 / Finish current motion first')
         if mode=='hardware':
             if command.get('workspace_clear') is not True:raise ValueError('Confirm the workspace is clear')
-            if s['connection']!='connected' or s['stale']:raise ValueError('先连接机械手 / Connect the hand first')
+            if s['connection']!='connected' or s['stale']:raise ValueError('先连接灵巧手 / Connect the hand first')
             if s['device_profile']['generation']!='hand2':raise ValueError('一代手指舞当前仅可预览 / Hand 1 dances are preview-only')
             if s['hardware'].get('gesture_library_version',0)<4:raise ValueError('先升级控制端动作库 / Update controller dance library')
         self.cancel.clear();self.heartbeat=time.monotonic();self.lease=secrets.token_hex(16)
@@ -101,7 +101,7 @@ class ProgramRunner:
                             self.check()
                             self.controller.action(dict(name='hardware_keepalive',lease=lease))
                             s=self.controller.snapshot();h=s['hardware']
-                            if s['stale']:raise ValueError('机械手反馈中断 / Hand feedback expired')
+                            if s['stale']:raise ValueError('灵巧手反馈中断 / Hand feedback expired')
                             seen=seen or h.get('active') is True
                             if h.get('active') is False and seen:
                                 r=h.get('trial_result') or {}

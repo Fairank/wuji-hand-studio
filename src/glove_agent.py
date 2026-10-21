@@ -66,7 +66,7 @@ def paired_hand_worker(address, serial, selected, requests, events, factory, sou
         from wuji_sdk import SdkManager
         hand,route,verified=connect_discovered(SdkManager.instance(),address,serial)
         if verified['id']!=selected['id']:
-            raise ValueError('手套映射与机械手的代际或左右手不符 / Hand model/side differs from glove mapping')
+            raise ValueError('手套映射与灵巧手的代际或左右手不符 / Hand model/side differs from glove mapping')
         if sys.platform.startswith('linux'):
             from device_ownership import DeviceOwnership
             ownership=DeviceOwnership(hand.serial_number)
@@ -178,7 +178,7 @@ def worker_glove(requests,events):
                             if selection_lease:selection_lease.close()
                         glove=candidate;glove_sn=c['serial'];source=GloveSource(c['timeout_ms'])
                         mapping=OutputMapping(c.get('retarget',defaults()));last_source_seq=None
-                        state='receiving';message='已连接手套，机械手未启用 / Glove connected; hand not enabled'
+                        state='receiving';message='已连接手套，灵巧手未启用 / Glove connected; hand not enabled'
                     elif name=='glove_solver':
                         if glove is None:raise ValueError('Connect glove preview first')
                         if hand_thread and hand_thread.is_alive():raise ValueError('Disconnect hand feedback before changing solver')
@@ -191,12 +191,12 @@ def worker_glove(requests,events):
                     elif name=='glove_prepare':
                         if glove is None:raise ValueError('先连接手套 / Connect glove first')
                         source.target(now)
-                        if hand_thread is not None and hand_thread.is_alive():raise ValueError('已有机械手会话；请先断开全部再重试')
+                        if hand_thread is not None and hand_thread.is_alive():raise ValueError('已有灵巧手会话；请先断开全部再重试')
                         from glove_motion import GloveMotion
                         def factory(*args):return GloveMotion(*args,source=source)
                         hand_state={};hand_identity={};hand_error='';hand_requests=queue.Queue();hand_events=queue.Queue()
                         hand_thread=threading.Thread(target=paired_hand_worker,args=(c.get('address',''),c.get('serial',''),selected,hand_requests,hand_events,factory,source),daemon=True)
-                        hand_thread.start();message='正在连接机械手，只读反馈 / Connecting hand feedback only'
+                        hand_thread.start();message='正在连接灵巧手，只读反馈 / Connecting hand feedback only'
                     elif name=='glove_retarget':
                         if glove is None:raise ValueError('Connect glove preview first')
                         if hand_thread and hand_thread.is_alive():raise ValueError('重新连接手套预览后应用映射 / Reconnect preview before applying mapping')
@@ -204,7 +204,7 @@ def worker_glove(requests,events):
                         source.invalidate('等待应用新映射后的骨架 / Waiting for a new mapped frame')
                         message='映射已应用，等待下一帧 / Mapping applied; awaiting new frame'
                     elif name=='glove_follow':
-                        if not hand_thread or not hand_thread.is_alive():raise ValueError('先连接机械手反馈 / Prepare hand feedback first')
+                        if not hand_thread or not hand_thread.is_alive():raise ValueError('先连接灵巧手反馈 / Prepare hand feedback first')
                         source.target(now)
                         hand_requests.put(dict(name='hardware_start',lease=c['lease'],workspace_clear=c['workspace_clear']))
                     elif name=='glove_keepalive':hand_requests.put(dict(name='hardware_keepalive',lease=c.get('lease')))
