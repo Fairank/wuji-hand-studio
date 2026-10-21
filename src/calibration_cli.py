@@ -226,15 +226,19 @@ class CalibrationCLI:
             if self.run['running']:
                 raise ValueError('Calibration is already running')
             state = self.snapshot(refresh=True)
-            if not state['available']:
-                raise ValueError(state['error'] or 'Official CLI unavailable')
+            if not state['available'] or state.get('metadata_current') is not True:
+                raise ValueError(state.get('metadata_error') or state.get('error') or 'Refresh official user status before calibration / 请先刷新官方标定用户状态')
             if not state['calibration_supported']:
                 raise ValueError('Streaming calibration requires the local managed controller / 流式标定需使用本机内置控制端')
             current = state['current'] or {}
-            if not current.get('name') or current['name'].lower() == 'default' or any(isinstance(u, dict) and u.get('name') == current['name'] and u.get('is_default') for u in state['users']):
+            if (not isinstance(current.get('name'), str) or not current['name'].strip()
+                    or current['name'].lower() == 'default' or current.get('is_default')
+                    or any(isinstance(u, dict) and u.get('name') == current['name'] and u.get('is_default') for u in state['users'])):
                 raise ValueError('Create and switch to a named SDK user first / 请先建立并切换到命名用户')
-            model = current.get(side + '_hand') or {}
-            if model.get('calibrated') and not replace:
+            model = current.get(side + '_hand')
+            if not isinstance(model, dict) or type(model.get('calibrated')) is not bool:
+                raise ValueError('Official calibration state is unknown; refresh first / 无法确认此侧已有标定，请先刷新用户状态')
+            if model['calibrated'] and not replace:
                 raise ValueError('This side is already calibrated; confirm replacement / 已有标定，请明确确认覆盖')
             if self.device_provider is not None:
                 devices=self.device_provider(True)
@@ -264,7 +268,7 @@ class CalibrationCLI:
                                        creationflags=flags, env={**os.environ, 'WUJI_NO_UPDATE_CHECK': '1'},
                                        text=True, encoding='utf-8', errors='replace', bufsize=1)
             self.process = process
-            self.run = dict(running=True, status='collecting', step=None, progress=None,
+            self.run = dict(running=True, status='starting', step=None, progress=None,
                             event=None, error=None, exit_code=None, started=time.time(),
                             side=side, serial=serial, user=current['name'],pose_index=None,phase='',
                             result=None,event_count=0,captured_poses=[],id=uuid.uuid4().hex)

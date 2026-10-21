@@ -21,7 +21,7 @@
  }
  const settings=addPage('settings','设置','Settings',{zh:'让工作台适合你的使用习惯。',en:'Make the workbench feel right for you.'});
  const devices=embedded?null:addPage('devices','多手演示','Hand ensemble',{zh:'选择参与的手，一起播放或双手衔接。',en:'Choose participating hands for same-action playback or a paired routine.'});
- settings.innerHTML=`<div class="wb-card"><h3 id="wb-appearance-title"></h3><p id="wb-appearance-note"></p><div class="wb-row"><label id="wb-theme-label" for="wb-theme"></label><select id="wb-theme"><option value="system"></option><option value="light"></option><option value="dark"></option></select></div><div class="wb-row"><label id="wb-auto-hand-label"><input type="checkbox" id="wb-auto-hand"><span></span></label></div><div class="wb-row"><label id="wb-auto-glove-label"><input type="checkbox" id="wb-auto-glove"><span></span></label></div></div>
+ settings.innerHTML=`<div class="wb-card"><h3 id="wb-appearance-title"></h3><p id="wb-appearance-note"></p><div class="wb-row"><label id="wb-theme-label" for="wb-theme"></label><select id="wb-theme"><option value="system"></option><option value="light"></option><option value="dark"></option></select></div></div>
  <div class="wb-card"><h3 id="wb-retarget-title"></h3><p id="wb-retarget-note"></p><div class="wb-row"><label for="wb-smoothing" id="wb-smoothing-label"></label><input id="wb-smoothing" type="number" min="0" max="1000" step="10" value="0"><span>ms</span></div><div id="wb-retarget-grid" class="wb-list"></div><div class="wb-actions"><button id="wb-retarget-default"></button><button id="wb-retarget-save" class="primary"></button></div><p id="wb-retarget-status" class="wb-status" role="status"></p></div>`;
  if(devices)devices.innerHTML=`<div class="wb-card"><h3 id="wb-device-title"></h3><p id="wb-device-note"></p><div class="wb-row"><label for="wb-device-name" id="wb-device-name-label"></label><input id="wb-device-name" maxlength="40"><label for="wb-device-profile" id="wb-device-profile-label"></label><select id="wb-device-profile"><option value="hand2_left">Hand 2 · Left</option><option value="hand2_right">Hand 2 · Right</option><option value="hand1_left">Hand 1 · Left</option><option value="hand1_right">Hand 1 · Right</option></select><button id="wb-device-add" class="primary"></button></div><p id="wb-device-status" role="status" class="wb-status"></p><div id="wb-device-list" class="wb-list"></div></div>`;
  function request(name,payload={}){
@@ -42,24 +42,6 @@
  $('wb-theme').onchange=()=>{themeChoice=$('wb-theme').value;localStorage.setItem('wuji-workbench-theme',themeChoice);themeApply(themeChoice)};
  matchMedia('(prefers-color-scheme: dark)').addEventListener('change',()=>themeApply(themeChoice));
  window.addEventListener('message',event=>{if(embedded&&document.referrer&&event.origin===new URL(document.referrer).origin&&event.data?.type==='wb-theme')themeApply(event.data.value)});
- const autoHand=$('wb-auto-hand'),autoGlove=$('wb-auto-glove');
- autoHand.checked=localStorage.getItem('wuji-auto-hand')==='true';autoGlove.checked=localStorage.getItem('wuji-auto-glove')==='true';
- autoHand.onchange=()=>localStorage.setItem('wuji-auto-hand',String(autoHand.checked));
- autoGlove.onchange=()=>localStorage.setItem('wuji-auto-glove',String(autoGlove.checked));
- let lastHand=0,lastGlove=0,openedGlove=false;
- setInterval(()=>{
-  const now=Date.now();
-  if(autoHand.checked&&!autoGlove.checked&&!state?.glove?.busy&&['disconnected','error'].includes(state?.connection)&&now-lastHand>15000){lastHand=now;request('connect',{address:'',auto_detect:true}).catch(()=>{})}
-  if(autoGlove.checked&&state?.connection==='disconnected'&&!state?.glove?.busy&&now-lastGlove>15000){lastGlove=now;request('glove_scan').catch(()=>{})}
-  const g=state?.glove||{};
-  if(autoGlove.checked&&g.connection==='ready'&&g.devices?.length===1&&!openedGlove){openedGlove=true;
-   request('glove_open',{serial:g.devices[0].serial,user_id:g.user?.user_id||'',timeout_ms:250}).catch(()=>{openedGlove=false});
-  }
-  if(g.connection==='disconnected')openedGlove=false;
- },1000);
- document.addEventListener('click',event=>{if(event.target?.id==='disconnect'||event.target?.id==='connection-toggle'&&state?.connection==='connected'){
-  autoHand.checked=false;localStorage.setItem('wuji-auto-hand','false');
- }},true);
  const fingerNames=()=>L.lang==='en'?['Thumb','Index','Middle','Ring','Little']:['拇指','食指','中指','无名指','小指'];
  let outputGrid=null,outputKind='gain';
  const kindSelect=document.createElement('select');kindSelect.id='wb-output-kind';kindSelect.setAttribute('aria-label',t('调整项','Adjustment'));
@@ -192,8 +174,6 @@
   $('wb-appearance-note').textContent=t('使用系统原生磨砂；不采集桌面、不绘制外部折射。','Native frosted material. No desktop capture or external refraction.');
   $('wb-theme-label').textContent=t('显示主题','Theme');
   for(const [id,zh,en] of [['system','跟随系统','System'],['light','白色','Light'],['dark','黑色','Dark']])$('wb-theme').querySelector(`[value=${id}]`).textContent=t(zh,en);
-  $('wb-auto-hand-label').querySelector('span').textContent=t('自动发现并连接单只灵巧手（只读反馈）','Find and connect a single hand automatically (feedback only)');
-  $('wb-auto-glove-label').querySelector('span').textContent=t('自动发现并连接单只手套（仅预览）','Find and connect a single glove automatically (preview only)');
   $('wb-retarget-title').textContent=t('映射输出调整','Mapper output adjustment');
   $('wb-retarget-note').textContent=t('所选求解器将 21 个关键点映射为 20 个关节角，再应用下方幅度、角度偏移和平滑。配置按左右手、代际、手套、灵巧手与标定用户分别保存。默认保持官方输出。','The selected solver maps 21 landmarks to 20 joint angles, followed by gain, offset and smoothing. Settings are separate for side, generation, glove, hand and SDK user. Defaults preserve SDK output.');
   $('wb-smoothing-label').textContent=t('输出平滑','Output smoothing');$('wb-retarget-default').textContent=t('恢复默认','Reset defaults');$('wb-retarget-save').textContent=t('保存映射','Save mapping');

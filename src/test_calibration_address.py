@@ -314,7 +314,7 @@ class NativeDiscoveryAdapterTests(unittest.TestCase):
 class NativeCaptureAdapterTests(unittest.TestCase):
     def setUp(self):
         self.config = {'mode': 'wsl', 'cli': 'wuji'}
-        self.status = {'available': True, 'calibration_supported': True,
+        self.status = {'available': True, 'calibration_supported': True, 'metadata_current': True,
                        'users': [{'name': 'Demo', 'is_default': False}],
                        'current': {'name': 'Demo', 'left_hand': {'calibrated': False}},
                        'devices': [{'sn': SERIAL, 'model': 'Wuji Glove', 'handedness': 'left',
@@ -345,6 +345,7 @@ class NativeCaptureAdapterTests(unittest.TestCase):
             self.assertEqual(e.spawn.call_args.args[0], ['fake-linux-envelope'])
             self.assertEqual(e.service.run['serial'], SERIAL)
             self.assertEqual(e.service.run['user'], 'Demo')
+            self.assertEqual(e.service.run['status'], 'starting')
             self.assertTrue(e.service.thread.started)
 
     def test_runner_envelope_keeps_identity_outside_single_official_selector(self):
@@ -360,7 +361,13 @@ class NativeCaptureAdapterTests(unittest.TestCase):
 
     def test_host_default_overwrite_and_side_checks_still_prevent_launch(self):
         cases = [('default', lambda s: s['current'].update(name='Default'), False),
+                 ('current_marked_default', lambda s: s['current'].update(is_default=True), False),
                  ('profile_marked_default', lambda s: s['users'][0].update(is_default=True), False),
+                 ('unverified_metadata', lambda s: s.update(metadata_current=False, error='User status unverified'), False),
+                 ('missing_metadata_status', lambda s: s.pop('metadata_current'), False),
+                 ('unknown_model', lambda s: s['current'].pop('left_hand'), False),
+                 ('malformed_model', lambda s: s['current'].update(left_hand='unknown'), False),
+                 ('non_boolean_model', lambda s: s['current']['left_hand'].update(calibrated=0), False),
                  ('existing_model', lambda s: s['current']['left_hand'].update(calibrated=True), False),
                  ('side_mismatch', lambda s: s['devices'][0].update(handedness='right'), False),
                  ('missing_address', lambda s: s['devices'][0].pop('address'), False)]

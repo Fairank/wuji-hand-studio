@@ -32,3 +32,8 @@ body[data-official-viz-focus=true] .ov-root>.ov-modes{align-self:flex-start}
 body[data-official-viz-focus=true] .ov-root[data-view-mode=offline] #ov-message{display:block}
 #connection-popover .connection-cli-status{display:block;font-size:11px;font-weight:400;line-height:1.5;color:var(--ui-sub,var(--wb-sub));overflow-wrap:anywhere}
 @media(forced-colors:active){.ov-root[data-view-mode=offline]>.ov-source-info{background:Canvas;border-color:CanvasText}html #page-connection #ov-connect-device{background:ButtonFace;color:ButtonText;border:1px solid ButtonText}}
+
+/* The live-device entry is primary. A no-device viewer stays an explicit option. */
+.ov-root[data-view-mode=device][data-phase=idle] .ov-stage{min-height:230px;height:clamp(230px,36dvh,340px)}
+.ov-root[data-view-mode=device][data-phase=idle] #ov-empty{min-height:230px}
+body[data-official-viz-focus=true] .ov-root[data-view-mode=device][data-phase=idle] .ov-stage{min-height:0;height:auto}

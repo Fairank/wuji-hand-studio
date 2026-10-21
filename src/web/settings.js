@@ -24,9 +24,11 @@
  });
  body.replaceChildren(tabs,...Object.values(sections));sections.appearance.append(appearance);
  function card(parent,zh,en,noteZh,noteEn){const node=el('div',undefined,undefined,'wb-card');node.append(el('h3',zh,en));if(noteZh)node.append(el('p',noteZh,noteEn));parent.append(node);return node;}
- const discovery=card(sections.devices,'自动发现','Automatic discovery','连接仅开启反馈或预览；设备跟随与动作播放仍由你启动。','Connecting starts feedback or preview. You start follow and motion separately.');
- for(const id of ['wb-auto-hand-label','wb-auto-glove-label']){const label=$(id),row=label.closest('.wb-row');row.classList.add('settings-row','settings-discovery');label.append(label.querySelector('input'));discovery.append(row);}
- discovery.append(el('p','发现多只设备时需要选择；网络或控制端未就绪时，在连接页查看具体原因。','Select a device when multiple are found. Connection details show network or controller issues.','settings-footnote'));
+ const discovery=card(sections.devices,'设备发现与接入','Device discovery & connection','未接入时每5秒自动查找，不会自动连接设备。','The workbench searches every 5 seconds while disconnected. Devices never connect automatically.');
+ discovery.id='settings-device-discovery';
+ discovery.append(el('p','在设备目录中选择具体设备，再点击对应的连接操作。','Select a specific device in the directory, then choose its connection action.','settings-footnote'));
+ discovery.append(el('p','接入成功后暂停自动查找。需要更多设备时，点击“添加设备”继续查找。','Automatic discovery pauses after a successful connection. Choose Add device to search for another device.','settings-footnote'));
+ discovery.append(el('p','添加设备不会断开当前会话。若设备正在用于动作、手套预览或标定，先按页面提示处理；动作与跟随仍需你单独开启。','Adding a device does not disconnect active sessions. Follow the page guidance if motion, glove preview or calibration owns a device. Motion and follow always require a separate action.','settings-footnote'));
  discovery.append(el('p','未识别时显示 Wuji Hand；SDK 确认真实身份后才显示代际、左右手和编号。默认地址探测只适用于未改 IP/端口的手套。','Shows Wuji Hand until the SDK verifies generation, side and serial. Factory-address fallback applies only to gloves with default network settings.','settings-footnote'));
  const appearanceRow=$('wb-theme').closest('.wb-row');appearanceRow.classList.add('settings-row');
  const languageRow=el('div',undefined,undefined,'wb-row settings-row'),languageLabel=el('label','语言','Language'),language=el('select');language.id='settings-language';languageLabel.htmlFor=language.id;

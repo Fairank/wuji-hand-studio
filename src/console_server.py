@@ -182,7 +182,7 @@ class Controller:
         if viz.get('scanning'):reason='正在扫描设备 / Device discovery is running'
         elif reservation(self.official_viz.folder):reason='官方 CLI 会话正在使用设备目录 / An official CLI session is active'
         else:
-            try:self.official_viz.idle_check()
+            try:self.official_viz.check_scan()
             except (ValueError,OSError,RuntimeError) as error:reason=str(error)[:700]
         # Explain the common local owner instead of an opaque global failure.
         if reason and state['glove'].get('busy'):
@@ -1000,20 +1000,29 @@ class ConsoleHTTPServer(ThreadingHTTPServer):
     allow_reuse_port = False
 
     def configure_official_cli(self,startup=True):
-        def all_idle():
-            from studio_component import require_idle
+        def check_workspaces(check):
             from managed_runtime import status as runtime_status
             if runtime_status().get('busy'):raise ValueError('Wait for control environment installation')
             if getattr(self.controller,'desktop_closing',False):raise ValueError('Workbench is closing')
-            require_idle(self.controller.snapshot(),self.controller.doctor.snapshot())
+            check(self.controller.snapshot(),self.controller.doctor.snapshot())
             if self.controller.official_tools.snapshot()['check']['busy']:raise ValueError('Wait for official software checks')
             if hasattr(self,'_fleet'):
                 with self.fleet.lock:records=list(self.fleet.children.values())
                 for row in records:
-                    try:require_idle(self.fleet.get(row,'/api/state'),self.fleet.get(row,'/api/doctor'))
+                    try:check(self.fleet.get(row,'/api/state'),self.fleet.get(row,'/api/doctor'))
                     except OSError:raise ValueError('无法确认另一个工作区状态 / Another workspace state is unavailable') from None
+        def all_idle():
+            from studio_component import require_idle
+            check_workspaces(require_idle)
+        def scan_idle():
+            from bridge_config import load_config
+            from official_device_discovery import use_native
+            from discovery_guard import require_discovery_idle
+            if use_native(load_config()):check_workspaces(require_discovery_idle)
+            else:all_idle()
         self.controller.official_cli.idle_check=all_idle
         self.controller.official_viz.idle_check=all_idle
+        self.controller.official_viz.scan_check=scan_idle
         self.controller.calibration.device_provider=self.controller.calibration_devices
         def calibration_idle():
             from cli_coordination import reservation

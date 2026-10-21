@@ -10,7 +10,7 @@
   root.innerHTML='<header class="ov-heading"><div><h3 id="ov-title"></h3><p id="ov-description"></p></div><span id="ov-state" role="status"></span></header><div class="ov-toolbar"><label class="ov-device-field"><span id="ov-device-label"></span><select id="ov-device"></select></label><button id="ov-scan" type="button"></button><button id="ov-start" class="primary" type="button"></button><button id="ov-stop" type="button"></button><div class="ov-display-actions"><button id="ov-reload" type="button"></button><button id="ov-focus" type="button" aria-pressed="false"></button></div></div><p id="ov-start-note" class="ov-note"></p><div class="ov-session"><span id="ov-identity"></span><span id="ov-version"></span></div><p id="ov-message" role="status" aria-live="polite"></p><p id="ov-error" role="alert"></p><div class="ov-stage"><div id="ov-empty"><strong id="ov-empty-title"></strong><p id="ov-empty-message"></p></div></div><span id="ov-frame-status" role="status"></span><details class="ov-logs"><summary id="ov-logs-label"></summary><pre id="ov-logs"></pre></details>';
   host.append(root);const $=id=>root.querySelector('#'+id),stage=root.querySelector('.ov-stage'),logs=root.querySelector('details');
   const modes=document.createElement('div');modes.className='ov-modes hub-tabs';modes.setAttribute('role','tablist');
-  modes.innerHTML='<button id="ov-mode-offline" role="tab" type="button"></button><button id="ov-mode-device" role="tab" type="button"></button>';
+  modes.innerHTML='<button id="ov-mode-device" role="tab" type="button"></button><button id="ov-mode-offline" role="tab" type="button"></button>';
   root.querySelector('.ov-heading').after(modes);
   const deviceControls=root.querySelector('.ov-toolbar'),displayActions=root.querySelector('.ov-display-actions');deviceControls.after(displayActions);displayActions.prepend($('ov-stop'));
   const sourceInfo=document.createElement('div');sourceInfo.className='ov-source-info';
@@ -18,7 +18,7 @@
   sourceInfo.append($('ov-message'),connectDevice);displayActions.after(sourceInfo);
   const t=(zh,en)=>window.WujiLocale?.lang==='en'?en:zh;
   let state=null,fresh=false,loading=null,pending='',sequence=0,transportError='',actionError='',viewerError='',frame=null,frameUrl='',frameLoaded=false,focus=false,destroyed=false,lastVisible=null,optionKey='',savedScroll=0;
-  let viewMode='offline',offline=null,offlineError='',offlineLoading=null,frameReady=false,consoleState=null,wantedSerial='';
+  let viewMode='device',offline=null,offlineError='',offlineLoading=null,frameReady=false,consoleState=null,wantedSerial='';
   const previewOnly=s=>s?.connection==='disconnected'&&s?.hardware?.active===false&&s?.glove?.busy===true&&!s.glove.feedback?.device_id&&s.glove.hardware?.active!==true&&s.glove.hardware?.active!==null&&!(s.unconfirmed_devices||[]).length;
   const theme=()=>document.documentElement.dataset.theme==='dark'?'dark':'light';
   const visible=()=>!document.hidden&&host.getClientRects().length>0&&getComputedStyle(host).visibility!=='hidden';
@@ -42,16 +42,16 @@
    frame.addEventListener('error',()=>{if(frame!==current)return;viewerError=t('画面载入失败，可重新载入；CLI 会话仍需单独停止。','Viewer loading failed. Reload the view; stop the CLI session separately.');render();});
    frame.src=url;stage.append(frame);$('ov-empty').hidden=true;renderFrameStatus();
   }
-  function renderFrameStatus(){root.dataset.rendererReady=String(frameReady);setText('ov-frame-status',(viewMode==='offline'?frameReady:frameLoaded)?(viewMode==='offline'?t('原版空窗口 · 未接入设备数据','Original empty Viewer · No device data'):t('页面已载入；CLI 未报告数据新鲜度','Page loaded; data freshness is not reported by the CLI')):t('正在载入原版画面…','Loading the original Viewer…'));$('ov-frame-status').hidden=!frame;}
+  function renderFrameStatus(){root.dataset.rendererReady=String(frameReady);setText('ov-frame-status',(viewMode==='offline'?frameReady:frameLoaded)?(viewMode==='offline'?t('查看器已打开 · 未接入设备数据，不用于标定','Viewer open · No device data; not a calibration session'):t('页面已载入；CLI 未报告数据新鲜度','Page loaded; data freshness is not reported by the CLI')):t('正在载入原版画面…','Loading the original Viewer…'));$('ov-frame-status').hidden=!frame;}
   function renderLogs(){if(logs.open)setText('ov-logs',(Array.isArray(state?.logs)?state.logs:[]).filter(line=>typeof line==='string').slice(-80).map(line=>line.slice(0,2000)).join('\n')||t('暂无日志','No log messages'));}
   function render(){
    if(destroyed)return;const s=state||{},busy=!!pending||!!s.busy,active=s.active===true,phase=s.phase;
    setText('ov-title',t('官方可视化','Official visualization'));setText('ov-description',t('通过 Wuji CLI 打开完整原版 Viewer。','Open the complete original Viewer through Wuji CLI.'));
-   const blank=viewMode==='offline';root.dataset.viewMode=viewMode;setText('ov-mode-offline',t('空窗口','Empty Viewer'));setText('ov-mode-device',t('实时设备','Live device'));modes.setAttribute('aria-label',t('可视化来源','Viewer source'));
+   const blank=viewMode==='offline';root.dataset.viewMode=viewMode;setText('ov-mode-offline',t('无设备查看器','Viewer only'));setText('ov-mode-device',t('实时设备','Live device'));modes.setAttribute('aria-label',t('可视化来源','Viewer source'));
    for(const key of ['offline','device']){$('ov-mode-'+key).setAttribute('aria-selected',String(key===viewMode));$('ov-mode-'+key).tabIndex=key===viewMode?0:-1;}
    deviceControls.hidden=blank;root.querySelector('.ov-session').hidden=blank;
    const phases={idle:['尚未打开','Not open'],starting:['CLI 正在启动','CLI starting'],running:['CLI 运行中','CLI running'],stopping:['CLI 正在停止','CLI stopping'],error:['CLI 需要处理','CLI needs attention'],exited:['CLI 已退出','CLI exited']};
-   setText('ov-state',blank?(offline?.available?t('空窗口','Empty Viewer'):t('正在准备界面','Preparing Viewer')):!fresh?t('状态未核对','Status unverified'):s.scanning?t('正在查找设备','Finding devices'):phases[phase]?t(...phases[phase]):t('状态未知','Status unknown'));root.dataset.phase=fresh?text(phase,40):'unknown';
+   setText('ov-state',blank?(offline?.available?t('无设备查看器','Viewer only'):t('正在准备界面','Preparing Viewer')):!fresh?t('状态未核对','Status unverified'):s.scanning?t('正在查找设备','Finding devices'):phases[phase]?t(...phases[phase]):t('状态未知','Status unknown'));root.dataset.phase=fresh?text(phase,40):'unknown';
    setText('ov-device-label',t('手套或灵巧手','Glove or hand'));setText('ov-scan',s.scanning?t('正在查找…','Finding…'):previewOnly(consoleState)?t('关闭手套预览并查找','Close glove preview and find'):t('查找设备','Find devices'));setText('ov-start',pending==='official_viz_start'?t('正在打开…','Opening…'):t('启动实时画面','Start live view'));setText('ov-stop',pending==='official_viz_stop'?t('正在停止…','Stopping…'):t('停止可视化','Stop visualization'));setText('ov-reload',t('重新载入画面','Reload view'));setFocus(focus);
    const devices=(Array.isArray(s.devices)?s.devices:[]).filter(d=>d&&typeof (d.sn||d.serial)==='string'&&(d.sn||d.serial)).map(d=>({...d,sn:d.sn||d.serial})),key=JSON.stringify([devices,window.WujiLocale?.lang]);
    if(key!==optionKey){optionKey=key;const selected=wantedSerial||$('ov-device').value;$('ov-device').replaceChildren(new Option(t('选择设备','Select a device'),''),...devices.map(d=>new Option([text(d.model||d.device_type,100),d.sn,(d.handedness||d.side)==='left'?t('左','Left'):(d.handedness||d.side)==='right'?t('右','Right'):''].filter(Boolean).join(' · '),d.sn)));if(devices.some(d=>d.sn===selected))$('ov-device').value=selected;}
@@ -65,11 +65,11 @@
    setText('ov-identity',identity?(active?t('启动报告：','Startup report: '):t('上次启动：','Previous startup: '))+identity:'');setText('ov-version','CLI '+(text(s.cli_version,80)||t('版本未核对','version unverified'))+(s.backend==='windows_native'?t(' · Windows 原生',' · Native Windows'):''));
    setText('ov-message',!fresh?t('当前状态未核对，重新读取后再操作。','Current state is unverified. Reload it before starting.'):text(s.blocked_reason)||(active?t('显示 CLI 进程状态；画面保留不代表反馈在线。','Shows CLI process state; a retained image does not establish live feedback.'):t('选择设备后打开；不会自动连接其他设备。','Select a device to open; another device is never selected automatically.')));
    if(blank){
-    setText('ov-description',t('原版 Viewer 可以独立打开；插上设备后，仍需选择并启动实时画面。','The original Viewer opens independently. After plugging in a device, select it and start the live view.'));
+    setText('ov-description',t('这里只打开官方查看器，不接收设备数据，也不进行标定。连接设备后，请切换到“实时设备”。','This opens the official viewer without device data or calibration. Choose Live device after connecting your hardware.'));
     setText('ov-start-note',t('原版 Rerun Viewer · 无需启动设备或 Linux 控制端。','Original Rerun Viewer · No device or Linux controller required.'));
-    setText('ov-message',active||s.reserved?t('当前显示空窗口，尚未接入数据；已有设备会话仍在运行，可切到“实时设备”查看，或单独停止。','This empty Viewer has no device data. A device session is still active; switch to Live device to view it, or stop it separately.'):t('当前是空窗口，尚未接入设备数据。点击“接入设备”，再查找并选择手套或灵巧手。','This is an empty Viewer with no device data. Choose Use a live device, then find and select a glove or hand.'));
+    setText('ov-message',active||s.reserved?t('当前查看器没有接入数据；已有设备会话仍在运行，请切回“实时设备”查看或单独停止。','This viewer has no device data. The existing device session is still running; return to Live device to view it or stop it separately.'):t('无设备时可先检查查看器能否打开。查看手套或灵巧手，请点击“接入设备”，再查找并选择实际设备。','Use this to check that the viewer opens without hardware. For glove or hand data, choose Use a live device, then find and select your device.'));
    }
-   setText('ov-error',transportError||actionError||text(s.error)||viewerError);setText('ov-empty-title',!fresh?t('状态未核对','Status unverified'):s.supported===false?t('当前环境不支持','Not supported in this environment'):active?t('等待画面','Waiting for the Viewer'):t('原版 Viewer','Original Viewer'));
+   setText('ov-error',transportError||actionError||text(s.error)||viewerError);setText('ov-empty-title',!fresh?t('状态未核对','Status unverified'):s.supported===false?t('当前环境不支持','Not supported in this environment'):active?t('等待画面','Waiting for the Viewer'):t('选择设备，打开实时画面','Select a device for live visualization'));
    setText('ov-empty-message',!fresh?t('重新读取状态后可恢复画面。','The view can resume after status is verified.'):active?t('CLI 可能仍在运行，停止会话请使用上方按钮。','The CLI may still be running. Use the button above to stop its session.'):t('查找并选择设备，原版界面将在此处显示。','Find and select a device. The original interface will appear here.'));
    if(blank){setText('ov-error',offlineError||viewerError);setText('ov-empty-title',t('正在打开原版 Viewer','Opening original Viewer'));setText('ov-empty-message',offlineError||t('本地资源正在准备，无需连接设备。','Preparing local resources. No device connection needed.'));}
    setText('ov-logs-label',t('详细日志','Detailed log'));renderLogs();syncFrame();renderFrameStatus();$('ov-focus').disabled=!frame;
@@ -104,7 +104,7 @@
   function showDeviceMode(){selectMode('device');($('ov-scan').disabled?$('ov-mode-device'):$('ov-scan')).focus();}
   connectDevice.onclick=showDeviceMode;
   $('ov-mode-offline').onclick=()=>selectMode('offline');$('ov-mode-device').onclick=()=>selectMode('device');
-  modes.addEventListener('keydown',event=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;event.preventDefault();selectMode(event.key==='Home'?'offline':event.key==='End'?'device':viewMode==='offline'?'device':'offline');$('ov-mode-'+viewMode).focus();});
+  modes.addEventListener('keydown',event=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;event.preventDefault();selectMode(event.key==='Home'?'device':event.key==='End'?'offline':viewMode==='offline'?'device':'offline');$('ov-mode-'+viewMode).focus();});
   $('ov-focus').onclick=()=>setFocus(!focus);$('ov-reload').onclick=()=>{detach();viewerError='';if(viewMode==='offline'&&!offline)loadOffline();else syncFrame();render();};logs.addEventListener('toggle',renderLogs);
   const onEscape=e=>{if(e.key==='Escape'&&focus){setFocus(false);$('ov-focus').focus();}},onLanguage=()=>render(),onTheme=()=>{render();if(visible()||state?.active)refresh();};
   const onReady=event=>{if(frame&&frameUrl&&event.source===frame.contentWindow&&event.origin===new URL(frameUrl).origin&&event.data==='READY'){frameReady=true;renderFrameStatus();}};

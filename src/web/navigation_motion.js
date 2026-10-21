@@ -1,7 +1,7 @@
 /* Selection follows existing ARIA state. No routing, control requests or frame loop. */
 (()=>{
   'use strict';
-  const HOSTS='.directory,.hub-tabs,.parameter-tabs,.playback-modes,.symbol-kinds,.wsx-manage-tabs,.rt-segments,.hg-seg,.hg-targets';
+  const HOSTS='.directory,.hub-tabs,.parameter-tabs,.playback-modes,.symbol-kinds,.symbol-options,.wsx-manage-tabs,.rt-segments,.hg-seg,.hg-targets,.di-filters,.pe-mode,.view-sources,.ji-fingers,.ji-joints';
   const ITEMS='a[aria-current],a[data-page],button[aria-selected],button[aria-pressed],[role=tab],label:has(> input[type=radio])';
   const SELECTED='[aria-current=page],[aria-selected=true],[aria-pressed=true],label:has(> input[type=radio]:checked)';
   let mounted=null;
@@ -43,6 +43,8 @@
         this.collect();schedule(this,true);
       }
       collect(){
+        // Rebuilt option lists may replace every child. Reuse the same surface.
+        if(this.indicator.parentNode!==this.host)this.host.append(this.indicator);
         const next=new Set([...this.host.querySelectorAll(ITEMS)].filter(item=>item.closest(HOSTS)===this.host));
         for(const item of this.items)if(!next.has(item)){this.resize.unobserve(item);item.removeAttribute('data-nm-item');}
         for(const item of next)if(!this.items.has(item)){item.dataset.nmItem='';this.resize.observe(item);}

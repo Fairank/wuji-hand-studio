@@ -15,7 +15,7 @@
     function draft(){
       const value=valid();$('symbol-apply').disabled=!value||busy;
       $('symbol-error').textContent=input.value.trim()&&!value?text(kind==='letters'?'请输入 A–Z、0–9 和空格，最多 48 个字符':'请输入一位数字 0–9',kind==='letters'?'Use A–Z, 0–9 and spaces; up to 48 characters.':'Enter one digit, 0–9.'):'\u00a0';
-      for(const b of $('symbol-options').children)b.setAttribute('aria-pressed',String(b.textContent===value));
+      for(const b of $('symbol-options').querySelectorAll(':scope > button'))b.setAttribute('aria-pressed',String(b.textContent===value));
       if(kind==='numbers'){
         const item=catalog.find(x=>x.id==='digit_'+value);
         $('symbol-help').textContent=(item?text(item.description_zh||'',item.description_en||'')+'。 ':'')+text('采用中国大陆常用比数方式；各地有不同习惯。选择后点击播放。','Uses a common mainland Chinese convention; regional variants exist. Press play after selecting.');

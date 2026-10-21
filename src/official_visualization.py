@@ -33,8 +33,9 @@ def viewer_url(value,theme=None):
 
 
 class OfficialVisualization:
-    def __init__(self,folder=None,idle_check=None):
+    def __init__(self,folder=None,idle_check=None,scan_check=None):
         self.folder=Path(folder or root_folder());self.idle_check=idle_check or (lambda:None)
+        self.scan_check=scan_check
         self.lock=threading.RLock();self.process=None;self.thread=None;self.token=None;self.config=None
         self.native_job=None;self.native_stop=threading.Event()
         self.transport=None
@@ -88,10 +89,13 @@ class OfficialVisualization:
             raise
         return self.snapshot()
 
+    def check_scan(self):
+        (self.scan_check or self.idle_check)()
+
     def _begin_scan(self):
         with gate(self.folder):
             token=reserve('scan',self.folder)
-            try:self.idle_check()
+            try:self.check_scan()
             except Exception:release(token,self.folder);raise
             with self.lock:
                 if self.state['busy'] or self.state['active']:release(token,self.folder);raise ValueError('Official CLI session is busy')

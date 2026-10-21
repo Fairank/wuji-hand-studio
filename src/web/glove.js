@@ -36,7 +36,7 @@
  'glove-title':['手套遥操作','Glove teleoperation'],'glove-subtitle':['手套接收 → 映射预览 → 真实手跟随','Glove input → Mapping preview → Real-hand follow'],
  'glove-receive-title':['连接与预览','Connect and preview'],'glove-scan':['扫描手套','Scan gloves'],'glove-config':['控制端设置','Controller settings'],
  'glove-device-label':['选择手套','Select glove'],'glove-user-label':['标定用户','SDK user profile'],'glove-user-note':['选择完成标定时使用的用户。Default 使用内置手型；选择具名用户也不代表已经完成标定。','Choose the profile used for calibration. Default uses the built-in hand model; a named profile alone does not prove calibration.'],
- 'glove-timeout-label':['手套失联后停用','Disable after glove timeout'],'glove-open':['连接手套并预览','Connect glove and preview'],'glove-disconnect':['断开全部','Disconnect all'],
+ 'glove-timeout-label':['手套失联后停用','Disable after glove timeout'],'glove-open':['连接手套并预览','Connect glove and preview'],'glove-disconnect':['断开此会话','Disconnect session'],
  'glove-follow-title':['灵巧手跟随','Real-hand follow'],'glove-follow-note':['先连接灵巧手反馈，检查手套与设备的左右手是否一致，再由你开启跟随。','Prepare hand feedback and verify matching hand sides before starting follow.'],
  'glove-address-label':['灵巧手地址（可空，按所选左右手发现）','Hand address (optional; discover by selected side)'],'glove-prepare':['连接灵巧手反馈','Prepare hand feedback'],
  'glove-clear-label':['底座已固定，灵巧手活动空间已清空','Base secured and robotic hand workspace clear'],

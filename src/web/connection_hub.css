@@ -70,3 +70,65 @@ html[data-reduce-motion=true] .settings-row input,html[data-reduce-motion=true] 
 @media(prefers-reduced-motion:reduce){.settings-row input,.settings-row input:before{transition:none}}
 @media(forced-colors:active){.settings-row input[type=checkbox]{appearance:auto}.settings-row input:before{display:none}}
 @media(max-width:700px){.settings-row{gap:12px}.settings-row>select{width:140px;min-width:120px}.settings-section .wb-card{padding:18px}}
+
+/* Calibration is a single preparation flow beside the official live event. */
+html body #page-connection #hub-calibration .hub-calibration{max-width:none;padding:0;border:0;background:transparent;box-shadow:none}
+html body #page-connection #hub-calibration .hub-calibration-heading{gap:16px;margin:0 0 18px;padding:0 0 16px;align-items:center}
+html body #page-connection #hub-calibration #hub-calib-title{font-size:19px;letter-spacing:-.35px;margin:0 0 5px}
+html body #page-connection #hub-calibration #hub-calib-description{font-size:12px;line-height:1.6;margin:0;max-width:52ch}
+html body #page-connection #hub-calibration .hub-calibration-tools{gap:7px}
+html body #page-connection #hub-calibration .hub-calibration-tools :is(button,a){display:inline-flex;align-items:center;justify-content:center;min-height:32px;padding:6px 10px;border:1px solid var(--wb-line);border-radius:9px;background:var(--wb-card);color:var(--wb-ink);font-size:11px;line-height:1.5;white-space:nowrap;text-decoration:none;box-shadow:none}
+html body #page-connection #hub-calibration .hub-calibration-tools #hub-calib-cli{padding:4px 0;border:0;background:transparent;font-size:10px;line-height:1.5;max-width:15ch}
+html body #page-connection #hub-calibration .hub-calibration-tools #hub-calib-cli[data-state=ready]{color:var(--wb-ok,#168344)}
+html body #page-connection #hub-calibration .hub-calibration-workspace{grid-template-columns:minmax(280px,1.25fr) minmax(230px,1fr);gap:22px;align-items:start}
+html body #page-connection #hub-calibration .hub-calibration-session{position:relative;min-height:0;border:1px solid var(--wb-line);border-radius:17px;padding:18px;background:var(--wb-group)}
+html body #page-connection #hub-calibration .hub-calibration-setup{padding:0;margin:0;border:0;border-radius:0;background:transparent}
+html body #page-connection #hub-calibration .hub-calibration-setup>:not(summary){margin:0}
+html body #page-connection #hub-calibration .hub-calib-setup-caption{display:none}
+html body #page-connection #hub-calibration .hub-calibration-form{display:grid;gap:16px;margin:0;padding:0}
+html body #page-connection #hub-calibration .hub-calib-field{min-width:0;margin:0;padding:0;border:0}
+html body #page-connection #hub-calibration .hub-calib-field-heading{display:flex;align-items:center;gap:8px;margin:0 0 8px;font-size:12px;font-weight:600;color:var(--wb-ink);line-height:1.5;min-height:24px}
+html body #page-connection #hub-calibration .hub-calib-field-heading>label{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--wb-ink);font-weight:600;min-width:0;margin:0}
+html body #page-connection #hub-calibration .hub-calib-field-heading>button{margin-left:auto;min-height:26px;padding:4px 8px;font-size:10px;border:1px solid var(--wb-line);border-radius:7px;background:var(--wb-card);color:var(--wb-ink);box-shadow:none;white-space:nowrap}
+html body #page-connection #hub-calibration .hub-calib-number{display:inline-flex;align-items:center;justify-content:center;flex:none;width:21px;height:21px;border-radius:50%;background:var(--wb-group);border:1px solid var(--wb-line);color:var(--wb-sub);font-size:10px;font-weight:600;font-variant-numeric:tabular-nums}
+html body #page-connection #hub-calibration .hub-calibration-form :is(select,input:not([type=checkbox])){box-sizing:border-box;width:100%;min-width:0;height:36px;min-height:36px;font-size:12px;padding:7px 10px;line-height:1.5;border:1px solid var(--wb-line);border-radius:9px;background:var(--wb-card);color:var(--wb-ink);box-shadow:none}
+html body #page-connection #hub-calibration .hub-calibration-form select{text-overflow:ellipsis}
+html body #page-connection #hub-calibration .hub-profile-current{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:8px}
+html body #page-connection #hub-calibration .hub-profile-current[hidden]{display:none}
+html body #page-connection #hub-calibration .hub-profile-current button{min-height:36px;padding:7px 10px;font-size:11px;border:1px solid var(--wb-line);border-radius:9px;background:var(--wb-card);color:var(--wb-ink);box-shadow:none}
+html body #page-connection #hub-calibration .hub-profile-current label{min-width:0;margin:0;display:block}
+html body #page-connection #hub-calibration .hub-profile-create{margin:8px 0 0;padding:0!important;border:0}
+html body #page-connection #hub-calibration #hub-new-profile-title{margin:0 0 7px;color:var(--wb-sub);font-size:11px;line-height:1.5;font-weight:400}
+html body #page-connection #hub-calibration .hub-calib-profile-field[data-default=true] #hub-new-profile-title{display:none}
+html body #page-connection #hub-calibration .hub-field-note{font-size:10px!important;line-height:1.55!important;color:var(--wb-sub);margin:6px 0 0!important;overflow-wrap:anywhere;max-width:64ch}
+html body #page-connection #hub-calibration .hub-calib-side-row{display:grid;grid-template-columns:minmax(120px,.8fr) minmax(0,1fr);align-items:center;gap:12px}
+html body #page-connection #hub-calibration .hub-calib-side-row .hub-field-note{margin:0!important}
+html body #page-connection #hub-calibration .hub-replace{font-size:11px;line-height:1.5;padding:8px 0 0;margin:0}
+html body #page-connection #hub-calibration .hub-calib-readiness{display:flex;gap:12px;align-items:center;margin:16px 0 0;padding:12px 13px;border:1px solid var(--wb-line);border-radius:12px;background:var(--wb-group)}
+html body #page-connection #hub-calibration .hub-calib-readiness>div{min-width:0;flex:1}
+html body #page-connection #hub-calibration #hub-calib-ready-title{display:block;margin:0 0 4px;font-size:12px;font-weight:600;line-height:1.5}
+html body #page-connection #hub-calibration #hub-calib-ready-note{margin:0;font-size:11px;line-height:1.55;color:var(--wb-sub);overflow-wrap:anywhere}
+html body #page-connection #hub-calibration #hub-calib-next{flex:none;max-width:40%;min-height:30px;padding:5px 8px;font-size:10px;line-height:1.5;border:1px solid var(--wb-line);border-radius:8px;background:var(--wb-card);color:var(--wb-ink);box-shadow:none;overflow-wrap:anywhere}
+html body #page-connection #hub-calibration .hub-calib-readiness[data-state=ready]{border-color:color-mix(in srgb,var(--wb-ok,#168344) 25%,var(--wb-line))}
+html body #page-connection #hub-calibration .hub-calib-readiness[data-state=ready] #hub-calib-ready-title{color:var(--wb-ok,#168344)}
+html body #page-connection #hub-calibration .hub-calibration-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:12px 0 0;padding:0}
+html body #page-connection #hub-calibration .hub-calibration-actions button{flex:1;min-width:100px;min-height:36px;padding:7px 12px;font-size:12px!important;line-height:1.5;border-radius:10px}
+html body #page-connection #hub-calibration .hub-calibration-actions #hub-calib-start{flex:1.35}
+html body #page-connection #hub-calibration .hub-calibration-actions #hub-calib-end-preview{flex-basis:100%;font-size:11px!important}
+html body #page-connection #hub-calibration .hub-sr-only{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+html body #page-connection #hub-calibration [hidden]{display:none!important}
+@media(max-width:900px){html body #page-connection #hub-calibration .hub-calibration-workspace{grid-template-columns:1fr;gap:20px}html body #page-connection #hub-calibration .hub-calibration-session{padding:17px}html body #page-connection #hub-calibration .hub-calibration-heading{align-items:start}}
+@media(max-width:600px){html body #page-connection #hub-calibration .hub-calibration-heading{flex-direction:column;gap:12px}html body #page-connection #hub-calibration .hub-calibration-tools{width:100%;justify-content:flex-start}html body #page-connection #hub-calibration .hub-calibration-tools #hub-calib-cli{max-width:none;margin-right:auto}html body #page-connection #hub-calibration .hub-calib-readiness{align-items:flex-start;gap:8px}html body #page-connection #hub-calibration .hub-calib-side-row{grid-template-columns:minmax(110px,.8fr) minmax(0,1fr)}}
+@media(prefers-reduced-motion:reduce){html body #page-connection #hub-calibration :is(button,input,select){transition:none!important;animation:none!important}}
+html[data-reduce-motion=true] body #page-connection #hub-calibration :is(button,input,select){transition:none!important;animation:none!important}
+@media(forced-colors:active){html body #page-connection #hub-calibration :is(.hub-calib-number,.hub-calib-readiness,.hub-calibration-session){border:1px solid CanvasText;background:Canvas;color:CanvasText}}
+
+/* The current decision and primary action remain in view beside preparation. */
+html body #page-connection #hub-calibration .hub-calibration-session{display:flex;flex-direction:column;gap:14px}
+html body #page-connection #hub-calibration .hub-calibration-session .hub-calib-readiness{order:0;margin:0;padding:0;border:0;background:transparent;flex-direction:column;align-items:stretch;gap:8px}
+html body #page-connection #hub-calibration .hub-calibration-session #hub-calib-next{align-self:flex-start;max-width:100%;font-size:11px;padding:5px 9px}
+html body #page-connection #hub-calibration .hub-calibration-session .hub-calibration-actions{order:1;margin:0}
+html body #page-connection #hub-calibration #hub-calibration-guide{order:2;padding-top:14px;border-top:1px solid var(--wb-line)}
+html body #page-connection #hub-calibration[data-running=true] #hub-calibration-guide{order:0;padding-top:0;border-top:0}
+html body #page-connection #hub-calibration[data-running=true] .hub-calib-readiness{display:none}
+html body #page-connection #hub-calibration[data-running=true] .hub-calibration-actions{order:1}

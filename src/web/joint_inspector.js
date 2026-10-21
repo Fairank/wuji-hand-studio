@@ -80,7 +80,7 @@
       button.addEventListener('click', () => onPick(i));
     }
     bar.addEventListener('keydown', (e) => {
-      const buttons = Array.from(bar.children);
+      const buttons = Array.from(bar.querySelectorAll(':scope > button'));
       const i = buttons.indexOf(e.target);
       const moves = { ArrowRight: i + 1, ArrowDown: i + 1, ArrowLeft: i - 1, ArrowUp: i - 1, Home: 0, End: count - 1 };
       const to = moves[e.key];
@@ -95,7 +95,7 @@
 
   // Updates buttons in place, so a focused button keeps focus and stays the tab stop across renders.
   function sync(bar, pressed, labels) {
-    const buttons = Array.from(bar.children);
+    const buttons = Array.from(bar.querySelectorAll(':scope > button'));
     const focused = buttons.indexOf(bar.getRootNode().activeElement);
     const stop = focused >= 0 ? focused : pressed;
     buttons.forEach((b, i) => {

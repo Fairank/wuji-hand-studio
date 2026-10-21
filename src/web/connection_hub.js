@@ -33,27 +33,31 @@
  const calib=document.createElement('div');calib.className='hub-calibration wb-card';
  calib.innerHTML=`<header class="hub-calibration-heading"><div><h3 id="hub-calib-title"></h3><p id="hub-calib-description"></p></div><div class="hub-calibration-tools"><span id="hub-calib-cli" class="hub-calib-availability"></span><button type="button" id="hub-calib-refresh"></button><a href="https://docs.wuji.tech/docs/en/wuji-cli/latest/hand-model-calibration/" target="_blank" rel="noopener" id="hub-calib-doc"></a></div></header>
  <div class="hub-calibration-workspace"><div class="hub-calibration-preparation">
- <details class="hub-calibration-setup" open><summary><strong id="hub-calib-setup-label"></strong><span id="hub-calib-setup-summary"></span></summary><div class="hub-calibration-form">
- <div class="hub-profile-current"><label><span id="hub-profile-label"></span><select id="hub-profile"></select></label><button type="button" id="hub-profile-switch"></button></div><p id="hub-current-profile" class="hub-field-note"></p>
- <details class="hub-profile-create"><summary id="hub-new-profile-title"></summary><div class="hub-profile-current"><label><span id="hub-new-profile-label"></span><input id="hub-new-profile" maxlength="32" autocomplete="off"></label><button type="button" id="hub-profile-create"></button></div></details>
- <div class="hub-fields"><label><span id="hub-glove-label"></span><select id="hub-calib-device"></select></label><label><span id="hub-side-label"></span><select id="hub-side"><option value="left"></option><option value="right"></option></select></label></div>
- <p id="hub-calib-models" class="hub-field-note"></p><label class="hub-replace"><input type="checkbox" id="hub-replace"><span id="hub-replace-label"></span></label></div></details>
- <div class="wb-actions hub-calibration-actions"><button type="button" id="hub-calib-start" class="primary" aria-describedby="hub-current-profile hub-calib-setup-summary"></button><button type="button" id="hub-calib-cancel"></button></div>
+ <div class="hub-calibration-setup"><div class="hub-calib-setup-caption"><strong id="hub-calib-setup-label"></strong><span id="hub-calib-setup-summary"></span></div><div class="hub-calibration-form">
+ <section class="hub-calib-field hub-calib-device-field"><div class="hub-calib-field-heading"><label for="hub-calib-device"><span class="hub-calib-number" aria-hidden="true">1</span><span id="hub-glove-label"></span></label><button type="button" id="hub-calib-scan"></button></div><select id="hub-calib-device" aria-describedby="hub-calib-device-note"></select><p id="hub-calib-device-note" class="hub-field-note"></p></section>
+ <section class="hub-calib-field hub-calib-profile-field"><div class="hub-calib-field-heading"><label for="hub-profile"><span class="hub-calib-number" aria-hidden="true">2</span><span id="hub-profile-label"></span></label><button type="button" id="hub-profile-new"></button></div><div class="hub-profile-current"><select id="hub-profile" aria-describedby="hub-current-profile"></select><button type="button" id="hub-profile-switch"></button></div><p id="hub-current-profile" class="hub-field-note"></p>
+ <div class="hub-profile-create"><p id="hub-new-profile-title"></p><div class="hub-profile-current"><label><span id="hub-new-profile-label" class="hub-sr-only"></span><input id="hub-new-profile" maxlength="32" autocomplete="off" aria-describedby="hub-profile-name-hint"></label><button type="button" id="hub-profile-create"></button></div><p id="hub-profile-name-hint" class="hub-field-note"></p></div></section>
+ <section class="hub-calib-field hub-calib-side-field"><label for="hub-side" class="hub-calib-field-heading"><span class="hub-calib-number" aria-hidden="true">3</span><span id="hub-side-label"></span></label><div class="hub-calib-side-row"><select id="hub-side" aria-describedby="hub-calib-models"><option value=""></option><option value="left"></option><option value="right"></option></select><p id="hub-calib-models" class="hub-field-note"></p></div><label class="hub-replace"><input type="checkbox" id="hub-replace"><span id="hub-replace-label"></span></label></section>
+ </div></div>
+ <div class="hub-calib-readiness" role="status" aria-live="polite"><div><strong id="hub-calib-ready-title"></strong><p id="hub-calib-ready-note"></p></div><button type="button" id="hub-calib-next"></button></div>
+ <div class="wb-actions hub-calibration-actions"><button type="button" id="hub-calib-start" class="primary" aria-describedby="hub-calib-ready-note"></button><button type="button" id="hub-calib-cancel"></button></div>
  </div><div class="hub-calibration-session"><div id="hub-calibration-guide"></div></div></div>`;
  sections.calibration.append(calib);
+ const calibrationSession=calib.querySelector('.hub-calibration-session');calibrationSession.prepend(calib.querySelector('.hub-calib-readiness'),calib.querySelector('.hub-calibration-actions'));
  const endPreview=document.createElement('button');endPreview.id='hub-calib-end-preview';endPreview.type='button';endPreview.hidden=true;calib.querySelector('.hub-calibration-actions').append(endPreview);
  const previewOnly=s=>s?.glove?.busy===true&&s?.connection==='disconnected'&&s?.hardware?.active===false&&!s.glove.feedback?.device_id&&s.glove.hardware?.active!==true&&s.glove.hardware?.active!==null&&!(s.unconfirmed_devices||[]).length;
- const setup=calib.querySelector('.hub-calibration-setup'),profileModels=$('hub-calib-models'),guideHost=$('hub-calibration-guide');
+ const guideHost=$('hub-calibration-guide');
  const guide=window.OfficialCalibration?.mount(guideHost,{language:()=>window.WujiLocale?.lang||'zh'});
  window.WujiConnectionHub={show(key){location.hash='#connection';ws.showPage();select(key)}};
- let active='device',calibration=null,calibrationFresh=false,consoleState=null,busy=false,refreshPending=false,actionError='',refreshError='',renderedCalibration=null,renderedForm='',wantedGlove='';
- window.addEventListener('device-inventory-selection',event=>{const row=event.detail?.device;if(row?.kind!=='glove')return;wantedGlove=row.sn||row.serial;if(['left','right'].includes(row.side))$('hub-side').value=row.side;renderedForm='';renderCalibration();});
+ let active='device',calibration=null,calibrationFresh=false,consoleState=null,busy=false,refreshPending=false,scanPending=false,calibrationReadAt=0,actionError='',refreshError='',wantedGlove='',newProfileOpen=false,nextAction=null,lastActiveProfile='',replacementContext='';
+ window.addEventListener('device-inventory-selection',event=>{const row=event.detail?.device;if(row?.kind!=='glove')return;const serial=row.sn||row.serial;if(serial!==wantedGlove)$('hub-side').value=['left','right'].includes(row.side)?row.side:'';wantedGlove=serial;renderCalibration();});
+ window.addEventListener('device-inventory-update',()=>{renderCalibration();});
  function select(key){if(!sections[key])key='device';const changed=active!==key;active=key;for(const [name,section] of Object.entries(sections)){
    section.hidden=name!==key;const button=$('hub-tab-'+name);button.setAttribute('aria-selected',String(name===key));button.tabIndex=name===key?0:-1;
   }
   if(key==='visual'&&window.wujiFloating?.isFloating()!==true)$('glove-viewer-dock')?.append($('pose-console'));
   else if(window.wujiFloating?.isFloating()!==true)ws.viewerHome()?.append($('pose-console'));
-  if(key==='calibration')refresh(true);
+  if(key==='calibration'){window.WujiDeviceInventory?.refresh();refresh(true);}
   document.body.dataset.hubTab=key;
   officialViz?.syncVisibility();
   // A different task opens at its first step. Polling and same-tab refreshes
@@ -75,54 +79,120 @@
   $('hub-hand-badge').dataset.state=hand==='connected'&&!consoleState?.stale?'ready':hand==='connecting'?'pending':hand==='error'?'error':'idle';
   $('hub-glove-badge').dataset.state=glove==='receiving'?'ready':glove==='connecting'?'pending':'idle';
  }
- async function refresh(force=false){if(busy||refreshPending||(!force&&active!=='calibration'))return;refreshPending=true;renderCalibration();try{const response=await fetch('/api/calibration'+(force?'?refresh=1':''),{cache:'no-store',signal:AbortSignal.timeout(5000)});if(!response.ok)throw Error(t('无法读取官方校准状态','Calibration status unavailable'));const next=await response.json();if(!next||typeof next.available!=='boolean')throw Error(t('官方校准状态无效','Invalid calibration status'));calibration=next;calibrationFresh=true;refreshError='';}catch(error){calibrationFresh=false;refreshError=error.message;}finally{refreshPending=false;renderCalibration()}}
+ const object=value=>!!value&&typeof value==='object'&&!Array.isArray(value);
+ const write=(id,value)=>{const element=$(id);if(element.textContent!==value)element.textContent=value;};
+ function options(element,items,value){const signature=JSON.stringify(items);if(element.dataset.options!==signature){element.replaceChildren(...items.map(([label,key,disabled])=>{const option=new Option(label,key);option.disabled=disabled===true;return option;}));element.dataset.options=signature;}element.value=items.some(item=>item[1]===value)?value:'';}
+ const milliseconds=value=>{if(typeof value==='number'&&Number.isFinite(value))return value<1e12?value*1000:value;if(typeof value==='string'){const parsed=Date.parse(value);return Number.isFinite(parsed)?parsed:0;}return 0;};
+ function gloveFresh(row,c){const now=Date.now(),expires=milliseconds(row?.expires_at),seen=milliseconds(row?.last_seen||row?.observed_at)||milliseconds(c.metadata_checked_at)||calibrationReadAt;return !!row&&row.stale!==true&&row.selectable!==false&&seen>0&&seen<=now&&now-seen<30000&&(!expires||now<expires);}
+ const sideOf=row=>{const side=String(row?.handedness||row?.side||'').toLowerCase().replace(/^handedness\./,'');return ['left','right'].includes(side)?side:'';};
+ function sessionBlock(){
+  if(!consoleState)return t('工作台服务离线，恢复后再操作。','Workbench service is offline. Wait for reconnection.');
+  if((consoleState.unconfirmed_devices||[]).length)return t('有设备的停用结果尚未确认，请先在设备页面核对。','A device stop is unconfirmed. Review its session in Devices.');
+  if(consoleState.connection!=='disconnected')return t('灵巧手反馈仍在连接，请先在原会话中断开。','Hand feedback is connected. Disconnect it in its owning session first.');
+  if(consoleState.hardware?.active!==false)return t('灵巧手电机状态尚未确认，暂不能标定。','The hand motor state is unconfirmed. Calibration is unavailable.');
+  if(consoleState.glove?.busy)return t('手套预览或遥操作正在使用设备，请先结束原会话。','Glove preview or teleoperation is using the device. End that session first.');
+  if(consoleState.program?.active||consoleState.group?.active||consoleState.recording?.active||consoleState.parameter_sync?.busy)return t('当前工作区仍有任务运行，请先结束后再标定。','A workspace task is still running. Finish it before calibration.');
+  return '';
+ }
+ async function refresh(force=false){if(busy||refreshPending||(!force&&active!=='calibration'))return;refreshPending=true;renderCalibration();try{
+  const response=await fetch('/api/calibration'+(force?'?refresh=1':''),{cache:'no-store',signal:AbortSignal.timeout(8000)});
+  if(!response.ok)throw Error(t('无法读取官方校准状态','Calibration status unavailable'));
+  const next=await response.json();if(!object(next)||typeof next.available!=='boolean'||!Array.isArray(next.users)||!Array.isArray(next.devices)||next.current!==null&&!object(next.current)||!object(next.run)||typeof next.run.running!=='boolean')throw Error(t('官方标定信息不完整，请刷新后重试。','Official calibration data is incomplete. Refresh and retry.'));
+  calibration=next;calibrationReadAt=Date.now();calibrationFresh=true;refreshError='';
+ }catch(error){calibrationFresh=false;refreshError=error.message;}finally{refreshPending=false;renderCalibration()}}
  async function action(name,extra={}){if(busy)return;busy=true;actionError='';renderCalibration();try{
    const token=consoleState?.csrf;if(!token)throw Error(t('工作台服务未就绪','Workbench service not ready'));
-   const response=await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json','X-Console-Token':token},body:JSON.stringify({name,...extra})});const data=await response.json();if(!response.ok)throw Error(data.error||'Action failed');
-   calibration=data.calibration||calibration;if(name==='calibration_start')$('hub-replace').checked=false;
+   const response=await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json','X-Console-Token':token},body:JSON.stringify({name,...extra})});const data=await response.json();if(!response.ok||data.ok===false)throw Error(data.error||'Action failed');
+   if(object(data.calibration)){calibration=data.calibration;calibrationReadAt=Date.now();calibrationFresh=true;}if(name==='calibration_start')$('hub-replace').checked=false;
+   if(name==='calibration_profile_create'||name==='calibration_profile_switch')$('hub-profile').value='';
+   if(name==='calibration_profile_create'){newProfileOpen=false;$('hub-new-profile').value='';}
   }catch(error){actionError=error.message}finally{busy=false;renderCalibration();refresh(true)}}
- function renderCalibration(){
-  endPreview.hidden=!previewOnly(consoleState);endPreview.disabled=busy||!!calibration?.run?.running;endPreview.textContent=t('关闭手套预览以标定','Close glove preview for calibration');
-  const form=JSON.stringify([busy,refreshPending,calibrationFresh,actionError,refreshError,consoleState?.connection,!!consoleState?.glove?.busy,$('hub-profile').value,$('hub-calib-device').value,$('hub-new-profile').value,$('hub-side').value,$('hub-replace').checked,window.WujiLocale?.lang]);
-  if(renderedCalibration===calibration&&renderedForm===form)return;renderedCalibration=calibration;renderedForm=form;
-  const c=calibration||{},metadataFresh=calibrationFresh&&c.metadata_current!==false,available=metadataFresh&&c.available,run=c.run||{},users=(c.users||[]).filter(x=>x&&typeof x==='object'),devices=(c.devices||[]).filter(x=>x&&typeof x==='object');
-  $('hub-calib-cli').textContent=!calibrationFresh?t('状态未核对','Status unverified'):c.available?(c.calibration_supported?t('CLI 可用','CLI available'):t('远程 CLI 仅可查看状态','Remote CLI: status only')):t('CLI 未就绪','CLI unavailable');
-  const current=c.current||{},profile=current.name||'',old=$('hub-profile').value;
-  $('hub-calib-setup-summary').textContent=(profile||t('选择用户','Select user'))+' · '+t($('hub-side').value==='left'?'左手':'右手',$('hub-side').value==='left'?'Left hand':'Right hand');
-  $('hub-profile').replaceChildren(new Option(t('选择 SDK 用户','Select SDK user'),''),...users.map(u=>new Option(u.name+(u.is_default?' · Default':''),u.name)));
-  $('hub-profile').value=old&&[...$('hub-profile').options].some(o=>o.value===old)?old:profile;
-  const chosenProfile=$('hub-profile').value;
-  $('hub-current-profile').textContent=metadataFresh&&chosenProfile&&chosenProfile!==profile?t('已选择 '+chosenProfile+'，切换后使用；当前仍为 '+(profile||'—')+'。','Selected '+chosenProfile+'. Switch to use it; the active user is still '+(profile||'—')+'.'):(metadataFresh?t('当前使用：','Active user: '):t('上次用户（未核对）：','Previous user (unverified): '))+(profile||t('尚未核对','Unverified'));
-  $('hub-calib-start').textContent=t('开始标定','Start calibration')+(profile?' · '+profile:'');
-  const serial=wantedGlove||$('hub-calib-device').value;$('hub-calib-device').replaceChildren(new Option(t('选择已发现手套','Select discovered glove'),''),...devices.filter(d=>d.sn||d.serial).map(d=>new Option(d.sn||d.serial,d.sn||d.serial)));
-  if([...$('hub-calib-device').options].some(o=>o.value===serial))$('hub-calib-device').value=serial;
-  profileModels.textContent=t('用户已有模型：','Saved user models: ')+['left','right'].map(side=>{const calibrated=current[side+'_hand']?.calibrated;return t(side==='left'?'左手 ':'右手 ',side==='left'?'Left ':'Right ')+(available&&calibrated===true?t('已标定','Calibrated'):available&&calibrated===false?t('未标定','Not calibrated'):t('未知','Unknown'))}).join(' · ');
-  if(run.running)setup.open=false;
-  for(const id of ['hub-profile','hub-new-profile','hub-calib-device','hub-side','hub-replace'])$(id).disabled=busy||run.running;
-  const defaultUser=!profile||profile.toLowerCase()==='default'||users.some(u=>u.name===profile&&u.is_default);
-  const hasModel=!!current[$('hub-side').value+'_hand']?.calibrated;
-  if(available&&!run.running&&!setup.dataset.offered){setup.open=defaultUser||!$('hub-calib-device').value;setup.dataset.offered='true'}
-  $('hub-replace').closest('label').hidden=!hasModel;
-  $('hub-profile-switch').disabled=busy||refreshPending||run.running||!available||!$('hub-profile').value||$('hub-profile').value===profile;
-  $('hub-profile-create').disabled=busy||refreshPending||run.running||!available||!$('hub-new-profile').value.trim();
-  $('hub-calib-refresh').disabled=busy||refreshPending||run.running;
-  $('hub-calib-start').disabled=busy||refreshPending||run.running||!available||!c.calibration_supported||defaultUser||!$('hub-calib-device').value||(hasModel&&!$('hub-replace').checked)||consoleState?.connection!=='disconnected'||!!consoleState?.glove?.busy;
-  $('hub-calib-cancel').disabled=busy||!run.running;
-  let notice=available&&!c.calibration_supported?t('远程 SSH 可查看标定状态；请改用工作台内置或本机 Linux 控制端执行官方标定。','SSH can read calibration status. Use the built-in or local Linux controller for official calibration.'):'';
-  if(!run.running&&!actionError&&!refreshError&&!c.error&&available&&c.calibration_supported&&(!run.status||run.status==='idle')){
-   const reason=!consoleState?t('工作台服务离线，恢复后再操作。','Workbench service offline; wait for reconnection.'):consoleState.connection!=='disconnected'?t('先断开灵巧手反馈，再校准手套。','Disconnect hand feedback before glove calibration.'):
-    consoleState.glove?.busy?t('先退出手套预览或跟随，再开始标定。','Close the glove preview or follow session before calibration.'):
-    defaultUser?t('在“准备标定”中创建或选择一个命名用户。','Create or select a named user in calibration setup.'):
-    !$('hub-calib-device').value?t('请选择手套；未发现时，到“设备连接”重新查找。','Select a glove; use Devices to find it if none are listed.'):
-    hasModel&&!$('hub-replace').checked?t('此侧已有标定；如需重做，请在设置中确认覆盖。','This side is calibrated. Confirm replacement in settings to recalibrate.'):null;
-   notice=reason||t('准备已完成，开始后按官方当前步骤操作。','Setup is ready. Start calibration, then follow the current official step.');
-  }
-  guide?.render(c,{fresh:calibrationFresh,error:[actionError,refreshError,c.error].filter(Boolean).join(' · '),notice});
+ async function scanGloves(){
+  if(scanPending||busy||calibration?.run?.running)return;scanPending=true;actionError='';renderCalibration();
+  try{
+   const inventory=window.WujiDeviceInventory;if(!inventory)throw Error(t('设备发现尚未就绪，请稍后重试。','Device discovery is not ready. Retry shortly.'));
+   await inventory.refresh();const before=inventory.snapshot();if(before?.scan_allowed!==true)throw Error(before?.blocked_reason||t('当前会话暂不能扫描，请先结束设备任务。','Discovery is unavailable. Finish active device sessions first.'));
+   const scanned=await inventory.scan();await inventory.refresh();let after=inventory.snapshot();
+   if(!scanned)throw Error(after?.error||after?.blocked_reason||t('手套扫描尚未完成，请重试。','Glove discovery did not complete. Retry.'));
+   const deadline=Date.now()+20000;
+   while(after?.scanning===true){
+    if(document.hidden||active!=='calibration'||location.hash!=='#connection')return;
+    if(Date.now()>=deadline)throw Error(t('扫描尚未结束，请稍后重新查找。','Discovery is still running. Try again shortly.'));
+    await new Promise(resolve=>setTimeout(resolve,300));
+    if(document.hidden||active!=='calibration'||location.hash!=='#connection')return;
+    await inventory.refresh();after=inventory.snapshot();
+   }
+   if(after?.error)throw Error(after.error);
+  }catch(error){actionError=error.message}finally{scanPending=false;if(!document.hidden&&active==='calibration'&&location.hash==='#connection')await refresh(true);renderCalibration()}
  }
- $('hub-calib-refresh').onclick=()=>refresh(true);$('hub-profile-switch').onclick=()=>action('calibration_profile_switch',{profile:$('hub-profile').value});$('hub-profile-create').onclick=()=>action('calibration_profile_create',{profile:$('hub-new-profile').value.trim()});
- $('hub-calib-start').onclick=()=>action('calibration_start',{side:$('hub-side').value,serial:$('hub-calib-device').value,replace:$('hub-replace').checked});$('hub-calib-cancel').onclick=()=>action('calibration_cancel');
+ function renderCalibration(){
+  const c=object(calibration)?calibration:{},run=object(c.run)?c.run:{},metadataFresh=calibrationFresh&&c.metadata_current===true,available=metadataFresh&&c.available===true;
+  const users=Array.isArray(c.users)?c.users.filter(u=>object(u)&&typeof u.name==='string'):[],devices=Array.isArray(c.devices)?c.devices.filter(d=>object(d)&&typeof(d.sn||d.serial)==='string'):[];
+  const current=object(c.current)?c.current:{},profile=typeof current.name==='string'?current.name:'',old=$('hub-profile').value;
+  const defaultUser=!profile||profile.toLowerCase()==='default'||current.is_default===true||users.some(u=>u.name===profile&&u.is_default===true);
+  options($('hub-profile'),[[t('选择标定用户','Choose calibration user'),''],...users.map(u=>[u.name+(u.is_default&&u.name.toLowerCase()!=='default'?t(' · 默认',' · Default'):''),u.name])],old&&old!==lastActiveProfile&&users.some(u=>u.name===old)?old:profile);
+  lastActiveProfile=profile;
+  const chosenProfile=$('hub-profile').value,pendingProfile=!!chosenProfile&&chosenProfile!==profile;
+  $('hub-profile').closest('.hub-profile-current').hidden=defaultUser&&users.length===1&&!pendingProfile;calib.querySelector('.hub-calib-profile-field').dataset.default=String(defaultUser);
+  const serial=wantedGlove||$('hub-calib-device').value;
+  options($('hub-calib-device'),[[devices.length?t('选择手套','Choose a glove'):t('尚未发现手套','No glove found'), ''],...devices.map(d=>{const side=sideOf(d);return[(d.sn||d.serial)+(side?' · '+t(side==='left'?'左手':'右手',side==='left'?'Left':'Right'):t(' · 左右待核对',' · Side unverified'))+(gloveFresh(d,c)?'':t(' · 已过期',' · Stale')),d.sn||d.serial,!gloveFresh(d,c)];})],serial);
+  const selected=devices.find(d=>(d.sn||d.serial)===$('hub-calib-device').value),side=$('hub-side').value,reportedSide=sideOf(selected),sideMismatch=!!reportedSide&&!!side&&reportedSide!==side;
+  const model=object(current[side+'_hand'])?current[side+'_hand']:{},modelKnown=typeof model.calibrated==='boolean',hasModel=model.calibrated===true;
+  const replacementKey=JSON.stringify([profile,chosenProfile,side,$('hub-calib-device').value,hasModel]);
+  if(replacementContext!==replacementKey||!hasModel)$('hub-replace').checked=false;replacementContext=replacementKey;
+  const inventory=window.WujiDeviceInventory?.snapshot(),block=sessionBlock(),inventoryBlock=inventory?.scan_allowed===false?(inventory.blocked_reason||t('设备会话暂不可用，请先核对连接状态。','Device sessions are unavailable. Review connection status.')):'';
+  const mutating=busy||refreshPending||scanPending||run.running===true;
+  write('hub-calib-cli',refreshPending?t('正在核对…','Checking…'):!metadataFresh?t('信息待刷新','Refresh required'):c.available?c.calibration_supported?t('官方 CLI 已就绪','Official CLI ready'):t('仅可查看状态','Status only'):t('CLI 未就绪','CLI unavailable'));
+  $('hub-calib-cli').dataset.state=available&&c.calibration_supported?'ready':'unknown';
+  write('hub-calib-setup-summary',run.running?(run.user||profile||'')+' · '+(run.serial||''):t('设备、用户与侧别确认后开始','Confirm glove, user and hand side'));
+  write('hub-current-profile',!metadataFresh?t('用户信息尚未核对，请刷新。','User information is unverified. Refresh first.'):pendingProfile?t('已选择 '+chosenProfile+'，点击“使用此用户”后生效。','Selected '+chosenProfile+'. Choose Use this user to make it active.'):defaultUser?t('Default 无法保存个人标定，请先创建命名用户。','Default cannot save personal calibration. Create a named user first.'):t('标定将保存到 '+profile+' 的个人档案。','Calibration will be saved to '+profile+"’s profile."));
+  const userName=$('hub-new-profile').value.trim(),nameValid=/^[A-Za-z0-9_][A-Za-z0-9_-]{0,31}$/.test(userName),nameExists=users.some(u=>u.name===userName);
+  calib.querySelector('.hub-profile-create').hidden=!(defaultUser||newProfileOpen);
+  $('hub-profile-new').hidden=defaultUser;$('hub-profile-new').disabled=mutating||!available||!!block||!!inventoryBlock;
+  write('hub-profile-name-hint',userName&&!nameValid?t('名称限 1–32 个字母、数字、_ 或 -，不能以 - 开头。','Use 1–32 letters, digits, _ or -. Do not start with -.'):nameExists?t('此用户已存在，请在上方选择并使用。','This user exists. Select and use it above.'):t('1–32 个字母、数字、_ 或 -','1–32 letters, digits, _ or -'));
+  $('hub-new-profile').setAttribute('aria-invalid',String(!!userName&&(!nameValid||nameExists)));
+  write('hub-calib-device-note',scanPending||inventory?.scanning?t('正在查找手套，只读取设备身份。','Finding gloves; reading device identity only.'):c.devices_error||(!devices.length?t('先接好电源与数据线，再点“扫描手套”。无需先连接预览。','Connect power and the data cable, then scan. No preview connection is needed.'):selected?reportedSide?t('设备报告：'+(reportedSide==='left'?'左手':'右手')+'。开始时还会核对设备身份。','Device reports '+(reportedSide==='left'?'left':'right')+'. Its identity is rechecked on start.'):t('扫描未报告左右，请在第 3 步选择；开始时由 SDK 核对实际身份。','Discovery did not report a side. Choose it in step 3; the SDK verifies the device on start.'):t('按序列号选择本次要标定的一只手套。','Select the glove for this calibration by serial number.')));
+  write('hub-calib-models',!side?t('左右手分别保存标定','Left and right models are saved separately'):!metadataFresh||!modelKnown?t('已有标定尚未核对','Existing calibration is unverified'):hasModel?t('此侧已有个人标定','A personal model exists for this side'):t('此侧尚未标定','This side is not calibrated'));
+  $('hub-replace').closest('label').hidden=!hasModel;
+  for(const id of ['hub-profile','hub-new-profile','hub-calib-device','hub-side','hub-replace'])$(id).disabled=mutating;
+  $('hub-profile-switch').hidden=!pendingProfile;$('hub-profile-switch').disabled=mutating||!available||!pendingProfile||!!block||!!inventoryBlock;
+  $('hub-profile-create').disabled=mutating||!available||!nameValid||nameExists||!!block||!!inventoryBlock;
+  $('hub-calib-refresh').disabled=busy||refreshPending||scanPending||run.running===true;
+  $('hub-calib-scan').disabled=mutating||!!block||inventory?.scanning===true||inventory?.scan_allowed===false;
+  write('hub-calib-scan',scanPending||inventory?.scanning?t('扫描中…','Scanning…'):t('扫描手套','Scan gloves'));
+  $('hub-calib-scan').title=block||inventoryBlock||t('只查找设备，不开始预览或标定','Find devices only; does not start preview or calibration');
+  endPreview.hidden=!previewOnly(consoleState);endPreview.disabled=busy||refreshPending||scanPending||run.running===true;write('hub-calib-end-preview',t('结束预览，准备标定','End preview to prepare calibration'));
+  let reason='',nextLabel='',next=null;
+  if(refreshPending||scanPending){reason=scanPending?t('正在查找设备，完成后重新核对准备状态。','Finding devices; preparation is checked again when discovery finishes.'):t('正在核对官方用户与标定信息。','Checking official user and calibration data.');}
+  else if(!calibrationFresh||!metadataFresh||!c.available){reason=refreshError||c.metadata_error||c.error||t('官方用户与标定信息尚未核对，请刷新后继续。','Official user and calibration data is unverified. Refresh to continue.');nextLabel=t('刷新状态','Refresh status');next=()=>refresh(true);}
+  else if(!c.calibration_supported){reason=t('当前控制端仅支持查看状态，请切换到内置或本机 Linux 控制端。','This controller can read status only. Use the built-in or local Linux controller.');nextLabel=t('连接设置','Connection settings');next=()=>{window.WujiDeviceInventory?.show('glove');window.WujiDeviceInventory?.showSettings('glove');};}
+  else if(block){reason=block;if(previewOnly(consoleState)){nextLabel=t('查看预览交接','Review preview handover');next=()=>endPreview.focus();}else{nextLabel=t('查看设备','Review devices');next=()=>window.WujiDeviceInventory?.show('all');}}
+  else if(inventoryBlock){reason=inventoryBlock;nextLabel=t('刷新状态','Refresh status');next=async()=>{await window.WujiDeviceInventory?.refresh();await refresh(true);};}
+  else if(pendingProfile){reason=t('所选用户尚未启用，请先点击“使用此用户”。','The selected user is not active. Choose Use this user first.');nextLabel=t('使用此用户','Use this user');next=()=>$('hub-profile-switch').click();}
+  else if(defaultUser){reason=t('先创建一个命名用户，标定结果才能保存到你的档案。','Create a named user so calibration can be saved to your profile.');nextLabel=t('填写用户名称','Enter a user name');next=()=>$('hub-new-profile').focus();}
+  else if(c.devices_error){reason=c.devices_error;nextLabel=t('重新扫描','Scan again');next=scanGloves;}
+  else if(!selected){reason=devices.length?t('请选择本次要标定的手套。','Select the glove to calibrate.'):t('尚未发现可用手套。接好设备后扫描，列表会显示序列号和左右信息。','No usable glove was found. Connect it and scan to see its serial number and hand side.');nextLabel=devices.length?t('选择手套','Choose a glove'):t('扫描手套','Scan gloves');next=devices.length?()=>$('hub-calib-device').focus():scanGloves;}
+  else if(!gloveFresh(selected,c)){reason=t('所选手套的发现记录已过期，请重新扫描后再开始。','Discovery for this glove is stale. Scan again before starting.');nextLabel=t('重新扫描','Scan again');next=scanGloves;}
+  else if(!['left','right'].includes(side)){reason=t('请选择这只手套的左手或右手，开始时会再次核对。','Choose left or right for this glove. Its identity is checked again on start.');nextLabel=t('选择左右手','Choose hand side');next=()=>$('hub-side').focus();}
+  else if(sideMismatch){reason=t('所选手套报告为'+(reportedSide==='left'?'左手':'右手')+'，与标定侧不一致。','The glove reports '+(reportedSide==='left'?'left':'right')+', which does not match the selected side.');nextLabel=t('检查标定侧','Review hand side');next=()=>$('hub-side').focus();}
+  else if(!modelKnown){reason=t('此侧已有模型的状态未知，请刷新核对后再开始。','The existing model status for this side is unknown. Refresh before starting.');nextLabel=t('刷新状态','Refresh status');next=()=>refresh(true);}
+  else if(hasModel&&!$('hub-replace').checked){reason=t('此侧已有个人标定。重新标定前，请确认覆盖。','A personal model exists for this side. Confirm replacement to recalibrate.');nextLabel=t('确认覆盖','Review replacement');next=()=>$('hub-replace').focus();}
+  const ready=!reason&&!busy&&run.running!==true;
+  calib.querySelector('.hub-calib-readiness').dataset.state=run.running?'running':ready?'ready':'blocked';
+  write('hub-calib-ready-title',run.running?t('官方标定正在进行','Official calibration in progress'):busy?t('正在提交…','Submitting…'):ready?t('准备完成','Ready to calibrate'):t('开始前还需完成','Before you start'));
+  write('hub-calib-ready-note',run.running?t('请跟随右侧官方当前步骤，取消会结束本次采集。','Follow the current official step. Cancel ends this capture.'):actionError||reason||t('佩戴好手套后开始。工作台会先核对身份，再进入官方采集流程。','Put on the glove and start. The Workbench verifies identity before official capture.'));
+  nextAction=next;$('hub-calib-next').hidden=run.running===true||!nextLabel;write('hub-calib-next',nextLabel);$('hub-calib-next').disabled=mutating;
+  $('hub-calib-start').disabled=!ready;$('hub-calib-cancel').disabled=busy||run.running!==true;
+  write('hub-calib-start',t('开始标定','Start calibration'));write('hub-calib-cancel',t('取消标定','Cancel calibration'));
+  calib.dataset.running=String(run.running===true);sections.calibration.dataset.running=String(run.running===true);
+  guide?.render(c,{fresh:calibrationFresh,error:[actionError,refreshError,c.error].filter(Boolean).join(' · '),notice:t('开始后，在这里查看官方当前步骤与采集反馈。','Start calibration to see the current official step and capture feedback here.')});
+ }
+ $('hub-calib-refresh').onclick=()=>refresh(true);$('hub-calib-scan').onclick=scanGloves;$('hub-calib-next').onclick=()=>nextAction?.();
+ $('hub-profile-new').onclick=()=>{newProfileOpen=!newProfileOpen;renderCalibration();if(newProfileOpen)$('hub-new-profile').focus();};
+ $('hub-profile-switch').onclick=()=>action('calibration_profile_switch',{profile:$('hub-profile').value});$('hub-profile-create').onclick=()=>action('calibration_profile_create',{profile:$('hub-new-profile').value.trim()});
+ $('hub-calib-start').onclick=()=>{renderCalibration();if(!$('hub-calib-start').disabled)action('calibration_start',{side:$('hub-side').value,serial:$('hub-calib-device').value,replace:calibration?.current?.[$('hub-side').value+'_hand']?.calibrated===true&&$('hub-replace').checked});};$('hub-calib-cancel').onclick=()=>action('calibration_cancel');
  endPreview.onclick=async()=>{try{const response=await fetch('/api/state',{cache:'no-store',signal:AbortSignal.timeout(5000)});if(!response.ok)throw Error(t('无法核对设备状态','Cannot verify device state'));const state=await response.json();consoleState=state;if(!previewOnly(state))throw Error(t('设备会话已改变，请在原工作区结束。','The device session changed. End it in its owning workspace.'));await action('glove_disconnect');}catch(error){actionError=error.message;renderCalibration();}};
- $('hub-calib-device').addEventListener('input',()=>{wantedGlove=$('hub-calib-device').value;window.WujiDeviceInventory?.select(wantedGlove);});
+ $('hub-calib-device').addEventListener('input',()=>{wantedGlove=$('hub-calib-device').value;const row=(Array.isArray(calibration?.devices)?calibration.devices:[]).find(d=>(d.sn||d.serial)===wantedGlove);$('hub-side').value=sideOf(row);window.WujiDeviceInventory?.select(wantedGlove);});
  for(const id of ['hub-new-profile','hub-side','hub-replace','hub-profile','hub-calib-device'])$(id).addEventListener('input',renderCalibration);
  window.addEventListener('console-state',event=>{consoleState=event.detail;renderStatus();renderCalibration()});
  window.addEventListener('console-offline',()=>{consoleState=null;renderStatus();renderCalibration()});
@@ -133,9 +203,9 @@
   $('hub-real-label').textContent=t('三维：灵巧手 / 映射预览','3D: hand / mapped preview');$('hub-preview-label').textContent='';
   $('hub-calib-title').textContent=t('手型标定','Hand-model calibration');
   $('hub-calib-setup-label').textContent=t('准备标定','Calibration setup');
-  $('hub-calib-description').textContent=t('官方 CLI 采集手套数据，结果按用户和左右手保存。','Official glove capture, saved per user and hand side.');
-  $('hub-profile-label').textContent=t('选择 SDK 用户','SDK user');$('hub-new-profile-title').textContent=t('创建新用户','Create a new user');$('hub-new-profile-label').textContent=t('用户名称','User name');$('hub-profile-switch').textContent=t('切换','Switch');$('hub-profile-create').textContent=t('创建并切换','Create and switch');$('hub-calib-refresh').textContent=t('刷新','Refresh');$('hub-calib-refresh').setAttribute('aria-label',t('刷新官方标定状态','Refresh official calibration status'));
-  $('hub-glove-label').textContent=t('已发现手套','Discovered glove');$('hub-side-label').textContent=t('标定侧','Hand side');$('hub-side').options[0].textContent=t('左手','Left');$('hub-side').options[1].textContent=t('右手','Right');$('hub-replace-label').textContent=t('覆盖这一侧已有标定','Replace existing model for this side');$('hub-calib-start').textContent=t('开始标定','Start calibration');$('hub-calib-cancel').textContent=t('取消标定','Cancel calibration');$('hub-calib-doc').textContent=t('说明 ↗','Guide ↗');$('hub-calib-doc').setAttribute('aria-label',t('官方手型标定说明（新窗口）','Official hand-model calibration guide (opens in a new window)'));$('hub-calib-doc').href='https://docs.wuji.tech/docs/'+(window.WujiLocale?.lang==='en'?'en':'zh')+'/wuji-cli/latest/hand-model-calibration/';
+  $('hub-calib-description').textContent=t('选择手套与个人档案，跟随官方流程完成采集。','Choose a glove and personal profile, then follow official capture.');
+  $('hub-profile-label').textContent=t('标定用户','Calibration user');$('hub-profile-new').textContent=t('新建用户','New user');$('hub-new-profile-title').textContent=t('创建你的个人标定档案','Create your personal calibration profile');$('hub-new-profile-label').textContent=t('用户名称','User name');$('hub-new-profile').placeholder=t('填写名称，例如 Alex','Name, e.g. Alex');$('hub-profile-switch').textContent=t('使用此用户','Use this user');$('hub-profile-create').textContent=t('创建并使用','Create and use');$('hub-calib-refresh').textContent=t('刷新','Refresh');$('hub-calib-refresh').setAttribute('aria-label',t('刷新官方标定状态','Refresh official calibration status'));
+  $('hub-glove-label').textContent=t('选择手套','Choose glove');$('hub-side-label').textContent=t('确认左右手','Confirm hand side');$('hub-side').options[0].textContent=t('选择左右手','Choose hand side');$('hub-side').options[1].textContent=t('左手','Left');$('hub-side').options[2].textContent=t('右手','Right');$('hub-replace-label').textContent=t('覆盖这一侧已有标定','Replace existing model for this side');$('hub-calib-start').textContent=t('开始标定','Start calibration');$('hub-calib-cancel').textContent=t('取消标定','Cancel calibration');$('hub-calib-doc').textContent=t('说明 ↗','Guide ↗');$('hub-calib-doc').setAttribute('aria-label',t('官方手型标定说明（新窗口）','Official hand-model calibration guide (opens in a new window)'));$('hub-calib-doc').href='https://docs.wuji.tech/docs/'+(window.WujiLocale?.lang==='en'?'en':'zh')+'/wuji-cli/latest/hand-model-calibration/';
   renderStatus();renderCalibration();
  }
  window.addEventListener('wuji-language',labels);labels();select(active);setInterval(()=>{if(active==='calibration'&&calibration?.run?.running)refresh(false)},500);

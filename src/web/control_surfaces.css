@@ -97,3 +97,32 @@ html[data-reduce-motion=true] :is(.wa-row,.connection-popover,button,summary:aft
 html[data-reduce-transparency=true] .connection-popover{background:var(--ui-card)!important}
 @media(prefers-reduced-transparency:reduce){html .connection-popover{background:var(--ui-card)!important}}
 @media(forced-colors:active){html :is(.wa-row,.ui-link-button,.connection-device-card,.connection-popover){color:CanvasText!important;background:Canvas!important;border:1px solid CanvasText;box-shadow:none}html .wa-icon{color:LinkText}html .wa-row:focus-visible{outline-color:Highlight}}
+
+/* Shared confirmation/multi-select controls. Preference switches keep their own family. */
+html body :is(.page-body,.hws-body,dialog) input[type=checkbox]:not(.settings-row input):not(.di-auto input){
+ appearance:none;-webkit-appearance:none;display:inline-block;vertical-align:middle;flex:none;
+ width:16px;min-width:16px;height:16px;min-height:16px;margin:0 7px 0 0;padding:0;
+ border:1px solid color-mix(in srgb,var(--ui-ink) 28%,transparent);border-radius:5px;
+ background-color:var(--ui-card);background-position:center;background-repeat:no-repeat;background-size:12px 12px;
+ box-shadow:0 1px 2px #00000005;cursor:pointer;
+ transition:background-color 140ms ease,border-color 140ms ease,box-shadow 140ms ease;
+}
+html body :is(.page-body,.hws-body,dialog) input[type=checkbox]:not(.settings-row input):not(.di-auto input):checked{
+ background-color:#007aff;border-color:#007aff;
+ background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='m3.2 8 3.1 3.1 6.5-6.4' fill='none' stroke='white' stroke-width='2.1' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+html body :is(.page-body,.hws-body,dialog) input[type=checkbox]:not(.settings-row input):not(.di-auto input):focus-visible{outline:2px solid var(--ui-blue);outline-offset:3px}
+html body :is(.page-body,.hws-body,dialog) input[type=checkbox]:not(.settings-row input):not(.di-auto input):indeterminate{background-color:#007aff;border-color:#007aff;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4 8h8' fill='none' stroke='white' stroke-width='2.1' stroke-linecap='round'/%3E%3C/svg%3E")}
+html body :is(.page-body,.hws-body,dialog) input[type=checkbox]:not(.settings-row input):not(.di-auto input):disabled{cursor:default;opacity:1;box-shadow:none;background-color:var(--ui-fill)}
+html body :is(.page-body,.hws-body,dialog) input[type=checkbox]:not(.settings-row input):not(.di-auto input):disabled:checked{background-color:#8e8e93;border-color:#8e8e93}
+/* Disabled is a readable, intentional state, rather than a faded active action. */
+html body button:disabled:not(.di-refresh){opacity:1!important;filter:none!important;color:var(--ui-sub)!important;background:var(--ui-fill)!important;border-color:var(--ui-line)!important;box-shadow:none!important;cursor:default}
+@media(prefers-reduced-motion:reduce){html body input[type=checkbox]{transition:none!important;animation:none!important}}
+html[data-reduce-motion=true] body input[type=checkbox]{transition:none!important;animation:none!important}
+@media(forced-colors:active){
+ html body :is(.page-body,.hws-body,dialog) input[type=checkbox]:not(.settings-row input):not(.di-auto input){appearance:auto;-webkit-appearance:auto;background-image:none!important;box-shadow:none;forced-color-adjust:auto}
+ html body button:disabled:not(.di-refresh){color:GrayText!important;background:ButtonFace!important;border-color:GrayText!important}
+}
+
+html body :is(.page-body,.hws-body,dialog) input[type=checkbox]:not(.settings-row input):not(.di-auto input):disabled:indeterminate{background-color:#8e8e93;border-color:#8e8e93}
+html :is(#page-home,#page-connection) .di-root button.primary:disabled{opacity:1!important;background:var(--ui-fill)!important;color:var(--ui-sub)!important;border-color:var(--ui-line)!important;box-shadow:none!important}

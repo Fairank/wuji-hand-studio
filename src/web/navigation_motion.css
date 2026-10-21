@@ -14,6 +14,14 @@ html body .nm-host[data-nm-ready=true] label:has(>input[type=radio]:checked){bac
 html body .rt-segments.nm-host[data-nm-ready=true] button{border-bottom-color:transparent!important}
 html body #page-connection #hub-retarget.rt-flow-ready .rt-segments.nm-host[data-nm-ready=true] button[aria-selected=true]{background:transparent!important;box-shadow:none!important;border-color:transparent!important}
 .rt-segments.nm-host,.hg-seg.nm-host,.hg-targets.nm-host{--nm-radius:9px}
+.di-filters.nm-host,.pe-mode.nm-host,.view-sources.nm-host,.symbol-options.nm-host,.ji-fingers.nm-host,.ji-joints.nm-host{--nm-radius:9px}
+/* Grid options retain their selected text contrast on the shared light surface. */
+html body .symbol-options.nm-host[data-nm-ready=true] button[aria-pressed=true]{color:var(--wb-accent,#007aff)!important}
+html[data-theme=dark] body .symbol-options.nm-host[data-nm-ready=true] button[aria-pressed=true]{color:var(--wb-accent,#6ba8ff)!important}
+html body .ji-bar.nm-host[data-nm-ready=true] button[aria-pressed=true]{color:var(--ji-ink,#1d1d1f)!important}
+/* Retire older page-specific important fills only while motion owns selection. */
+html body :is(#page-connection,#page-home) .di-filters.nm-host[data-nm-ready=true] button[aria-pressed=true]{background:transparent!important;border-color:transparent!important;box-shadow:none!important}
+html body #page-connection .ji .ji-bar.nm-host[data-nm-ready=true] button[aria-pressed=true]{background:transparent!important;border-color:transparent!important;box-shadow:none!important;color:var(--ji-ink,#1d1d1f)!important}
 .directory.nm-host [data-nm-proxy=true]{color:var(--wb-accent,#007aff);font-weight:600}
 html[data-theme=dark] .nm-host{--nm-fill:rgba(255,255,255,.13);--nm-edge:rgba(255,255,255,.1);--nm-shadow:0 1px 4px rgba(0,0,0,.2),inset 0 1px rgba(255,255,255,.06)}
 html[data-reduce-transparency=true] .nm-host{--nm-fill:#fff}

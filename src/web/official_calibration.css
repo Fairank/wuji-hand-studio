@@ -21,3 +21,30 @@
 .oc-run[data-status=idle] :is(.oc-step,.oc-progress-row){display:none}
 @media(max-width:700px){.oc-heading{align-items:start}.oc-progress-row{column-gap:10px}.oc-progress-row progress{flex:1;min-width:80px}.oc-run{gap:16px}}
 @media(forced-colors:active){#oc-state,.oc-step{border:1px solid CanvasText;color:CanvasText;background:Canvas}}
+
+/* Read the current official event without a separate pose catalogue. */
+#hub-calibration .oc-run{gap:14px}
+#hub-calibration .oc-heading{gap:8px;align-items:flex-start}
+#hub-calibration .oc-heading h4{font-size:13px;line-height:1.5}
+#hub-calibration #oc-state{font-size:10px;padding:3px 7px;border:1px solid var(--wb-line);background:var(--wb-card);max-width:100%;overflow-wrap:anywhere}
+#hub-calibration .oc-run #hub-calib-status{font-size:11px;line-height:1.65;max-width:none}
+#hub-calibration .oc-step{position:relative;gap:7px;border:1px solid var(--wb-line);border-radius:12px;padding:13px;background:var(--wb-card)}
+#hub-calibration .oc-step dt{font-size:10px;line-height:1.5;padding-right:42px}
+#hub-calibration .oc-step dd{font-size:17px;line-height:1.45;letter-spacing:-.25px;font-weight:600}
+#hub-calibration #oc-step-count{position:absolute;right:13px;top:14px;font-size:10px;line-height:1.5;color:var(--wb-sub);font-variant-numeric:tabular-nums}
+#hub-calibration .oc-progress-row{display:grid;grid-template-columns:1fr auto;gap:8px;font-size:10px}
+#hub-calibration .oc-progress-row progress{grid-column:1/-1;grid-row:2;width:100%;height:5px}
+#hub-calibration #oc-progress-text{grid-column:2;grid-row:1}
+#hub-calibration .oc-feedback{display:grid;gap:8px;margin:0;font-size:10px;line-height:1.5}
+#hub-calibration .oc-feedback>div{display:flex;justify-content:space-between;gap:14px;min-width:0}
+#hub-calibration .oc-feedback dt{color:var(--wb-sub)}
+#hub-calibration .oc-feedback dd{margin:0;text-align:right;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+#hub-calibration .oc-feedback dd[data-state=ready]{color:var(--wb-ok,#168344)}
+#hub-calibration .oc-result{border-top:1px solid var(--wb-line);padding-top:12px;min-width:0}
+#hub-calibration .oc-result strong{font-size:12px;line-height:1.5}
+#hub-calibration .oc-result p{font-size:10px;color:var(--wb-sub);line-height:1.65;margin:6px 0 0;overflow-wrap:anywhere}
+#hub-calibration #oc-result-location{font-family:ui-monospace,Consolas,monospace}
+#hub-calibration .oc-details{padding-top:10px}
+#hub-calibration .oc-details summary{font-size:11px}
+#hub-calibration .oc-run[data-status=idle] :is(.oc-step,.oc-progress-row,.oc-feedback){display:none}
+#hub-calibration .oc-run [hidden]{display:none!important}
