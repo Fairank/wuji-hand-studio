@@ -79,7 +79,10 @@ def connect_discovered(manager, address='', serial='', use_routes=None):
             if target:
                 devices = [d for d in devices if d['address'].removeprefix('udp/') == target or
                            (routed and bundle.routes and d['address'] == 'zenoh://' + d['serial'])]
-            if devices or time.monotonic() >= deadline:break
+            # Another hand may advertise before the explicitly selected one.
+            # Keep the original bounded discovery window for that exact serial.
+            ready = any(d['serial'] == serial for d in devices) if serial else bool(devices)
+            if ready or time.monotonic() >= deadline:break
             time.sleep(.1)
         if not devices:
             raise RuntimeError('未发现机械手，请检查电源、网线或填写自定义地址 / No hand discovered')

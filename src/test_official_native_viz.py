@@ -9,6 +9,7 @@ import json
 from pathlib import Path
 import sys
 import tempfile
+import time
 from types import ModuleType
 import unittest
 from unittest.mock import Mock, patch
@@ -155,7 +156,7 @@ class NativeVisualizationTests(unittest.TestCase):
             stack.enter_context(patch.object(visualization.subprocess, 'Popen', side_effect=AssertionError('No real subprocess')))
             stack.enter_context(patch.object(visualization.subprocess, 'run', side_effect=AssertionError('No external recovery command')))
             value = visualization.OfficialVisualization(folder, idle_check=Mock())
-            value.state.update(supported=True, devices=[{'sn': SERIAL, 'model': 'Wuji Glove'}])
+            value.state.update(supported=True, devices=[{'sn': SERIAL, 'model': 'Wuji Glove'}],scanned_at=time.time())
             yield value, job, factory, prepare, recover, sockets, config
 
     def marker(self, value):

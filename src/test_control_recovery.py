@@ -394,7 +394,7 @@ def glove_worker_fixture(disconnect_error=False, solver_close_error=False, wrong
     }
     worker = extracted('glove_agent.py', 'worker_glove', dict(
         copy=copy, queue=queue, sys=NS(platform='linux'), threading=threading,
-        time=NS(monotonic=lambda: 1., sleep=lambda duration: None),
+        time=NS(monotonic=lambda: 1., time=lambda: 1000., sleep=lambda duration: None),
         GloveSource=Source, read_latest=lambda sub: None))
     commands, events = queue.Queue(), queue.Queue()
     commands.put(dict(name='glove_open', serial='SYNTHETIC', user_id='B', timeout_ms=250, solver=dict(engine='sdk')))

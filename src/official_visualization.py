@@ -44,7 +44,9 @@ class OfficialVisualization:
         with self.lock:row=copy.deepcopy(self.state)
         lease=reservation(self.folder)
         blocked=bool(lease) and lease.get('token')!=self.token
-        row['can_start']=row['supported'] and not row['busy'] and not row['active'] and not lease
+        scanned=row.get('scanned_at')
+        row['devices_fresh']=type(scanned) in (int,float) and 0<=time.time()-scanned<=30 and not row.get('error')
+        row['can_start']=row['supported'] and not row['busy'] and not row['active'] and not lease and row['devices_fresh']
         row['reserved']=bool(lease) and lease.get('kind')=='viz'
         row['blocked_reason']='另一个官方 CLI 会话尚未结束 / Another official CLI session is active' if blocked else None
         if row.get('viewer_url'):row['viewer_url']=viewer_url(row['viewer_url'],theme)
@@ -77,30 +79,52 @@ class OfficialVisualization:
             return closed
 
     def scan(self):
+        token=self._begin_scan()
+        try:
+            threading.Thread(target=self._collect_scan,args=(token,),name='Official CLI device discovery',daemon=True).start()
+        except Exception as error:
+            self._set(devices=[],scanned_at=None,busy=False,scanning=False,error=str(error)[:700])
+            with gate(self.folder):release(token,self.folder)
+            raise
+        return self.snapshot()
+
+    def _begin_scan(self):
         with gate(self.folder):
             token=reserve('scan',self.folder)
             try:self.idle_check()
             except Exception:release(token,self.folder);raise
             with self.lock:
                 if self.state['busy'] or self.state['active']:release(token,self.folder);raise ValueError('Official CLI session is busy')
-                self.state.update(busy=True,scanning=True,error=None)
-        def work():
-            try:
-                from bridge_config import load_config
-                from calibration_cli import cli_json
-                config=load_config()
-                value=cli_json(config,'devices')
-                self._set(backend='windows_native' if native_network(config) else 'linux_controller')
-                devices=value.get('devices')
-                if not isinstance(devices,list):raise ValueError('Invalid official device list')
-                devices=[x for x in devices if isinstance(x,dict)]
-                self._set(devices=devices,scanned_at=time.time())
-            except Exception as error:self._set(error=str(error)[:700])
-            finally:
-                with gate(self.folder):release(token,self.folder)
+                self.state.update(busy=True,scanning=True,error=None,devices=[],scanned_at=None)
+        return token
+
+    def _collect_scan(self,token):
+        try:
+            from bridge_config import load_config
+            from calibration_cli import cli_json
+            config=load_config()
+            value=cli_json(config,'devices')
+            self._set(backend='windows_native' if native_network(config) else 'linux_controller')
+            devices=value.get('devices')
+            if not isinstance(devices,list):raise ValueError('Invalid official device list')
+            devices=[copy.deepcopy(x) for x in devices if isinstance(x,dict)]
+            self._set(devices=devices,scanned_at=time.time())
+            return copy.deepcopy(devices)
+        except Exception as error:
+            self._set(devices=[],scanned_at=None,error=str(error)[:700])
+            return None
+        finally:
+            with gate(self.folder):
+                # Finish the state transition before another session can start.
                 self._set(busy=False,scanning=False)
-        threading.Thread(target=work,name='Official CLI device discovery',daemon=True).start()
-        return self.snapshot()
+                release(token,self.folder)
+
+    def discover_inline(self):
+        """Explicit synchronous scan for calibration, with identical ownership."""
+        token=self._begin_scan()
+        devices=self._collect_scan(token)
+        if devices is None:raise ValueError(self.snapshot().get('error') or 'Official discovery failed')
+        return devices
 
     def _command(self,config,*extra):
         from calibration_cli import controller_args
@@ -123,8 +147,15 @@ class OfficialVisualization:
                 self.idle_check()
                 with self.lock:
                     if self.process or self.state['busy'] or self.state['active'] or self.thread and self.thread.is_alive():raise ValueError('Official visualization already active')
+                    scanned=self.state.get('scanned_at')
+                    if (type(scanned) not in (int,float) or not 0<=time.time()-scanned<=30 or self.state.get('error')):
+                        raise ValueError('请重新查找设备后再打开画面 / Find devices again before starting the Viewer')
                     found=next((x for x in self.state['devices'] if (x.get('sn') or x.get('serial'))==serial),None)
                     if not found:raise ValueError('请先扫描并选择实际设备 / Scan and select a discovered device first')
+                    from device_inventory import normalize_devices
+                    normalized=normalize_devices(self.state['devices'],source='official_cli',observed_at=scanned)
+                    selected=next((row for row in normalized['devices'] if row['sn']==serial and row['selectable']),None)
+                    if selected is None:raise ValueError('设备类型未知或身份冲突，请重新发现 / Device type is unknown or conflicting; rescan')
                     kind=' '.join(str(found.get(k,'')) for k in ('model','type','device_type','device_name')).lower()
                     if serial.startswith('WH1') or ('hand' in kind and '2' not in kind and not serial.startswith('WH2')):raise ValueError('官方 viz 当前支持 Hand 2 和 Glove / Official viz supports Hand 2 and Glove')
                     self.token=token;self.config=config
@@ -136,7 +167,11 @@ class OfficialVisualization:
                         atomic(self.folder/'session.json',marker)
                     self.thread=threading.Thread(target=self._run,args=(config,serial,theme),name='Official CLI visualization',daemon=True)
                     self.thread.start()
-            except Exception:release(token,self.folder);raise
+            except Exception as error:
+                if self.token==token:
+                    self._set(busy=False,active=False,phase='error',viewer_url=None,error=str(error)[:700])
+                    self.token=None;self.thread=None;self.config=None
+                release(token,self.folder);raise
         return self.snapshot(theme)
 
     def _run(self,config,serial,theme):

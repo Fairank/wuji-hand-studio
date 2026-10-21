@@ -90,7 +90,7 @@ def worker_glove(requests,events):
     from device_profiles import controller_profile
     selected=controller_profile();source=GloveSource();glove=sub=session=None
     hand_thread=None;hand_requests=queue.Queue();hand_events=queue.Queue()
-    hand_state={};hand_error='';manager=None;previous_user=None
+    hand_state={};hand_identity={};hand_error='';manager=None;previous_user=None
     devices=[];hands=[];users=[];current=None;state='starting';message='正在加载官方SDK'
     glove_sn='';last_emit=0.;next_map=0.;last_source_seq=None
     from retarget_settings import OutputMapping, defaults
@@ -115,7 +115,7 @@ def worker_glove(requests,events):
             from glove_discovery import scan_gloves
             from zenoh_route import managed_wsl
             return scan_gloves(manager,sdk,all_devices,allow_direct=managed_wsl())
-        devices=scan();state='ready';message='选择手套和标定用户 / Select glove and SDK user'
+        devices=scan();devices_at=time.time();state='ready';message='选择手套和标定用户 / Select glove and SDK user'
         while True:
             now=time.monotonic()
             try:c=requests.get_nowait()
@@ -126,7 +126,7 @@ def worker_glove(requests,events):
                     if name in ('disconnect','glove_disconnect'):break
                     if name=='glove_scan':
                         if glove is not None:raise ValueError('先断开手套再扫描 / Disconnect glove before scanning')
-                        devices=scan();message='扫描完成 / Scan completed'
+                        devices=scan();devices_at=time.time();message='扫描完成 / Scan completed'
                     elif name=='glove_open':
                         if glove is not None:raise ValueError('手套已连接，修改配置请先断开')
                         if c['serial'] not in {d['serial'] for d in devices}:raise ValueError('请先扫描并选择手套')
@@ -194,7 +194,7 @@ def worker_glove(requests,events):
                         if hand_thread is not None and hand_thread.is_alive():raise ValueError('已有机械手会话；请先断开全部再重试')
                         from glove_motion import GloveMotion
                         def factory(*args):return GloveMotion(*args,source=source)
-                        hand_state={};hand_error='';hand_requests=queue.Queue();hand_events=queue.Queue()
+                        hand_state={};hand_identity={};hand_error='';hand_requests=queue.Queue();hand_events=queue.Queue()
                         hand_thread=threading.Thread(target=paired_hand_worker,args=(c.get('address',''),c.get('serial',''),selected,hand_requests,hand_events,factory,source),daemon=True)
                         hand_thread.start();message='正在连接机械手，只读反馈 / Connecting hand feedback only'
                     elif name=='glove_retarget':
@@ -231,6 +231,8 @@ def worker_glove(requests,events):
                 try:event=hand_events.get_nowait()
                 except queue.Empty:break
                 if event['type']=='state':hand_state=event
+                elif event['type']=='identity':
+                    hand_identity=dict(serial=event.get('device_id'),profile=event.get('profile'),source='sdk_identity')
                 elif event['type']=='selection':
                     hands=event['devices'];message=event['message']
                 elif event['type'] in ('notice','error'):
@@ -248,10 +250,11 @@ def worker_glove(requests,events):
                 snapshot['solver']=dict(getattr(session,'info',{}) or {},engine=solver_engine,applied=bool(session and snapshot['fresh']))
                 hw=copy.deepcopy(hand_state.get('hardware',{}))
                 feedback=copy.deepcopy({k:hand_state.get(k) for k in ('latest','device_id','joint_rates','metrics','connection')})
+                feedback['identified_device']=copy.deepcopy(hand_identity)
                 if feedback.get('latest'):
                     feedback['metrics']['age_ms']=max(0,now-feedback['latest']['host_s'])*1000
                 events.put(dict(type='glove_state',state=dict(version=1,connection=state,message=message,
-                    devices=devices,hands=hands,users=users,user=current,profile=selected['id'],glove_serial=glove_sn,
+                    devices=devices,devices_at=devices_at,hands=hands,users=users,user=current,profile=selected['id'],glove_serial=glove_sn,
                     stream=snapshot,hardware=hw,feedback=feedback,hand_error=hand_error,
                     parameters=__import__('official_policy').settings(),
                     source='official_open_live_retarget' if solver_engine=='official_open' else 'official_sdk_live_retarget',hardware_validated=False)))

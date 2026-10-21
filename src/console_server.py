@@ -157,6 +157,60 @@ class Controller:
     def parameter_snapshot(self):
         with self.lock:return self.parameters.snapshot()
 
+    def device_inventory(self):
+        """A passive shared directory. Reading it never discovers or connects."""
+        from device_inventory import build_inventory,merge_inventories
+        from cli_coordination import reservation
+        state=self.snapshot();viz=state['official_viz']
+        result=build_inventory(viz=viz,controller=state,glove=state['glove'])
+        local_official={row['sn'] for row in result['devices'] if row['official_available']}
+        owners={};workspace_errors=[];inventories=[result]
+        for workspace in getattr(self,'inventory_observer',lambda:[])():
+            if not workspace.get('state'):
+                workspace_errors.append(dict(id=workspace.get('id'),error='Workspace unavailable'));continue
+            observed=workspace['state']
+            child=build_inventory(viz=observed.get('official_viz'),controller=observed,glove=observed.get('glove'))
+            inventories.append(child)
+            for row in child['devices']:
+                if row['in_use']:owners.setdefault(row['sn'],[]).append(dict(id=workspace.get('id'),label=workspace.get('label')))
+        if len(inventories)>1:result=merge_inventories(inventories)
+        for row in result['devices']:
+            # A sibling's advertisement is not this Viewer's scan authority.
+            row['official_available']=row['sn'] in local_official
+            if row['sn'] in owners:row['workspace_owners']=owners[row['sn']]
+        reason=None
+        if viz.get('scanning'):reason='正在扫描设备 / Device discovery is running'
+        elif reservation(self.official_viz.folder):reason='官方 CLI 会话正在使用设备目录 / An official CLI session is active'
+        else:
+            try:self.official_viz.idle_check()
+            except (ValueError,OSError,RuntimeError) as error:reason=str(error)[:700]
+        # Explain the common local owner instead of an opaque global failure.
+        if reason and state['glove'].get('busy'):
+            reason='手套预览或遥操作正在使用设备；已有设备仍可查看，请先在原会话中断开再重新扫描 / Glove preview or teleoperation owns the device; disconnect in its session before rescanning'
+        if workspace_errors and not reason:reason='无法确认其他工作区的状态 / Another workspace state is unavailable'
+        result.update(scanning=bool(viz.get('scanning')),scanned_at=viz.get('scanned_at'),
+                      error=viz.get('error'),scan_allowed=not reason and bool(viz.get('supported')),
+                      blocked_reason=reason,backend=viz.get('backend'),workspace_errors=workspace_errors)
+        return result
+
+    def calibration_devices(self,fresh=False):
+        from device_inventory import normalize_devices
+        if fresh:
+            rows=self.official_viz.discover_inline()
+            return [row for row in normalize_devices(rows,source='official_cli',observed_at=time.time())['devices'] if row['selectable']]
+        state=self.official_viz.snapshot()
+        if (state.get('error') or state.get('scanning') or not state.get('scanned_at')
+                or not 0<=time.time()-state['scanned_at']<=30):return []
+        return [row for row in normalize_devices(state.get('devices',[]),source='official_cli',observed_at=state['scanned_at'])['devices'] if row['selectable']]
+
+    def visualization_status(self,theme=None):
+        result=self.official_viz.snapshot(theme)
+        if result.get('can_start'):
+            try:self.official_viz.idle_check()
+            except (ValueError,OSError,RuntimeError) as error:
+                result.update(can_start=False,blocked_reason=str(error)[:700])
+        return result
+
     def synchronize_parameters(self,source):
         client=None;error=None
         try:
@@ -195,13 +249,13 @@ class Controller:
         if isinstance(command,dict) and command.get('name') in {'connect','runtime_select','bridge_config_save','bridge_password_save','bridge_password_forget','parameters_sync','doctor_version','doctor_run','doctor_support','device_profile_select','glove_connect'}:
             from managed_runtime import status as runtime_status
             if runtime_status()['busy']:raise ValueError('内置控制环境正在安装，请等待完成 / Wait for controller setup to finish')
-        if isinstance(command,dict) and command.get('name') in {'official_cli_check','official_cli_update','official_cli_rollback','official_viz_scan','official_viz_start','official_viz_stop'}:
+        if isinstance(command,dict) and command.get('name') in {'official_cli_check','official_cli_update','official_cli_rollback','official_viz_scan','device_inventory_scan','official_viz_start','official_viz_stop'}:
             if getattr(self,'desktop_closing',False) and command['name']!='official_viz_stop':raise ValueError('Session is closing')
             name=command['name']
             if name=='official_cli_check':return dict(official_cli=self.official_cli.start(check_only=True))
             if name=='official_cli_update':return dict(official_cli=self.official_cli.start())
             if name=='official_cli_rollback':return dict(official_cli=self.official_cli.rollback())
-            if name=='official_viz_scan':return dict(official_viz=self.official_viz.scan())
+            if name in {'official_viz_scan','device_inventory_scan'}:return dict(official_viz=self.official_viz.scan())
             if name=='official_viz_start':return dict(official_viz=self.official_viz.start(command.get('serial'),command.get('theme','light')))
             return dict(official_viz=self.official_viz.stop())
         from cli_coordination import gate,enforce
@@ -632,6 +686,7 @@ class Controller:
                 self.log('自动识别：'+self.state['device_profile']['zh']+' · '+event['device_id'])
             elif kind == 'selection':
                 self.state['devices'] = event['devices']
+                self.state['devices_at'] = time.time()
                 self.state['connection'] = 'error'
                 self.state['message'] = event['message']
                 self.clear_live()
@@ -731,7 +786,8 @@ class Handler(BaseHTTPRequestHandler):
         if url.path=='/api/official-studio':return self.reply(200,self.server.studio.snapshot())
         if url.path=='/api/control-tools':return self.reply(200,self.server.controller.official_tools.snapshot())
         if url.path=='/api/official-cli':return self.reply(200,self.server.controller.official_cli.snapshot())
-        if url.path=='/api/official-viz':return self.reply(200,self.server.controller.official_viz.snapshot(parse_qs(url.query).get('theme',[None])[0]))
+        if url.path=='/api/official-viz':return self.reply(200,self.server.controller.visualization_status(parse_qs(url.query).get('theme',[None])[0]))
+        if url.path=='/api/device-inventory':return self.reply(200,self.server.controller.device_inventory())
         if url.path=='/api/official-viewer':
             from official_viewer import snapshot
             return self.reply(200,snapshot(parent_port=self.server.server_address[1]))
@@ -865,6 +921,8 @@ class Handler(BaseHTTPRequestHandler):
         assets['/viewer']=('viewer.html','text/html; charset=utf-8')
         for name in ('official_tools.js','official_studio.js','official_studio_viewer.js','official_viz.js'):assets['/'+name]=(name,'text/javascript; charset=utf-8')
         for name in ('official_tools.css','official_studio.css','official_studio_viewer.css','official_viz.css'):assets['/'+name]=(name,'text/css; charset=utf-8')
+        for name in ('device_inventory.js','device_workflows.js'):assets['/'+name]=(name,'text/javascript; charset=utf-8')
+        assets['/device_inventory.css']=('device_inventory.css','text/css; charset=utf-8')
         assets['/official_studio_viewer.html']=('official_studio_viewer.html','text/html; charset=utf-8')
         assets['/favicon.ico']=('favicon.ico','image/x-icon')
         assets['/app-icon.png']=('app-icon.png','image/png')
@@ -955,6 +1013,14 @@ class ConsoleHTTPServer(ThreadingHTTPServer):
                     except OSError:raise ValueError('无法确认另一个工作区状态 / Another workspace state is unavailable') from None
         self.controller.official_cli.idle_check=all_idle
         self.controller.official_viz.idle_check=all_idle
+        self.controller.calibration.device_provider=self.controller.calibration_devices
+        def calibration_idle():
+            from cli_coordination import reservation
+            if reservation(self.controller.official_viz.folder):
+                raise ValueError('官方 CLI 会话正在运行；用户档案暂不刷新 / Official CLI session active; user profiles have not been refreshed')
+            all_idle()
+        self.controller.calibration.metadata_check=calibration_idle
+        self.controller.inventory_observer=lambda:self.fleet.inventory_snapshots() if hasattr(self,'_fleet') else []
         if startup:self.controller.official_cli.startup()
 
     @property

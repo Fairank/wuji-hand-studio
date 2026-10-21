@@ -126,6 +126,16 @@ class DeviceFleet:
                     self._beat_pending[r['id']]=self._beat_pool.submit(self.post,r,{'name':'session_keepalive'})
         return errors
 
+    def inventory_snapshots(self):
+        """Read only already-running workspaces; never create a child process."""
+        with self.lock:records=list(self.children.values())
+        def read(row):
+            observed=dict(id=row['id'],label=row.get('label'))
+            try:observed['state']=self.get(row,'/api/state')
+            except (OSError,ValueError):observed['state']=None
+            return observed
+        with ThreadPoolExecutor(max_workers=8) as pool:return list(pool.map(read,records))
+
     def snapshot(self):
         with self.lock:
             records = list(self.children.values())
@@ -139,6 +149,7 @@ class DeviceFleet:
                 g=s.get('glove',{});feedback=g.get('feedback') or {};hw=g.get('hardware') or {}
                 row.update(glove_serial=g.get('glove_serial'),sdk_user=(g.get('user') or {}).get('display_name'),
                            hand_serial=feedback.get('device_id') or s.get('device_id'),
+                           paired_hand_serial=feedback.get('device_id') if feedback.get('connection')=='connected' else None,
                            following=hw.get('active'),feedback_hz=(feedback.get('metrics') or s.get('metrics') or {}).get('host_hz'),
                            mapping_hz=(g.get('stream') or {}).get('retarget_hz'),
                            stale=feedback.get('stale') if feedback.get('device_id') else s.get('stale'),

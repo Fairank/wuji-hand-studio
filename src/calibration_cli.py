@@ -135,8 +135,11 @@ def record_progress(run,event):
 
 
 class CalibrationCLI:
-    def __init__(self, reports=None):
+    def __init__(self, reports=None, device_provider=None, metadata_check=None):
         self.lock = threading.RLock()
+        self.refresh_lock = threading.Lock()
+        self.device_provider=device_provider
+        self.metadata_check=metadata_check or (lambda:None)
         self.process = None
         self.thread = None
         self.cache = None
@@ -151,23 +154,44 @@ class CalibrationCLI:
             run = copy.deepcopy(self.run)
             cache = copy.deepcopy(self.cache)
             stale = time.monotonic() - self.cached_at > 8
+        metadata_error=None
+        refreshing=False
         if not run['running'] and (refresh or cache is None or stale):
-            config = None
+            # Do not wait while holding self.lock: start() may already hold it,
+            # while another metadata reader needs it to publish its result.
+            if not self.refresh_lock.acquire(blocking=False):
+                refreshing=True;metadata_error='官方用户信息正在刷新，请稍后重试 / Official user information is refreshing; retry shortly'
+            else:
+                config=None
+                try:
+                    self.metadata_check()
+                    config=load_config()
+                    users=cli_json(config,'user','list').get('users',[])
+                    current=cli_json(config,'user','show')
+                    devices=[] if self.device_provider is not None else cli_json(config,'devices').get('devices',[])
+                    if not isinstance(users,list) or not isinstance(current,dict) or not isinstance(devices,list):
+                        raise ValueError('Unexpected official CLI list')
+                    cache=dict(available=True,calibration_supported=config['mode']!='ssh',mode=config['mode'],users=users,
+                               current=current,devices=[d for d in devices if is_glove_device(d)],error=None,
+                               metadata_checked_at=time.time())
+                    with self.lock:
+                        self.cache=copy.deepcopy(cache);self.cached_at=time.monotonic()
+                    stale=False
+                except (OSError,ValueError,RuntimeError,TimeoutError) as error:
+                    metadata_error=str(error)[:400]
+                finally:self.refresh_lock.release()
+        if cache is None:
+            cache=dict(available=False,calibration_supported=False,mode=None,users=[],current=None,devices=[],error=None,metadata_checked_at=None)
+        cache.update(metadata_current=bool(cache.get('available') and not stale and not metadata_error),
+                     metadata_error=metadata_error,metadata_refreshing=refreshing)
+        if metadata_error:cache.update(available=False,error=metadata_error)
+        if self.device_provider is not None:
             try:
-                config = load_config()
-                users = cli_json(config, 'user', 'list').get('users', [])
-                current = cli_json(config, 'user', 'show')
-                devices = cli_json(config, 'devices').get('devices', [])
-                if not isinstance(users, list) or not isinstance(devices, list):
-                    raise ValueError('Unexpected official CLI list')
-                cache = dict(available=True, calibration_supported=config['mode']!='ssh', mode=config['mode'], users=users,
-                             current=current, devices=[d for d in devices if is_glove_device(d)], error=None)
-            except (OSError, ValueError, RuntimeError, TimeoutError) as error:
-                cache = dict(available=False, calibration_supported=False, mode=(config or {}).get('mode'),
-                             users=[], current=None, devices=[], error=str(error)[:400])
-            with self.lock:
-                self.cache = cache
-                self.cached_at = time.monotonic()
+                devices=self.device_provider(False)
+                if not isinstance(devices,list):raise ValueError('Unexpected shared device inventory')
+                cache.update(devices=[copy.deepcopy(d) for d in devices if is_glove_device(d)],devices_error=None)
+            except (OSError,ValueError,RuntimeError,TimeoutError) as error:
+                cache.update(devices=[],devices_error=str(error)[:400])
         with self.lock:run=copy.deepcopy(self.run)
         return dict(**(cache or {}), run=run)
 
@@ -212,6 +236,10 @@ class CalibrationCLI:
             model = current.get(side + '_hand') or {}
             if model.get('calibrated') and not replace:
                 raise ValueError('This side is already calibrated; confirm replacement / 已有标定，请明确确认覆盖')
+            if self.device_provider is not None:
+                devices=self.device_provider(True)
+                if not isinstance(devices,list):raise ValueError('Unexpected shared device inventory')
+                state['devices']=[copy.deepcopy(d) for d in devices if is_glove_device(d)]
             if not any(isinstance(d, dict) and (d.get('sn') or d.get('serial')) == serial for d in state['devices']):
                 raise ValueError('Selected glove is not in the latest official scan / 手套不在最新扫描结果中')
             device=next(d for d in state['devices'] if (d.get('sn') or d.get('serial'))==serial)

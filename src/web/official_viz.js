@@ -18,7 +18,7 @@
   sourceInfo.append($('ov-message'),connectDevice);displayActions.after(sourceInfo);
   const t=(zh,en)=>window.WujiLocale?.lang==='en'?en:zh;
   let state=null,fresh=false,loading=null,pending='',sequence=0,transportError='',actionError='',viewerError='',frame=null,frameUrl='',frameLoaded=false,focus=false,destroyed=false,lastVisible=null,optionKey='',savedScroll=0;
-  let viewMode='offline',offline=null,offlineError='',offlineLoading=null,frameReady=false,consoleState=null;
+  let viewMode='offline',offline=null,offlineError='',offlineLoading=null,frameReady=false,consoleState=null,wantedSerial='';
   const previewOnly=s=>s?.connection==='disconnected'&&s?.hardware?.active===false&&s?.glove?.busy===true&&!s.glove.feedback?.device_id&&s.glove.hardware?.active!==true&&s.glove.hardware?.active!==null&&!(s.unconfirmed_devices||[]).length;
   const theme=()=>document.documentElement.dataset.theme==='dark'?'dark':'light';
   const visible=()=>!document.hidden&&host.getClientRects().length>0&&getComputedStyle(host).visibility!=='hidden';
@@ -53,8 +53,8 @@
    const phases={idle:['尚未打开','Not open'],starting:['CLI 正在启动','CLI starting'],running:['CLI 运行中','CLI running'],stopping:['CLI 正在停止','CLI stopping'],error:['CLI 需要处理','CLI needs attention'],exited:['CLI 已退出','CLI exited']};
    setText('ov-state',blank?(offline?.available?t('空窗口','Empty Viewer'):t('正在准备界面','Preparing Viewer')):!fresh?t('状态未核对','Status unverified'):s.scanning?t('正在查找设备','Finding devices'):phases[phase]?t(...phases[phase]):t('状态未知','Status unknown'));root.dataset.phase=fresh?text(phase,40):'unknown';
    setText('ov-device-label',t('手套或机械手','Glove or hand'));setText('ov-scan',s.scanning?t('正在查找…','Finding…'):previewOnly(consoleState)?t('关闭手套预览并查找','Close glove preview and find'):t('查找设备','Find devices'));setText('ov-start',pending==='official_viz_start'?t('正在打开…','Opening…'):t('启动实时画面','Start live view'));setText('ov-stop',pending==='official_viz_stop'?t('正在停止…','Stopping…'):t('停止可视化','Stop visualization'));setText('ov-reload',t('重新载入画面','Reload view'));setFocus(focus);
-   const devices=(Array.isArray(s.devices)?s.devices:[]).filter(d=>d&&typeof d.sn==='string'&&d.sn),key=JSON.stringify([devices,window.WujiLocale?.lang]);
-   if(key!==optionKey){optionKey=key;const selected=$('ov-device').value;$('ov-device').replaceChildren(new Option(t('选择设备','Select a device'),''),...devices.map(d=>new Option([text(d.model,100),d.sn,d.handedness==='left'?t('左','Left'):d.handedness==='right'?t('右','Right'):''].filter(Boolean).join(' · '),d.sn)));if(devices.some(d=>d.sn===selected))$('ov-device').value=selected;}
+   const devices=(Array.isArray(s.devices)?s.devices:[]).filter(d=>d&&typeof (d.sn||d.serial)==='string'&&(d.sn||d.serial)).map(d=>({...d,sn:d.sn||d.serial})),key=JSON.stringify([devices,window.WujiLocale?.lang]);
+   if(key!==optionKey){optionKey=key;const selected=wantedSerial||$('ov-device').value;$('ov-device').replaceChildren(new Option(t('选择设备','Select a device'),''),...devices.map(d=>new Option([text(d.model||d.device_type,100),d.sn,(d.handedness||d.side)==='left'?t('左','Left'):(d.handedness||d.side)==='right'?t('右','Right'):''].filter(Boolean).join(' · '),d.sn)));if(devices.some(d=>d.sn===selected))$('ov-device').value=selected;}
    $('ov-device').disabled=busy||active||!!s.scanning;$('ov-scan').disabled=!fresh||busy||active||!!s.reserved||!!s.scanning||s.supported!==true;
    $('ov-start').disabled=!fresh||busy||active||!!s.scanning||s.supported!==true||s.can_start!==true||!$('ov-device').value;
    $('ov-stop').disabled=pending==='official_viz_stop'||!active&&!s.reserved&&!['starting','running','stopping'].includes(phase);
@@ -99,7 +99,7 @@
    finally{if(own===sequence)pending='';if(!destroyed)render();}
   }
   function syncVisibility(){if(destroyed)return;const now=visible();if(!now){setFocus(false);detach();}if(now!==lastVisible){lastVisible=now;if(now){refresh();if(viewMode==='offline'&&!offline&&!offlineError)loadOffline();}}syncFrame();}
-  $('ov-scan').onclick=()=>act('official_viz_scan',{},previewOnly(consoleState));$('ov-start').onclick=()=>act('official_viz_start',{serial:$('ov-device').value,theme:theme()});$('ov-stop').onclick=()=>act('official_viz_stop');$('ov-device').onchange=render;
+  $('ov-scan').onclick=()=>act('official_viz_scan',{},previewOnly(consoleState));$('ov-start').onclick=()=>act('official_viz_start',{serial:$('ov-device').value,theme:theme()});$('ov-stop').onclick=()=>act('official_viz_stop');$('ov-device').onchange=()=>{wantedSerial=$('ov-device').value;window.WujiDeviceInventory?.select(wantedSerial);render();};
   function selectMode(value){viewMode=value;setFocus(false);render();if(value==='offline'&&!offline)loadOffline();}
   function showDeviceMode(){selectMode('device');($('ov-scan').disabled?$('ov-mode-device'):$('ov-scan')).focus();}
   connectDevice.onclick=showDeviceMode;
@@ -114,8 +114,11 @@
   const observer=new MutationObserver(syncVisibility);for(let node=host;node;node=node.parentElement)observer.observe(node,{attributes:true,attributeFilter:['hidden','class','style','data-page','data-hub-tab']});
   const themeObserver=new MutationObserver(onTheme);themeObserver.observe(document.documentElement,{attributes:true,attributeFilter:['data-theme']});
   const sizeObserver=new ResizeObserver(syncVisibility);sizeObserver.observe(host);const timer=setInterval(()=>{syncVisibility();if(visible()||state?.active)refresh();},1000);
-  const api={refresh,syncVisibility,showDeviceMode,destroy(){destroyed=true;clearInterval(timer);observer.disconnect();themeObserver.disconnect();sizeObserver.disconnect();document.removeEventListener('keydown',onEscape);document.removeEventListener('visibilitychange',syncVisibility);window.removeEventListener('workspace-page',syncVisibility);window.removeEventListener('hashchange',syncVisibility);window.removeEventListener('wuji-language',onLanguage);window.removeEventListener('message',onReady);window.removeEventListener('console-state',onConsole);setFocus(false);detach();root.remove();mounted=null;}};
+  function selectDevice(serial){wantedSerial=serial;optionKey='';render();}
+  const onSelection=event=>{if(event.detail?.device?.sn)selectDevice(event.detail.device.sn);};
+  window.addEventListener('device-inventory-selection',onSelection);
+  const api={refresh,syncVisibility,showDeviceMode,selectDevice,destroy(){destroyed=true;clearInterval(timer);observer.disconnect();themeObserver.disconnect();sizeObserver.disconnect();document.removeEventListener('keydown',onEscape);document.removeEventListener('visibilitychange',syncVisibility);window.removeEventListener('workspace-page',syncVisibility);window.removeEventListener('hashchange',syncVisibility);window.removeEventListener('wuji-language',onLanguage);window.removeEventListener('message',onReady);window.removeEventListener('console-state',onConsole);window.removeEventListener('device-inventory-selection',onSelection);setFocus(false);detach();root.remove();mounted=null;}};
   mounted={host,api};render();syncVisibility();return api;
  }
- window.WujiOfficialViz={mount,showDeviceMode(){mounted?.api.showDeviceMode();}};
+ window.WujiOfficialViz={mount,showDeviceMode(){mounted?.api.showDeviceMode();},async selectDevice(serial){await mounted?.api.refresh();mounted?.api.selectDevice(serial);}};
 })();

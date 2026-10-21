@@ -33,6 +33,17 @@ class DiscoveryTests(unittest.TestCase):
         m=manager(LEFT)
         with self.assertRaisesRegex(RuntimeError,'no longer'):d.connect_discovered(m,serial=RIGHT,use_routes=False)
         m.connect.assert_not_called()
+    def test_explicit_serial_waits_when_another_hand_advertises_first(self):
+        m=manager(RIGHT);m.scan.side_effect=[[device(LEFT)],[device(LEFT)],[device(LEFT),device(RIGHT)]]
+        with patch.object(d.time,'monotonic',side_effect=[0,.1,.2]),patch.object(d.time,'sleep') as sleep:
+            h,r,p=d.connect_discovered(m,serial=RIGHT,use_routes=False)
+        self.assertEqual(m.scan.call_count,3);self.assertEqual(sleep.call_count,2)
+        m.connect.assert_called_once_with(sn=RIGHT,device_name='wuji_hand_2');self.assertEqual(p['side'],'right');r.close()
+    def test_explicit_missing_serial_obeys_deadline_despite_other_visible_hand(self):
+        m=manager(LEFT)
+        with patch.object(d.time,'monotonic',side_effect=[0,.2,1.2,3.1]),patch.object(d.time,'sleep') as sleep:
+            with self.assertRaisesRegex(RuntimeError,'no longer'):d.connect_discovered(m,serial=RIGHT,use_routes=False)
+        self.assertEqual(m.scan.call_count,3);self.assertEqual(sleep.call_count,2);m.connect.assert_not_called()
     def test_unrelated_unknown_device_and_mismatched_uri_rejected(self):
         self.assertEqual(d.candidates([device('WG2JA00000000001'),device(LEFT,address='zenoh://'+RIGHT)]),[])
     def test_real_side_and_serial_must_agree(self):

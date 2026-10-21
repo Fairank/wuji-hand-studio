@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 from types import ModuleType, SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
@@ -95,7 +96,7 @@ class OfficialCLIRuntimeTests(unittest.TestCase):
     def viewer(self):
         value = visualization.OfficialVisualization(self.folder, idle_check=self.idle)
         value.config = copy.deepcopy(self.config)
-        value.state.update(supported=True, device={'sn': SERIAL, 'model': 'Wuji Hand 2'}, devices=[{'sn': SERIAL, 'model': 'Wuji Hand 2'}])
+        value.state.update(supported=True, device={'sn': SERIAL, 'model': 'Wuji Hand 2'}, devices=[{'sn': SERIAL, 'model': 'Wuji Hand 2'}],scanned_at=time.time())
         return value
 
     def own_marker(self, value, kind='viz'):

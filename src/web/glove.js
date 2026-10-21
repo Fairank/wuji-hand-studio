@@ -27,7 +27,7 @@
  document.querySelector('.page-area').append(page);ws.views.glove=page.querySelector('.page-body');
  const link=document.createElement('a');link.href='#glove';link.dataset.page='glove';link.innerHTML='<svg viewBox="0 0 26 24" aria-hidden="true"><path d="M5 19V10a2 2 0 0 1 4 0V5a2 2 0 0 1 4 0v5-7a2 2 0 0 1 4 0v9-5a2 2 0 0 1 4 0v9c0 5-3 7-7 7H9l-6-6"/></svg><span></span>';
  document.querySelector('.directory').insertBefore(link,document.querySelector('[data-page="feedback"]'));
- let state=null,pending=false,lease=null,leaseAt=0,seen=false,optionsKey='',lastMessage='',savedBinding=null;
+ let state=null,pending=false,lease=null,leaseAt=0,seen=false,optionsKey='',lastMessage='',savedBinding=null,wantedGlove='';
  fetch('/api/retarget/context').then(r=>r.json()).then(c=>{savedBinding=c.binding;optionsKey='';render()}).catch(()=>{});
  const sdkHead=document.createElement('th');sdkHead.id='glove-sdk-target-label';$('glove-target-label').before(sdkHead);
  const f=(v,d=1)=>typeof v==='number'&&Number.isFinite(v)?v.toFixed(d):'—';
@@ -54,7 +54,7 @@
   const g=state?.glove||{},hw=g.hardware||{},stream=g.stream||{},feedback=g.feedback||{},receiving=g.connection==='receiving',connecting=g.connection==='connecting';
   $('glove-profile').textContent=state?.device_profile?.[window.WujiLocale.lang==='en'?'en':'zh']||'';
   const key=JSON.stringify([g.devices,g.hands,g.users,g.user?.user_id,state?.device_profile?.id]);
-  if(key!==optionsKey){optionsKey=key;const old=$('glove-device').value;$('glove-device').replaceChildren(new Option(t('请选择手套','Select a glove'),''));for(const d of g.devices||[])$('glove-device').add(new Option(`${d.serial} · ${d.address}`,d.serial));if([...$('glove-device').options].some(o=>o.value===old))$('glove-device').value=old;else if(g.devices?.length===1)$('glove-device').value=g.devices[0].serial;
+  if(key!==optionsKey){optionsKey=key;const old=wantedGlove||$('glove-device').value;$('glove-device').replaceChildren(new Option(t('请选择手套','Select a glove'),''));for(const d of g.devices||[])$('glove-device').add(new Option(`${d.serial||d.sn} · ${d.address||''}`,d.serial||d.sn));if([...$('glove-device').options].some(o=>o.value===old))$('glove-device').value=old;else if(!wantedGlove&&g.devices?.length===1)$('glove-device').value=g.devices[0].serial||g.devices[0].sn;
    const previousUser=$('glove-user').value;$('glove-user').replaceChildren();for(const u of g.users||[])$('glove-user').add(new Option(u.display_name+(u.is_default?' · Default':''),u.user_id));$('glove-user').value=previousUser||savedBinding?.sdk_user||g.user?.user_id||'';
    const handChoice=$('glove-hand-device').value||savedBinding?.hand_serial||'';
    const compatible=(g.hands||[]).filter(h=>h.generation===state?.device_profile?.generation&&(!h.side_hint||h.side_hint===state?.device_profile?.side));
@@ -91,7 +91,8 @@
  $('glove-prepare').onclick=()=>act({name:'glove_prepare',address:$('glove-hand-address').value.trim(),serial:$('glove-hand-device').value});
  $('glove-follow').onclick=()=>act({name:'glove_follow',workspace_clear:$('glove-clear').checked});
  $('glove-stop').onclick=()=>act({name:'glove_stop'});$('glove-disconnect').onclick=()=>act({name:'glove_disconnect'});
- $('glove-device').onchange=render;$('glove-clear').onchange=render;
+ $('glove-device').onchange=()=>{wantedGlove=$('glove-device').value;window.WujiDeviceInventory?.select(wantedGlove);render();};$('glove-clear').onchange=render;
+ window.addEventListener('device-inventory-selection',event=>{if(event.detail?.device?.kind!=='glove')return;wantedGlove=event.detail.serial;optionsKey='';render();});
  window.addEventListener('console-state',e=>{state=e.detail;render();});window.addEventListener('wuji-language',translate);
  window.addEventListener('console-offline',()=>{lease=null;lastMessage=t('工作台服务已离线','Workbench service offline');render();});
  setInterval(async()=>{if(!lease)return;try{await post({name:'glove_keepalive',lease});}catch(e){lease=null;lastMessage=e.message;render();}},250);
