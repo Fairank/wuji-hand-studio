@@ -9,6 +9,11 @@ html body .nm-host[data-nm-ready=true] [data-nm-item]{transition-property:scale,
 html body .nm-host[data-nm-ready=true] :is([data-nm-visual-selected=true],[data-nm-item][aria-current=page],[data-nm-item][aria-selected=true],[data-nm-item][aria-pressed=true]){background:transparent!important;border-color:transparent!important;box-shadow:none!important}
 /* This existing dark connection rule is important; replace only its selected fill. */
 html[data-theme=dark] #page-connection .hub-tabs.nm-host[data-nm-ready=true] button:is([data-nm-visual-selected=true],[aria-selected=true],[aria-pressed=true]){background:transparent!important;box-shadow:none!important}
+/* Radio segments share the moving surface; native checked/focus behavior stays. */
+html body .nm-host[data-nm-ready=true] label:has(>input[type=radio]:checked){background:transparent!important;border-color:transparent!important;box-shadow:none!important}
+html body .rt-segments.nm-host[data-nm-ready=true] button{border-bottom-color:transparent!important}
+html body #page-connection #hub-retarget.rt-flow-ready .rt-segments.nm-host[data-nm-ready=true] button[aria-selected=true]{background:transparent!important;box-shadow:none!important;border-color:transparent!important}
+.rt-segments.nm-host,.hg-seg.nm-host,.hg-targets.nm-host{--nm-radius:9px}
 .directory.nm-host [data-nm-proxy=true]{color:var(--wb-accent,#007aff);font-weight:600}
 html[data-theme=dark] .nm-host{--nm-fill:rgba(255,255,255,.13);--nm-edge:rgba(255,255,255,.1);--nm-shadow:0 1px 4px rgba(0,0,0,.2),inset 0 1px rgba(255,255,255,.06)}
 html[data-reduce-transparency=true] .nm-host{--nm-fill:#fff}

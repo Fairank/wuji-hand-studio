@@ -11,13 +11,13 @@
 /* Generated spring: end */
 
 /* Individual scale leaves positioning transforms and the layout box untouched. */
-html body :is(button,.button,.wa-row,.ui-link-button,.directory a):not(:disabled,[aria-disabled=true],[class*=handle i],[class*=resize i],.danger,.stop-motion,[id$="-stop"],#stop) {
+html body :is(button,.button,.wa-row,.ui-link-button,.directory a):not(:disabled,[aria-disabled=true],[class*=handle i],[class*=resize i],.danger,.stop-motion,.hg-stop,.wsx-stopall,[id$="-stop"],#stop) {
   scale: 1;
   transition: scale var(--wb-settle) var(--wb-spring),
     background-color 140ms ease, border-color 140ms ease, color 140ms ease,
     box-shadow 140ms ease;
 }
-html body :is(button,.button,.wa-row,.ui-link-button,.directory a):not(:disabled,[aria-disabled=true],[class*=handle i],[class*=resize i],.danger,.stop-motion,[id$="-stop"],#stop):active {
+html body :is(button,.button,.wa-row,.ui-link-button,.directory a):not(:disabled,[aria-disabled=true],[class*=handle i],[class*=resize i],.danger,.stop-motion,.hg-stop,.wsx-stopall,[id$="-stop"],#stop):active {
   scale: .97;
   transform: none;
   transition: scale 75ms cubic-bezier(.2,.7,.3,1),
@@ -25,7 +25,7 @@ html body :is(button,.button,.wa-row,.ui-link-button,.directory a):not(:disabled
     box-shadow 100ms ease;
 }
 /* Stop controls retain an immediate, stable target. */
-html body :is(.danger,.stop-motion,[id$="-stop"],#stop) {
+html body :is(.danger,.stop-motion,.hg-stop,.wsx-stopall,[id$="-stop"],#stop) {
   scale: 1!important;
   transform: none!important;
   transition: background-color 100ms ease, border-color 100ms ease;
@@ -47,7 +47,23 @@ html dialog[open]:is(.symbol-dialog,.connection-popover,.hws-sheet,#desktop-menu
 html .workspace-page:not([hidden])>.page-heading {
   animation: wb-spring-content 360ms var(--wb-spring), wb-micro-fade 130ms ease-out;
 }
-html :is(.hub-section,.settings-section):not([hidden]) { animation:wb-micro-fade 140ms ease-out; }
+/* Panels settle in one short fade. Do not move the embedded renderer, floating
+   windows or live stop targets while the user's pointer is over them. */
+html :is(.hub-section,.settings-section,#rt-output,#rt-official):not([hidden]) { animation:wb-micro-fade 180ms ease-out; }
+/* Use the browser's native disclosure box. No wrapper cloning, max-height
+   guess, per-frame JavaScript, scroll interception or delayed control action. */
+@supports (interpolate-size:allow-keywords) and selector(details::details-content) {
+  html :is(#page-connection,#page-devices,#page-settings,#page-library,#page-parameters)
+    details { interpolate-size:allow-keywords; }
+  html :is(#page-connection,#page-devices,#page-settings,#page-library,#page-parameters)
+    details::details-content {
+    block-size:0;
+    overflow:clip;
+    transition:block-size 220ms cubic-bezier(.2,.75,.25,1),content-visibility 220ms allow-discrete;
+  }
+  html :is(#page-connection,#page-devices,#page-settings,#page-library,#page-parameters)
+    details[open]::details-content { block-size:auto; }
+}
 /* Chevron/switch motion stays inside its existing control. */
 html :is(.wc-options,.cr-details,.hub-calibration-setup,.rt-advanced,.rt-help,.folded-panel,.motion-notes,.library-reference)>summary:after,
 html #wb-program .wb-program-summary svg {
@@ -66,10 +82,12 @@ html #spring-preview { display:inline-flex;align-items:center;justify-content:ce
 /* Honor both preferences. Settling is immediate even during an active press. */
 html[data-reduce-motion=true] body :is(button,.button,.wa-row,.ui-link-button,.directory a),
 html[data-reduce-motion=true] .spring-preview-dot { scale:1!important;transform:none!important;transition:none!important;animation:none!important; }
-html[data-reduce-motion=true] :is(dialog,.page-heading,.hub-section,.settings-section),
+html[data-reduce-motion=true] :is(dialog,.page-heading,.hub-section,.settings-section,#rt-output,#rt-official),
 html[data-reduce-motion=true] :is(summary:after,.settings-row input:before) { animation:none!important;transition:none!important; }
+html[data-reduce-motion=true] details::details-content { transition:none!important; }
 @media(prefers-reduced-motion:reduce) {
   html body :is(button,.button,.wa-row,.ui-link-button,.directory a),.spring-preview-dot { scale:1!important;transform:none!important;transition:none!important;animation:none!important; }
-  html :is(dialog,.page-heading,.hub-section,.settings-section),
+  html :is(dialog,.page-heading,.hub-section,.settings-section,#rt-output,#rt-official),
   html :is(summary:after,.settings-row input:before) { animation:none!important;transition:none!important; }
+  html details::details-content { transition:none!important; }
 }

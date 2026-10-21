@@ -1,9 +1,9 @@
 /* Selection follows existing ARIA state. No routing, control requests or frame loop. */
 (()=>{
   'use strict';
-  const HOSTS='.directory,.hub-tabs,.parameter-tabs,.playback-modes,.symbol-kinds,.wsx-manage-tabs';
-  const ITEMS='a[aria-current],a[data-page],button[aria-selected],button[aria-pressed],[role=tab]';
-  const SELECTED='[aria-current=page],[aria-selected=true],[aria-pressed=true]';
+  const HOSTS='.directory,.hub-tabs,.parameter-tabs,.playback-modes,.symbol-kinds,.wsx-manage-tabs,.rt-segments,.hg-seg,.hg-targets';
+  const ITEMS='a[aria-current],a[data-page],button[aria-selected],button[aria-pressed],[role=tab],label:has(> input[type=radio])';
+  const SELECTED='[aria-current=page],[aria-selected=true],[aria-pressed=true],label:has(> input[type=radio]:checked)';
   let mounted=null;
   const near=(a,b)=>a&&b&&['x','y','w','h'].every(key=>Math.abs(a[key]-b[key])<.25);
   const transform=box=>`translate(${box.x}px,${box.y}px) scale(${box.sx},${box.sy})`;
@@ -162,6 +162,18 @@
     preferences.observe(root,{attributes:true,attributeOldValue:true,attributeFilter:['data-reduce-motion','data-theme']});
     if(document.body)preferences.observe(document.body,{attributes:true,attributeOldValue:true,attributeFilter:['class','style']});
     const onLayout=()=>refresh(true),onPage=()=>refresh(false),onPreference=()=>{for(const group of groups.values())if(reduced()||forced.matches)group.cancel();refresh(true);};
+    // Native radios change their checked property without an attribute mutation.
+    // Observe the user event; leave selection, keyboard and command handling owned
+    // by the existing panel rather than mirroring state in the motion layer.
+    const onChange=event=>{
+      if(!event.target.matches?.('input[type=radio]'))return;
+      const group=groups.get(event.target.closest(HOSTS));
+      if(group)schedule(group,false);
+    };
+    const onSync=event=>{
+      const group=groups.get(event.target.closest?.(HOSTS));
+      if(group)schedule(group,false);
+    };
     const onVisibility=()=>{
       if(document.hidden){if(frame)cancelAnimationFrame(frame);frame=0;for(const group of groups.values())group.suspend();}
       else refresh(true);
@@ -169,6 +181,8 @@
     window.addEventListener('resize',onLayout);window.addEventListener('wuji-language',onLayout);
     window.addEventListener('workspace-page',onPage);
     document.addEventListener('visibilitychange',onVisibility);
+    scope.addEventListener('change',onChange);
+    scope.addEventListener('wuji-selection-sync',onSync);
     reducedSystem.addEventListener('change',onPreference);forced.addEventListener('change',onPreference);
     const fonts=document.fonts;fonts?.addEventListener('loadingdone',onLayout);
     discover(scope);
@@ -178,6 +192,8 @@
       window.removeEventListener('resize',onLayout);window.removeEventListener('wuji-language',onLayout);
       window.removeEventListener('workspace-page',onPage);
       document.removeEventListener('visibilitychange',onVisibility);reducedSystem.removeEventListener('change',onPreference);
+      scope.removeEventListener('change',onChange);
+      scope.removeEventListener('wuji-selection-sync',onSync);
       forced.removeEventListener('change',onPreference);fonts?.removeEventListener('loadingdone',onLayout);mounted=null;
     }};
     mounted={scope,api};return api;

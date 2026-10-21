@@ -64,7 +64,7 @@ body:not(.presentation) .top #presentation{display:none}
 #symbol-help{font-size:11px;line-height:1.6;color:var(--muted);margin:12px 0}
 .symbol-dialog footer{display:flex;justify-content:flex-end;gap:8px;margin-top:15px;padding:0}
 .symbol-dialog footer button{font-size:12px;min-height:35px;padding:8px 15px}
-#studio-desktop{margin-top:12px;font-size:12px;min-height:34px;padding:7px 10px;background:#fff}
+#studio-desktop{margin-top:12px;font-size:12px;min-height:34px;padding:7px 10px;background:var(--wb-card,#fff);color:var(--wb-ink,#222);border-color:var(--wb-line,#8883)}
 .speed-explanation{padding-top:14px}.speed-explanation p{line-height:1.7;padding:10px;background:#f4f8fa}
 #page-library .page-heading p{display:none}
 #page-library .page-heading h2{font-size:23px}

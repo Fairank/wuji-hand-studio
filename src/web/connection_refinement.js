@@ -12,25 +12,33 @@
  const hand=node('section','cr-device-card',cards);text(node('h3','',hand),'Wuji Hand','Wuji Hand');
  const connection=$('connect').closest('.panel'),profile=device.querySelector('.device-profile-control');
  hand.append(profile,connection);
+ const handHeader=node('div','cr-card-heading');hand.prepend(handHeader);handHeader.append(hand.querySelector('h3'),$('hub-hand-badge'));
+ const handNote=text(node('p','cr-card-description',hand),'连接后自动识别型号与左右手。','Generation and hand side are identified on connection.');handHeader.after(handNote);
+ const manual=fold(hand,'手动地址与型号说明','Manual address and model details',[connection.querySelector('label[for="device-address"]'),$('device-address'),profile.querySelector('.hint')]);
+ if($('device-address').value.trim())manual.open=true;
+ const handStatus=node('p','cr-device-status',hand);handStatus.setAttribute('role','status');handStatus.setAttribute('aria-live','polite');connection.append(handStatus);
+ const initialHint=connection.querySelector(':scope > .hint');if(initialHint)initialHint.hidden=true;
  const glove=node('section','cr-device-card',cards);text(node('h3','',glove),'Wuji Glove','Wuji Glove');
  const gloveControls=document.querySelector('.glove-controls'),steps=gloveControls?.querySelectorAll('.glove-step');
  if(steps?.length===2){
   const children=[...gloveControls.children];for(const child of children){if(child===steps[1])break;glove.append(child)}
   steps[0].hidden=true;
   fold(glove,'配对说明与失联设置','Pairing help and timeout',[$('glove-pair-note'),$('glove-user-note'),$('glove-timeout-label'),$('glove-timeout').closest('.glove-input-unit')]);
-  const header=node('div','cr-card-heading');glove.prepend(header);header.append(glove.querySelector('h3'),$('glove-scan'));
+  const header=node('div','cr-card-heading');glove.prepend(header);const heading=node('div','cr-card-identity',header);heading.append(glove.querySelector('h3'),$('hub-glove-badge'));header.append($('glove-scan'));
+  const note=text(node('p','cr-card-description',glove),'选择手套与标定用户，打开映射预览。','Choose a glove and calibration user to preview mapping.');header.after(note);
   const description=glove.querySelector('.cr-details');description.append($('glove-profile'));
   const settingLink=glove.querySelector('.button-row a');if(settingLink)description.append(settingLink);
   const pairing=node('div','cr-pair-fields');$('glove-user-label').before(pairing);
   for(const ids of [['glove-user-label','glove-user'],['glove-hand-device-label','glove-hand-device']]){const field=node('div','',pairing);ids.forEach(id=>field.append($(id)))}
  }
  const gloveStatus=node('p','cr-device-status',glove);gloveStatus.setAttribute('role','status');
- const next=node('div','cr-next',glove);link(next,'校准手套','Calibrate glove','calibration');link(next,'查看遥操作','View teleoperation','visual');
+ const next=node('div','cr-next');cards.after(next);link(next,'校准手套','Calibrate glove','calibration');link(next,'查看遥操作','View teleoperation','visual');
  const environment=fold(device,'控制环境与连接设置','Controller environment and settings',[device.querySelector('.runtime-card'),device.querySelector('.installation')]);
  environment.classList.add('cr-environment');
- const network=device.querySelector('.network-card');if(network)cards.after(network);
- const checks=node('div','cr-device-checks',device);
- device.querySelectorAll(':scope > .folded-panel').forEach(x=>checks.append(x));
+ const desktopLaunch=$('studio-desktop');if(desktopLaunch)environment.append(desktopLaunch);
+ const network=device.querySelector('.network-card');if(network){network.classList.add('cr-network-status');environment.append(network)}
+ const checks=fold(device,'首次设备核对','First-time device checks',[...device.querySelectorAll(':scope > .folded-panel')]);checks.classList.add('cr-device-checks');
+ const statusBadges=device.querySelector('.hub-badges');if(statusBadges&&!statusBadges.children.length)statusBadges.hidden=true;
 
  // A fixed workspace for editing, with contextual joint help rather than another long form.
  const workspace=node('div','cr-mapping-workspace',mapping),editor=node('div','cr-mapping-editor',workspace),aside=node('aside','cr-joint-aside',workspace);
@@ -87,9 +95,14 @@
  $('wb-retarget-grid').addEventListener('focusin',e=>{const input=e.target.closest('input[data-grid-row]');if(!input)return;chosen=Number(input.dataset.gridRow)*4+Number(input.dataset.gridColumn);paint()});
  $('wb-output-kind').addEventListener('change',()=>{decorate();paint()});
  new MutationObserver(()=>{decorate();paint()}).observe($('wb-retarget-grid'),{childList:true});
- function labels(){copy.forEach(([el,zh,en])=>el.textContent=t(zh,en));load();decorate();paint();}
- window.addEventListener('console-state',e=>{state=e.detail;gloveStatus.textContent=t('手套：','Glove: ')+(state.glove?.connection==='receiving'?t('正在接收','Receiving'):state.glove?.connection==='connecting'?t('正在连接','Connecting'):t('未连接','Disconnected'));load();paint()});
- window.addEventListener('console-offline',()=>{state=null;gloveStatus.textContent=t('手套：状态不可用','Glove: status unavailable');paint()});
+ function labels(){copy.forEach(([el,zh,en])=>el.textContent=t(zh,en));deviceStatus();load();decorate();paint();}
+ function deviceStatus(){
+  const g=state?.glove||{};
+  handStatus.textContent=state?.connection==='connected'?(state.stale?t('反馈已过期，请核对连接。','Feedback is stale. Check the connection.'):state.message||t('反馈已接通，可在“实时反馈”查看。','Measured data is available in Live feedback.')):state?.connection==='connecting'?t('正在识别设备，请稍候…','Identifying the device…'):state?.connection==='error'?state.message||t('连接未完成，请核对设备与网络。','Connection incomplete. Check the device and network.'):t('连接只读取反馈；动作由你单独开始。','Connecting reads feedback. Start motion separately.');
+  gloveStatus.textContent=g.message||(g.connection==='receiving'?t('正在接收；实机跟随尚需单独开启。','Receiving data. Real-hand follow is enabled separately.'):g.connection==='connecting'?t('正在连接手套…','Connecting to the glove…'):g.connection==='ready'?t('选择手套和标定用户后打开预览。','Select the glove and calibration user to open preview.'):t('先扫描，再从设备列表中选择手套。','Scan first, then choose from the glove list.'));
+ }
+ window.addEventListener('console-state',e=>{state=e.detail;deviceStatus();load();paint()});
+ window.addEventListener('console-offline',()=>{state=null;handStatus.textContent=t('工作台服务离线，连接状态暂不可用。','Workbench service offline. Connection status is unavailable.');gloveStatus.textContent=t('手套状态暂不可用。','Glove status is unavailable.');paint()});
  window.addEventListener('wuji-language',labels);window.addEventListener('workspace-page',e=>{if(e.detail==='connection'){if(!info)requestKey='';load()}});
- labels();
+ labels();deviceStatus();
 })();

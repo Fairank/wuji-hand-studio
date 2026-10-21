@@ -6,17 +6,21 @@
   const SRC = ['编排动作 · 实机效果待验证','Authored choreography · physical result not yet verified'];
   const SPEEDS = [0.1, 0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 3, 4], CYCLES = [1, 3], AMPS = [0.25, 0.5, 0.75, 1];
   const T = {
-    title: ['多手编排', 'Hand group choreography'], status: ['运行状态', 'Run status'],
+    title: ['多手编排', 'Hand group choreography'], status: ['本组状态', 'Group status'],
     mode: ['模式', 'Mode'], elapsed: ['已用时间', 'Elapsed'], reason: ['原因', 'Reason'],
-    authority: ['各只手的进度显示在这里，可随时停止整组。', 'Track each hand here and stop the entire group at any time.'],
-    stop: ['停止', 'Stop'], setup: ['编排设置', 'Setup'],
+    authority: ['停止会作用于当前整组，以设备返回状态为准。', 'Stop applies to this group. Device status confirms the result.'],
+    stop: ['停止本组', 'Stop group'], setup: ['编排设置', 'Setup'],
+    runDetails: ['运行详情', 'Run details'],
     members: ['参与的手', 'Participating hands'], count: ['已选 {n} / {t}', '{n} of {t} selected'],
+    membersHelp: ['选择本次一起演示的手，设备管理中可添加或调整工作区。', 'Select the hands for this routine. Manage hands to add or organise them.'],
     empty: ['工作区暂无手部设备，可用后会显示在这里。', 'No hands in the workspace yet. They will appear here when available.'],
-    type: ['编排类型', 'Choreography type'],
+    type: ['选择动作', 'Choose a routine'],
+    playback: ['播放设置', 'Playback'],
+    playbackHelp: ['先在屏幕中确认动作，再按需切换到真实手。', 'Check the routine on screen, then choose real hands when ready.'],
     same: ['同步动作', 'Same action'], sameDesc: ['所选的每只手执行同一动作', 'Every selected hand performs the same action'],
     pair: ['双手衔接', 'Paired routine'], pairDesc: ['一只左手与一只右手连贯配合', 'One left and one right hand in a connected routine'],
-    pairNote: ['摆放：掌心朝向观众，拇指朝内。这些功能无法移动底座，请手动摆放双手。',
-      'Arrangement: palms toward the viewer, thumbs pointing inward. These functions cannot move the base; place the hands manually.'],
+    pairNote: ['掌心朝前、拇指向内；请手动摆放底座。',
+      'Place the bases manually, with palms forward and thumbs inward.'],
     action: ['动作', 'Action'], noAction: ['此类型暂无动作', 'No actions for this type'], options: ['循环与幅度', 'Cycles & amplitude'],
     speed: ['速度', 'Speed'], cycles: ['循环次数', 'Cycles'], amp: ['幅度', 'Amplitude'],
     clear: ['我已确认工作区内无人员和障碍物', 'I confirm the workspace is clear of people and obstacles'],
@@ -105,27 +109,30 @@
       `<span class="hg-opt-text"><span class="hg-opt-title" data-t="${k}"></span><span class="hg-opt-desc" data-t="${k}Desc"></span></span></label>`;
     return `<header class="hg-head"><h2 class="hg-h" data-t="title"></h2></header>
 <section class="hg-card hg-status" aria-labelledby="${p}st">
-  <div class="hg-row"><h3 class="hg-title" id="${p}st" data-t="status"></h3><span class="hg-badge hg-phase"></span></div>
+  <div class="hg-row hg-status-head"><div class="hg-status-label"><h3 class="hg-title" id="${p}st" data-t="status"></h3><span class="hg-badge hg-phase"></span></div><details class="hg-run-details"><summary data-t="runDetails"></summary>
   <dl class="hg-facts">
     <div class="hg-fact"><dt data-t="mode"></dt><dd class="hg-mode"></dd></div>
     <div class="hg-fact"><dt data-t="elapsed"></dt><dd class="hg-elapsed"></dd></div>
-    <div class="hg-fact hg-reason-row"><dt data-t="reason"></dt><dd class="hg-reason"></dd></div>
   </dl>
   <ul class="hg-runlist"></ul>
-  <div class="hg-row"><p class="hg-foot" data-t="authority"></p><button type="button" class="hg-btn hg-stop" data-cmd="stop" data-t="stop"></button></div>
+  </details><button type="button" class="hg-btn hg-stop" data-cmd="stop" data-t="stop" aria-describedby="${p}authority"></button></div>
+  <p class="hg-reason-row"><span class="hg-reason"></span></p>
+  <p class="hg-foot" id="${p}authority" data-t="authority"></p>
 </section>
 <section class="hg-card hg-setup" aria-labelledby="${p}su">
   <h3 class="hg-title" id="${p}su" data-t="setup"></h3>
   <fieldset class="hg-config">
-    <fieldset class="hg-group"><legend class="hg-legend"><span data-t="members"></span><span class="hg-count"></span></legend>
-      <div class="hg-body"><p class="hg-empty" data-t="empty"></p><div class="hg-members"></div></div></fieldset>
-    <fieldset class="hg-group"><legend class="hg-legend" data-t="type"></legend>
-      <div class="hg-body"><div class="hg-seg">${kind('same')}${kind('pair')}</div><p class="hg-note" data-t="pairNote"></p></div></fieldset>
-    <div class="hg-grid hg-main-fields">${field('action', '')}${field('speed', opt(SPEEDS, v => v + '×'))}</div>
-    <details class="hg-options"><summary data-t="options"></summary><div class="hg-grid">${field('cycles', opt(CYCLES, String))}${field('amp', opt(AMPS, v => Math.round(v * 100) + '%'))}</div></details>
+    <fieldset class="hg-group hg-step hg-step-devices"><legend class="hg-legend"><span class="hg-step-number" aria-hidden="true">1</span><span data-t="members"></span><span class="hg-count"></span></legend>
+      <div class="hg-body"><p class="hg-step-help hg-members-help" data-t="membersHelp"></p><p class="hg-empty" data-t="empty"></p><div class="hg-members"></div></div></fieldset>
+    <fieldset class="hg-group hg-step hg-step-routine"><legend class="hg-legend"><span class="hg-step-number" aria-hidden="true">2</span><span data-t="type"></span></legend>
+      <div class="hg-body"><div class="hg-seg">${kind('same')}${kind('pair')}</div><p class="hg-kind-help"></p><div class="hg-grid hg-main-fields">${field('action', '')}${field('speed', opt(SPEEDS, v => v + '×'))}</div><p class="hg-note" data-t="pairNote"></p></div></fieldset>
+    <fieldset class="hg-group hg-step hg-step-playback"><legend class="hg-legend"><span class="hg-step-number" aria-hidden="true">3</span><span data-t="playback"></span></legend>
+    <div class="hg-body"><p class="hg-step-help" data-t="playbackHelp"></p>
     <fieldset class="hg-destination"><legend class="hg-legend" data-t="destination"></legend><div class="hg-targets"><label><input type="radio" name="${p}destination" value="preview" checked><span data-t="targetPreview"></span></label><label><input type="radio" name="${p}destination" value="hardware"><span data-t="targetHardware"></span></label></div></fieldset>
+    <details class="hg-options"><summary data-t="options"></summary><div class="hg-grid">${field('cycles', opt(CYCLES, String))}${field('amp', opt(AMPS, v => Math.round(v * 100) + '%'))}</div></details>
     <label class="hg-clear" hidden><input type="checkbox" class="hg-clearbox"><span data-t="clear"></span></label>
     <div class="hg-actions"><button type="button" class="hg-btn" data-cmd="preview" data-t="preview" aria-describedby="${p}hint"></button><button type="button" class="hg-btn hg-primary" data-cmd="hardware" data-t="hardware" aria-describedby="${p}hint"></button></div>
+    </div></fieldset>
   </fieldset>
   <p class="hg-hint" id="${p}hint" aria-live="polite" aria-atomic="true"></p>
   <p class="hg-msg" aria-live="polite" aria-atomic="true"></p>
@@ -138,11 +145,10 @@
     const doc = root.ownerDocument;
     const p = `hg${++seq}${Math.random().toString(36).slice(2, 6)}-`;
     const el = doc.createElement('div');
-    el.className = 'hg-panel';
+    el.className = 'hg-panel hg-flow';
     el.innerHTML = markup(p); // static template only; runtime data goes through textContent / value
     root.appendChild(el);
     const $ = s => el.querySelector(s);
-    el.insertBefore($('.hg-status'),$('.hg-src')); // visual, reading and focus order agree
     const E = {
       phase: $('.hg-phase'), mode: $('.hg-mode'), elapsed: $('.hg-elapsed'), reasonRow: $('.hg-reason-row'),
       reason: $('.hg-reason'), runlist: $('.hg-runlist'), stop: $('[data-cmd="stop"]'), config: $('.hg-config'),
@@ -254,7 +260,9 @@
     function update() {
       const ev = evaluate(), m = st.msg, n = st.snap.members.length;
       if(ev.active&&['preview','hardware'].includes(st.snap.run.mode))st.destination=st.snap.run.mode;
-      el.querySelectorAll(`input[name="${p}destination"]`).forEach(x=>{x.checked=x.value===st.destination;});
+      let destinationChanged=false;
+      el.querySelectorAll(`input[name="${p}destination"]`).forEach(x=>{const checked=x.value===st.destination;if(x.checked!==checked){x.checked=checked;destinationChanged=true;}});
+      if(destinationChanged)$('.hg-targets').dispatchEvent(new Event('wuji-selection-sync',{bubbles:true}));
       E.config.disabled = ev.locked;
       E.preview.disabled = !ev.canPreview;
       E.hw.disabled = !ev.canHw;
@@ -265,7 +273,9 @@
       E.stop.disabled = st.pendStop;
       E.stop.classList.toggle('hg-danger', ev.active || st.pendStart);
       E.note.hidden = st.kind !== 'pair';
+      setText($('.hg-kind-help'), t(st.kind === 'pair' ? 'pairDesc' : 'sameDesc'));
       E.empty.hidden = n > 0;
+      $('.hg-members-help').hidden = n > 0;
       E.members.hidden = n === 0;
       setText(E.count, n ? fmt(t('count'), { n: ev.sel.length, t: n }) : '');
       setText(E.hint, fmt(t(st.destination==='preview'&&ev.canPreview?'previewReady':ev.hint), ev.vars));

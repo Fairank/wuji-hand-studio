@@ -91,8 +91,11 @@
  const loadPreset=document.createElement('button'),savePreset=document.createElement('button'),deletePreset=document.createElement('button'),applyMapping=document.createElement('button');
  for(const button of [loadPreset,savePreset,deletePreset,applyMapping])button.type='button';
  presetRow.append(presetSelect,loadPreset,presetName,savePreset,deletePreset);mappingCard.append(presetRow);$('wb-retarget-save').after(applyMapping);
+ function renderMappingBinding(){if(!mappingContext)return;
+  const b=mappingContext.binding;bindingNote.textContent=`${b.generation} · ${b.side} · ${t('手套','Glove')} ${b.glove_serial||'—'} → ${t('机械手','Hand')} ${b.hand_serial||t('连接时选择','Select on connect')} · ${t('用户','User')} ${b.sdk_user||'—'} · v${mappingContext.revision}`;
+ }
  function showContext(value,replace=true){mappingContext=value;if(replace){retarget=value.settings;retargetRender()}
-  const b=value.binding;bindingNote.textContent=`${b.generation} · ${b.side} · ${t('手套','Glove')} ${b.glove_serial||'—'} → ${t('机械手','Hand')} ${b.hand_serial||t('连接时选择','Select on connect')} · ${t('用户','User')} ${b.sdk_user||'—'} · v${value.revision}`;
+  renderMappingBinding();
   const choice=presetSelect.value;presetSelect.replaceChildren(new Option(t('选择映射预设','Select a mapping preset'),''),...(value.presets||[]).map(p=>new Option(p.name,p.name)));presetSelect.value=choice;
  }
  async function mappingRefresh(){try{const response=await fetch('/api/retarget/context');if(!response.ok)throw Error(t('无法读取映射配置','Cannot load mapping configuration'));showContext(await response.json())}catch(error){$('wb-retarget-status').textContent=error.message}}
@@ -197,6 +200,7 @@
   $('wb-glove-settings-link').textContent=t('调整手套映射 →','Adjust retargeting →');
   if(devices){$('wb-device-title').textContent=t('独立设备会话','Independent hand sessions');$('wb-device-note').textContent=t('多手可加入同一个工作区，也可分开使用。','Hands can share a workspace or work independently.');$('wb-device-name-label').textContent=t('名称','Name');$('wb-device-profile-label').textContent=t('型号','Model');$('wb-device-add').textContent=t('添加工作区','Add workspace')}
   retargetRender(false);
+  renderMappingBinding();
  }
  window.addEventListener('console-state',event=>{state=event.detail;});
  window.addEventListener('wuji-language',()=>{labels();fleetRefresh()});
