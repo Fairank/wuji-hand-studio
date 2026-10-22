@@ -29,9 +29,9 @@
   const handCard=deviceCard('connection-hand-summary'),gloveCard=deviceCard('connection-glove-summary');
   const gloveCli=document.createElement('small');gloveCli.id='connection-glove-cli';gloveCli.className='connection-cli-status';gloveCard.card.append(gloveCli);
   const routes=document.createElement('nav');routes.className='connection-routes';
-  const routeSpecs=[['device','connection','连接设备','Connect devices','灵巧手反馈与手套 SDK 预览','Hand feedback and glove SDK preview'],['official','glove','手套官方画面','Official glove view','查找手套，打开原版实时可视化','Find a glove and open the original live Viewer'],['calibration','calibration','手套标定','Calibrate glove','用户档案与官方六姿势流程','User profiles and six official poses'],['retarget','mapping','手套映射','Glove mapping','调整关键点比例与关节输出','Tune landmark scales and joint output']];
+  const routeSpecs=[['device','connection','设备','Devices','选择与接入设备','Choose and connect devices'],['visual','glove','遥操作','Teleoperation','选择手套与目标灵巧手','Choose a glove and target hand'],['official','glove','官方画面','Official view','查看手套原始数据','View original glove data'],['calibration','calibration','手套标定','Calibrate glove','个人档案与官方指导','Personal profile and official guidance'],['retarget','mapping','映射设置','Mapping settings','调整输出与求解参数','Adjust mapping and solver parameters']];
   const routeRows=routeSpecs.map(([tab,icon,label,en,detail,detailEn])=>{
-    const row=window.WorkbenchActionRow.create({kind:'link',href:'#connection',icon,label,detail,onActivate:()=>{close();window.WujiConnectionHub.show(tab);if(tab==='official')window.WujiOfficialViz?.showDeviceMode();else document.getElementById('hub-tab-'+tab)?.focus();}});
+    const row=window.WorkbenchActionRow.create({kind:'link',href:tab==='visual'?'#glove':'#connection',icon,label,detail,onActivate:()=>{close();window.WujiConnectionHub.show(tab);if(tab==='official')window.WujiOfficialViz?.showDeviceMode();else if(tab==='visual')document.getElementById('glove-title')?.focus({preventScroll:true});else document.getElementById('hub-tab-'+tab)?.focus();}});
     routes.append(row.element);return {row,label,en,detail,detailEn};
   });
   pop.append(header,devices,summary,pendingNote,legacyNote,candidates,routes);document.body.append(pop);
@@ -85,7 +85,7 @@
     close();const owner=gloveOwner();
     if(owner==='calibration'){window.WujiConnectionHub?.show('calibration');return true;}
     if(owner==='official'){window.WujiConnectionHub?.show('official');window.WujiOfficialViz?.showDeviceMode();return true;}
-    if(owner==='sdk'){window.WujiConnectionHub?.show('device');window.WujiDeviceInventory?.showSettings('glove');return true;}
+    if(owner==='sdk'){window.WujiConnectionHub?.show('visual');return true;}
     return routeInventory('glove');
   }
   function pairedHand(){const g=state?.glove;return online&&g?.busy===true&&!!g.feedback?.device_id;}

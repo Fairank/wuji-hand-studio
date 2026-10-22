@@ -51,6 +51,27 @@ class DesktopToolsTests(unittest.TestCase):
             self.assertFalse(idle(dict(state,**addition),{}))
         self.assertFalse(idle(state,dict(running=True)))
 
+    def test_released_viewer_is_not_idle_while_a_handover_is_starting(self):
+        # During explicit handover the Viewer may already be gone while the
+        # destination has not published its new owner. Code tools must not close
+        # or reload the application in this legitimate transition gap.
+        for key in ('calibration_connection','teleoperation_connection'):
+            host=Mock()
+            host.server.controller.snapshot.return_value=dict(
+                connection='disconnected',hardware=dict(active=False),
+                official_viz=dict(active=False,busy=False,reserved=False),
+                **{key:dict(busy=True,viewer_released=True,phase='starting')})
+            host.server.controller.doctor.snapshot.return_value={}
+            for operation in ('close_idle','prepare_update','reload_ui','preview'):
+                payload=dict(operation=operation)
+                if operation=='preview':payload.update(action='open',speed=1)
+                with self.assertRaises(ValueError):dispatch(host,payload)
+            host.stop_and_close.assert_not_called();host.reload_ui.assert_not_called()
+            host.preview.assert_not_called()
+            host.server.controller.snapshot.return_value[key]['busy']=False
+            dispatch(host,dict(operation='preview',action='open',speed=1))
+            host.preview.assert_called_once_with('open',1)
+
     def test_update_requires_edition_hash_version_and_local_path(self):
         with TemporaryDirectory() as tmp:
             root=Path(tmp);(root/'updates').mkdir();data=b'MZ'+b'test installer';digest=hashlib.sha256(data).hexdigest()

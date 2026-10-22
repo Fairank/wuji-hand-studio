@@ -25,6 +25,7 @@ class GloveBridge:
         with self.lock:
             s=copy.deepcopy(self.state);age=max(0,time.monotonic()-self.last_update)*1000
             s['busy']=self.busy;s['transport_age_ms']=age if self.last_update else None
+            s['session_id']=self.session
             stream=s['stream'];remote=stream.get('age_ms')
             if remote is not None:stream['age_ms']=remote+age
             stream['fresh']=bool(stream.get('fresh') and remote is not None and remote+age<=stream.get('timeout_ms',250))
@@ -33,6 +34,13 @@ class GloveBridge:
             if metrics.get('age_ms') is not None:metrics['age_ms']+=age
             feedback['stale']=metrics.get('age_ms') is None or metrics['age_ms']>100 or age>200
             s['feedback']=feedback
+            if not s['stream']['fresh'] or not self.busy or self.stopping or self.lease:
+                s['can_prepare']=False
+                s['prepare_blocked_reason']=('等待新鲜手套数据 / Wait for fresh glove data' if not s['stream']['fresh']
+                    else '会话正在停止或跟随 / Session is closing or following')
+            elif s.get('can_prepare') is not True:
+                s['can_prepare']=False
+                s.setdefault('prepare_blocked_reason','请等待控制端核对灵巧手会话 / Wait for controller hand-session verification')
             return s
 
     def confirm_termination(self,device,session):
@@ -47,6 +55,13 @@ class GloveBridge:
     def send(self,c):
         if not self.stdin:raise ValueError('控制端尚未就绪 / Controller not ready')
         self.stdin.write(json.dumps(c)+'\n');self.stdin.flush()
+
+    def disconnect_session(self,session):
+        """A handover cancellation must never disconnect a replacement session."""
+        with self.lock:
+            if type(session) is not int or session!=self.session:
+                raise ValueError('遥操作会话已改变，请在所属会话中断开 / Teleoperation session changed; disconnect its owning session')
+            return self.action(dict(name='glove_disconnect'))
 
     def action(self,c):
         validate(c)
@@ -64,6 +79,10 @@ class GloveBridge:
                 elif not self.busy:self.state['connection']='disconnected'
                 return
             if not self.busy:raise ValueError('先扫描控制端 / Scan controller first')
+            if name=='glove_prepare':
+                state=self.snapshot()
+                if state.get('can_prepare') is not True:
+                    raise ValueError(state.get('prepare_blocked_reason') or 'Hand preparation is unavailable')
             if name=='glove_follow':
                 s=self.snapshot()
                 if self.lease:raise ValueError('已有启动请求 / Start already requested')

@@ -19,20 +19,14 @@
  const handStatus=node('p','cr-device-status',hand);handStatus.setAttribute('role','status');handStatus.setAttribute('aria-live','polite');connection.append(handStatus);
  const initialHint=connection.querySelector(':scope > .hint');if(initialHint)initialHint.hidden=true;
  const glove=node('section','cr-device-card',cards);text(node('h3','',glove),'Wuji Glove','Wuji Glove');
- const gloveControls=document.querySelector('.glove-controls'),steps=gloveControls?.querySelectorAll('.glove-step');
- if(steps?.length===2){
-  const children=[...gloveControls.children];for(const child of children){if(child===steps[1])break;glove.append(child)}
-  steps[0].hidden=true;
-  fold(glove,'配对说明与失联设置','Pairing help and timeout',[$('glove-pair-note'),$('glove-user-note'),$('glove-timeout-label'),$('glove-timeout').closest('.glove-input-unit')]);
-  const header=node('div','cr-card-heading');glove.prepend(header);const heading=node('div','cr-card-identity',header);heading.append(glove.querySelector('h3'),$('hub-glove-badge'));header.append($('glove-scan'));
-  const note=text(node('p','cr-card-description',glove),'选择手套与标定用户，打开映射预览。','Choose a glove and calibration user to preview mapping.');header.after(note);
-  const description=glove.querySelector('.cr-details');description.append($('glove-profile'));
-  const settingLink=glove.querySelector('.button-row a');if(settingLink)description.append(settingLink);
-  const pairing=node('div','cr-pair-fields');$('glove-user-label').before(pairing);
-  for(const ids of [['glove-user-label','glove-user'],['glove-hand-device-label','glove-hand-device']]){const field=node('div','',pairing);ids.forEach(id=>field.append($(id)))}
- }
+ // Connection settings are a destination summary. The teleoperation workspace
+ // owns its source, profile, target and controls together for the whole task.
+ const gloveHeader=node('div','cr-card-heading');glove.prepend(gloveHeader);
+ gloveHeader.append(glove.querySelector('h3'),$('hub-glove-badge'));
+ text(node('p','cr-card-description',glove),'在遥操作中选择手套，预览映射，再连接目标灵巧手。','Choose a glove in Teleoperation, preview the mapping, then connect a target hand.');
+ link(glove,'打开遥操作','Open teleoperation','visual');
  const gloveStatus=node('p','cr-device-status',glove);gloveStatus.setAttribute('role','status');
- const next=node('div','cr-next');cards.after(next);link(next,'校准手套','Calibrate glove','calibration');link(next,'查看遥操作','View teleoperation','visual');
+ const next=node('div','cr-next');cards.after(next);link(next,'标定手套','Calibrate glove','calibration');link(next,'遥操作','Teleoperation','visual');
  const environment=fold(device,'控制环境与连接设置','Controller environment and settings',[device.querySelector('.runtime-card'),device.querySelector('.installation')]);
  environment.classList.add('cr-environment');
  const desktopLaunch=$('studio-desktop');if(desktopLaunch)environment.append(desktopLaunch);
@@ -99,7 +93,7 @@
  function deviceStatus(){
   const g=state?.glove||{};
   handStatus.textContent=state?.connection==='connected'?(state.stale?t('反馈已过期，请核对连接。','Feedback is stale. Check the connection.'):state.message||t('反馈已接通，可在“实时反馈”查看。','Measured data is available in Live feedback.')):state?.connection==='connecting'?t('正在识别设备，请稍候…','Identifying the device…'):state?.connection==='error'?state.message||t('连接未完成，请核对设备与网络。','Connection incomplete. Check the device and network.'):t('连接只读取反馈；动作由你单独开始。','Connecting reads feedback. Start motion separately.');
-  gloveStatus.textContent=g.message||(g.connection==='receiving'?t('正在接收；实机跟随尚需单独开启。','Receiving data. Real-hand follow is enabled separately.'):g.connection==='connecting'?t('正在连接手套…','Connecting to the glove…'):g.connection==='ready'?t('选择手套和标定用户后打开预览。','Select the glove and calibration user to open preview.'):t('先扫描，再从设备列表中选择手套。','Scan first, then choose from the glove list.'));
+  gloveStatus.textContent=g.message||(g.connection==='receiving'?g.hardware?.active===true?t('正在跟随','Following'):t('映射预览中','Mapping preview'):g.connection==='connecting'?t('正在准备遥操作…','Preparing teleoperation…'):g.connection==='ready'?t('待选择手套','Choose a glove'):t('尚未接入','Not connected'));
  }
  window.addEventListener('console-state',e=>{state=e.detail;deviceStatus();load();paint()});
  window.addEventListener('console-offline',()=>{state=null;handStatus.textContent=t('工作台服务离线，连接状态暂不可用。','Workbench service offline. Connection status is unavailable.');gloveStatus.textContent=t('手套状态暂不可用。','Glove status is unavailable.');paint()});

@@ -71,5 +71,29 @@ class GloveViewTests(unittest.TestCase):
         glove['stream']['fresh']=False
         self.assertIsNone(pose(glove,'hand1')[0])
 
+    def test_explicit_target_remains_preview_after_feedback_is_connected(self):
+        for generation in ('hand1','hand2'):
+            glove=self.measured(generation)
+            self.assertEqual(pose(glove,generation,'target'),([9.]*20,'glove_preview',{}))
+            measured,mode,_=pose(glove,generation,'feedback')
+            self.assertEqual(measured,[(i+1)/100 for i in range(20)])
+            self.assertEqual(mode,'glove_live')
+
+    def test_target_requires_a_fresh_complete_finite_vector(self):
+        for q in ([1.]*19,[float('nan')]*20,[float('inf')]*20,[True]*20,['1']*20,None):
+            self.assertIsNone(pose(dict(stream=dict(q=q,fresh=True)),'hand2','target')[0])
+        for fresh,generation in ((False,'hand2'),(True,None),(True,'hand3')):
+            self.assertIsNone(pose(dict(stream=dict(q=[1.]*20,fresh=fresh)),generation,'target')[0])
+
+    def test_explicit_feedback_never_falls_back_to_generated_targets(self):
+        glove=dict(stream=dict(q=[1.]*20,fresh=True),hardware={})
+        self.assertEqual(pose(glove,'hand2','feedback'),(None,'glove_live',{}))
+        glove=self.measured('hand2',stale=True)
+        q,mode,_=pose(glove,'hand2','feedback')
+        self.assertIsNone(q);self.assertEqual(mode,'glove_live')
+
+    def test_unknown_display_selection_is_rejected(self):
+        with self.assertRaises(ValueError):pose({},'hand2','automatic')
+
 
 if __name__=='__main__':unittest.main()

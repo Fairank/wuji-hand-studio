@@ -73,6 +73,8 @@ class Controller:
         self.official_viz=OfficialVisualization()
         from calibration_handover import CalibrationHandover
         self.calibration_handover=CalibrationHandover(self)
+        from teleoperation_handover import TeleoperationHandover
+        self.teleoperation_handover=TeleoperationHandover(self)
         from program_runner import ProgramRunner
         self.program=ProgramRunner(self)
         from group_participant import GroupParticipant
@@ -87,7 +89,7 @@ class Controller:
             recording=dict(active=False, frames=0, elapsed_s=0, label='baseline', seconds=30),
             sessions=[], log=[], read_only=True, recognition_enabled=False,
             motion_enabled=False, instance='wuji-studio-v1',motion_history=[],
-            camera=copy.deepcopy(DEFAULT_CAMERA),camera_revision=0,view_source='feedback')
+            camera=copy.deepcopy(DEFAULT_CAMERA),camera_revision=0,view_source='feedback',teleoperation_view_mode='target')
         from device_profiles import selected_profile
         self.state['device_profile']=selected_profile()
         self.state['hardware'] = dict(ready=False,active=False,actions=[],probe_ready=False,reason='先连接左手，进行单关节试动')
@@ -158,6 +160,7 @@ class Controller:
                     and self.calibration.run.get('running') is False and self.calibration.run.get('id') is not None
                     and self.calibration.run.get('cleanup_confirmed') is not True)
             result['calibration_connection']=self.calibration_handover.snapshot()
+            result['teleoperation_connection']=self.teleoperation_handover.snapshot()
             return result
 
     def parameter_snapshot(self):
@@ -255,6 +258,10 @@ class Controller:
         from calibration_handover import workflow_action
         name=command.get('name') if isinstance(command,dict) else None
         handover=self.calibration_handover
+        teleoperation=getattr(self,'teleoperation_handover',None)
+        if name=='teleoperation_handover':return self.teleoperation_handover.start(command)
+        if name=='teleoperation_handover_cancel':return self.teleoperation_handover.cancel()
+        if teleoperation is not None and name in {'glove_disconnect','official_viz_stop','session_close'}:teleoperation.request_cancel()
         if name=='calibration_handover':return handover.start(command)
         if name in {'calibration_cancel','official_viz_stop','session_close'}:handover.request_cancel()
         if not workflow_action(command):return self._workflow_action(command)
@@ -404,7 +411,33 @@ class Controller:
             if name=='retarget_tuning_save':return dict(tuning=self.tuning.save(binding,command.get('values'),command.get('revision')))
             return dict(tuning_export=self.tuning.export(binding,command.get('values')))
         if name=='retarget_binding_save':
-            if self.glove.snapshot()['connection'] not in ('disconnected','ready','error'):
+            glove=self.glove.snapshot()
+            if glove['connection']=='receiving':
+                from mapping_library import validate_binding
+                binding=validate_binding(command.get('binding'))
+                current=self.retarget.context(self.state['device_profile'])['binding']
+                immutable=('generation','side','glove_serial','sdk_user')
+                if (not self.glove.busy or not glove.get('stream',{}).get('fresh')
+                        or (glove.get('feedback') or {}).get('device_id') or glove.get('hardware')
+                        or self.glove.lease or any(binding[k]!=current[k] for k in immutable)
+                        or current['glove_serial']!=glove.get('glove_serial')
+                        or current['sdk_user']!=(glove.get('user') or {}).get('user_id')
+                        or any(current[k]!=self.state['device_profile'][k] for k in ('generation','side'))):
+                    raise ValueError('仅可在本次新鲜纯手套预览中选择目标灵巧手；其他配对字段须断开后修改 / Only target hand selection may change in this fresh glove-only preview')
+                if binding['hand_serial']!=current['hand_serial']:
+                    # Choosing a target must not silently load that target's
+                    # other saved gain/solver settings into an existing stream.
+                    from retarget_settings import validate as validate_output
+                    target=self.retarget.library.snapshot(binding)
+                    tuning=self.tuning.context(binding)
+                    stream=glove.get('stream') or {};solver=stream.get('solver') or {}
+                    try:equal=validate_output(stream.get('retarget'))==target['settings']
+                    except ValueError:equal=False
+                    equal=equal and solver.get('applied') is True and solver.get('engine')==tuning['engine']
+                    if tuning['engine']=='official_open':equal=equal and solver.get('values_sha256')==tuning['values_sha256']
+                    if not equal:
+                        raise ValueError('此目标使用另一套映射，请断开预览，先选目标，再重新预览核对 / This target uses different mapping settings; disconnect preview, choose the target, then reopen and review')
+            elif glove['connection'] not in ('disconnected','ready','error'):
                 raise ValueError('先断开手套预览再改变配对 / Disconnect preview before changing pairing')
             return dict(mapping=self.retarget.select(command.get('binding'),self.state['device_profile']))
         if name in {'retarget_save','retarget_preset_save','retarget_preset_delete','retarget_apply'}:
@@ -432,6 +465,23 @@ class Controller:
             serial=self.retarget.context(self.state['device_profile'])['binding']['hand_serial']
             if serial and command.get('serial') and command['serial']!=serial:raise ValueError('Hand differs from saved pairing / 灵巧手与保存配对不符')
             command=dict(command,serial=serial or command.get('serial',''))
+        if name=='glove_follow':
+            # Preparation verified a typed SDK device. Recheck the published
+            # identity against the *current* binding before forwarding start;
+            # dropdowns, old discovery and a fresh target alone are not proof.
+            profile=self.state['device_profile'];binding=self.retarget.context(profile)['binding']
+            glove=self.glove.snapshot();feedback=glove.get('feedback') or {}
+            identity=feedback.get('identified_device') or {};user=glove.get('user') or {}
+            hand=binding['hand_serial']
+            if (not self.glove.busy or self.glove.stopping or glove.get('connection')!='receiving'
+                    or not hand or feedback.get('device_id')!=hand or identity.get('serial')!=hand
+                    or identity.get('source')!='sdk_identity' or identity.get('profile')!=profile['id']
+                    or profile['id']!=profile['generation']+'_'+profile['side']
+                    or glove.get('profile')!=profile['id']
+                    or any(binding[k]!=profile[k] for k in ('generation','side'))
+                    or not binding['glove_serial'] or glove.get('glove_serial')!=binding['glove_serial']
+                    or not isinstance(user.get('user_id'),str) or user['user_id']!=binding['sdk_user']):
+                raise ValueError('遥操作实际设备或档案与当前配对不符，请重新核对连接 / Actual teleoperation device or SDK profile differs from the current pairing; review the connection')
         if name=='hardware_stop' and self.glove.busy:
             return self.glove.action(dict(name='glove_stop'))
         if isinstance(name,str) and name.startswith('glove_'):
@@ -575,6 +625,11 @@ class Controller:
                 self.state['view_source'] = source
                 if source=='feedback':self.player.command(dict(name='demo_stop'))
             return
+        if isinstance(command,dict) and command.get('name')=='teleoperation_view_mode':
+            if set(command)-{'name','mode'} or command.get('mode') not in ('target','feedback'):
+                raise ValueError('Choose mapped target or measured feedback')
+            self.state['teleoperation_view_mode']=command['mode'];self.state['view_source']='glove'
+            return dict(teleoperation_view_mode=command['mode'])
         if isinstance(command, dict) and str(command.get('name','')).startswith('demo_'):
             if command['name']=='demo_start' and self.state['hardware'].get('active') is not False:
                 raise ValueError('先停止实机展示，再播放仿真预览')
@@ -1061,6 +1116,10 @@ class ConsoleHTTPServer(ThreadingHTTPServer):
                 transition=state.get('calibration_connection') or {}
                 if transition.get('busy') and not (local and self.controller.calibration_handover.internal):
                     raise ValueError('另一个工作区正在切换设备任务 / Another workspace is switching device tasks')
+                teleoperation=state.get('teleoperation_connection') or {}
+                local_teleop=getattr(self.controller,'teleoperation_handover',None)
+                if teleoperation.get('busy') and not (local and local_teleop is not None and local_teleop.internal):
+                    raise ValueError('另一个工作区正在切换遥操作任务 / Another workspace is switching teleoperation tasks')
                 if (state.get('calibration') or {}).get('cleanup_required') is True:
                     raise ValueError('标定退出尚未确认，请先核对原会话 / Calibration cleanup is unconfirmed; review its owning session')
                 viewer=state.get('official_viz') or {}
@@ -1078,7 +1137,9 @@ class ConsoleHTTPServer(ThreadingHTTPServer):
         def all_idle():
             from studio_component import require_idle
             handover=self.controller.calibration_handover
-            check_workspaces(require_idle,handover.viewer_token if handover.internal else None)
+            teleoperation=getattr(self.controller,'teleoperation_handover',None)
+            token=handover.viewer_token if handover.internal else teleoperation.viewer_token if teleoperation is not None and teleoperation.internal else None
+            check_workspaces(require_idle,token)
         def scan_idle():
             from bridge_config import load_config
             from official_device_discovery import use_native
@@ -1096,6 +1157,7 @@ class ConsoleHTTPServer(ThreadingHTTPServer):
             all_idle()
         self.controller.calibration.metadata_check=calibration_idle
         self.controller.calibration_handover.idle_check=all_idle
+        if hasattr(self.controller,'teleoperation_handover'):self.controller.teleoperation_handover.idle_check=all_idle
         def profile_read_idle():
             # Native user list/show reads local SDK files, not a device. A
             # discovery/calibration reservation must not require a connected

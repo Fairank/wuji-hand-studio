@@ -59,7 +59,7 @@
    playlistOpen.textContent=t('查看节目单','View playlist');
    runningTitle.textContent=t('节目单播放','Playlist playback');
    playlistStop.textContent=t('停止节目单','Stop playlist');
-   const names={devices:['多手演示','Hand ensemble'],glove:['手套遥操作','Glove control']};
+   const names={devices:['多手演示','Hand ensemble'],glove:['遥操作','Teleoperation']};
    for(const [key,pair]of Object.entries(names)){
     const link=nav.querySelector(`[data-page="${key}"] span`);if(link){link.removeAttribute('data-i18n');link.textContent=t(...pair);}
    }

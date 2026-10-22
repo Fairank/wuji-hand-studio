@@ -130,13 +130,13 @@
   setText(emptyTitle,!online?t('正在读取设备','Reading device status'):busy?t('正在寻找设备','Finding your devices'):blocked?t('查找暂不可用','Discovery unavailable'):filter!=='all'?t('此分类没有设备','No devices in this category'):t('尚未发现设备','No devices found yet'));
   setText(emptyNote,!online?t('服务就绪后会继续，不需要启动灵巧手。','The list resumes when the service is ready. No motor startup is needed.'):blocked||error||t('接好电源与数据线后，工作台会自动查找；也可点击“重新查找”。','Connect power and the data cable. The Workbench finds devices automatically; you can also choose Find devices.'));
   const selectedOwner=ownerLabel(row);setText(selectionTitle,hasSelection?brief(row):t('选择一个设备','Select a device'));setText(selectionNote,hasSelection?sn(row)+(selectedOwner?' · '+selectedOwner+(fresh(row)?'':t(' · 发现记录已过期，当前会话仍保留',' · Discovery record expired; current session retained')):fresh(row)?'':t(' · 已过期，请重新查找',' · Stale; find devices again'))+(row.generation==='hand1'?t(' · 官方画面支持 Hand 2 与 Glove；Hand 1 请使用灵巧手反馈。',' · Official view supports Hand 2 and Glove. Use hand feedback for Hand 1.'):''):t('设备身份、连接和动作是不同状态。发现设备后由你选择下一步。','Discovery, connection and motion are separate states. Choose the next step after finding a device.'));
-  setText(buttons.official,t('接入并查看','Connect and view'));setText(buttons.preview,t('高级预览设置','Advanced preview settings'));setText(buttons.hand,t('连接灵巧手','Connect hand'));setText(buttons.calibration,t('手套标定','Calibrate glove'));
+  setText(buttons.official,t('接入并查看','Connect and view'));setText(buttons.preview,t('遥操作','Teleoperation'));setText(buttons.hand,t('连接灵巧手','Connect hand'));setText(buttons.calibration,t('手套标定','Calibrate glove'));
   buttons.official.hidden=hasSelection&&row.kind==='unknown';buttons.official.disabled=!canUse||row?.official_available!==true||row?.generation==='hand1';buttons.official.title=row?.generation==='hand1'?t('官方画面支持 Hand 2 与 Glove','Official view supports Hand 2 and Glove'):'';
   buttons.preview.hidden=!hasSelection||row.kind!=='glove';buttons.preview.disabled=!canUse;
   buttons.hand.hidden=!hasSelection||row.kind!=='hand';buttons.hand.disabled=!canUse;
   buttons.calibration.hidden=!hasSelection||row.kind!=='glove';buttons.calibration.disabled=!canUse;
   selectedArea.hidden=!hasSelection;
-  const preparing={official:['正在准备官方画面…','Preparing official view…'],preview:['正在设置所选手套的预览，请稍候…','Setting up the selected glove preview…'],hand:['正在连接所选灵巧手反馈…','Connecting the selected hand feedback…'],calibration:['正在打开所选手套的标定设置…','Opening calibration settings for the selected glove…']};
+  const preparing={official:['正在准备官方画面…','Preparing official view…'],preview:['正在打开遥操作…','Opening teleoperation…'],hand:['正在连接所选灵巧手反馈…','Connecting the selected hand feedback…'],calibration:['正在打开所选手套的标定设置…','Opening calibration settings for the selected glove…']};
   setText(useStatus,consumerError||(using&&preparing[pendingMode]?t(...preparing[pendingMode]):''));useStatus.hidden=!useStatus.textContent;useStatus.dataset.error=String(!!consumerError);
   setText(advancedLabel,t('工作区连接设置','Workspace connection settings'));setText(advancedNote,t('映射用户、配对与当前会话','Mapping user, pairing and current sessions'));advanced.hidden=!advancedBody.children.length;
   if(!busy&&scanFocus){const previous=cards.get(scanFocus)?.radio;if(previous&&!previous.disabled&&document.activeElement===document.body)previous.focus({preventScroll:true});scanFocus='';}
@@ -183,7 +183,7 @@
   select,refresh,scan:()=>scan(true),snapshot:()=>inventory?JSON.parse(JSON.stringify(inventory)):null,
   show(kind='all'){filter=['hand','glove'].includes(kind)?kind:'all';window.WujiConnectionHub.show('device');render();schedule(0);scanButton.focus();},
   setUseHandler(handler){if(typeof handler!=='function')throw TypeError('Device inventory requires a use handler');useHandler=handler;},
-  showSettings(kind){advanced.open=true;const section=kind==='glove'?advancedBody.querySelector('#glove-device'):advancedBody.querySelector('#connect');section?.focus();advanced.scrollIntoView({block:'nearest'});},
+  showSettings(kind){if(kind==='glove'){location.hash='#glove';window.WujiWorkspace?.showPage();document.getElementById('glove-device')?.focus({preventScroll:true});return;}advanced.open=true;advancedBody.querySelector('#connect')?.focus();advanced.scrollIntoView({block:'nearest'});},
   destroy(){destroyed=true;clearTimeout(timer);observer.disconnect();root.remove();}
  };
  render();visibilityChanged();

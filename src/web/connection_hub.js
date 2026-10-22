@@ -9,7 +9,7 @@
  const old=[...body.children];
  const tabs=document.createElement('div');tabs.className='hub-tabs';tabs.setAttribute('role','tablist');tabs.setAttribute('aria-label',t('连接与校准分区','Connection sections'));
  const sections={};
- const definitions=[['device','设备连接','Devices'],['official','官方 CLI','Official CLI'],['retarget','映射调校','Mapping'],['visual','遥操作预览','Teleoperation']];
+ const definitions=[['device','设备连接','Devices'],['official','官方 CLI','Official CLI'],['retarget','映射调校','Mapping']];
  for(const [key,zh,en] of definitions){
   const button=document.createElement('button');button.type='button';button.id='hub-tab-'+key;button.dataset.hubTab=key;button.setAttribute('role','tab');button.setAttribute('aria-controls','hub-'+key);button.textContent=t(zh,en);tabs.append(button);
   const section=document.createElement('section');section.className='hub-section';section.id='hub-'+key;section.setAttribute('role','tabpanel');section.setAttribute('aria-labelledby',button.id);section.hidden=true;sections[key]=section;
@@ -17,19 +17,15 @@
  body.replaceChildren(tabs,...Object.values(sections));
  const officialViz=window.WujiOfficialViz?.mount(sections.official,{onCalibrate:()=>startCalibration(),onTaskChange:task=>{if(task==='calibration')refresh(true);},onDeviceChange:selectSharedDevice,onDiscovery:()=>refresh(true)});
  sections.device.append(...old);
- const glovePage=$('page-glove'),gloveBody=glovePage?.querySelector('.page-body');
- if(gloveBody)sections.visual.append(...[...gloveBody.children]);
  const retarget=$('wb-retarget-title')?.closest('.wb-card');if(retarget)sections.retarget.append(retarget);
- const oldGloveNav=document.querySelector('.directory [data-page="glove"]');if(oldGloveNav)oldGloveNav.hidden=true;
+ const oldGloveNav=document.querySelector('.directory [data-page="glove"]');if(oldGloveNav)oldGloveNav.hidden=false;
  const mappingLink=$('wb-glove-settings-link');if(mappingLink)mappingLink.href='#connection';
+ if(mappingLink)$('page-glove')?.querySelector('.page-heading')?.append(mappingLink);
  mappingLink?.addEventListener('click',()=>select('retarget'));
 
  const intro=document.createElement('div');intro.className='hub-intro';
  intro.innerHTML='<p id="hub-intro-note"></p><div class="hub-badges"><span id="hub-hand-badge"></span><span id="hub-glove-badge"></span></div>';
  sections.device.prepend(intro);
- const visualIntro=document.createElement('div');visualIntro.className='hub-intro';
- visualIntro.innerHTML='<h3 id="hub-visual-title"></h3><p id="hub-visual-note"></p><div class="hub-legend"><span id="hub-real-label"></span><span id="hub-preview-label"></span></div>';
- sections.visual.prepend(visualIntro);
  const calib=document.createElement('div');calib.className='hub-calibration wb-card';
  calib.innerHTML=`<header class="hub-calibration-heading"><div><h3 id="hub-calib-title"></h3><p id="hub-calib-description"></p><span id="hub-calib-runtime"></span></div><div class="hub-calibration-tools"><span id="hub-calib-cli" class="hub-calib-availability"></span><button type="button" id="hub-calib-refresh"></button><a href="https://docs.wuji.tech/docs/en/wuji-cli/latest/hand-model-calibration/" target="_blank" rel="noopener" id="hub-calib-doc"></a></div></header>
  <div class="hub-calibration-workspace"><div class="hub-calibration-preparation">
@@ -61,7 +57,7 @@
  const advanced=document.createElement('details');advanced.id='hub-calib-advanced';advanced.innerHTML='<summary id="hub-calib-advanced-label"></summary><label for="hub-calib-interface" id="hub-calib-interface-label"></label><select id="hub-calib-interface"><option value="guided"></option><option value="terminal"></option></select><p id="hub-calib-interface-note" class="hub-field-note"></p>';
  calib.querySelector('.hub-calibration-preparation').append(advanced);
  const previous=document.createElement('details');previous.id='hub-calib-previous';previous.hidden=true;previous.innerHTML='<summary id="hub-calib-previous-label"></summary>';calib.append(previous);
- window.WujiConnectionHub={show(key){location.hash='#connection';ws.showPage();select(key)}};
+ window.WujiConnectionHub={show(key){if(key==='visual'||key==='glove'){location.hash='#glove';ws.showPage();return;}location.hash='#connection';ws.showPage();select(key)}};
  let active='device',calibration=null,calibrationFresh=false,consoleState=null,busy=false,refreshPending=false,scanPending=false,calibrationReadAt=0,actionError='',refreshError='',wantedGlove='',newProfileOpen=false,nextAction=null,lastActiveProfile='',replacementContext='',lastStartedRunId='';
  function selectSharedDevice(serial,row){if(serial!==wantedGlove)$('hub-side').value=sideOf(row);wantedGlove=serial||'';renderCalibration();}
  window.addEventListener('device-inventory-selection',event=>{const row=event.detail?.device;if(row)selectSharedDevice(row.sn||row.serial,row);});
@@ -69,11 +65,10 @@
  window.addEventListener('official-viz-update',()=>renderCalibration());
  function calibrationVisible(){return active==='official'&&officialViz?.snapshot()?.task==='calibration';}
  function openCalibration(locate=false){officialViz?.setTask('calibration');window.WujiDeviceInventory?.refresh();refresh(true);if(locate)requestAnimationFrame(()=>{$('ov-device')?.scrollIntoView({block:'nearest',behavior:'instant'});$('ov-task-calibration')?.focus({preventScroll:true});});}
- function select(key){const prepare=key==='calibration';if(prepare)key='official';if(!sections[key])key='device';const changed=active!==key;active=key;for(const [name,section] of Object.entries(sections)){
+ function select(key){if(key==='visual'||key==='glove'){location.hash='#glove';ws.showPage();return;}const prepare=key==='calibration';if(prepare)key='official';if(!sections[key])key='device';const changed=active!==key;active=key;for(const [name,section] of Object.entries(sections)){
    section.hidden=name!==key;const button=$('hub-tab-'+name);button.setAttribute('aria-selected',String(name===key));button.tabIndex=name===key?0:-1;
   }
-  if(key==='visual'&&window.wujiFloating?.isFloating()!==true)$('glove-viewer-dock')?.append($('pose-console'));
-  else if(window.wujiFloating?.isFloating()!==true)ws.viewerHome()?.append($('pose-console'));
+  if(window.wujiFloating?.isFloating()!==true)ws.viewerHome()?.append($('pose-console'));
   if(key==='official'){window.WujiDeviceInventory?.refresh();refresh(true);}
   document.body.dataset.hubTab=key;
   officialViz?.syncVisibility();
@@ -87,9 +82,7 @@
  }
  tabs.addEventListener('click',event=>{const key=event.target.closest('[data-hub-tab]')?.dataset.hubTab;if(key)select(key)});
  tabs.addEventListener('keydown',event=>{if(!['ArrowRight','ArrowLeft','Home','End'].includes(event.key))return;const index=definitions.findIndex(x=>x[0]===active),next=event.key==='Home'?0:event.key==='End'?definitions.length-1:(index+(event.key==='ArrowRight'?1:-1)+definitions.length)%definitions.length;event.preventDefault();const key=definitions[next][0];select(key);$('hub-tab-'+key).focus()});
- window.addEventListener('hashchange',()=>{if(location.hash==='#glove'){location.hash='#connection';select('visual')}});
  window.addEventListener('workspace-page',event=>{if(event.detail==='connection')select(active)});
- if(location.hash==='#glove'){location.hash='#connection';active='visual'}
 
  function renderStatus(){const hand=consoleState?.connection,glove=consoleState?.glove?.connection;
   $('hub-hand-badge').textContent=hand==='connected'?(consoleState?.stale?t('反馈过期','Stale feedback'):t('已连接','Connected')):hand==='connecting'?t('连接中','Connecting'):hand==='disconnected'?t('未连接','Not connected'):hand==='error'?t('连接未完成','Connection incomplete'):t('状态未知','Unknown');
@@ -281,9 +274,6 @@
  window.addEventListener('console-offline',()=>{consoleState=null;actionError='';renderStatus();renderCalibration()});
  function labels(){for(const [key,zh,en] of definitions)$('hub-tab-'+key).textContent=t(zh,en);
   $('hub-intro-note').textContent=t('灵巧手与手套独立连接，也可以只使用其中一种。','Connect a hand, a glove, or both. Each connection is independent.');
-  $('hub-visual-title').textContent=t('映射与灵巧手预览','Mapping and hand preview');
-  $('hub-visual-note').textContent=t('此处显示工作台独有的映射目标与灵巧手反馈；手套骨架和触觉数据请使用官方可视化。','View workbench mapping targets and hand feedback here. Use the original visualization for glove skeleton and tactile data.');
-  $('hub-real-label').textContent=t('三维：灵巧手 / 映射预览','3D: hand / mapped preview');$('hub-preview-label').textContent='';
   $('hub-calib-title').textContent=t('手型标定','Hand-model calibration');
   $('hub-calib-setup-label').textContent=t('准备标定','Calibration setup');
   $('hub-calib-description').textContent=t('选择手套与个人档案，跟随官方流程完成采集。','Choose a glove and personal profile, then follow official capture.');

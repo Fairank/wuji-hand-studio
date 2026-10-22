@@ -8,11 +8,11 @@
   const box=document.createElement('div');box.className='ui-context-note';
   box.append(copy(document.createElement('strong'),title,enTitle),copy(document.createElement('p'),body,enBody));host.prepend(box);return box;
  }
- const destinations=[['calibration','calibration','手套标定','Calibrate glove','管理用户档案，按官方姿势采集','User profiles and official pose capture'],['visual','glove','遥操作预览','Teleoperation preview','查看映射，单独选择是否启用跟随','Inspect mapping before enabling hand follow']];
+ const destinations=[['calibration','calibration','手套标定','Calibrate glove','个人档案与官方指导','Personal profile and official guidance'],['visual','glove','遥操作','Teleoperation','选择手套与目标灵巧手','Choose a glove and target hand']];
  const next=document.querySelector('.cr-next'),rows=[];
  if(next&&window.WorkbenchActionRow){
   next.replaceChildren();for(const [key,icon,zh,en,detail,detailEn] of destinations){
-   const row=window.WorkbenchActionRow.create({icon,label:t(zh,en),detail:t(detail,detailEn),onActivate:()=>{window.WujiConnectionHub.show(key);$('hub-tab-'+key)?.focus()}});next.append(row.element);rows.push([row,zh,en,detail,detailEn]);
+   const row=window.WorkbenchActionRow.create({icon,label:t(zh,en),detail:t(detail,detailEn),onActivate:()=>{window.WujiConnectionHub.show(key);if(key==='visual')$('glove-title')?.focus({preventScroll:true});else $('hub-tab-'+key)?.focus()}});next.append(row.element);rows.push([row,zh,en,detail,detailEn]);
   }
  }
  // Documentation is secondary, but is still a recognizable control, not a loose URL.

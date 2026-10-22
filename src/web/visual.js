@@ -56,7 +56,7 @@
     byId('pose-image').classList.remove('view-stale');
     byId('pose-unavailable').hidden=true;
     const en=document.documentElement.lang==='en';
-    byId('pose-message').textContent=en?({'手套遥操作 · 实际灵巧手反馈':'Glove teleoperation · Measured hand feedback','手套映射预览 · 未驱动灵巧手':'Glove mapping preview · Hand not driven','手套遥操作 · 等待新鲜数据':'Glove teleoperation · Waiting for fresh data'}[meta.message]||meta.message):meta.message;
+    byId('pose-message').textContent=en?({'手套遥操作 · 实际灵巧手反馈':'Glove teleoperation · Measured hand feedback','手套映射目标 · 非实测反馈':'Glove mapping target · Not measured hand feedback','手套遥操作 · 等待新鲜数据':'Glove teleoperation · Waiting for fresh data'}[meta.message]||meta.message):meta.message;
     byId('render-rate').textContent=`MuJoCo 渲染 ${fmt(meta.render_hz,1)} 帧/秒`;
     byId('pose-frame').textContent=meta.mode==='glove_preview'?(en?`Glove mapping frame ${meta.glove_seq??'—'} · Target, not hand feedback`:`手套映射帧 ${meta.glove_seq??'—'} · 目标姿态，不是实机反馈`):meta.mode==='demo'?'仿真编排 · 不驱动实机':meta.source_seq==null?'模型预览 · 未接收实机姿态':`实机反馈帧 ${meta.source_seq} · 图表与姿态使用同一帧`;
     const rates=new Map((meta.feedback?.joint_rates||[]).map(r=>[r.nid,r]));

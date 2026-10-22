@@ -57,11 +57,29 @@ def read_latest(sub):
     raise ValueError('手套队列积压；请重新连接 / Glove backlog was not drained')
 
 
+def prepare_permission(hand_thread,hand_state):
+    """Retry only after the previous exact feedback worker released ownership."""
+    if hand_thread is not None and hand_thread.is_alive():
+        return False,'灵巧手反馈会话仍在运行 / Hand feedback session is still running'
+    hardware=hand_state.get('hardware') or {}
+    if 'active' in hardware and hardware['active'] is not False:
+        return False,'灵巧手停用结果未确认 / Hand disable is unconfirmed'
+    if hand_thread is not None and hand_state.get('cleanup_confirmed') is not True:
+        return False,'上次灵巧手连接退出未确认，请先结束此会话 / Previous hand cleanup is unconfirmed; end this session first'
+    return True,''
+
+
 def paired_hand_worker(address, serial, selected, requests, events, factory, source=None):
     """Choose one fresh serial and verify side/model before creating a driver."""
     from device_discovery import connect_discovered, SelectionRequired
     from console_agent import worker
-    hand=route=ownership=None
+    hand=route=ownership=None;delegated=False;closed=None;cleanup=True
+    class Forward:
+        def put(self,event):
+            nonlocal closed
+            if event.get('type')=='closed':closed=copy.deepcopy(event)
+            events.put(event)
+    forward=Forward()
     try:
         from wuji_sdk import SdkManager
         hand,route,verified=connect_discovered(SdkManager.instance(),address,serial)
@@ -70,21 +88,31 @@ def paired_hand_worker(address, serial, selected, requests, events, factory, sou
         if sys.platform.startswith('linux'):
             from device_ownership import DeviceOwnership
             ownership=DeviceOwnership(hand.serial_number)
+        # Publish the identity already verified by connect_discovered only
+        # after acquiring ownership, before either prepared driver can start.
+        events.put(dict(type='identity',profile=verified['id'],device_id=str(hand.serial_number)))
         owned_hand,owned_route=hand,route;hand=route=None
+        delegated=True
         if selected['generation']=='hand1':
             from first_generation import worker_first
-            try:worker_first(address,requests,events,prepared_hand=owned_hand,source=source)
+            try:worker_first(address,requests,forward,prepared_hand=owned_hand,source=source)
             finally:owned_route.close()
         else:
-            worker(address,requests,events,factory,prepared=(owned_hand,owned_route))
+            worker(address,requests,forward,factory,prepared=(owned_hand,owned_route))
     except SelectionRequired as error:
         events.put(dict(type='selection',devices=error.devices,message=str(error)))
     except Exception as error:
+        if delegated:cleanup=False
         events.put(dict(type='error',message=str(error)))
     finally:
-        if hand is not None:hand.disconnect()
-        if route is not None:route.close()
-        if ownership is not None:ownership.close()
+        for resource in (hand,route,ownership):
+            if resource is not None:
+                try:resource.disconnect() if resource is hand else resource.close()
+                except Exception:cleanup=False
+        if delegated:
+            hardware=(closed or {}).get('hardware') or {}
+            cleanup=cleanup and closed is not None and hardware.get('active') is False
+        events.put(dict(type='hand_session_closed',cleanup_confirmed=cleanup))
 
 def worker_glove(requests,events):
     from device_profiles import controller_profile
@@ -191,7 +219,8 @@ def worker_glove(requests,events):
                     elif name=='glove_prepare':
                         if glove is None:raise ValueError('先连接手套 / Connect glove first')
                         source.target(now)
-                        if hand_thread is not None and hand_thread.is_alive():raise ValueError('已有灵巧手会话；请先断开全部再重试')
+                        allowed,reason=prepare_permission(hand_thread,hand_state)
+                        if not allowed:raise ValueError(reason)
                         from glove_motion import GloveMotion
                         def factory(*args):return GloveMotion(*args,source=source)
                         hand_state={};hand_identity={};hand_error='';hand_requests=queue.Queue();hand_events=queue.Queue()
@@ -241,6 +270,8 @@ def worker_glove(requests,events):
                 elif event['type']=='closed':
                     hand_state['connection']='disconnected'
                     if 'hardware' in event:hand_state['hardware']=event['hardware']
+                elif event['type']=='hand_session_closed':
+                    hand_state['cleanup_confirmed']=event.get('cleanup_confirmed') is True
             now=time.monotonic()
             if now-last_emit>=.05:
                 snapshot=source.snapshot(now)
@@ -249,6 +280,9 @@ def worker_glove(requests,events):
                 snapshot['retarget']=mapping.settings
                 snapshot['solver']=dict(getattr(session,'info',{}) or {},engine=solver_engine,applied=bool(session and snapshot['fresh']))
                 hw=copy.deepcopy(hand_state.get('hardware',{}))
+                can_prepare,prepare_reason=prepare_permission(hand_thread,hand_state)
+                if glove is None:can_prepare=False;prepare_reason='请先打开手套预览 / Open glove preview first'
+                elif not snapshot['fresh']:can_prepare=False;prepare_reason='等待新鲜手套数据 / Wait for fresh glove data'
                 feedback=copy.deepcopy({k:hand_state.get(k) for k in ('latest','device_id','joint_rates','metrics','connection')})
                 feedback['identified_device']=copy.deepcopy(hand_identity)
                 if feedback.get('latest'):
@@ -256,6 +290,8 @@ def worker_glove(requests,events):
                 events.put(dict(type='glove_state',state=dict(version=1,connection=state,message=message,
                     devices=devices,devices_at=devices_at,hands=hands,users=users,user=current,profile=selected['id'],glove_serial=glove_sn,
                     stream=snapshot,hardware=hw,feedback=feedback,hand_error=hand_error,
+                    can_prepare=can_prepare,prepare_blocked_reason=prepare_reason,
+                    hand_cleanup_confirmed=hand_state.get('cleanup_confirmed'),
                     parameters=__import__('official_policy').settings(),
                     source='official_open_live_retarget' if solver_engine=='official_open' else 'official_sdk_live_retarget',hardware_validated=False)))
                 last_emit=now

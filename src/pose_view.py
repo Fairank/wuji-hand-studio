@@ -174,7 +174,7 @@ class PoseView:
                     from glove_view import pose as glove_pose,channel_ids
                     glove_generation=state.get('device_profile',{}).get('generation')
                     glove_channels=channel_ids(glove_generation)
-                    gq,gmode,gfeedback=glove_pose(state.get('glove',{}),glove_generation)
+                    gq,gmode,gfeedback=glove_pose(state.get('glove',{}),glove_generation,state.get('teleoperation_view_mode'))
                     d.qpos[:]=0;active=0;latest=None
                     if gq is not None:
                         for i,jid in enumerate(ids):d.qpos[m.jnt_qposadr[jid]]=gq[i]
@@ -226,7 +226,7 @@ class PoseView:
                     gq,gmode,gfeedback=glove_display
                     meta.update(mode=gmode,source_seq=latest['seq'] if latest else None,
                         glove_seq=state.get('glove',{}).get('stream',{}).get('seq'),
-                        message=('手套遥操作 · 实际灵巧手反馈' if active else '手套映射预览 · 未驱动灵巧手' if gq is not None else '手套遥操作 · 等待新鲜数据'),
+                        message=('手套遥操作 · 实际灵巧手反馈' if active else '手套映射目标 · 非实测反馈' if gq is not None else '手套遥操作 · 等待新鲜数据'),
                         feedback=gfeedback if active else dict(latest=None,joint_rates=[],stale=True,metrics={}))
                 with self.lock:
                     self.jpeg, self.meta = output.getvalue(), meta

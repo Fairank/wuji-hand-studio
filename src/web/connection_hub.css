@@ -41,7 +41,6 @@ body .hub-tabs button[aria-selected=true]{background:var(--wb-card);box-shadow:0
 .hub-skeleton:not(.is-live) #hub-skeleton-svg{display:none}
 #hub-skeleton-svg{display:block;width:min(100%,310px);height:280px;margin:6px auto 0;background:var(--wb-group);border-radius:16px}
 #hub-skeleton-lines line{stroke:#1986dc;stroke-width:3;stroke-linecap:round;opacity:.85}#hub-skeleton-points circle{fill:#005db3;stroke:var(--wb-card);stroke-width:1}
-#hub-visual .glove-layout{align-items:start}#hub-visual .glove-display{min-width:0}#hub-visual .glove-controls{max-width:none}
 #hub-retarget>.wb-card{max-width:900px}
 @media(max-width:700px){.hub-fields{grid-template-columns:1fr}.hub-tabs{width:100%}.hub-section{animation:none}}
 @media(prefers-reduced-motion:reduce){.hub-section{animation:none}}

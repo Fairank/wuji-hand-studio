@@ -28,8 +28,8 @@
   chooseGlove(found);
   if(mode==='calibration'){window.WujiConnectionHub.show('calibration');return;}
   if(mode!=='preview')throw Error('Unknown device workflow');
-  // Opening advanced settings must not start a controller or probe devices.
-  // Its existing explicit scan/open controls own those actions.
-  window.WujiConnectionHub.show('device');directory.showSettings('glove');return;
+  // Choose the source, then open its workspace. Connecting remains a separate
+  // explicit action; visiting teleoperation never starts a controller or motor.
+  location.hash='#glove';window.WujiWorkspace.showPage();return;
  });
 })();
