@@ -3,10 +3,11 @@
 No SDK, device, socket, actual lease file or child process is used. The locked
 runner tests replace both lock factories, signals, stdin and background threads.
 """
-from contextlib import ExitStack, contextmanager
+from contextlib import ExitStack, contextmanager, nullcontext
 import copy
 import io
 import json
+import os
 import time
 from types import SimpleNamespace
 import unittest
@@ -314,6 +315,7 @@ class NativeDiscoveryAdapterTests(unittest.TestCase):
 
 class NativeCaptureAdapterTests(unittest.TestCase):
     def setUp(self):
+        self.connected=dict(source='native_viewer',serial=SERIAL,side='left',viewer_token='a'*32,owner_pid=os.getpid(),owner_start='live',checked_at=time.time())
         self.config = {'mode': 'wsl', 'cli': 'wuji'}
         self.status = {'available': True, 'calibration_supported': True, 'metadata_current': True,
                        'users': [{'name': 'Demo', 'is_default': False}],
@@ -326,6 +328,8 @@ class NativeCaptureAdapterTests(unittest.TestCase):
         service = calibration_cli.CalibrationCLI()
         process = SimpleNamespace(stdin=io.StringIO(), stdout=io.StringIO(), stderr=io.StringIO())
         with ExitStack() as stack:
+            stack.enter_context(patch('cli_coordination.identity',return_value='live'))
+            stack.enter_context(patch('cli_coordination.gate',side_effect=lambda *a,**k:nullcontext()))
             stack.enter_context(patch.object(calibration_cli, 'load_config', return_value=self.config))
             snapshot = stack.enter_context(patch.object(service, 'snapshot', return_value=self.status))
             stack.enter_context(patch('official_cli.cli_path', return_value='/fake/linux/wuji'))
@@ -338,12 +342,11 @@ class NativeCaptureAdapterTests(unittest.TestCase):
             yield SimpleNamespace(service=service, snapshot=snapshot, command=command, spawn=spawn,
                                   native=native_factory)
 
-    def test_native_scan_identity_is_delegated_to_native_capture(self):
+    def test_native_discovery_alone_never_opens_or_calibrates(self):
         with self.environment() as e:
-            self.assertEqual(e.service.start('left', SERIAL), {'native': True})
-            e.native.assert_called_once_with(e.service)
-            e.native.return_value.start_human.assert_called_once_with(SERIAL, expected_side='left', timeout=900)
-            e.command.assert_not_called(); e.spawn.assert_not_called()
+            with self.assertRaisesRegex(ValueError,'Connect the selected Viewer'):
+                e.service.start('left', SERIAL)
+            e.native.assert_not_called(); e.command.assert_not_called(); e.spawn.assert_not_called()
 
     def test_runner_envelope_keeps_identity_outside_single_official_selector(self):
         config = {'mode': 'local', 'agent_directory': '/fake/controller', 'python': 'python-test'}
@@ -376,65 +379,54 @@ class NativeCaptureAdapterTests(unittest.TestCase):
                 e.command.assert_not_called(); e.spawn.assert_not_called()
                 e.native.assert_not_called()
 
-    def test_native_existing_model_is_decided_by_original_human_prompt(self):
+    def test_native_existing_model_is_decided_by_original_human_prompt_after_explicit_handover(self):
         self.status['current']['left_hand']['calibrated'] = True
-        with self.environment() as e:
-            e.service.start('left', SERIAL, replace=True)
+        with self.environment() as e, patch.object(calibration_cli,'cli_json') as query:
+            e.service.start('left', SERIAL, interface='terminal', connected=self.connected)
             e.native.return_value.start_human.assert_called_once_with(SERIAL, expected_side='left', timeout=900)
-            e.command.assert_not_called(); e.spawn.assert_not_called()
+            query.assert_not_called();e.command.assert_not_called();e.spawn.assert_not_called()
 
-    def test_native_exact_sn_capture_does_not_depend_on_linux_network_address(self):
+    def test_native_exact_sn_handover_does_not_depend_on_linux_network_address(self):
         self.status['devices'][0].pop('address')
         with self.environment() as e:
-            self.assertEqual(e.service.start('left', SERIAL), {'native': True})
+            self.assertEqual(e.service.start('left', SERIAL, interface='terminal', connected=self.connected), {'native': True})
             e.native.return_value.start_human.assert_called_once_with(SERIAL, expected_side='left', timeout=900)
-            e.command.assert_not_called(); e.spawn.assert_not_called()
 
-    def test_native_human_default_unknown_profile_and_missing_side_need_no_preparation(self):
-        for current in [None, {}, {'name':'Default','is_default':True},
-                        {'name':'Demo','left_hand':{'calibrated':'unknown'}}]:
+    def test_native_terminal_keeps_original_profile_journey_but_requires_connected_side(self):
+        for current in [None, {}, {'name':'Default','is_default':True}, {'name':'Demo','left_hand':{'calibrated':'unknown'}}]:
             with self.subTest(current=current), self.environment() as e:
-                self.status['current'] = current
-                self.status['users'] = []
-                self.status['metadata_current'] = False
-                e.service.start(None, SERIAL)
+                self.status.update(current=current,users=[],metadata_current=False)
+                e.service.start('left', SERIAL, interface='terminal', connected=self.connected)
                 e.native.return_value.start_human.assert_called_once_with(SERIAL, expected_side='left', timeout=900)
-                e.command.assert_not_called();e.spawn.assert_not_called()
-
-    def test_native_inventory_side_is_authoritative_over_caller_side(self):
         with self.environment() as e:
-            self.status['devices'][0]['handedness'] = 'right'
-            e.service.start('left', SERIAL)
-            e.native.return_value.start_human.assert_called_once_with(SERIAL, expected_side='right', timeout=900)
+            with self.assertRaises(ValueError):e.service.start(None,SERIAL,interface='terminal',connected=self.connected)
+            e.native.assert_not_called()
+
+    def test_native_connected_side_is_authoritative_over_caller_and_scan_hint(self):
+        self.status['devices'][0]['handedness']='right'
         with self.environment() as e:
-            self.status['devices'][0].pop('handedness', None)
-            e.service.start('left', SERIAL)
-            e.native.return_value.start_human.assert_called_once_with(SERIAL, expected_side=None, timeout=900)
+            e.service.start('left', SERIAL, interface='terminal', connected=self.connected)
+            e.native.return_value.start_human.assert_called_once_with(SERIAL,expected_side='left',timeout=900)
+        with self.environment() as e:
+            with self.assertRaisesRegex(ValueError,'side changed'):
+                e.service.start('right',SERIAL,interface='terminal',connected=self.connected)
+            e.native.assert_not_called()
 
-    def test_native_reuses_shared_selection_without_rescan_or_profile_requests(self):
-        with self.environment() as e, patch.object(calibration_cli, 'cli_json') as query:
-            rows = copy.deepcopy(self.status['devices'])
-            rows[0].update(selectable=True, observed_at=time.time())
-            provider = Mock(return_value=rows)
-            e.service.device_provider = provider
-            e.service.start(None, SERIAL)
-            provider.assert_called_once_with(False)
-            e.snapshot.assert_not_called()
-            query.assert_not_called()
-            e.native.return_value.start_human.assert_called_once_with(SERIAL, expected_side='left', timeout=900)
+    def test_native_handover_uses_owned_connection_without_rescan_or_profile_requests(self):
+        with self.environment() as e, patch.object(calibration_cli,'cli_json') as query:
+            e.service.device_provider=Mock(return_value=[])
+            e.service.start('left',SERIAL,interface='terminal',connected=self.connected)
+            e.service.device_provider.assert_not_called();e.snapshot.assert_not_called();query.assert_not_called()
+            e.native.return_value.start_human.assert_called_once_with(SERIAL,expected_side='left',timeout=900)
 
-    def test_native_stale_missing_duplicate_or_non_glove_selection_never_launches(self):
-        original = copy.deepcopy(self.status['devices'][0])
-        cases = [[], [dict(original, observed_at=time.time()-31)],
-                 [dict(original, selectable=False)], [dict(original, sn='WG_OTHER')],
-                 [dict(original, model='Wuji Hand 2',sn='WH2_SYNTHETIC')],
-                 [dict(original), dict(original)]]
-        for rows in cases:
-            with self.subTest(rows=rows), self.environment() as e:
-                e.service.device_provider = Mock(return_value=rows)
-                with self.assertRaises(ValueError):e.service.start(None, SERIAL)
-                e.service.device_provider.assert_called_once_with(False)
-                e.native.assert_not_called();e.command.assert_not_called();e.spawn.assert_not_called()
+    def test_native_scan_history_never_substitutes_for_explicit_connection(self):
+        original=copy.deepcopy(self.status['devices'][0])
+        for rows in [[],[dict(original,observed_at=time.time())],[dict(original,observed_at=time.time()-31)],
+                     [dict(original,selectable=True)],[dict(original),dict(original)]]:
+            with self.subTest(rows=rows),self.environment() as e:
+                e.service.device_provider=Mock(return_value=rows)
+                with self.assertRaisesRegex(ValueError,'Connect the selected Viewer'):e.service.start('left',SERIAL)
+                e.service.device_provider.assert_not_called();e.native.assert_not_called();e.command.assert_not_called();e.spawn.assert_not_called()
 
     def test_non_native_capture_retains_serial_and_handedness_flags(self):
         with self.environment(native=False) as e:

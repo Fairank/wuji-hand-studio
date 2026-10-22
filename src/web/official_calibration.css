@@ -63,3 +63,20 @@
 #hub-calibration .oc-run[data-human-tty=true][data-status=running]>#hub-calib-status{display:none}
 #hub-calibration .oc-run[data-human-tty=true] .oc-details{margin-top:6px}
 @media(max-width:600px){#hub-calibration .oc-run[data-human-tty=true][data-has-run=true]{padding:12px}#hub-calibration .oc-run[data-human-tty=true] .official-terminal-scroll{padding:12px}#hub-calibration #oc-empty{padding:22px}}
+
+/* One current reference, driven only by the official structured event. */
+#hub-calibration .oc-run[data-guided=true]{display:grid;grid-template-columns:minmax(170px,1fr) minmax(190px,1fr);gap:14px 22px;align-items:start}
+#hub-calibration .oc-run[data-guided=true]>.oc-heading,#hub-calibration .oc-run[data-guided=true]>#hub-calib-status,#hub-calibration .oc-run[data-guided=true]>.oc-result,#hub-calibration .oc-run[data-guided=true]>.oc-details{grid-column:1/-1}
+#hub-calibration .oc-run[data-guided=true] #oc-guide{grid-column:1;grid-row:3/7;min-width:0;margin:0;text-align:center}
+#oc-guide-image{display:block;width:100%;max-width:280px;height:auto;aspect-ratio:1;object-fit:contain;margin:0 auto;border-radius:12px;background:#fff}
+#oc-guide figcaption{font-size:10px;color:var(--wb-sub);line-height:1.6;margin-top:9px}
+#oc-guide figcaption a{color:var(--ui-blue,#007aff);white-space:nowrap;text-decoration:none}
+#oc-guide-unavailable{font-size:12px;line-height:1.7;color:var(--wb-sub);margin:22px 0}
+#hub-calibration .oc-run[data-guided=true]>.oc-step{grid-column:2;grid-row:3;margin:0;background:transparent;border:0;padding:0}
+#hub-calibration .oc-run[data-guided=true] .oc-step dd{font-size:20px;line-height:1.5}
+#hub-calibration .oc-run[data-guided=true] #oc-step-count{top:0;right:0}
+#hub-calibration .oc-run[data-guided=true]>.oc-progress-row{grid-column:2;grid-row:4}
+#hub-calibration .oc-run[data-guided=true]>.oc-feedback{grid-column:2;grid-row:5;font-size:11px;gap:9px}
+#hub-calibration .oc-run[data-guided=true]>#oc-diagnostics{grid-column:2;grid-row:6;font-size:11px;line-height:1.7;padding-left:17px;margin:0;color:var(--wb-sub)}
+#hub-calibration .oc-run[data-guided=true][data-previous=true]>.oc-heading h4{color:var(--wb-sub)}
+@media(max-width:700px){#hub-calibration .oc-run[data-guided=true]{grid-template-columns:minmax(0,1fr);gap:14px}#hub-calibration .oc-run[data-guided=true] #oc-guide,#hub-calibration .oc-run[data-guided=true]>.oc-step,#hub-calibration .oc-run[data-guided=true]>.oc-progress-row,#hub-calibration .oc-run[data-guided=true]>.oc-feedback,#hub-calibration .oc-run[data-guided=true]>#oc-diagnostics{grid-column:1;grid-row:auto}#hub-calibration .oc-run[data-guided=true] #oc-guide-image{max-width:220px}#hub-calibration .oc-run[data-guided=true]>.oc-step{order:0}}

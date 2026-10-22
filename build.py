@@ -22,6 +22,7 @@ args=[sys.executable,'-m','PyInstaller','--noconfirm','--clean','--onedir','--na
     '--add-data','src/trial_sdk_poses.json'+os.pathsep+'.','--add-data','src/motion_parameters.py'+os.pathsep+'.',
     '--add-data','src/edition.json'+os.pathsep+'.','--add-data','LICENSE'+os.pathsep+'.',
     '--add-data','src/official_viewer_manifest.json'+os.pathsep+'.',
+    '--add-data','src/official_calibration_guides.json'+os.pathsep+'.',
     '--add-data','runtime_payload/official-viewer'+os.pathsep+'official-viewer',
     '--add-data','src/runtime_manifest.json'+os.pathsep+'.',
     '--add-data','src/runtime_update.py'+os.pathsep+'.',

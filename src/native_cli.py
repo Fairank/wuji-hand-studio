@@ -5,6 +5,8 @@ download the public release and runs only version/help checks, never discovery
 or a device command. ``resolve`` verifies local files without running anything.
 """
 from datetime import datetime, timezone
+from collections import OrderedDict
+import copy
 import hashlib
 import json
 import os
@@ -14,6 +16,7 @@ import shutil
 import stat
 import subprocess
 import tempfile
+import threading
 import time
 import zipfile
 
@@ -30,6 +33,9 @@ BINARY_SHA256 = '5a2325310040085bb3cb93d3711738eb2fbf456f33426f498aa0b6b6f3826b0
 MAX_EXTRACTED = 512 * 1024 * 1024
 MAX_MEMBERS = 256
 MAX_RATIO = 200
+_verified=OrderedDict()
+_verified_lock=threading.RLock()
+_MAX_VERIFIED=16
 
 
 def _redirect(path):
@@ -182,7 +188,48 @@ class NativeCLIStore(CLIReleaseStore):
         shutil.rmtree(home)
         return evidence
 
-    def _cached(self, directory, version):
+    def _identity_tree(self,directory):
+        """Cheap identity of every path; redirects never inherit prior trust.
+
+        This is a metadata-poll cache only. A strict process-launch check still
+        hashes content even if an adversary can restore file timestamps.
+        """
+        self._safe_root()
+        if not directory.is_dir() or _redirect(directory):
+            raise ReleaseStoreError('Native CLI version is not prepared')
+        pending=[directory];rows=[]
+        while pending:
+            path=pending.pop()
+            if _redirect(path):raise ReleaseStoreError('Native CLI version contains a filesystem redirect')
+            info=path.lstat()
+            if stat.S_ISDIR(info.st_mode):pending.extend(path.iterdir())
+            elif not stat.S_ISREG(info.st_mode):raise ReleaseStoreError('Invalid native CLI cache path type')
+            rows.append((path.relative_to(directory).as_posix(),info.st_mode,info.st_size,
+                info.st_mtime_ns,info.st_ctime_ns,info.st_ino,info.st_dev,
+                getattr(info,'st_file_attributes',0),getattr(info,'st_reparse_tag',0)))
+        return tuple(sorted(rows))
+
+    def _cached(self,directory,version,*,strict=False):
+        if type(strict) is not bool:raise ValueError('Expected a boolean strict verification option')
+        key=(os.path.normcase(str(directory.absolute())),version,REPOSITORY,REPO_URL,PINNED_VERSION,ARCHIVE_NAME,
+             ASSET_URL,ARCHIVE_SHA256,ARCHIVE_SIZE,BINARY_SHA256)
+        with _verified_lock:
+            try:before=self._identity_tree(directory)
+            except BaseException:
+                _verified.pop(key,None);raise
+            previous=_verified.get(key)
+            if not strict and previous is not None and previous[0]==before:
+                _verified.move_to_end(key)
+                return copy.deepcopy(previous[1])
+            _verified.pop(key,None)
+            result=self._cached_full(directory,version)
+            after=self._identity_tree(directory)
+            if before!=after:raise ReleaseStoreError('Native CLI changed during integrity verification')
+            _verified[key]=(after,copy.deepcopy(result))
+            while len(_verified)>_MAX_VERIFIED:_verified.popitem(last=False)
+            return result
+
+    def _cached_full(self, directory, version):
         if _redirect(directory) or not directory.is_dir():
             raise ReleaseStoreError('Native CLI version is not prepared')
         manifest_path = directory / 'manifest.json'
@@ -227,14 +274,15 @@ class NativeCLIStore(CLIReleaseStore):
             raise ReleaseStoreError('Native CLI executable failed integrity verification')
         return dict(manifest, directory=str(directory), binary=str(binary))
 
-    def resolve(self, version=PINNED_VERSION):
+    def resolve(self, version=PINNED_VERSION, *, strict=False):
         """Return a verified local executable; never download or execute it."""
         version = _version(version)
         self._safe_root()
-        return self._cached(self.root / version, version)['binary']
+        return self._cached(self.root / version, version,strict=strict)['binary']
 
-    def prepare(self, version=PINNED_VERSION, *, release=None, archive=None):
+    def prepare(self, version=PINNED_VERSION, *, release=None, archive=None, strict=False):
         """Explicitly prepare and help-check the pinned official Windows CLI."""
+        if type(strict) is not bool:raise ValueError('Expected a boolean strict verification option')
         version = _version(version)
         self._safe_root()
         self._check_cancel()
@@ -242,7 +290,7 @@ class NativeCLIStore(CLIReleaseStore):
         with self._locked():
             final = self.root / version
             if final.exists() or _redirect(final):
-                return self._cached(final, version)
+                return self._cached(final, version,strict=strict)
             release = self.fetch_release(version) if release is None else release
             encoded = json.dumps(release).encode('utf-8')
             if len(encoded) > MAX_METADATA:
@@ -291,7 +339,7 @@ class NativeCLIStore(CLIReleaseStore):
                 self._write_json(stage / 'manifest.json', manifest)
                 self._check_cancel()
                 os.replace(stage, final)
-                return self._cached(final, version)
+                return self._cached(final, version,strict=strict)
             finally:
                 if stage.exists():
                     if (stage.parent != self.root or not stage.name.startswith('.prepare-') or
@@ -300,11 +348,11 @@ class NativeCLIStore(CLIReleaseStore):
                     shutil.rmtree(stage)
 
 
-def resolve(version=PINNED_VERSION, *, folder=None):
-    return NativeCLIStore(folder).resolve(version)
+def resolve(version=PINNED_VERSION, *, folder=None,strict=False):
+    return NativeCLIStore(folder).resolve(version,strict=strict)
 
 
-def prepare(version=PINNED_VERSION, *, folder=None, release=None, archive=None):
+def prepare(version=PINNED_VERSION, *, folder=None, release=None, archive=None,strict=False):
     if version in (PINNED_VERSION,'v'+PINNED_VERSION) and release is None and archive is None:
         from runtime_paths import RESOURCE
         bundled=RESOURCE/'official-cli-native'
@@ -312,13 +360,15 @@ def prepare(version=PINNED_VERSION, *, folder=None, release=None, archive=None):
             metadata=bundled/'release.json'
             if metadata.stat().st_size>MAX_METADATA:raise ReleaseStoreError('Bundled CLI release metadata exceeds its limit')
             release=json.loads(metadata.read_text(encoding='utf-8'));archive=bundled/ARCHIVE_NAME
-    return NativeCLIStore(folder).prepare(version, release=release, archive=archive)
+    return NativeCLIStore(folder).prepare(version, release=release, archive=archive,strict=strict)
 
 
 def json_command(*arguments):
     """Same Windows executable and SDK HOME; no shell or web-supplied argv."""
     from windows_process_job import OwnedProcess
-    component=prepare()
+    # Every executable launch, including local profile reads, rehashes content.
+    # Stat-based reuse is only for metadata polling that does not run a binary.
+    component=prepare(strict=True)
     with OwnedProcess([component['binary'],'--json',*arguments],stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,encoding='utf-8',errors='replace',
             env={**os.environ,'WUJI_NO_UPDATE_CHECK':'1','WUJI_TELEMETRY_DISABLE':'1'}) as owned:

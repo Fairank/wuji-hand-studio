@@ -267,6 +267,13 @@ def build_inventory(viz=None, controller=None, glove=None, *, now=None, ttl=30):
         for row in observations:
             if row['serial'] == active_serial:
                 row['in_use'] = True
+    calibration=controller.get('calibration') or {}
+    calibration_serial=calibration.get('serial')
+    if calibration.get('running') is True and isinstance(calibration_serial,str) and _SERIAL.fullmatch(calibration_serial):
+        # An official task owns this exact glove; it does not expose SDK
+        # feedback freshness. Do not renew an advertisement or claim receiving.
+        add([dict(serial=calibration_serial,device_type='wuji_glove',side=calibration.get('side'))],
+            'official_calibration_session',None,owned=True)
     devices, merged_conflicts = _merge(observations)
     conflicts.extend(merged_conflicts)
     return dict(devices=[_public(row) for row in devices], conflicts=conflicts, rejected=rejected, updated_at=now, ttl_s=ttl)

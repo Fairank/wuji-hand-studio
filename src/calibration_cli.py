@@ -148,6 +148,7 @@ class CalibrationCLI:
         self.refresh_lock = threading.Lock()
         self.device_provider=device_provider
         self.metadata_check=metadata_check or (lambda:None)
+        self.profile_read_check=self.metadata_check
         self.process = None
         self.native = None
         self.thread = None
@@ -173,17 +174,34 @@ class CalibrationCLI:
             else:
                 config=None
                 try:
-                    self.metadata_check()
                     config=load_config()
                     from official_device_discovery import use_native
                     native=use_native(config)
                     if native:
-                        # Human TTY owns profile creation/switching and overwrite
-                        # confirmation. Status must not launch a second user flow.
+                        # These commands read local SDK user files only. They
+                        # neither discover nor connect to a device.
+                        self.profile_read_check()
                         from native_cli import prepare
                         component=prepare()
-                        users=[];current=None
+                        users=cli_json(config,'user','list').get('users',[])
+                        current=cli_json(config,'user','show')
+                        if not isinstance(users,list) or len(users)>128:raise ValueError('Invalid SDK user list')
+                        detailed=[]
+                        for user in users:
+                            if not isinstance(user,dict) or not isinstance(user.get('name'),str) or not _NAME.fullmatch(user['name']):
+                                raise ValueError('Invalid SDK user identity')
+                            user=copy.deepcopy(user)
+                            calibrated=user.get('calibrated')
+                            if isinstance(calibrated,dict) and all(type(calibrated.get(s)) is bool for s in ('left','right')):
+                                for s in ('left','right'):user[s+'_hand']=dict(calibrated=calibrated[s])
+                            if not all(isinstance(user.get(s+'_hand'),dict) and type(user[s+'_hand'].get('calibrated')) is bool for s in ('left','right')):
+                                detail=cli_json(config,'user','show',user['name'])
+                                if detail.get('name')!=user['name']:raise ValueError('SDK user identity changed')
+                                user.update(detail)
+                            detailed.append(user)
+                        users=detailed
                     else:
+                        self.metadata_check()
                         users=cli_json(config,'user','list').get('users',[])
                         current=cli_json(config,'user','show')
                     devices=[] if self.device_provider is not None else cli_json(config,'devices').get('devices',[])
@@ -193,7 +211,7 @@ class CalibrationCLI:
                                current=current,devices=[d for d in devices if is_glove_device(d)],error=None,
                                metadata_checked_at=time.time())
                     if native:
-                        cache.update(runtime=dict(backend='windows_native',label='Windows CLI · Windows SDK',version=component['version']),guide='official_tty',human_tty=True)
+                        cache.update(runtime=dict(backend='windows_native',label='Windows CLI · Windows SDK',version=component['version']),guide='official_jsonl',human_tty=False,guided_native=True)
                     else:cache.update(runtime=dict(backend=config['mode'],label=config['mode']+' CLI / SDK'),guide='official_jsonl',human_tty=False)
                     with self.lock:
                         self.cache=copy.deepcopy(cache);self.cached_at=time.monotonic()
@@ -243,7 +261,25 @@ class CalibrationCLI:
             self.cache = None
         return self.snapshot(refresh=True)
 
-    def start(self, side, serial, replace=False, timeout_s=900):
+    def preflight_guided(self, profile, side, replace=False, *, create_profile=False):
+        """Read-only preflight may run while this workspace owns the Viewer."""
+        from calibration_guided import validate_profile
+        if (not isinstance(profile,str) or not _NAME.fullmatch(profile) or profile.lower()=='default'
+                or type(create_profile) is not bool or type(replace) is not bool):
+            raise ValueError('请选择或填写命名佩戴者 / Select or create a named SDK user')
+        if side not in ('left','right'):raise ValueError('请先确认手套左右手 / Verify the selected glove side')
+        self.profile_read_check()
+        config=load_config()
+        users=cli_json(config,'user','list').get('users')
+        if not isinstance(users,list):raise ValueError('Invalid SDK user list')
+        exists=any(isinstance(u,dict) and u.get('name')==profile for u in users)
+        if create_profile:
+            if exists:raise ValueError('佩戴者名称已存在 / SDK user already exists')
+            return dict(name=profile,left_hand=dict(calibrated=False),right_hand=dict(calibrated=False))
+        if not exists:raise ValueError('未找到佩戴者 / Unknown SDK user')
+        return validate_profile(cli_json(config,'user','show',profile),profile,side,replace)
+
+    def start(self, side, serial, replace=False, timeout_s=900, *, interface='guided', connected=None, profile=None, create_profile=False, cancel_check=None):
         config=load_config()
         from official_device_discovery import use_native
         if use_native(config):
@@ -251,22 +287,41 @@ class CalibrationCLI:
                 raise ValueError('Select a discovered glove / 请选择已发现的手套')
             if type(replace) is not bool or type(timeout_s) is not int or not 60<=timeout_s<=1800:
                 raise ValueError('Invalid calibration options')
-            with self.lock:
-                if self.run['running']:raise ValueError('Calibration is already running')
-                # Reuse the selected, recent shared inventory. Never rescan or
-                # silently choose a different glove inside the human journey.
-                devices=self.device_provider(False) if self.device_provider is not None else self.snapshot(refresh=False).get('devices',[])
-                if not isinstance(devices,list):raise ValueError('Unexpected shared device inventory')
-                matching=[d for d in devices if is_glove_device(d) and (d.get('sn') or d.get('serial'))==serial and d.get('selectable') is not False]
-                if len(matching)!=1:raise ValueError('Selected glove is not in the latest official scan / 请刷新设备目录并选择手套')
-                device=matching[0]
-                observed=device.get('observed_at')
-                if observed is not None and (type(observed) not in (int,float) or not math.isfinite(observed) or not 0<=time.time()-observed<=30):
-                    raise ValueError('Selected glove discovery is stale / 手套发现记录已过期，请重新扫描')
-                found_side=str(device.get('handedness') or device.get('side') or '').lower().removeprefix('handedness.')
+            if interface not in ('guided','terminal') or type(create_profile) is not bool:raise ValueError('Invalid calibration interface')
+            # Only the server handover supplies this fact after matching and
+            # stopping its own live Viewer. Browser discovery is not a connection.
+            from cli_coordination import identity,gate
+            if (not isinstance(connected,dict) or connected.get('source')!='native_viewer'
+                    or connected.get('serial')!=serial or connected.get('owner_pid')!=os.getpid()
+                    or identity(os.getpid())!=connected.get('owner_start')
+                    or not isinstance(connected.get('viewer_token'),str)
+                    or type(connected.get('checked_at')) not in (int,float)
+                    or not math.isfinite(connected['checked_at']) or not 0<=time.time()-connected['checked_at']<=60):
+                raise ValueError('请先手动接入并查看，再切换到标定 / Connect the selected Viewer before calibration')
+            if side not in ('left','right') or connected.get('side') not in (None,side):raise ValueError('Glove side changed during handover')
+            with gate():
+                # Metadata checks read Controller.snapshot (controller -> run
+                # lock). Never hold the run lock while calling back into it.
+                with self.lock:
+                    if self.run['running']:raise ValueError('Calibration is already running')
+                self.metadata_check()
+                if cancel_check is not None:cancel_check()
+                if interface=='guided':
+                    self.preflight_guided(profile,side,replace,create_profile=create_profile)
+                    current=cli_json(config,'user','show')
+                    if cancel_check is not None:cancel_check()
+                    if create_profile:cli_json(config,'user','create',profile,'--switch')
+                    elif current.get('name')!=profile:cli_json(config,'user','switch',profile)
+                    if cancel_check is not None:cancel_check()
+                    from calibration_guided import validate_profile
+                    validate_profile(cli_json(config,'user','show'),profile,side,replace)
+                elif create_profile:raise ValueError('Original terminal manages its own user creation')
                 from native_calibration import NativeCalibration
-                self.native=NativeCalibration(self)
-                return self.native.start_human(serial,expected_side=found_side if found_side in ('left','right') else None,timeout=timeout_s)
+                native=NativeCalibration(self)
+                with self.lock:self.native=native
+                options=dict(cancel_check=cancel_check) if cancel_check is not None else {}
+                if interface=='terminal':return native.start_human(serial,expected_side=side,timeout=timeout_s,**options)
+                return native.start_guided(serial,side,profile,replace,timeout_s,**options)
         if side not in ('left', 'right') or not isinstance(serial, str) or not _SERIAL.fullmatch(serial):
             raise ValueError('Select a discovered glove and its hand side')
         if type(replace) is not bool or type(timeout_s) is not int or not 60 <= timeout_s <= 1800:

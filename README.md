@@ -8,9 +8,19 @@
 
 ## Windows 下载和启动
 
-在 [Releases](../../releases) 选择实际已上传的安装包，各版本沿用同一 Windows 软件、安装身份和用户数据目录。0.2.30 的软件检查与设备验收边界见 [软件验证记录](docs/VALIDATION_0.2.30.md)；打包、安装和源码推送结果另记于外部最终交付清单。目前尚未发布本版二进制 Release，不能把源码实现当作已上传安装包。Windows 当前用户安装无需另装 Python；安装器检查微软 WebView2 运行时，缺少时联网安装。包暂未进行发布者代码签名，下载需核对实际发布的 SHA-256。
+在 [Releases](../../releases) 选择实际已上传的安装包，各版本沿用同一 Windows 软件、安装身份和用户数据目录。0.2.32 的软件检查与设备验收边界见 [软件验证记录](docs/VALIDATION_0.2.32.md)；打包、安装和源码推送结果另记于外部最终交付清单。目前尚未发布本版二进制 Release，不能把源码实现当作已上传安装包。Windows 当前用户安装无需另装 Python；安装器检查微软 WebView2 运行时，缺少时联网安装。包暂未进行发布者代码签名，下载需核对实际发布的 SHA-256。
 
-## 0.2.30 直接使用完整官方标定流程
+## 0.2.32 手动接入与官方图形标定引导
+
+扫描只列出设备，选择不会连接。点击「接入并查看」才打开所选原版Viewer；再选「标定」，确认佩戴者并点击「切换到标定」，软件核对并释放自己拥有的这一Viewer后，才用同一手套运行官方标定。不会自动结束其他工作区或换连设备。
+
+本地佩戴者资料读取可以与设备发现同时进行，不把“已连接设备”作为只读档案查询的前提。连接、用户切换/创建与实际采集仍保留各自门禁。
+
+默认图形引导显示官方JSONL当前动作、稳定性、约束和进度。六动作及参考图来自官方说明，采集、求解和发布仍调用固定CLI 2026.10.12/SDK。日志进入详情；高级选项保留原版终端，同一时刻只运行一种标定。参考图只按固定链接及摘要缓存到用户目录，不随源码或安装器分发。
+
+后台刷新和发现有效期不再遮住当前步骤。图形模式成功必须有匹配用户、侧别和URDF的官方result、实际退出0及清理确认。软件和设备边界见[0.2.32验证记录](docs/VALIDATION_0.2.32.md)，操作见[标定说明](docs/CALIBRATION.md)。本次没有真实六动作采集或模型质量验收。
+
+## 历史：0.2.30 原版终端流程
 
 0.2.29 虽然合并了入口，仍要求先在工作台填写用户、左右手和覆盖确认，再进入官方终端，保留了两套准备流程。用户指出这一点后，本版移除默认 Windows 路径的重复准备表单。
 
@@ -126,7 +136,7 @@ Windows 内置 WSL 的默认配置改由主机原生官方 CLI 发现手套并�
 
 ## 历史：0.2.18 完整 Ubuntu Wuji Studio
 
-以下 0.2.18 及更早段落保留当时实现记录，当前功能以上方0.2.30说明为准。0.2.18 的 Studio 嵌入入口已取消，以下内容不是当前版本的安装或使用指引。
+以下 0.2.18 及更早段落保留当时实现记录，当前功能以上方0.2.32说明为准。0.2.18 的 Studio 嵌入入口已取消，以下内容不是当前版本的安装或使用指引。
 
 Windows 侧栏新增「Wuji Studio」，在工作台内部显示完整、未修改的官方 Ubuntu 应用，保留官方连接、Visualization、标定和隐私提示。首次使用从官方 GitHub 下载经 SHA-256 核对的程序，在已有内置 Linux 中安装专属图形组件，不另建大型虚拟机，不采集 Windows 桌面。
 
@@ -321,6 +331,10 @@ Ubuntu 已有历史 0.1.3 包。macOS 的原生构建在 GitHub Mac runner 上�
 0.2.0 的本地 Claude 按用户当时偏好使用 `claude-opus-5-5 --effort max`，仅辅助边界明确的播放列表基础设计；实际返回模型为 `claude-opus-5-5`。输出经主维护者审核，控制逻辑、设备边界和真实结果由主维护者核验。代码接口用于检视软件，不操作桌面。来源和许可证见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
 ## English
+
+Version 0.2.32 requires an explicit connection before calibration. Discovery and selection never connect. Connect and view starts the selected official Viewer; Switch to calibration explicitly releases only that owned session and starts the same glove's official calibration. The default graphical guide reads official schema-v2 JSONL, with official six-pose references cached privately from pinned URLs. Capture, solver and publishing remain in the unmodified CLI/SDK. Original Human TTY remains an advanced alternative. Background refresh and discovery age do not obscure an active run. Guided completion requires a matching official result, actual exit zero and confirmed cleanup. See [0.2.32 validation](docs/VALIDATION_0.2.32.md). No physical calibration-quality acceptance is claimed.
+
+The following descriptions are retained as history.
 
 Version 0.2.30 removes the duplicate Workbench calibration preparation retained in 0.2.29. In Connection → Official CLI, select a device once. View device opens the original Viewer; Start calibration opens the original Human TTY in the same display stage. The pinned official CLI 2026.10.12 owns profile creation/switching, overwrite confirmation (No by default), six colored pose guides and its result journey. No second Workbench user, hand-side or device selection is required. Device identity, recent discovery and cross-workspace session checks remain enforced; the explicit legacy JSONL path retains its existing named-user and overwrite protections.
 

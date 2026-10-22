@@ -91,3 +91,9 @@ body[data-official-viz-focus=true] .ov-root[data-task=calibration] #hub-calibrat
 @media(max-width:960px){.ov-root .ov-device-field{flex-basis:220px}.ov-root>.ov-display-actions{margin-top:9px}#ov-shared-stage.ov-stage{height:clamp(340px,calc(100dvh - 315px),760px)}}
 @media(max-width:600px){.ov-root .ov-device-field{flex-basis:calc(100% - 110px)}html #page-connection .ov-toolbar #ov-scan{flex:0 0 auto}html #page-connection .ov-toolbar>.ov-task-choice{flex:1 1 auto}html #page-connection .ov-task-choice>button{flex:1}html #page-connection .ov-toolbar>:is(#ov-start,#ov-calibrate){flex:1 1 auto;min-width:112px}.ov-root>.ov-display-actions{width:auto;justify-content:flex-start;flex-wrap:wrap}.ov-display-actions .ov-session{flex-basis:100%;order:2}#ov-shared-stage.ov-stage{min-height:340px;height:56dvh}.ov-root>.ov-heading{align-items:center;gap:7px}.ov-root>.ov-heading p{font-size:11px}}
 @media(forced-colors:active){html #page-connection .ov-task-choice>button[aria-pressed=true]{outline:1px solid Highlight;background:Highlight;color:HighlightText}}
+.ov-root[data-guided=true] #ov-version{display:none}
+.ov-root[data-guided=true][data-task=calibration]>.ov-source-info{display:none}
+.ov-root[data-guided=true] #ov-start-note{font-size:10px}
+.ov-root>.ov-display-actions{align-self:stretch;width:100%;box-sizing:border-box;flex-wrap:wrap}
+.ov-root[data-guided=true] .ov-display-actions .ov-session{order:-1;flex:1 1 150px}
+html body #page-connection .ov-root[data-guided=true] .ov-toolbar #ov-calibrate{min-width:126px}

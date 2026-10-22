@@ -54,11 +54,11 @@
   const g=state?.glove||{},hw=g.hardware||{},stream=g.stream||{},feedback=g.feedback||{},receiving=g.connection==='receiving',connecting=g.connection==='connecting';
   $('glove-profile').textContent=state?.device_profile?.[window.WujiLocale.lang==='en'?'en':'zh']||'';
   const key=JSON.stringify([g.devices,g.hands,g.users,g.user?.user_id,state?.device_profile?.id]);
-  if(key!==optionsKey){optionsKey=key;const old=wantedGlove||$('glove-device').value;$('glove-device').replaceChildren(new Option(t('请选择手套','Select a glove'),''));for(const d of g.devices||[])$('glove-device').add(new Option(`${d.serial||d.sn} · ${d.address||''}`,d.serial||d.sn));if([...$('glove-device').options].some(o=>o.value===old))$('glove-device').value=old;else if(!wantedGlove&&g.devices?.length===1)$('glove-device').value=g.devices[0].serial||g.devices[0].sn;
+  if(key!==optionsKey){optionsKey=key;const old=wantedGlove||$('glove-device').value;$('glove-device').replaceChildren(new Option(t('请选择手套','Select a glove'),''));for(const d of g.devices||[])$('glove-device').add(new Option(`${d.serial||d.sn} · ${d.address||''}`,d.serial||d.sn));if([...$('glove-device').options].some(o=>o.value===old))$('glove-device').value=old;
    const previousUser=$('glove-user').value;$('glove-user').replaceChildren();for(const u of g.users||[])$('glove-user').add(new Option(u.display_name+(u.is_default?' · Default':''),u.user_id));$('glove-user').value=previousUser||savedBinding?.sdk_user||g.user?.user_id||'';
-   const handChoice=$('glove-hand-device').value||savedBinding?.hand_serial||'';
+   const handChoice=$('glove-hand-device').value||'';
    const compatible=(g.hands||[]).filter(h=>h.generation===state?.device_profile?.generation&&(!h.side_hint||h.side_hint===state?.device_profile?.side));
-   $('glove-hand-device').replaceChildren(new Option(t('自动选择单只设备','Auto-select a single device'),''),...compatible.map(d=>new Option(d.serial+' · '+d.address,d.serial)));
+   $('glove-hand-device').replaceChildren(new Option(t('选择配对灵巧手','Choose a hand to pair'),''),...compatible.map(d=>new Option(d.serial+' · '+d.address,d.serial)));
    if(handChoice&&![...$('glove-hand-device').options].some(o=>o.value===handChoice))$('glove-hand-device').add(new Option(handChoice+' · '+t('保存的配对，连接时验证','Saved pairing; verified on connect'),handChoice));
    $('glove-hand-device').value=handChoice;
   }
@@ -69,7 +69,7 @@
   $('glove-open').disabled=pending||g.connection!=='ready'||!$('glove-device').value;
   for(const id of ['glove-device','glove-user','glove-hand-device','glove-timeout'])$(id).disabled=pending||receiving||connecting;
   $('glove-disconnect').disabled=pending||!g.busy;
-  $('glove-prepare').disabled=pending||!stream.fresh||!!feedback.device_id||hw.active!==undefined;
+  $('glove-prepare').disabled=pending||!stream.fresh||!!feedback.device_id||hw.active!==undefined||!$('glove-hand-device').value;
   $('glove-follow').disabled=pending||!!lease||!stream.fresh||feedback.stale||!hw.probe_ready||hw.active!==false||!$('glove-clear').checked;
   $('glove-stop').disabled=!g.busy||(!lease&&hw.active===false&&!hw.stop_confirmed);
   $('glove-rate').textContent=f(stream.retarget_hz)+' Hz';$('glove-age').textContent=f(stream.age_ms,0)+' ms';$('glove-send').textContent=f(hw.active?hw.command_timing?.host_publish_hz:null)+' Hz';
@@ -88,11 +88,11 @@
   const d=await post(c);if(d.lease){lease=d.lease;leaseAt=Date.now();seen=false;}if(c.name==='glove_stop'||c.name==='glove_disconnect')lease=null;}catch(e){lastMessage=e.message;}finally{pending=false;render();}}
  $('glove-scan').onclick=()=>act({name:'glove_scan'});
  $('glove-open').onclick=()=>act({name:'glove_open',serial:$('glove-device').value,user_id:$('glove-user').value,timeout_ms:Number($('glove-timeout').value)});
- $('glove-prepare').onclick=()=>act({name:'glove_prepare',address:$('glove-hand-address').value.trim(),serial:$('glove-hand-device').value});
+ $('glove-prepare').onclick=()=>{if(!$('glove-hand-device').value)return;act({name:'glove_prepare',address:$('glove-hand-address').value.trim(),serial:$('glove-hand-device').value});};
  $('glove-follow').onclick=()=>act({name:'glove_follow',workspace_clear:$('glove-clear').checked});
  $('glove-stop').onclick=()=>act({name:'glove_stop'});$('glove-disconnect').onclick=()=>act({name:'glove_disconnect'});
- $('glove-device').onchange=()=>{wantedGlove=$('glove-device').value;window.WujiDeviceInventory?.select(wantedGlove);render();};$('glove-clear').onchange=render;
- window.addEventListener('device-inventory-selection',event=>{if(event.detail?.device?.kind!=='glove')return;wantedGlove=event.detail.serial;optionsKey='';render();});
+ $('glove-device').onchange=()=>{wantedGlove=$('glove-device').value;window.WujiDeviceInventory?.select(wantedGlove);render();};$('glove-hand-device').onchange=render;$('glove-clear').onchange=render;
+ window.addEventListener('device-inventory-selection',event=>{if(event.detail?.device===null){wantedGlove='';$('glove-device').value='';$('glove-hand-device').value='';optionsKey='';render();return;}if(event.detail?.device?.kind!=='glove')return;wantedGlove=event.detail.serial;optionsKey='';render();});
  window.addEventListener('console-state',e=>{state=e.detail;render();});window.addEventListener('wuji-language',translate);
  window.addEventListener('console-offline',()=>{lease=null;lastMessage=t('工作台服务已离线','Workbench service offline');render();});
  setInterval(async()=>{if(!lease)return;try{await post({name:'glove_keepalive',lease});}catch(e){lease=null;lastMessage=e.message;render();}},250);

@@ -28,32 +28,8 @@
   chooseGlove(found);
   if(mode==='calibration'){window.WujiConnectionHub.show('calibration');return;}
   if(mode!=='preview')throw Error('Unknown device workflow');
-  let s=await state();
-  if(s.connection!=='disconnected'||s.hardware?.active!==false)throw Error(t('先结束灵巧手会话，再设置手套预览。','End the hand session before setting up glove preview.'));
-  const side=found.side,profile=s.device_profile;
-  if(['left','right'].includes(side)&&profile?.side!==side){
-   if(s.glove?.busy)throw Error(t('当前手套会话属于另一侧，请先断开。','The glove session uses the other side. Disconnect it first.'));
-   await post('device_profile_select',{profile:(profile?.generation==='hand1'?'hand1':'hand2')+'_'+side});
-  }
-  if(!s.glove?.busy)await post('glove_scan');
-  // Scanning the SDK prepares its users/pairing controls; opening is a separate
-  // visible button and still performs typed SDK identity verification.
-  const deadline=Date.now()+30000;
-  while(Date.now()<deadline){
-   s=await state();if(s.glove?.connection==='error')throw Error(s.glove.message||t('手套控制端未就绪','Glove controller not ready'));
-   if(s.glove?.connection==='receiving'){
-    const actual=s.glove.glove_serial;
-    if(actual!==serial)throw Error(t('另一个手套预览正在运行，请先断开原会话。','A different glove preview is running. Disconnect it first.'));
-    break;
-   }
-   if(s.glove?.connection==='ready'){
-    if(!s.glove.devices?.some(row=>(row.serial||row.sn)===serial))throw Error(t('控制端未找到所选手套，请检查网络后重试。','The controller did not find this glove. Check the network and retry.'));
-    break;
-   }
-   await new Promise(resolve=>setTimeout(resolve,250));
-  }
-  if(!['ready','receiving'].includes(s.glove?.connection))throw Error(t('准备超时；未自动断开或连接其他设备。','Setup timed out. No other device was disconnected or selected.'));
-  chooseGlove(found);window.WujiConnectionHub.show('device');directory.showSettings('glove');
-  const message=$('glove-command-status');if(message)message.textContent=t('已选中此手套。核对标定用户后，点击“连接手套并预览”。','Glove selected. Check the calibration user, then choose Connect glove and preview.');
+  // Opening advanced settings must not start a controller or probe devices.
+  // Its existing explicit scan/open controls own those actions.
+  window.WujiConnectionHub.show('device');directory.showSettings('glove');return;
  });
 })();

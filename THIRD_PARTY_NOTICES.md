@@ -1,5 +1,15 @@
 # Attribution / 来源
 
+## Official calibration references (0.2.31)
+
+The six pose reference images are linked from the official Wuji CLI calibration
+documentation. Only exact source URLs, content hashes and attribution ship in
+`official_calibration_guides.json`; image bytes are fetched into the user's
+private cache and are not redistributed in this repository or installer.
+Image rights remain with their respective holders. The CLI source's MIT license
+is not represented as a license for these documentation images. References are
+not measured device poses and are never mirrored or redrawn.
+
 ## Original Windows CLI bundle (0.2.29)
 
 The Windows installer includes the unmodified official Wuji CLI

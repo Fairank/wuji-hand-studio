@@ -75,12 +75,15 @@
   }
   function gloveOwner(){
     const s=state,g=s?.glove||{},v=s?.official_viz||{},device=v.device||{};
+    if(calibrationSession())return 'calibration';
     if(online&&g.busy)return 'sdk';
     const serial=String(device.sn||device.serial||''),kind=['model','type','device_type','device_name'].map(k=>typeof device[k]==='string'?device[k]:'').join(' ');
     return online&&(/^WG/i.test(serial)||/glove/i.test(kind))&&(v.active===true||v.reserved||['starting','stopping'].includes(v.phase))?'official':null;
   }
+  function calibrationSession(){const c=state?.calibration||{},run=c.run||c;return online&&typeof run.id==='string'&&!!run.id&&typeof run.serial==='string'&&!!run.serial&&(run.running===true||run.cleanup_required===true||c.cleanup_required===true)?run:null;}
   function routeGlove(){
     close();const owner=gloveOwner();
+    if(owner==='calibration'){window.WujiConnectionHub?.show('calibration');return true;}
     if(owner==='official'){window.WujiConnectionHub?.show('official');window.WujiOfficialViz?.showDeviceMode();return true;}
     if(owner==='sdk'){window.WujiConnectionHub?.show('device');window.WujiDeviceInventory?.showSettings('glove');return true;}
     return routeInventory('glove');
@@ -117,18 +120,21 @@
     const viz=s?.official_viz||{},vizDevice=viz.device||{},vizSerial=String(vizDevice.sn||vizDevice.serial||''),vizKind=['model','type','device_type','device_name'].map(k=>typeof vizDevice[k]==='string'?vizDevice[k]:'').join(' ');
     const gloveSession=/^WG/i.test(vizSerial)||/glove/i.test(vizKind);
     const owner=gloveOwner(),gloveProfile=glove.profile||'',gloveSerial=typeof glove.glove_serial==='string'?glove.glove_serial:'',gloveRecord=window.WujiDeviceInventory?.snapshot()?.devices?.find(d=>(d.sn||d.serial)===gloveSerial&&d.kind==='glove');
-    const side=owner==='sdk'&&gloveSerial&&/^hand[12]_(left|right)$/.test(gloveProfile)?gloveProfile.split('_')[1]:owner==='official'?vizDevice.handedness||vizDevice.side:null;
+    const calibration=calibrationSession(),side=owner==='calibration'?calibration.side:owner==='sdk'&&gloveSerial&&/^hand[12]_(left|right)$/.test(gloveProfile)?gloveProfile.split('_')[1]:owner==='official'?vizDevice.handedness||vizDevice.side:null;
     const generation=owner==='sdk'&&gloveRecord?.generation==='glove1'?' 1':owner==='official'&&/\bglove\s*1\b/i.test(vizKind)?' 1':'';
     const gloveName='Glove'+generation+(['left','right'].includes(side)?' · '+text(side==='left'?'左':'右',side==='left'?'Left':'Right'):'');
     gloveTitle.textContent=gloveName;gloveStatus.title=owner==='sdk'?gloveSerial:owner==='official'?vizSerial:text('打开手套设备目录','Open glove device directory');
     gloveSubtitle.textContent=!online?text('服务离线','Service offline'):owner==='sdk'?glove.connection==='receiving'?(gloveFresh?text('数据中','Streaming'):text('等待数据','Waiting for data')):glove.connection==='connecting'?text('准备中…','Preparing…'):glove.connection==='ready'?text('已发现','Discovered'):text('需要处理','Needs attention'):owner==='official'?viz.phase==='running'&&viz.active===true?text('画面运行','Viewer running'):viz.phase==='starting'?text('画面准备中','Viewer starting'):text('查看会话','View session'):text('未接入','Not connected');
+    if(owner==='calibration'){gloveStatus.title=calibration.serial;gloveSubtitle.textContent=calibration.running===true?calibration.status==='starting'?text('标定准备中','Preparing calibration'):calibration.status==='solving'?text('正在生成手型','Creating model'):calibration.status==='cancelling'?text('正在结束标定','Ending calibration'):text('标定中','Calibrating'):text('会话待核对','Session needs verification');}
     gloveGroup.dataset.state=gloveFresh?'connected':owner==='sdk'&&glove.connection==='receiving'?'error':owner?'connecting':'disconnected';
     gloveToggle.textContent=owner?text('查看','View'):text('接入','Set up');gloveToggle.disabled=!online;
     gloveToggle.title=owner==='official'?text('查看官方画面会话；CLI 未报告数据新鲜度。','View the official Viewer session. The CLI does not report data freshness.'):owner==='sdk'?text('查看当前手套会话；停止与断开仍在原工作区。','View the current glove session. Stop and disconnect remain in its workspace.'):text('前往设备目录选择手套，不会自动接入或断开其他设备。','Choose a glove in the device directory. No device connects or disconnects automatically.');
+    if(owner==='calibration')gloveToggle.title=text('查看正在进行的标定，或结束本会话。标定状态不代表实时数据流。','View calibration or end its session. Calibration state is not live-stream evidence.');
     gloveStatus.setAttribute('aria-label',gloveName+' · '+gloveSubtitle.textContent);gloveToggle.setAttribute('aria-label',(owner?text('查看手套会话','View glove session'):text('接入手套','Set up glove')));
     gloveCard.name.textContent=gloveName;
     const cliLabels={starting:['正在启动','Starting'],running:['CLI 运行中，数据新鲜度未报告','CLI running; data freshness not reported'],stopping:['正在停止','Stopping'],error:['需要处理，请查看官方画面','Needs attention; see the official view'],exited:['已退出','Exited']};
     gloveCli.textContent=text('官方手套画面：','Official glove view: ')+(!online||gloveSession&&viz.phase==='running'&&viz.active!==true?text('状态未核对','Status unverified'):gloveSession&&cliLabels[viz.phase]?text(...cliLabels[viz.phase]):text('未运行','Not running'));
+    if(owner==='calibration')gloveCli.textContent=text('手型标定：','Hand-model calibration: ')+gloveSubtitle.textContent+' · '+calibration.serial;
     gloveCli.dataset.phase=online&&gloveSession&&typeof viz.phase==='string'?viz.phase:'unknown';
     const gloveStops=stops.filter(row=>row.source==='glove');
     if(gloveStops.length){

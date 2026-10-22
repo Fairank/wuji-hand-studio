@@ -78,6 +78,7 @@ Source: "{#ProjectRoot}\scripts\*"; DestDir: "{app}\scripts"; Excludes: "__pycac
 
 Source: "{#ProjectRoot}\src\*.py"; DestDir: "{app}\controller\source"; Excludes: "test_*"; Flags: ignoreversion
 Source: "{#ProjectRoot}\src\trial_sdk_poses.json"; DestDir: "{app}\controller\source"; Flags: ignoreversion
+Source: "{#ProjectRoot}\src\official_calibration_guides.json"; DestDir: "{app}\controller\source"; Flags: ignoreversion
 Source: "{#ProjectRoot}\src\edition.json"; DestDir: "{app}\controller\source"; Flags: ignoreversion
 Source: "{#ProjectRoot}\src\assets\*"; DestDir: "{app}\controller\source\assets"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#ProjectRoot}\src\official_data\*"; DestDir: "{app}\controller\source\official_data"; Flags: ignoreversion recursesubdirs createallsubdirs

@@ -85,7 +85,7 @@ class NativeTests(unittest.TestCase):
     def test_host_preflight_starts_original_human_journey_without_profile_calls(self):
         with self.environment() as env:
             state = env.service.start_human(SN, 'left', 900)
-            env.prepare.assert_called_once_with()
+            env.prepare.assert_called_once_with(strict=True)
             env.query.assert_not_called()
             env.owner.metadata_check.assert_called_once_with()
             marker = cli_coordination.reservation(env.folder)
@@ -432,12 +432,12 @@ class WorkerPreflightTests(unittest.TestCase):
 
 
 class NativeMetadataTests(unittest.TestCase):
-    def test_human_metadata_snapshot_never_starts_a_parallel_user_journey(self):
+    def test_guided_metadata_only_reads_local_users_without_device_or_profile_mutation(self):
         config = {'mode': 'wsl', 'cli': 'wuji'}
         def query(*args):
             if args == ('user', 'list'):
                 return {'users': [{'name': 'Demo', 'is_default': False}]}
-            if args == ('user', 'show'):
+            if args in (('user', 'show'),('user','show','Demo')):
                 return copy.deepcopy(PROFILE)
             self.fail('Unexpected native command: ' + repr(args))
         with temporary_folder() as folder, patch.dict(os.environ, WUJI_OFFICIAL_CLI_DATA=folder), \
@@ -452,11 +452,12 @@ class NativeMetadataTests(unittest.TestCase):
             self.assertTrue(state['metadata_current'])
             self.assertEqual(state['runtime']['backend'], 'windows_native')
             self.assertEqual(state['runtime']['version'], '2026.10.12')
-            self.assertEqual(state['guide'], 'official_tty')
-            self.assertTrue(state['human_tty'])
-            self.assertIsNone(state['current'])
-            self.assertEqual(state['users'], [])
-            call.assert_not_called()
+            self.assertEqual(state['guide'], 'official_jsonl')
+            self.assertFalse(state['human_tty'])
+            self.assertTrue(state['guided_native'])
+            self.assertEqual(state['current'], PROFILE)
+            self.assertEqual(state['users'], [PROFILE])
+            self.assertEqual([c.args for c in call.call_args_list],[('user','list'),('user','show'),('user','show','Demo')])
             linux.assert_not_called(); wrapper.assert_not_called()
 
     def test_native_json_metadata_uses_verified_binary_and_keeps_profile_environment(self):
@@ -471,7 +472,7 @@ class NativeMetadataTests(unittest.TestCase):
                 patch.object(native_cli, 'prepare', return_value=COMPONENT) as prepare, \
                 patch('windows_process_job.OwnedProcess', return_value=context) as owned:
             self.assertEqual(native_cli.json_command('user', 'show'), PROFILE)
-            prepare.assert_called_once_with()
+            prepare.assert_called_once_with(strict=True)
             args, kwargs = owned.call_args
             self.assertEqual(args[0], [COMPONENT['binary'], '--json', 'user', 'show'])
             self.assertEqual(kwargs['env']['HOME'], 'C:/synthetic-profile-home')

@@ -80,6 +80,11 @@ def self_check():
     return 0
 
 def main():
+    if '--jsonl-software-check' in sys.argv:
+        from native_calibration import terminal_software_check
+        try:code=terminal_software_check(sys.argv[sys.argv.index('--jsonl-software-check')+1],guided=True)
+        except Exception:code=1
+        os._exit(code)
     if '--terminal-software-check' in sys.argv:
         from native_calibration import terminal_software_check
         try:code=terminal_software_check(sys.argv[sys.argv.index('--terminal-software-check')+1])

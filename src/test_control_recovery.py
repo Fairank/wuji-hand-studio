@@ -26,6 +26,7 @@ sys.path.insert(0, str(ROOT/'src'))
 from device_termination import TerminationJournal, unconfirmed
 from glove_bridge import GloveBridge
 from desktop_lifecycle import close_sessions
+from calibration_handover import CalibrationHandover
 
 
 def extracted(filename, name, context):
@@ -137,6 +138,7 @@ class JournalCrosscheck(unittest.TestCase):
             REPORTS=Path(self.temp.name)/'reports', copy=copy, json=json, re=re, time=time,
             threading=threading, Path=Path, socket=socket))
         c = Controller.__new__(Controller)
+        c.calibration_handover = CalibrationHandover(c)
         c.lock, c.termination, c.glove = threading.RLock(), self.journal, bridge
         c.session_devices, c.session_epochs = {3: 'X'}, {3: direct_epoch}
         c.hardware_generation = c.generation = 3
@@ -177,6 +179,7 @@ class JournalCrosscheck(unittest.TestCase):
             vm_client=lambda: None, REPORTS=Path(self.temp.name)/'reports', copy=copy, json=json,
             re=re, time=time, threading=threading, Path=Path, socket=socket))
         c = Controller.__new__(Controller)
+        c.calibration_handover = CalibrationHandover(c)
         old, new = self.epoch(), self.epoch()
         c.lock = threading.RLock()
         c.termination = self.journal
@@ -202,6 +205,7 @@ class JournalCrosscheck(unittest.TestCase):
             REPORTS=Path(self.temp.name)/'reports', copy=copy, json=json, re=re, time=time,
             threading=threading, Path=Path, socket=socket))
         c = Controller.__new__(Controller)
+        c.calibration_handover = CalibrationHandover(c)
         c.lock, c.termination, c.glove = threading.RLock(), self.journal, bridge
         c.session_devices, c.session_epochs = {3: current_serial}, {3: direct_epoch}
         c.hardware_generation = c.generation = 3
@@ -257,6 +261,7 @@ class ShutdownCrosscheck(unittest.TestCase):
         for name in ('program_start', 'group_prepare', 'runtime_install', 'runtime_select', 'hardware_start', 'connect', 'calibration_start'):
             with self.subTest(command=name), patch.dict(sys.modules, modules):
                 c = Controller.__new__(Controller)
+                c.calibration_handover = CalibrationHandover(c)
                 c.lock, c.desktop_closing, c.state = threading.RLock(), True, idle_state()
                 c.group = NS(active=False, internal=False, handle=started('group'))
                 c.program = NS(snapshot=lambda: dict(active=False), start=started('program'))
@@ -275,6 +280,7 @@ class ShutdownCrosscheck(unittest.TestCase):
             threading=threading, Path=Path, socket=socket, HARDWARE_COMMANDS={'hardware_stop'},
             validate_command=lambda command: None))
         c = Controller.__new__(Controller)
+        c.calibration_handover = CalibrationHandover(c)
         c.lock, c.generation = threading.RLock(), 1
         c.session_devices, c.session_epochs = {}, {}
         c.hardware_generation = 1

@@ -49,6 +49,9 @@ class OfficialVisualization:
         row['devices_fresh']=type(scanned) in (int,float) and 0<=time.time()-scanned<=30 and not row.get('error')
         row['can_start']=row['supported'] and not row['busy'] and not row['active'] and not lease and row['devices_fresh']
         row['reserved']=bool(lease) and lease.get('kind')=='viz'
+        # A session identifier is an exact ownership selector, not a CSRF or
+        # permission token. Every handover rechecks its process/marker identity.
+        row['session_id']=self.token
         row['blocked_reason']='另一个官方 CLI 会话尚未结束 / Another official CLI session is active' if blocked else None
         if row.get('viewer_url'):row['viewer_url']=viewer_url(row['viewer_url'],theme)
         return row
@@ -164,10 +167,10 @@ class OfficialVisualization:
                     if serial.startswith('WH1') or ('hand' in kind and '2' not in kind and not serial.startswith('WH2')):raise ValueError('官方 viz 当前支持 Hand 2 和 Glove / Official viz supports Hand 2 and Glove')
                     self.token=token;self.config=config
                     self.native_stop.clear()
-                    self.state.update(busy=True,active=False,phase='starting',viewer_url=None,error=None,logs=[],device=found,started_at=time.time())
+                    self.state.update(busy=True,active=False,phase='starting',viewer_url=None,error=None,logs=[],device=found,reported_device=None,started_at=time.time())
                     if native_network(config):
                         marker=reservation(self.folder)
-                        marker.update(backend='windows_native',job_name='Local\\HandWorkbench-OfficialViz-'+token)
+                        marker.update(backend='windows_native',job_name='Local\\HandWorkbench-OfficialViz-'+token,serial=serial)
                         atomic(self.folder/'session.json',marker)
                     self.thread=threading.Thread(target=self._run,args=(config,serial,theme),name='Official CLI visualization',daemon=True)
                     self.thread.start()
@@ -254,7 +257,7 @@ class OfficialVisualization:
         try:
             from native_cli import prepare
             from windows_process_job import OwnedProcess
-            component=prepare()
+            component=prepare(strict=True)
             self._set(cli_version=component['version'],backend='windows_native')
             with self.lock:
                 if self.native_stop.is_set():return
@@ -286,7 +289,7 @@ class OfficialVisualization:
                 url=self._browser_url(url)
                 with self.lock:
                     if not self.native_stop.is_set():
-                        self.state.update(active=True,busy=False,phase='running',device={**self.state['device'],**reported},viewer_url=url)
+                        self.state.update(active=True,busy=False,phase='running',device={**self.state['device'],**reported},reported_device=copy.deepcopy(reported),viewer_url=url)
                 timer_done.set()
             code=p.wait(timeout=10);reader.join(timeout=2)
             with self.lock:
@@ -314,6 +317,46 @@ class OfficialVisualization:
                 with gate(self.folder):release(self.token,self.folder);self.token=None
             else:self._set(phase='error',busy=False,active=False,viewer_url=None,error='原生 CLI 退出未确认，请重试停止 / Native CLI cleanup unconfirmed; retry Stop')
 
+    def connection_record(self,serial,session_id):
+        """Verify an actual local native Viewer, independently of scan TTL.
+
+        Only the CLI's exact startup report establishes the current task's
+        identity. This does not claim sensor freshness or SDK preview state.
+        Callers performing a transition must also hold the shared CLI gate.
+        """
+        if (not isinstance(serial,str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_-]{0,79}',serial)
+                or not isinstance(session_id,str) or not re.fullmatch(r'[0-9a-f]{32}',session_id)):
+            raise ValueError('请选择本工作区已接入的手套 / Select the glove connected in this workspace')
+        with self.lock:
+            marker=reservation(self.folder);reported=self.state.get('reported_device') or {}
+            if (self.token!=session_id or marker.get('token')!=session_id or marker.get('kind')!='viz'
+                    or marker.get('backend')!='windows_native' or marker.get('serial')!=serial
+                    or marker.get('job_name')!='Local\\HandWorkbench-OfficialViz-'+session_id
+                    or marker.get('pid')!=os.getpid() or marker.get('start') is None
+                    or identity(marker.get('pid'))!=marker.get('start')
+                    or self.state.get('backend')!='windows_native' or self.state.get('active') is not True
+                    or self.state.get('phase')!='running' or self.state.get('busy') is not False
+                    or not isinstance(reported,dict) or reported.get('sn')!=serial
+                    or self.process is None or self.process.poll() is not None or self.native_job is None):
+                raise ValueError('设备画面会话已变化或尚未接入，请先接入所选设备 / The Viewer session changed or is not connected; connect the selected device first')
+            from calibration_cli import is_glove_device
+            if not is_glove_device(reported):raise ValueError('标定需要本次接入的手套 / Calibration requires the connected glove')
+            side=reported.get('handedness',reported.get('side'))
+            side=side.lower().removeprefix('handedness.') if isinstance(side,str) else None
+            return dict(serial=serial,side=side if side in ('left','right') else None,
+                source='native_viewer',viewer_token=session_id,cli_version=self.state.get('cli_version'),
+                checked_at=time.time(),owner_pid=marker['pid'],owner_start=marker['start'])
+
+    def stop_owned(self,serial,session_id):
+        """Stop only the explicitly selected local Viewer, then verify release."""
+        result=self._stop(expected_token=session_id,expected_serial=serial)
+        with self.lock:
+            if (self.token is not None or self.process is not None or self.native_job is not None
+                    or self.transport is not None or self.thread and self.thread.is_alive()
+                    or self.state.get('active') or self.state.get('busy') or self.state.get('phase')!='idle'):
+                raise ValueError('画面会话释放尚未确认，未开始标定 / Viewer release is unconfirmed; calibration has not started')
+        return result
+
     def stop(self):
         native=reservation(self.folder).get('backend')=='windows_native'
         try:return self._stop()
@@ -325,8 +368,12 @@ class OfficialVisualization:
                             error='原生 CLI 退出未确认，请重试停止 / Native CLI cleanup unconfirmed: '+str(error)[:400])
             raise
 
-    def _stop(self):
+    def _stop(self,*,expected_token=None,expected_serial=None):
+        if expected_token is not None:
+            with gate(self.folder):self.connection_record(expected_serial,expected_token)
         stale=reservation(self.folder)
+        if expected_token is not None and stale.get('token')!=expected_token:
+            raise ValueError('Viewer ownership changed before handover')
         expected_token=stale.get('token')
         if stale and stale.get('kind')!='viz':raise ValueError('另一个 CLI 操作正在进行 / Another CLI operation is in progress')
         if stale and stale.get('token')!=self.token:

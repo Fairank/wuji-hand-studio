@@ -14,6 +14,7 @@ from unittest.mock import Mock,patch
 
 import managed_runtime as runtime
 import runtime_refresh as refresh
+from calibration_handover import CalibrationHandover
 
 
 PROJECT=Path(__file__).resolve().parents[3]
@@ -167,6 +168,7 @@ class RuntimeInstallDispatchTests(unittest.TestCase):
     def controller(self,status,compatible,busy=False):
         from console_server import Controller
         controller=Controller.__new__(Controller)
+        controller.calibration_handover=CalibrationHandover(controller)
         controller.lock=threading.RLock();controller.state=dict(connection='disconnected',hardware=dict(active=False))
         controller.glove=SimpleNamespace(busy=False);controller.doctor=SimpleNamespace(snapshot=lambda:dict(running=False))
         controller.parameters=SimpleNamespace(sync_status=dict(busy=False))

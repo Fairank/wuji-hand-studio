@@ -71,6 +71,8 @@ class Controller:
         from official_visualization import OfficialVisualization
         self.official_cli=OfficialCLI()
         self.official_viz=OfficialVisualization()
+        from calibration_handover import CalibrationHandover
+        self.calibration_handover=CalibrationHandover(self)
         from program_runner import ProgramRunner
         self.program=ProgramRunner(self)
         from group_participant import GroupParticipant
@@ -151,7 +153,11 @@ class Controller:
             result['program']=self.program.snapshot()
             result['group']=self.group.snapshot()
             with self.calibration.lock:
-                result['calibration']={k:self.calibration.run.get(k) for k in ('running','status','side','user')}
+                result['calibration']={k:self.calibration.run.get(k) for k in ('running','status','side','user','id','serial','source','phase','cleanup_confirmed','interface')}
+                result['calibration']['cleanup_required']=(self.calibration.run.get('source') in ('official_tty','official_jsonl_native')
+                    and self.calibration.run.get('running') is False and self.calibration.run.get('id') is not None
+                    and self.calibration.run.get('cleanup_confirmed') is not True)
+            result['calibration_connection']=self.calibration_handover.snapshot()
             return result
 
     def parameter_snapshot(self):
@@ -246,6 +252,18 @@ class Controller:
         self.stdin.flush()
 
     def action(self, command):
+        from calibration_handover import workflow_action
+        name=command.get('name') if isinstance(command,dict) else None
+        handover=self.calibration_handover
+        if name=='calibration_handover':return handover.start(command)
+        if name in {'calibration_cancel','official_viz_stop','session_close'}:handover.request_cancel()
+        if not workflow_action(command):return self._workflow_action(command)
+        if not handover.workflow_lock.acquire(blocking=False):
+            raise ValueError('设备任务正在切换，请等待本次操作完成 / A device task transition is in progress')
+        try:return self._workflow_action(command)
+        finally:handover.workflow_lock.release()
+
+    def _workflow_action(self, command):
         if isinstance(command,dict) and command.get('name') in {'connect','runtime_select','bridge_config_save','bridge_password_save','bridge_password_forget','parameters_sync','doctor_version','doctor_run','doctor_support','device_profile_select','glove_connect'}:
             from managed_runtime import status as runtime_status
             if runtime_status()['busy']:raise ValueError('内置控制环境正在安装，请等待完成 / Wait for controller setup to finish')
@@ -796,6 +814,16 @@ class Handler(BaseHTTPRequestHandler):
         if url.path=='/api/official-cli':return self.reply(200,self.server.controller.official_cli.snapshot())
         if url.path=='/api/official-viz':return self.reply(200,self.server.controller.visualization_status(parse_qs(url.query).get('theme',[None])[0]))
         if url.path=='/api/device-inventory':return self.reply(200,self.server.controller.device_inventory())
+        if url.path=='/api/calibration-connection':return self.reply(200,self.server.controller.calibration_handover.snapshot())
+        if url.path=='/api/calibration-guide':
+            try:
+                from official_calibration_guides import read_guide
+                step=parse_qs(url.query).get('step',[])
+                if len(step)!=1 or not re.fullmatch(r'[0-9]{1,2}',step[0]):raise ValueError('Invalid official calibration step')
+                data,mime=read_guide(int(step[0]))
+                return self.reply(200,data,mime)
+            except (OSError,ValueError,RuntimeError,TimeoutError) as error:
+                return self.reply(503,dict(error=str(error)[:500]))
         if url.path=='/api/official-viewer':
             from official_viewer import snapshot
             return self.reply(200,snapshot(parent_port=self.server.server_address[1]))
@@ -1024,20 +1052,33 @@ class ConsoleHTTPServer(ThreadingHTTPServer):
     allow_reuse_port = False
 
     def configure_official_cli(self,startup=True):
-        def check_workspaces(check):
+        def check_workspaces(check,allow_local_viewer=None):
             from managed_runtime import status as runtime_status
             if runtime_status().get('busy'):raise ValueError('Wait for control environment installation')
             if getattr(self.controller,'desktop_closing',False):raise ValueError('Workbench is closing')
-            check(self.controller.snapshot(),self.controller.doctor.snapshot())
+            def one(state,doctor,local=False):
+                check(state,doctor)
+                transition=state.get('calibration_connection') or {}
+                if transition.get('busy') and not (local and self.controller.calibration_handover.internal):
+                    raise ValueError('另一个工作区正在切换设备任务 / Another workspace is switching device tasks')
+                if (state.get('calibration') or {}).get('cleanup_required') is True:
+                    raise ValueError('标定退出尚未确认，请先核对原会话 / Calibration cleanup is unconfirmed; review its owning session')
+                viewer=state.get('official_viz') or {}
+                owned=viewer.get('active') or viewer.get('busy') or viewer.get('scanning') or viewer.get('session_id') or viewer.get('phase') in ('starting','running','stopping')
+                if owned and not (local and allow_local_viewer and viewer.get('session_id')==allow_local_viewer
+                                  and viewer.get('active') is True and viewer.get('phase')=='running'):
+                    raise ValueError('请先结束原版画面会话 / Finish the original Viewer session first')
+            one(self.controller.snapshot(),self.controller.doctor.snapshot(),True)
             if self.controller.official_tools.snapshot()['check']['busy']:raise ValueError('Wait for official software checks')
             if hasattr(self,'_fleet'):
                 with self.fleet.lock:records=list(self.fleet.children.values())
                 for row in records:
-                    try:check(self.fleet.get(row,'/api/state'),self.fleet.get(row,'/api/doctor'))
+                    try:one(self.fleet.get(row,'/api/state'),self.fleet.get(row,'/api/doctor'))
                     except OSError:raise ValueError('无法确认另一个工作区状态 / Another workspace state is unavailable') from None
         def all_idle():
             from studio_component import require_idle
-            check_workspaces(require_idle)
+            handover=self.controller.calibration_handover
+            check_workspaces(require_idle,handover.viewer_token if handover.internal else None)
         def scan_idle():
             from bridge_config import load_config
             from official_device_discovery import use_native
@@ -1054,6 +1095,17 @@ class ConsoleHTTPServer(ThreadingHTTPServer):
                 raise ValueError('官方 CLI 会话正在运行；用户档案暂不刷新 / Official CLI session active; user profiles have not been refreshed')
             all_idle()
         self.controller.calibration.metadata_check=calibration_idle
+        self.controller.calibration_handover.idle_check=all_idle
+        def profile_read_idle():
+            # Native user list/show reads local SDK files, not a device. A
+            # discovery/calibration reservation must not require a connected
+            # Viewer or turn a harmless metadata refresh into a device task.
+            # Mutations/start/handover retain calibration_idle/all_idle above.
+            from managed_runtime import status as runtime_status
+            if runtime_status().get('busy'):raise ValueError('Wait for control environment installation')
+            if getattr(self.controller,'desktop_closing',False):raise ValueError('Workbench is closing')
+            if self.controller.official_tools.snapshot()['check']['busy']:raise ValueError('Wait for official software checks')
+        self.controller.calibration.profile_read_check=profile_read_idle
         self.controller.inventory_observer=lambda:self.fleet.inventory_snapshots() if hasattr(self,'_fleet') else []
         if startup:self.controller.official_cli.startup()
 

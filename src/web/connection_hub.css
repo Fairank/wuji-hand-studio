@@ -166,3 +166,26 @@ html body #page-connection #hub-calibration[data-human-tty=false] #hub-calibrati
 html body #page-connection #hub-calibration .hub-cli-device-context{display:none}
 html body #page-connection #hub-calibration[data-human-tty=false] .hub-calib-number{display:none}
 @media(max-width:700px){html body #page-connection #hub-calibration[data-human-tty=false] .hub-calibration-workspace{grid-template-columns:minmax(0,1fr)}html body #page-connection #ov-shared-stage>#hub-calibration>.hub-calibration{padding:15px}html body #page-connection #hub-calibration[data-human-tty=true]>.hub-calibration{padding:0}}
+
+/* A compact customer preparation; official events own the active stage. */
+html body #page-connection #hub-calibration[data-guided-native=true]>.hub-calibration{height:auto;min-height:100%;display:block;padding:22px;box-sizing:border-box}
+html body #page-connection #hub-calibration[data-guided-native=true] .hub-calibration-workspace{display:block;max-width:520px;margin:0 auto}
+html body #page-connection #hub-calibration[data-guided-native=true][data-running=true] .hub-calibration-workspace{display:none}
+html body #page-connection #hub-calibration[data-guided-native=true] .hub-calibration-session{border:0;border-radius:0;background:transparent;padding:0;margin-top:18px;min-height:0}
+html body #page-connection #hub-calibration[data-guided-native=true] .hub-calib-readiness{border:0;background:transparent;padding:0;margin:0;gap:8px}
+html body #page-connection #hub-calibration[data-guided-native=true] .hub-calibration-session #hub-calib-ready-title{font-size:13px;margin:0}
+html body #page-connection #hub-calibration[data-guided-native=true] .hub-calibration-form{gap:12px}
+html body #page-connection #hub-calibration[data-guided-native=true] .hub-calib-profile-field{max-width:none}
+html body #page-connection #hub-calibration[data-guided-native=true] .hub-profile-create{padding-top:10px!important;margin-top:10px;border-top:1px solid var(--wb-line)}
+html body #page-connection #hub-calibration[data-guided-native=true] .hub-replace{display:flex;align-items:flex-start;gap:8px;margin-top:10px;line-height:1.6}
+html body #page-connection #hub-calibration[data-guided-native=true] #hub-calib-advanced{margin-top:22px;padding-top:12px;border-top:1px solid var(--wb-line);font-size:11px;color:var(--wb-sub)}
+#hub-calib-advanced summary{cursor:pointer;padding:3px 0;line-height:1.6}
+#hub-calib-advanced label{display:block;font-size:11px;margin:12px 0 6px}
+#hub-calib-advanced select{max-width:100%;width:100%;font-size:12px;min-height:34px;border:1px solid var(--wb-line);border-radius:9px;background:var(--wb-card);color:var(--wb-ink)}
+html body #page-connection #hub-calibration[data-guided-native=true] #hub-calibration-guide{margin:0;padding:0;border:0;width:100%;min-height:0}
+html body #page-connection #hub-calibration[data-guided-native=true] #hub-calib-previous{max-width:520px;margin:20px auto 0;padding-top:12px;border-top:1px solid var(--wb-line);font-size:11px;color:var(--wb-sub)}
+#hub-calib-previous>summary{cursor:pointer;line-height:1.7}
+#hub-calib-previous[open] #hub-calibration-guide{margin-top:14px!important}
+html body #page-connection #hub-calibration[data-session-stage=disconnected] .hub-calibration-session{min-height:240px;justify-content:center;margin:0}
+html body #page-connection #hub-calibration[data-guided-native=true] .hub-calibration-actions{margin:0}
+@media(max-width:600px){html body #page-connection #hub-calibration[data-guided-native=true]>.hub-calibration{padding:18px}}

@@ -1,0 +1,93 @@
+{
+  "schema_version": 1,
+  "distribution": "reference_only_user_local_cache",
+  "source_document": "https://docs.wuji.tech/docs/en/wuji-cli/latest/hand-model-calibration/",
+  "source_document_sha256": "e584026a9d6c84d5ad0e8da2162a04f76846f8267180ece1a2383f5fe19c902b",
+  "source_checked_at": "2026-10-22T03:28:00.083438+00:00",
+  "copyright_notice": "Source: official Wuji Docs. Image rights remain with the respective holders. No independent redistribution license was verified.",
+  "license_status": "Unverified for offline redistribution. Do not include image bytes in source, installer, or bundled web resources. The application may request the exact referenced original into a user-local cache.",
+  "image_scope": "Static official pose references, not measured device poses. No independently verified left/right artwork pairs; do not mirror or redraw.",
+  "request_headers": {
+    "User-Agent": "HandWorkbench-public-asset-research/0.2.31"
+  },
+  "poses": [
+    {
+      "step": 0,
+      "step_index": 0,
+      "step_name": "pinch_index",
+      "url": "https://mintcdn.com/wuji-0bbde051/nLLDY-yV3f5aegbJ/shared/assets/source/images/en/wuji-cli/calibration-pose-1.png?fit=max&auto=format&n=nLLDY-yV3f5aegbJ&q=85&s=5191a52b0e58c622b84115d848cb9952",
+      "sha256": "dd3cb8a505e8e95ed900764660c90b9e3f7aa331ab794a14e115841869ac3a2b",
+      "size": 8816,
+      "mime": "image/jpeg",
+      "width": 400,
+      "height": 400,
+      "source_document": "https://docs.wuji.tech/docs/en/wuji-cli/latest/hand-model-calibration/",
+      "source_alt": "Thumb and index fingertips touching"
+    },
+    {
+      "step": 1,
+      "step_index": 1,
+      "step_name": "pinch_middle",
+      "url": "https://mintcdn.com/wuji-0bbde051/nLLDY-yV3f5aegbJ/shared/assets/source/images/en/wuji-cli/calibration-pose-2.png?fit=max&auto=format&n=nLLDY-yV3f5aegbJ&q=85&s=4966ed8420c2b65104b3366b5e65f625",
+      "sha256": "1be825ae0710c52560b216a62d13ac98e94a1157dfa5ffa8edab43265ed7f5f6",
+      "size": 9123,
+      "mime": "image/jpeg",
+      "width": 400,
+      "height": 400,
+      "source_document": "https://docs.wuji.tech/docs/en/wuji-cli/latest/hand-model-calibration/",
+      "source_alt": "Thumb and middle fingertips touching"
+    },
+    {
+      "step": 2,
+      "step_index": 2,
+      "step_name": "pinch_ring",
+      "url": "https://mintcdn.com/wuji-0bbde051/nLLDY-yV3f5aegbJ/shared/assets/source/images/en/wuji-cli/calibration-pose-3.png?fit=max&auto=format&n=nLLDY-yV3f5aegbJ&q=85&s=17085a39ecd9c1087c79cc855036e75b",
+      "sha256": "e32d26150dad0b23bf8f35d5f9f740ce2f433fa9af15625a66258fa084c2fde6",
+      "size": 8977,
+      "mime": "image/jpeg",
+      "width": 400,
+      "height": 400,
+      "source_document": "https://docs.wuji.tech/docs/en/wuji-cli/latest/hand-model-calibration/",
+      "source_alt": "Thumb and ring fingertips touching"
+    },
+    {
+      "step": 3,
+      "step_index": 3,
+      "step_name": "pinch_pinky",
+      "url": "https://mintcdn.com/wuji-0bbde051/nLLDY-yV3f5aegbJ/shared/assets/source/images/en/wuji-cli/calibration-pose-4.png?fit=max&auto=format&n=nLLDY-yV3f5aegbJ&q=85&s=eaab6e4b231f7aa1245511ac7f66837e",
+      "sha256": "59e966ecd42fa527eaf63f44defa338b9e1f14311175bc1d01e4824128d2087e",
+      "size": 9131,
+      "mime": "image/jpeg",
+      "width": 400,
+      "height": 400,
+      "source_document": "https://docs.wuji.tech/docs/en/wuji-cli/latest/hand-model-calibration/",
+      "source_alt": "Thumb and pinky fingertips touching"
+    },
+    {
+      "step": 4,
+      "step_index": 4,
+      "step_name": "four_finger_bend_90",
+      "url": "https://mintcdn.com/wuji-0bbde051/nLLDY-yV3f5aegbJ/shared/assets/source/images/en/wuji-cli/calibration-pose-5.png?fit=max&auto=format&n=nLLDY-yV3f5aegbJ&q=85&s=a34cf5e6a5f86cbbb37f57cff4487aea",
+      "sha256": "cd31328246ecb41d69aab82e9201b670dbd348f9f07e740f66d40d74df5ee07d",
+      "size": 9375,
+      "mime": "image/jpeg",
+      "width": 400,
+      "height": 400,
+      "source_document": "https://docs.wuji.tech/docs/en/wuji-cli/latest/hand-model-calibration/",
+      "source_alt": "Four fingers bent to about 90 degrees"
+    },
+    {
+      "step": 5,
+      "step_index": 5,
+      "step_name": "flat_open",
+      "url": "https://mintcdn.com/wuji-0bbde051/nLLDY-yV3f5aegbJ/shared/assets/source/images/en/wuji-cli/calibration-pose-6.png?fit=max&auto=format&n=nLLDY-yV3f5aegbJ&q=85&s=efa41228026647a9020b91bd1cae02c1",
+      "sha256": "788ede65d4ff3cad508efe40e3ac89b216f358fb5b3a49f5b9411440ccb1917f",
+      "size": 11612,
+      "mime": "image/jpeg",
+      "width": 400,
+      "height": 400,
+      "source_document": "https://docs.wuji.tech/docs/en/wuji-cli/latest/hand-model-calibration/",
+      "source_alt": "Hand open and flat"
+    }
+  ]
+}

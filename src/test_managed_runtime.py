@@ -29,9 +29,12 @@ class ManagedRuntimeTests(unittest.TestCase):
             runtime.status();run.assert_not_called()
     def test_connection_and_reconfiguration_wait_for_setup(self):
         from console_server import Controller
+        from calibration_handover import CalibrationHandover
+        controller=Controller.__new__(Controller)
+        controller.calibration_handover=CalibrationHandover(controller)
         with patch.object(runtime,'status',return_value={'busy':True}):
             for command in ['connect','runtime_select','parameters_sync','bridge_config_save','doctor_run']:
                 with self.assertRaisesRegex(ValueError,'Wait for controller setup'):
-                    Controller.action(None,{'name':command})
+                    controller.action({'name':command})
 
 if __name__=='__main__':unittest.main()
