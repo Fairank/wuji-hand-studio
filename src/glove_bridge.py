@@ -5,7 +5,7 @@ import secrets
 import socket
 import threading
 import time
-from glove_protocol import validate
+from glove_protocol import validate, CancellationNotDispatched
 
 class GloveBridge:
     def __init__(self,factory,termination=None):
@@ -59,11 +59,15 @@ class GloveBridge:
         if not self.stdin:raise ValueError('控制端尚未就绪 / Controller not ready')
         self.stdin.write(json.dumps(c)+'\n');self.stdin.flush()
 
-    def disconnect_session(self,session):
+    def disconnect_session(self,session,*,pending_only=False):
         """A handover cancellation must never disconnect a replacement session."""
         with self.lock:
             if type(session) is not int or session!=self.session:
-                raise ValueError('遥操作会话已改变，请在所属会话中断开 / Teleoperation session changed; disconnect its owning session')
+                raise CancellationNotDispatched('遥操作会话已改变，请在所属会话中断开 / Teleoperation session changed; disconnect its owning session')
+            if pending_only and (self.state.get('connection') not in ('connecting','ready')
+                    or (self.state.get('hardware') or {}).get('active',False) is not False
+                    or (self.state.get('feedback') or {}).get('device_id') or self.lease):
+                raise CancellationNotDispatched('接续已完成，请在遥操作中暂停或断开 / Continuation completed; pause or disconnect from teleoperation')
             return self.action(dict(name='glove_disconnect'))
 
     def start_calibrated(self,bundle,on_model_ready):

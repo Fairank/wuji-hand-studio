@@ -19,6 +19,20 @@ def execute(controller,expected_context,action,payload=None):
         payload=dict(payload)
     elif payload is not None and (not isinstance(payload,dict) or payload):
         raise ValueError('Unexpected task operation fields')
+    if action=='disconnect':
+        state=controller.snapshot()
+        continuation=state.get('calibrated_teleoperation') or {}
+        if continuation.get('busy') is True:
+            if context_digest(state)!=expected_context:
+                raise ValueError('任务设备或会话已变化，请刷新后重试 / Task device or session changed; refresh before retrying')
+            if (any(not isinstance(continuation.get(key),str) or not re.fullmatch('[0-9a-f]{32}',continuation[key]) for key in ('run_id','attempt_id'))
+                    or not isinstance(continuation.get('serial'),str)
+                    or not re.fullmatch('[A-Za-z0-9][A-Za-z0-9_-]{0,79}',continuation['serial'])):
+                raise ValueError('Continuation task identity is unverified')
+            # This worker owns the workflow lock until it finishes. Its exact
+            # attempt cancellation must remain deliverable while it is busy;
+            # Controller forwards these captured IDs to the strict cancel CAS.
+            return controller._task_context_dispatch(action,payload,state)
     lock=controller.calibration_handover.workflow_lock
     if not lock.acquire(blocking=False):raise ValueError('Another device task is switching')
     try:

@@ -16,15 +16,17 @@
    if(context.connected===true){navigate();return;}
    if(context.can_continue!==true||!context.run_id||!context.expected_revision)return;
    pending=true;requestedRun=context.run_id;error='';render();
-   try{acceptReply(await request('calibrated_teleoperation_continue',{run_id:context.run_id,expected_revision:context.expected_revision}),context.run_id);}
-   catch(e){error=requestError(e);requestedRun=null;}finally{pending=false;render();}
+   try{acceptReply(await request('calibrated_teleoperation_continue',{run_id:context.run_id,expected_revision:context.expected_revision}),context.run_id,context.attempt_id,true);}
+   catch(e){if(state?.calibrated_teleoperation?.run_id===context.run_id&&(!state.calibrated_teleoperation.attempt_id||state.calibrated_teleoperation.attempt_id===context.attempt_id))error=requestError(e);requestedRun=null;}finally{pending=false;render();}
   };
-  cancel.onclick=async()=>{if(pending)return;const runId=state?.calibrated_teleoperation?.run_id;pending=true;requestedRun=null;error='';render();try{acceptReply(await request('calibrated_teleoperation_cancel'),runId);}catch(e){error=requestError(e);}finally{pending=false;render();}};
+  cancel.onclick=async()=>{if(pending)return;const context=state?.calibrated_teleoperation;if(!context?.run_id||!context?.attempt_id)return;pending=true;requestedRun=null;error='';render();try{acceptReply(await request('calibrated_teleoperation_cancel',{run_id:context.run_id,attempt_id:context.attempt_id}),context.run_id,context.attempt_id);}catch(e){if(state?.calibrated_teleoperation?.run_id===context.run_id&&state?.calibrated_teleoperation?.attempt_id===context.attempt_id)error=requestError(e);}finally{pending=false;render();}};
   return true;
  }
- function acceptReply(value,runId){
+ function acceptReply(value,runId,attemptId,starting=false){
   const next=value?.calibrated_teleoperation;
-  if(state?.calibrated_teleoperation?.run_id===runId&&next?.run_id===runId)state={...state,calibrated_teleoperation:next};
+  const current=state?.calibrated_teleoperation;
+  const sameAttempt=starting?(!current?.attempt_id||current.attempt_id===attemptId||current.attempt_id===next?.attempt_id):(current?.attempt_id===attemptId&&next?.attempt_id===attemptId);
+  if(current?.run_id===runId&&next?.run_id===runId&&sameAttempt)state={...state,calibrated_teleoperation:next};
  }
  function requestError(value){
   if(['AbortError','TimeoutError'].includes(value?.name))return t('请求超时，结果尚未确认；请核对当前任务状态。','The request timed out; its outcome is unconfirmed. Review the current task state.');
@@ -45,7 +47,7 @@
   host.hidden=!c||!c.run_id||(!c.can_continue&&!c.busy&&!c.error&&!c.connected);
   button.hidden=c?.busy===true;button.disabled=pending||!state||!(c?.can_continue===true||c?.connected===true);
   button.textContent=c?.connected?t('进入遥操作','Open teleoperation'):t('继续使用这只手套','Continue with this glove');
-  cancel.hidden=c?.busy!==true;cancel.disabled=pending||!state;cancel.textContent=t('取消接续','Cancel continuation');
+  cancel.hidden=c?.busy!==true;cancel.disabled=pending||!state||!c?.attempt_id;cancel.textContent=t('取消接续','Cancel continuation');
   const phases={validating:['正在接续本次标定…','Continuing this calibration…'],exporting:['正在沿用已保存的手型…','Loading the saved hand model…'],connecting:['正在打开手套预览…','Opening glove preview…'],cancelling:['正在结束接续…','Ending continuation…']};
   note.textContent=error||c?.error||(pending?t('正在提交请求，等待工作台确认…','Submitting the request; waiting for the workbench…'):c?.busy?(phases[c.phase]?.[window.WujiLocale?.lang==='en'?1:0]||t('正在接续…','Continuing…')):'');note.hidden=!note.textContent;
   if(c?.connected===true&&requestedRun===c.run_id){requestedRun=null;navigate();}

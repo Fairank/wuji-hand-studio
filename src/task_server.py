@@ -41,7 +41,18 @@ class TaskServer:
         with workspaces.lock:
             for row in workspaces.rows:
                 coordinator=workspaces.coordinators.get(row['id'])
-                if task['endpoint_id'] in row['members'] and coordinator and coordinator.snapshot().get('active'):
+                if not coordinator:continue
+                run=coordinator.snapshot()
+                if not run.get('active'):continue
+                actual=run.get('members')
+                valid=(isinstance(actual,list) and 2<=len(actual)<=8
+                    and all(isinstance(member,dict) and isinstance(member.get('id'),str) for member in actual))
+                ids=[member['id'] for member in actual] if valid else []
+                valid=valid and len(set(ids))==len(ids) and all(ident in row['members'] for ident in ids)
+                # Catalog siblings can be idle while a selected subset runs.
+                # Unknown participant metadata retains the conservative gate.
+                participants=ids if valid else set(row['members'])|set(ids)
+                if task['endpoint_id'] in participants:
                     raise ValueError('请先停止此设备所属的多手演示 / Stop this device\'s ensemble first')
 
     def dispatch(self, endpoint, expected_context, action, payload=None):

@@ -234,7 +234,9 @@ class Controller:
             return result
         if action=='disconnect':
             if (state.get('calibrated_teleoperation') or {}).get('busy'):
-                return self.action(dict(name='calibrated_teleoperation_cancel'))
+                return self.action(dict(name='calibrated_teleoperation_cancel',
+                    run_id=state['calibrated_teleoperation'].get('run_id'),
+                    attempt_id=state['calibrated_teleoperation'].get('attempt_id')))
             if glove.get('busy'):
                 from device_termination import unconfirmed
                 if (glove.get('hardware') or {}).get('active',False) is not False or self.glove.lease or unconfirmed(state):
@@ -403,8 +405,8 @@ class Controller:
             with self.lock:self._continuation_profile=self.state['device_profile']['id']
             return dict(calibrated_teleoperation=continuation.execute({k:command[k] for k in ('run_id','expected_revision')}))
         if name=='calibrated_teleoperation_cancel':
-            if set(command)!={'name'}:raise ValueError('Invalid continuation cancellation')
-            return dict(calibrated_teleoperation=continuation.cancel())
+            if set(command)!={'name','run_id','attempt_id'}:raise ValueError('Invalid continuation cancellation')
+            return dict(calibrated_teleoperation=continuation.cancel({k:command[k] for k in ('run_id','attempt_id')}))
         if continuation is not None:
             if name in {'glove_disconnect','session_close'} and continuation.snapshot().get('busy'):continuation.cancel()
             if not continuation.internal and continuation.snapshot().get('busy') and (workflow_action(command) or name in {
@@ -1019,10 +1021,40 @@ class Handler(BaseHTTPRequestHandler):
     def allowed_host(self):
         return self.headers.get('Host') in {f'127.0.0.1:{PORT}', f'localhost:{PORT}'}
 
+    def _task_view_options(self):
+        # Read only an already-created catalog. A task-page check must not
+        # create a controller, a workspace, or a device discovery process.
+        workspaces=getattr(self.server,'_workspaces',None)
+        tasks=getattr(self.server,'_tasks',None)
+        if os.environ.get('WUJI_FLEET_PARENT') or workspaces is None or tasks is None:return {}
+        return dict(read_groups=lambda:[row for row in tasks.snapshot()['tasks'] if row.get('kind')=='ensemble'],
+                    group_action=workspaces.action,group_lock=workspaces.lock)
+
+    def _task_view_headers(self):
+        ident=self.headers.get('X-Task-Id')
+        context=self.headers.get('X-Task-Context')
+        query=parse_qs(urlsplit(self.headers.get('Referer','')).query)
+        embedded=query.get('task_view')==['1']
+        if not embedded and ident is None and context is None:return None
+        if (not isinstance(ident,str) or not re.fullmatch('[0-9a-f]{24}',ident)
+                or not isinstance(context,str) or not re.fullmatch('[0-9a-f]{64}',context)
+                or embedded and query.get('task_id')!=[ident]):
+            raise ValueError('任务页面归属尚未核对，请重新打开此任务 / Task page owner is unverified; reopen this task')
+        return ident,context
+
     def do_GET(self):
         if not self.allowed_host():
             return self.reply(403, dict(error='Local host required'))
         url = urlsplit(self.path)
+        if url.path=='/api/task-view':
+            try:
+                from task_view import scope
+                query=parse_qs(url.query)
+                if set(query)!={'task_id'} or len(query['task_id'])!=1:raise ValueError('Invalid task view query')
+                options=self._task_view_options()
+                return self.reply(200,scope(self.server.controller,query['task_id'][0],read_groups=options.get('read_groups')))
+            except (ValueError,TypeError) as error:return self.reply(400,dict(error=str(error)))
+            except Exception:return self.reply(503,dict(error='Task owner state unavailable'))
         if url.path=='/api/task-sessions':
             if os.environ.get('WUJI_FLEET_PARENT'):return self.reply(403,dict(error='Use tasks in the main window'))
             return self.reply(200,self.server.tasks.snapshot())
@@ -1232,7 +1264,16 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError('JSON required')
             payload=json.loads(self.rfile.read(length))
             if not isinstance(payload,dict):raise ValueError('JSON object required')
-            if self.path == '/api/desktop':
+            task_scope=self._task_view_headers()
+            if task_scope is not None:
+                from task_view import execute
+                if self.path!='/api/action':raise ValueError('Task pages cannot manage the desktop')
+                if (os.environ.get('WUJI_FLEET_PARENT') and payload.get('name') in {
+                        'official_viz_start','calibration_start','calibration_handover',
+                        'calibration_profile_create','calibration_profile_switch','official_cli_update','official_cli_rollback'}):
+                    raise ValueError('请在主工作台执行官方标定任务 / Open official calibration in the main workbench')
+                result=execute(self.server.controller,*task_scope,payload,**self._task_view_options())
+            elif self.path == '/api/desktop':
                 from desktop_tools import dispatch
                 host=getattr(self.server,'desktop',None)
                 if not host:return self.reply(409,dict(ok=False,error='Open the Windows desktop application to use this interface'))

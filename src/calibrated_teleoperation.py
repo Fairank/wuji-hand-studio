@@ -7,9 +7,11 @@ import copy
 import hashlib
 import json
 import re
+import secrets
 import threading
 
 from calibration_portability import calibration_proof, file_digest
+from glove_protocol import CancellationNotDispatched
 
 
 class CalibratedTeleoperation:
@@ -26,7 +28,7 @@ class CalibratedTeleoperation:
             gate_factory=gate
         self.gate_factory=gate_factory;self.lock=threading.RLock()
         self.thread=None;self._thread=None;self._cancel=threading.Event();self._proof=None
-        self.state=dict(busy=False,phase='idle',error=None,sdk_session=None,run_id=None,
+        self.state=dict(busy=False,phase='idle',error=None,cleanup_error=None,sdk_session=None,run_id=None,attempt_id=None,
                         connected=False,automatically_prepares_hand=False,automatically_follows=False)
 
     @property
@@ -67,22 +69,30 @@ class CalibratedTeleoperation:
         return proof
 
     def snapshot(self):
-        with self.lock:state=copy.deepcopy(self.state)
+        with self.lock:state=copy.deepcopy(self.state);cancelled=self._cancel.is_set()
+        proof=None;owned_session=False
         try:
             proof=self._current_proof()
             offered=dict(can_continue=not state['busy'],blocked_reason=None,
                 run_id=proof['source_run_id'],expected_revision=proof['expected_revision'],
-                serial=proof['serial'],side=proof['side'],profile=proof['source_profile'])
+                serial=proof['serial'],side=proof['side'],profile=proof['source_profile'],model_sha256=proof['model_sha256'])
         except (ValueError,OSError,TypeError) as error:
             offered=dict(can_continue=False,blocked_reason=str(error)[:500],expected_revision=None)
         if state.get('sdk_session') is not None:
             glove=self.get_glove()
             if glove.get('session_id')==state['sdk_session']:
                 if glove.get('busy'):
+                    owned_session=True
                     offered['can_continue']=False
                     if glove.get('connection') in ('connecting','ready'):state['busy']=True
                 receipt=glove.get('model_provenance') or {}
-                if (glove.get('connection')=='receiving' and receipt.get('source_run_id')==state.get('run_id')
+                if cancelled:
+                    # Disconnect is asynchronous. A last matching receiving
+                    # frame cannot turn a cancelled attempt back into preview.
+                    state.update(busy=bool(glove.get('busy')),connected=False,
+                        phase='error' if state.get('cleanup_error') and glove.get('busy') else 'cancelling' if glove.get('busy') else 'cancelled')
+                    if glove.get('busy'):offered['can_continue']=False
+                elif (glove.get('connection')=='receiving' and receipt.get('source_run_id')==state.get('run_id')
                         and receipt.get('model_sha256')==state.get('model_sha256')
                         and glove.get('glove_serial')==state.get('serial')):
                     state.update(busy=False,phase='preview',connected=True)
@@ -92,6 +102,16 @@ class CalibratedTeleoperation:
                 elif not glove.get('busy'):
                     state.update(busy=False,phase='cancelled' if self._cancel.is_set() else 'disconnected',connected=False)
             else:state.update(busy=False,phase='session_changed',connected=False,error='遥操作会话已改变 / Teleoperation session changed')
+        if proof is not None and state.get('run_id') not in (None,proof['source_run_id']):
+            if state.get('busy') or owned_session or state.get('connected'):
+                # Cancellation refers to the launched attempt. Never combine
+                # its token/session with a newer offered calibration result.
+                offered.update(can_continue=False,
+                    blocked_reason='标定任务已改变，原接续仍在结束 / Calibration task changed; the original continuation is still closing',
+                    run_id=state['run_id'],expected_revision=state.get('expected_revision'),
+                    serial=state.get('serial'),side=state.get('side'),profile=state.get('profile'),model_sha256=state.get('model_sha256'))
+            else:
+                state.update(phase='idle',error=None,cleanup_error=None,sdk_session=None,attempt_id=None,connected=False)
         return {**state,**offered}
 
     def execute(self,command):
@@ -108,9 +128,9 @@ class CalibratedTeleoperation:
             if self.state['busy'] or self.thread is not None and self.thread.is_alive():
                 raise ValueError('本次接续仍在处理中 / Continuation is still in progress')
             self._cancel.clear()
-            self.state.update(busy=True,phase='validating',error=None,sdk_session=None,connected=False,
+            self.state.update(busy=True,phase='validating',error=None,cleanup_error=None,sdk_session=None,connected=False,
                 run_id=proof['source_run_id'],serial=proof['serial'],side=proof['side'],profile=proof['source_profile'],
-                model_sha256=proof['model_sha256'])
+                model_sha256=proof['model_sha256'],expected_revision=proof['expected_revision'],attempt_id=secrets.token_hex(16))
             self.thread=threading.Thread(target=self._work,args=(proof,),name='Calibrated glove continuation',daemon=True)
             self.thread.start()
         return self.snapshot()
@@ -138,6 +158,10 @@ class CalibratedTeleoperation:
                 if self._current_proof()['expected_revision']!=proof['expected_revision']:
                     raise ValueError('Calibration task changed during export')
                 self._set(phase='connecting')
+                # Idle/owner/proof validation may wait on another software
+                # callback. A cancellation received there must still prevent
+                # opening a new controller session when validation returns.
+                self._not_cancelled()
                 session=self.start_session(bundle)
                 if type(session) is not int:raise ValueError('Controller did not return an exact session identity')
                 self._set(sdk_session=session)
@@ -149,11 +173,74 @@ class CalibratedTeleoperation:
             with self.lock:self.state['busy']=False;self._thread=None
             if acquired:self.workflow_lock.release()
 
-    def cancel(self):
-        self._cancel.set()
-        with self.lock:session=self.state['sdk_session'];busy=self.state['busy']
-        if session is not None:self.stop_session(session)
-        self._set(phase='cancelling' if busy or session is not None else 'cancelled',connected=False)
+    def cancel(self,expected=None):
+        finished='接续已完成或会话已变化，请在遥操作中暂停并断开 / Continuation finished or session changed; pause and disconnect in teleoperation'
+        with self.lock:
+            if expected is not None:
+                if (not isinstance(expected,dict) or set(expected)!={'run_id','attempt_id'}
+                        or any(not isinstance(expected[k],str) or not re.fullmatch('[0-9a-f]{32}',expected[k]) for k in expected)
+                        or any(expected[k]!=self.state.get(k) for k in expected)):
+                    raise ValueError('接续任务已改变，请核对当前任务 / Continuation attempt changed; review the current task')
+            captured=(self.state.get('run_id'),self.state.get('attempt_id'),self.state['sdk_session'])
+            worker_busy=self.state['busy']
+        if expected is not None:
+            # Never call the bridge/controller callback while holding this
+            # service lock. The destination repeats this stage check atomically
+            # with the actual disconnect under its own lock.
+            if captured[2] is None:
+                if not worker_busy:raise ValueError(finished)
+            else:
+                glove=self.get_glove()
+                if (not isinstance(glove,dict) or glove.get('session_id')!=captured[2]
+                        or glove.get('busy') is not True or glove.get('connection') not in ('connecting','ready')
+                        or (glove.get('hardware') or {}).get('active',False) is not False
+                        or (glove.get('feedback') or {}).get('device_id')):
+                    raise ValueError(finished)
+        with self.lock:
+            if expected is not None:
+                if captured!=(self.state.get('run_id'),self.state.get('attempt_id'),self.state['sdk_session']):
+                    raise ValueError('接续任务已改变，请核对当前任务 / Continuation attempt changed; review the current task')
+                if captured[2] is None and not self.state['busy']:raise ValueError(finished)
+        if expected is not None and captured[2] is not None:
+            # A pending-only destination can reject after the read above if
+            # this exact session has already become preview/following. Do not
+            # publish a cancellation flag before it accepts: the worker could
+            # otherwise observe that flag and issue a trusted cleanup itself.
+            try:self.stop_session(captured[2],pending_only=True)
+            except CancellationNotDispatched:
+                raise
+            except Exception as error:
+                with self.lock:
+                    if captured==(self.state.get('run_id'),self.state.get('attempt_id'),self.state.get('sdk_session')):
+                        self._cancel.set()
+                        reason='接续退出尚未确认 / Continuation cleanup is unconfirmed: '+str(error)[:500]
+                        self.state.update(phase='error',connected=False,error=reason,cleanup_error=reason)
+                raise
+            with self.lock:
+                if captured==(self.state.get('run_id'),self.state.get('attempt_id'),self.state.get('sdk_session')):
+                    self._cancel.set()
+                    self.state.update(phase='cancelling',connected=False,error=None,cleanup_error=None)
+            return self.snapshot()
+        with self.lock:
+            if expected is not None:
+                if captured!=(self.state.get('run_id'),self.state.get('attempt_id'),self.state['sdk_session']):
+                    raise ValueError('接续任务已改变，请核对当前任务 / Continuation attempt changed; review the current task')
+                if not self.state['busy']:raise ValueError(finished)
+            self._cancel.set()
+            session=self.state['sdk_session'];busy=self.state['busy']
+            # Publish under the same identity check. A slow exact-session stop
+            # must not overwrite the state of a later retry when it returns.
+            run_id=self.state.get('run_id');attempt_id=self.state.get('attempt_id')
+            self.state.update(phase='cancelling' if busy or session is not None else 'cancelled',connected=False,error=None,cleanup_error=None)
+        if session is not None:
+            try:
+                self.stop_session(session)
+            except Exception as error:
+                with self.lock:
+                    if (self.state.get('run_id'),self.state.get('attempt_id'),self.state.get('sdk_session'))==(run_id,attempt_id,session):
+                        reason='接续退出尚未确认 / Continuation cleanup is unconfirmed: '+str(error)[:500]
+                        self.state.update(phase='error',connected=False,error=reason,cleanup_error=reason)
+                raise
         return self.snapshot()
 
     def cancel_and_wait(self,timeout=5.):

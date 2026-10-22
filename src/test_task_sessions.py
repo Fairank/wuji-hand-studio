@@ -1,4 +1,5 @@
 import copy
+import threading
 import unittest
 from task_sessions import TaskSessions,context_digest
 
@@ -97,6 +98,105 @@ class TaskSessionTests(unittest.TestCase):
     def test_bad_endpoint_is_never_returned_as_embed_url(self):
         self.rows=[dict(id='bad',origin='https://evil.test',state=hand())]
         with self.assertRaises(ValueError):self.service.snapshot()
+
+    def test_unrelated_calibration_never_grants_historical_task_disconnect(self):
+        for previous in (hand('OLD-HAND'),glove('OLD-GLOVE')):
+            for stage in ('capture','handover'):
+                with self.subTest(previous=previous,stage=stage):
+                    self.setUp();self.add(previous);old=self.service.snapshot()['tasks'][0]
+                    state=dict(connection='disconnected',hardware={'active':False},glove={})
+                    if stage=='capture':state['calibration']=dict(running=True,id='new-run',serial='OTHER-GLOVE')
+                    else:state['calibration_connection']=dict(busy=True,serial='OTHER-GLOVE')
+                    self.rows[0]['state']=state
+                    task=self.service.snapshot()['tasks'][0]
+                    self.assertEqual(task['task_id'],old['task_id']);self.assertEqual(task['status'],'disconnected')
+                    self.assertFalse(task['capabilities']['can_disconnect'])
+                    with self.assertRaises(ValueError):
+                        self.service.action(dict(task_id=task['task_id'],expected_revision=task['revision'],action='disconnect'))
+                    self.assertEqual(self.calls,[])
+
+    def test_only_same_glove_calibration_retains_its_explicit_cancel_action(self):
+        for stage in ('capture','nested_capture','handover'):
+            with self.subTest(stage=stage):
+                self.setUp();self.add(glove('OWN-GLOVE'));self.service.snapshot()
+                state=dict(connection='disconnected',hardware={'active':False},glove={})
+                run=dict(running=True,id='new-run',serial='OWN-GLOVE')
+                if stage=='capture':state['calibration']=run
+                elif stage=='nested_capture':state['calibration']=dict(run=run)
+                else:state['calibration_connection']=dict(busy=True,serial='OWN-GLOVE')
+                self.rows[0]['state']=state;task=self.service.snapshot()['tasks'][0]
+                self.assertEqual(task['status'],'calibrating')
+                self.assertEqual(task['capabilities']['can_disconnect'],stage!='handover')
+                if stage!='handover':
+                    self.service.action(dict(task_id=task['task_id'],expected_revision=task['revision'],action='disconnect'))
+                    self.assertEqual(len(self.calls),1)
+
+    def test_same_glove_loaded_model_change_invalidates_revision_but_frame_stats_do_not(self):
+        self.add(glove());g=self.rows[0]['state']['glove']
+        g['model_provenance']=dict(source_run_id='run1',model_sha256='a'*64,owner_user_id='u1')
+        old=self.service.snapshot()['tasks'][0]
+        g['stream'].update(seq=99,age_ms=0,retarget_hz=120)
+        self.assertEqual(self.service.snapshot()['tasks'][0]['revision'],old['revision'])
+        g['model_provenance']['model_sha256']='b'*64
+        new=self.service.snapshot()['tasks'][0]
+        self.assertGreater(new['revision'],old['revision'])
+        with self.assertRaises(ValueError):
+            self.service.action(dict(task_id=old['task_id'],expected_revision=old['revision'],action='disconnect'))
+        self.assertEqual(self.calls,[])
+
+    def test_late_observation_cannot_resurrect_replaced_owner(self):
+        entered=threading.Event();release=threading.Event();late=[];counter=[0]
+        def endpoints():
+            counter[0]+=1
+            if counter[0]==1:
+                entered.set();release.wait(2);state=hand('OLD-HAND')
+            else:state=hand('NEW-HAND')
+            return [dict(id='main',origin='http://127.0.0.1:19000',state=state)]
+        service=TaskSessions(endpoints,lambda *args:self.calls.append(args))
+        thread=threading.Thread(target=lambda:late.append(service.snapshot()));thread.start()
+        self.assertTrue(entered.wait(1))
+        try:fresh=service.snapshot()
+        finally:release.set();thread.join(2)
+        self.assertFalse(thread.is_alive());self.assertEqual(late,[fresh])
+        self.assertEqual([t['devices']['hand'] for t in fresh['tasks']],['NEW-HAND'])
+        self.assertEqual(self.calls,[])
+
+    def test_continuation_attempt_is_exact_context_and_its_task_keeps_source_identity(self):
+        state=dict(connection='disconnected',device_profile=dict(id='hand2_left',side='left'),hardware={'active':False},
+            calibrated_teleoperation=dict(busy=True,attempt_id='a'*32,run_id='b'*32,expected_revision='c'*64,
+                serial='OWN-GLOVE',side='left',profile='Wearer',model_sha256='d'*64,sdk_session=None))
+        self.add(state);task=self.service.snapshot()['tasks'][0]
+        self.assertEqual(task['status'],'connecting');self.assertTrue(task['observed']['stale'])
+        self.assertIsNone(task['devices']['hand']);self.assertEqual(task['devices']['glove'],'OWN-GLOVE')
+        self.assertEqual(task['observed']['continuation']['attempt_id'],'a'*32)
+        self.assertEqual(task['observed']['continuation']['run_id'],'b'*32)
+        self.assertTrue(task['capabilities']['can_disconnect']);self.assertFalse(task['capabilities']['can_pair'])
+        self.rows[0]['state']['calibrated_teleoperation']['attempt_id']='e'*32
+        current=self.service.snapshot()['tasks'][0]
+        self.assertGreater(current['revision'],task['revision'])
+        with self.assertRaises(ValueError):
+            self.service.action(dict(task_id=task['task_id'],expected_revision=task['revision'],action='disconnect'))
+        self.assertEqual(self.calls,[])
+
+    def test_each_continuation_identity_change_invalidates_context_but_phase_does_not(self):
+        original=glove();original['calibrated_teleoperation']=dict(attempt_id='a'*32,run_id='b'*32,
+            expected_revision='c'*64,serial='GLOVE-A',side='left',profile='Wearer',model_sha256='d'*64,sdk_session=4)
+        digest=context_digest(original)
+        for key in ('attempt_id','run_id','expected_revision','serial','side','profile','model_sha256','sdk_session'):
+            changed=copy.deepcopy(original);changed['calibrated_teleoperation'][key]='different'
+            self.assertNotEqual(context_digest(changed),digest,key)
+        original['calibrated_teleoperation'].update(phase='exporting',busy=True,error='pending')
+        self.assertEqual(context_digest(original),digest)
+
+    def test_duplicate_glove_owners_keep_exact_first_owner_stop_but_never_pair(self):
+        first=glove('SAME-GLOVE');first['glove']['hardware']['active']=True
+        self.add(first,'one',19001);self.add(glove('SAME-GLOVE'),'two',19002)
+        task=self.service.snapshot()['tasks'][0]
+        self.assertEqual(task['status'],'conflict');self.assertEqual(task['endpoint_id'],'one')
+        self.assertTrue(task['capabilities']['can_pause']);self.assertTrue(task['capabilities']['can_disconnect'])
+        self.assertFalse(task['capabilities']['can_pair']);self.assertFalse(task['capabilities']['can_unpair'])
+        self.service.action(dict(task_id=task['task_id'],expected_revision=task['revision'],action='pause'))
+        self.assertEqual(self.calls,[('one',context_digest(first),'pause',{})])
 
 
 if __name__=='__main__':unittest.main()

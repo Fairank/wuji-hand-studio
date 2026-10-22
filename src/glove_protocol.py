@@ -1,6 +1,9 @@
 """Small typed command surface; network clients never supply joint targets."""
 import re
 
+class CancellationNotDispatched(ValueError):
+    """The exact-session preflight refused cancellation before any command."""
+
 COMMANDS = {'glove_session','glove_scan','glove_open','glove_prepare',
             'glove_follow','glove_keepalive','glove_stop','glove_disconnect','glove_unpair','glove_retarget','glove_solver'}
 

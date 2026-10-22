@@ -296,21 +296,27 @@ def prepare_controller_model(manager, context, *, folder=None, receipt_folder=No
         # model through the SDK, rather than trusting an old file path alone.
         audit=receipt_root/(uuid.uuid4().hex+'.zip')
         try:
-            report=manager.export_user_data(owner,str(audit))
-            if file_digest(audit,MAX_BUNDLE)[1]<=0:raise ValueError()
-            audit_preview=manager.preview_user_data(str(audit))
-        except Exception:raise ValueError('Cannot verify existing controller calibration; no data was overwritten') from None
-        if report.get('owner_user_id')!=owner or audit_preview.get('owner_user_id')!=owner:
-            raise ValueError('Controller calibration owner changed; no data was overwritten')
-        actual=_components(audit_preview)
-        if model_key not in actual or _bundle_signature(audit,actual[model_key])!=owned[model_key]['signature']:
-            raise ValueError('Controller SDK model differs from its managed receipt; no data was overwritten')
-        # An unchanged model needs no profile write and preserves unrelated data.
-        prior_model=owned[model_key]
-        same=file_digest(prior_model['path'])==(context['model_sha256'],context['model_bytes'])
-        if same:return dict(context,owner_user_id=owner,model_path=prior_model['path'],imported=False)
-        if set(actual)!=set(owned) or any(_bundle_signature(audit,actual[k])!=v['signature'] for k,v in owned.items()):
-            raise ValueError('Controller contains additional unmanaged calibration data; no data was overwritten')
+            try:
+                report=manager.export_user_data(owner,str(audit))
+                if file_digest(audit,MAX_BUNDLE)[1]<=0:raise ValueError()
+                audit_preview=manager.preview_user_data(str(audit))
+            except Exception:raise ValueError('Cannot verify existing controller calibration; no data was overwritten') from None
+            if report.get('owner_user_id')!=owner or audit_preview.get('owner_user_id')!=owner:
+                raise ValueError('Controller calibration owner changed; no data was overwritten')
+            actual=_components(audit_preview)
+            if model_key not in actual or _bundle_signature(audit,actual[model_key])!=owned[model_key]['signature']:
+                raise ValueError('Controller SDK model differs from its managed receipt; no data was overwritten')
+            # An unchanged model needs no profile write and preserves unrelated data.
+            prior_model=owned[model_key]
+            same=file_digest(prior_model['path'])==(context['model_sha256'],context['model_bytes'])
+            if same:return dict(context,owner_user_id=owner,model_path=prior_model['path'],imported=False)
+            if set(actual)!=set(owned) or any(_bundle_signature(audit,actual[k])!=v['signature'] for k,v in owned.items()):
+                raise ValueError('Controller contains additional unmanaged calibration data; no data was overwritten')
+        finally:
+            # Only this transaction's random audit export is temporary. Keep
+            # the source transfer bundle, installed SDK data and receipt intact.
+            try:audit.unlink(missing_ok=True)
+            except OSError:raise ValueError('临时资料包清理未确认，请检查控制端本地存储 / Temporary calibration archive cleanup is unconfirmed; review controller storage') from None
     try:imported=manager.import_user_data(str(bundle))
     except Exception:raise ValueError('官方资料导入未确认，未接入手套；请先检查控制端资料 / Official import is unconfirmed; glove was not opened. Review controller data before retrying') from None
     if not isinstance(imported,dict) or imported.get('owner_user_id')!=owner:

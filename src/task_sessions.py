@@ -7,6 +7,7 @@ owner-context digest which the destination must recheck under its workflow lock.
 import copy
 import hashlib
 import json
+import re
 import threading
 from urllib.parse import urlencode, urlsplit
 
@@ -32,11 +33,15 @@ def context_digest(state):
     # a compact, flat run. Both carry the same owner epoch.
     run = object_value(calibration.get('run')) or calibration
     profile = object_value(state.get('device_profile'))
+    provenance=object_value(glove.get('model_provenance'))
+    continuation=object_value(state.get('calibrated_teleoperation'))
     value = dict(hand=state.get('device_id'), identity=state.get('identified_device'),
                  generation=state.get('session_generation'), profile=profile.get('id'),
                  glove=glove.get('glove_serial'), session=glove.get('session_id'),glove_profile=glove.get('profile'),
                  user=object_value(glove.get('user')).get('user_id'),
+                 model={key:provenance.get(key) for key in ('source_run_id','model_sha256','owner_user_id')},
                  target=feedback.get('device_id'), target_identity=feedback.get('identified_device'),
+                 continuation={key:continuation.get(key) for key in ('attempt_id','run_id','expected_revision','serial','side','profile','model_sha256','sdk_session')},
                  viewer=viewer.get('session_id'), run=run.get('id'))
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
 
@@ -53,6 +58,8 @@ class TaskSessions:
         self.lock = threading.RLock()
         self.records = {}
         self.revision = 0
+        self.observation_started=0
+        self.observation_committed=0
 
     @staticmethod
     def _origin(value):
@@ -109,6 +116,13 @@ class TaskSessions:
                               active=False, stale=False, status='viewing', page='official-viz',
                               source='native', session=viewer.get('session_id')))
         continuation=object_value(state.get('calibrated_teleoperation'))
+        if (not found and continuation.get('busy') is True and serial(continuation.get('serial'))
+                and continuation.get('side') in ('left','right')
+                and isinstance(continuation.get('attempt_id'),str)
+                and re.fullmatch('[0-9a-f]{32}',continuation['attempt_id'])):
+            found.append(dict(kind='glove',hand=None,glove=continuation['serial'],profile=profile.get('id'),
+                side=continuation['side'],active=None,stale=True,status='connecting',page='official-viz',
+                source='native',session=continuation['attempt_id']))
         if (not found and continuation.get('can_continue') is True
                 and serial(continuation.get('serial')) and continuation.get('side') in ('left','right')):
             found.append(dict(kind='glove',hand=None,glove=continuation['serial'],profile=profile.get('id'),
@@ -118,6 +132,9 @@ class TaskSessions:
 
     def snapshot(self):
         # The reader only inspects existing processes; it must never spawn one.
+        with self.lock:
+            self.observation_started+=1
+            observation=self.observation_started
         endpoints = self.read_endpoints()
         observations = [item for endpoint in endpoints for item in self._observe(endpoint)]
         endpoint_states = {row['id']: row.get('state') for row in endpoints}
@@ -126,6 +143,10 @@ class TaskSessions:
             if observed['status']!='calibrated':endpoint_counts[endpoint]=endpoint_counts.get(endpoint,0)+1
         conflicting_endpoints={endpoint for endpoint,count in endpoint_counts.items() if count>1}
         with self.lock:
+            # Reads may finish out of order. Once a newer read has committed,
+            # an older response cannot resurrect a replaced/disconnected owner.
+            if observation<self.observation_committed:return self._public_snapshot()
+            self.observation_committed=observation
             seen = set()
             for observed, endpoint, origin, state in observations:
                 key = ('glove:' + observed['glove']) if observed['glove'] else ('hand:' + observed['hand'])
@@ -133,7 +154,15 @@ class TaskSessions:
                 record = self.records.get(task_id)
                 scope = context_digest(state)
                 if record and record.get('_seen_owner') != endpoint and record['task_id'] in seen:
-                    record.update(status='conflict',_pair_target=False, capabilities=dict(blocked_reason='设备存在多个会话归属，请先核对 / Conflicting device owners; review the sessions'))
+                    previous=record['capabilities']
+                    # Keep only the already identified first owner's stop and
+                    # disconnect. They still use its exact endpoint/context;
+                    # never broadcast or choose the other conflicting owner.
+                    record.update(status='conflict',_pair_target=False, capabilities=dict(
+                        can_pause=previous.get('can_pause') is True,
+                        can_disconnect=previous.get('can_disconnect') is True,
+                        can_pair=False,can_unpair=False,can_continue_teleoperation=False,
+                        blocked_reason='设备存在多个会话归属，请停止并核对 / Conflicting device owners; stop and review the sessions'))
                     continue
                 if not record:
                     record = dict(task_id=task_id, revision=0)
@@ -153,6 +182,7 @@ class TaskSessions:
                 continuation_verified = (not unknown and observed['status']=='calibrated' and continuation.get('can_continue') is True and bool(observed['glove'])
                     and continuation.get('serial') == observed['glove'] and continuation.get('side') == side)
                 reason = ('停止结果尚未确认 / Stop confirmation required' if unknown else
+                          '标定资料正在接续 / Continuing calibration data' if observed['status']=='connecting' else
                           '' if continuation_verified and observed['status']=='calibrated' else
                           '等待新鲜数据 / Waiting for fresh data' if observed['stale'] else
                           '请先暂停并确认停止 / Pause and confirm stop first' if observed['active'] is not False else '')
@@ -173,7 +203,9 @@ class TaskSessions:
                                           sdk_user=object_value(object_value(state.get('glove')).get('user')).get('user_id')),
                               observed=dict(stale=observed['stale'], hardware_active=observed['active'],
                                             source=observed['source'], session=observed['session'],
-                                            continuation_verified=continuation_verified),
+                                            continuation_verified=continuation_verified,
+                                            continuation={key:continuation.get(key) for key in ('busy','attempt_id','run_id','serial','side','profile','model_sha256','sdk_session')}
+                                                if continuation.get('serial')==observed['glove'] else None),
                               capabilities=capabilities,
                               view=dict(origin=origin, page=observed['page'], allow_native=endpoint=='main' and observed['source']=='native',
                                         url=origin+'/?'+params+('&task_native=1' if endpoint=='main' and observed['source']=='native' else '')+'#'+observed['page']),
@@ -201,12 +233,22 @@ class TaskSessions:
                         and continuation.get('can_continue') is True and bool(record['devices'].get('glove'))
                         and continuation.get('serial')==record['devices']['glove']
                         and continuation.get('side')==record['intent'].get('side'))
-                    continuing = object_value(state.get('calibration_connection')).get('busy') is True or object_value(state.get('calibration')).get('running') is True
+                    calibration=object_value(state.get('calibration'))
+                    run=object_value(calibration.get('run')) or calibration
+                    transition=object_value(state.get('calibration_connection'))
+                    glove_sn=record['devices'].get('glove')
+                    # An endpoint is reusable. A different device's later
+                    # calibration must not grant an old task the authority to
+                    # cancel it merely because both used this workspace.
+                    continuing=bool(glove_sn) and (
+                        run.get('running') is True and run.get('serial')==glove_sn
+                        or transition.get('busy') is True and transition.get('serial')==glove_sn)
                     record['status'] = 'calibrating' if continuing else 'calibrated' if verified else 'disconnected'
                     record['observed'].update(stale=True,hardware_active=None,
                         continuation_verified=verified)
                     record['_pair_target']=False
-                    record['capabilities'] = dict(can_pause=False, can_disconnect=continuing,
+                    record['capabilities'] = dict(can_pause=False, can_disconnect=bool(glove_sn)
+                        and run.get('running') is True and run.get('serial')==glove_sn and transition.get('busy') is not True,
                         can_pair=False, can_unpair=False, can_continue_teleoperation=verified and callable(self.continuation),
                         blocked_reason=continuation.get('blocked_reason', ''))
                 else:
@@ -235,15 +277,19 @@ class TaskSessions:
                     pair=pairs[record['devices']['hand']]
                     record['paired_into']=pair['task_id'];record['capabilities']={}
                     record['status']='paired'
-            tasks = [{key: copy.deepcopy(value) for key, value in record.items() if not key.startswith('_')} for record in self.records.values()]
-            candidates = []
-            for task in tasks:
-                if task['kind'] == 'hand' and task['observed']['source'] == 'sdk':
-                    candidates.append(dict(task_id=task['task_id'], revision=task['revision'],
-                                           label=task['label'],label_zh=task['label_zh'],label_en=task['label_en'], kind='hand', devices=task['devices'],
-                                           intent=task['intent'], can_pair=self.records[task['task_id']].get('_pair_target') is True and not task.get('paired_into'),
-                                           blocked_reason=task['capabilities'].get('blocked_reason','')))
-            return dict(revision=self.revision, tasks=tasks, pair_candidates=candidates)
+            return self._public_snapshot()
+
+    def _public_snapshot(self):
+        """Copy committed records only; callers hold the registry lock."""
+        tasks = [{key: copy.deepcopy(value) for key, value in record.items() if not key.startswith('_')} for record in self.records.values()]
+        candidates = []
+        for task in tasks:
+            if task['kind'] == 'hand' and task['observed']['source'] == 'sdk':
+                candidates.append(dict(task_id=task['task_id'], revision=task['revision'],
+                    label=task['label'],label_zh=task['label_zh'],label_en=task['label_en'], kind='hand',devices=task['devices'],
+                    intent=task['intent'],can_pair=self.records[task['task_id']].get('_pair_target') is True and not task.get('paired_into'),
+                    blocked_reason=task['capabilities'].get('blocked_reason','')))
+        return dict(revision=self.revision,tasks=tasks,pair_candidates=candidates)
 
     def action(self, command):
         if not isinstance(command, dict) or set(command) - {'name','task_id','expected_revision','action','hand_task_id','hand_revision'}:

@@ -102,7 +102,8 @@ class TaskPairing:
     def cancel(self, endpoint, expected_context, state):
         """Stop a pending workflow, never claim that hardware was disabled."""
         with self.lock:
-            if not self.state['busy'] or self.state.get('source_endpoint')!=endpoint:return False
+            if (not self.state['busy'] or self.state.get('source_endpoint')!=endpoint
+                    or self.state.get('phase') in ('paired','error','cancelled')):return False
             # The old request must describe the current owner, and that owner
             # must still be the source of this exact pending workflow. Check
             # under the job lock so a replacement start cannot slip between
@@ -181,7 +182,13 @@ class TaskPairing:
                             or object_value(glove.get('stream')).get('fresh') is not True
                             or state.get('unconfirmed_devices')):
                         raise ValueError('Unexpected hardware state after feedback preparation')
-                    self._set(phase='paired');return
+                    # The last feedback read may finish after cancellation.
+                    # Commit success under the same lock as cancel(), so the
+                    # winning outcome cannot be rewritten by a late callback.
+                    with self.lock:
+                        self._checkpoint(cancel)
+                        self.state.update(phase='paired')
+                    return
                 if self.clock() >= deadline:raise ValueError('配对反馈尚未确认，请查看此手套任务 / Pair feedback has not been confirmed; open this glove task')
                 self.sleep(.1)
         except Exception as error:

@@ -8,6 +8,49 @@
  document.documentElement.dataset.embedded=String(embedded);
  document.documentElement.dataset.taskView=String(taskView);
  document.documentElement.dataset.taskNative=String(taskNative);
+ // A task frame is a view of one authoritative owner, not a reusable endpoint.
+ // Every command (including keepalive/stop) is scoped again by the server.
+ let taskScope=null;
+ if(taskView){
+  const rawFetch=window.fetch.bind(window),app=document.querySelector('.app');
+  const notice=document.createElement('p');notice.id='task-scope-notice';notice.setAttribute('role','status');
+  Object.assign(notice.style,{position:'fixed',inset:'16px 16px auto',zIndex:'1000',margin:'0',padding:'14px 16px',borderRadius:'12px',background:'var(--wb-card,#f5f5f7)',color:'var(--wb-ink,#1d1d1f)',border:'1px solid var(--wb-line,#ddd)'});document.body.append(notice);
+  let current=false,parentCurrent=false,parentRevision=null,context=null,epoch=0,reading=null,checkedAt=0,reason='',lastPublished='';
+  const ownedReads=new Set(['/api/state','/api/view','/api/workspace-view','/api/official-viz','/api/calibration','/api/workspaces','/api/retarget/context']);
+  const parentOrigin=(()=>{try{return document.referrer?new URL(document.referrer).origin:null;}catch{return null;}})();
+  function publish(){const allowed=current&&parentCurrent,key=allowed?'current':'blocked';if(document.documentElement.dataset.taskScope!==key)document.documentElement.dataset.taskScope=key;if(app&&app.inert===allowed)app.inert=!allowed;if(notice.hidden!==allowed)notice.hidden=allowed;const message=reason||t('任务归属正在核对，此视图暂不可操作。','Verifying this task owner. This view is temporarily read-only.');if(notice.textContent!==message)notice.textContent=message;
+   const payload={type:'wb-task-scope',task_id:taskViewId,owner_revision:parentRevision,current:allowed,owner_context:allowed?context:null,reason:allowed?'':message},signature=JSON.stringify(payload);
+   if(parentOrigin&&window.parent!==window&&signature!==lastPublished){lastPublished=signature;window.parent.postMessage(payload,parentOrigin);}
+  }
+  function invalidate(message){current=false;reason=message;publish();}
+  function clearConsent(){for(const box of document.querySelectorAll('#glove-clear,#trial-clear,#probe-clear,#pe-clear,#hub-replace,.hg-clearbox'))box.checked=false;window.dispatchEvent(new Event('console-offline'));}
+  async function refreshScope(force=false){
+   if(reading)return reading;if(!force&&Date.now()-checkedAt<750)return;
+   const requestedRevision=parentRevision;reading=(async()=>{try{const r=await rawFetch('/api/task-view?task_id='+encodeURIComponent(taskViewId||''),{cache:'no-store',signal:AbortSignal.timeout(3000)});if(!r.ok)throw Error(t('无法核对任务归属。','Task ownership is unavailable.'));const value=await r.json();if(requestedRevision!==parentRevision)return;
+     if(value?.task_id!==taskViewId||value.current!==true||typeof value.owner_context!=='string'||!/^[a-f0-9]{64}$/.test(value.owner_context)){invalidate(t('此任务已断开或归属已变化，请打开当前设备任务。','This task is disconnected or its owner changed. Open the current device task.'));return;}
+     if(context!==value.owner_context){epoch++;clearConsent();context=value.owner_context;}
+     current=true;reason='';checkedAt=Date.now();publish();
+    }catch{invalidate(t('任务归属尚未确认，此视图暂不可操作。','Task ownership is unverified. This view is temporarily read-only.'));}
+    finally{reading=null;if(requestedRevision!==parentRevision)queueMicrotask(()=>refreshScope(true));}})();return reading;
+  }
+  window.fetch=async(input,init)=>{
+   const request=new Request(input,init),url=new URL(request.url),api=url.origin===location.origin&&url.pathname.startsWith('/api/');
+   if(!api)return rawFetch(request);
+   if(url.pathname==='/api/task-view')throw Error(t('任务归属查询由当前视图管理。','Task ownership is managed by this view.'));
+   const write=!['GET','HEAD'].includes(request.method),owned=write||ownedReads.has(url.pathname);
+   if(!owned)return rawFetch(request);
+   await refreshScope(write);if(!current||!parentCurrent)throw Error(t('此任务归属未确认，操作未发送。','This task owner is unverified. No operation was sent.'));
+   const sentContext=context,sentEpoch=epoch,headers=new Headers(request.headers);headers.set('X-Task-Id',taskViewId);headers.set('X-Task-Context',sentContext);
+   const response=await rawFetch(new Request(request,{headers}));
+   if(!write)await refreshScope(true);
+   if(!current||!parentCurrent||sentContext!==context||sentEpoch!==epoch)throw Error(t('任务会话已变化，旧响应未采用。','The task session changed. The old response was discarded.'));
+   return response;
+  };
+  for(const name of ['click','pointerdown','keydown','submit'])document.addEventListener(name,event=>{if((!current||!parentCurrent)&&!(name==='keydown'&&['Tab','Escape'].includes(event.key))){event.preventDefault();event.stopImmediatePropagation();}},true);
+  taskScope={setParent(value,revision){if(!Number.isSafeInteger(revision)||revision<1)return;if(parentRevision!==revision){parentRevision=revision;epoch++;current=false;context=null;checkedAt=0;clearConsent();}parentCurrent=value===true;publish();if(parentCurrent)refreshScope(true);},refresh:()=>refreshScope(true),snapshot:()=>({current:current&&parentCurrent,owner_context:context,epoch})};
+  publish();refreshScope(true);setInterval(()=>refreshScope(true),1000);
+  window.addEventListener('wuji-language',publish);
+ }
  let state=null,retarget=null;
  const speeds=[.1,.25,.5,.75,1,1.25,1.5,1.75,2,2.5,3,4];
  for(const id of ['trial-speed','play-speed']){
@@ -55,6 +98,7 @@
    else{location.hash='#'+value.page;ws.showPage();}
   }else if(value.type==='wb-task-language'&&['zh','en'].includes(value.language))window.WujiLocale?.setLanguage(value.language);
   else if(value.type==='wb-task-capabilities'&&typeof value.allow_native==='boolean'){taskNative=value.allow_native;document.documentElement.dataset.taskNative=String(taskNative);}
+  else if(value.type==='wb-task-owner'&&typeof value.current==='boolean')taskScope?.setParent(value.current,value.owner_revision);
  });
  const fingerNames=()=>L.lang==='en'?['Thumb','Index','Middle','Ring','Little']:['拇指','食指','中指','无名指','小指'];
  let outputGrid=null,outputKind='gain';
@@ -147,19 +191,42 @@
   url.searchParams.set('embedded','1');url.searchParams.set('task_view','1');url.searchParams.set('task_id',task.task_id);if(allowNative)url.searchParams.set('task_native','1');else url.searchParams.delete('task_native');if(task.view.page)url.hash=['official-viz','calibration'].includes(task.view.page)?'connection':task.view.page;
   return {url:url.href,origin:url.origin,page:task.view.page||null,allowNative};
  }
+ const taskDeviceSN=value=>typeof value==='string'?value:value?.serial||value?.sn||'';
+ function taskPrimary(task){
+  if(task.kind==='ensemble'){const hands=Array.isArray(task.devices?.hands)?task.devices.hands.map(taskDeviceSN):[];return hands.length>=2&&hands.every(Boolean)?JSON.stringify(['ensemble',...hands.slice().sort(),task.intent?.group_id,task.intent?.members]):'';}
+  const glove=taskDeviceSN(task.devices?.glove),hand=taskDeviceSN(task.devices?.hand);return glove?'glove:'+glove:hand?'hand:'+hand:'';
+ }
+ function taskCurrent(task){
+  if(!taskPrimary(task)||['disconnected','offline','unknown','unconfirmed','cleanup_required','conflict','error'].includes(task.status))return false;
+  if(task.status==='calibrated')return task.observed?.continuation_verified===true;
+  if(['calibrating','connecting'].includes(task.status))return true;
+  return task.observed?.stale!==true&&task.observed?.hardware_active!==null;
+ }
+ const taskScopeReason=()=>t('此任务已断开、反馈过期或归属待核对；请使用当前设备任务。','This task is disconnected, stale or unverified. Use the current device task.');
+ function taskApplyVisibility(item){const show=item.visible&&item.allowed&&item.scopeVerified;if(item.frame.hidden===show)item.frame.hidden=!show;if(item.ready&&item.lastVisible!==show){item.lastVisible=show;notifyFrame(item.frame,show);}}
+ function taskNotifyOwner(item,id){if(item.ready)item.frame.contentWindow?.postMessage({type:'wb-task-owner',task_id:id,owner_revision:item.revision,current:item.allowed},item.origin);}
  function mountTaskFrame(task,host){
   if(embedded||!host)throw Error('Task frame host unavailable');
   const spec=taskFrameSpec(task),old=taskFrames.get(task.task_id);
-  if(old){if(old.origin!==spec.origin||old.endpoint!==task.endpoint_id)throw Error(t('任务所属工作区已变化，请核对原会话','Task owner changed; review the original session'));if(old.host!==host)throw Error('A live task frame cannot be reparented');return old.frame;}
+  if(old){if(old.origin!==spec.origin||old.endpoint!==task.endpoint_id||old.primary!==taskPrimary(task))throw Error(t('任务所属设备已变化，请核对原会话','Task device owner changed; review the original session'));if(old.host!==host)throw Error('A live task frame cannot be reparented');return old.frame;}
+  if(!taskCurrent(task))throw Error(taskScopeReason());
   const frame=document.createElement('iframe');frame.className='tw-frame';frame.id='tw-frame-'+task.task_id;frame.title=task.label||t('设备任务','Device task');frame.dataset.taskId=task.task_id;
-  const item={frame,host,origin:spec.origin,endpoint:task.endpoint_id,allowNative:spec.allowNative,visible:false,page:spec.page,loads:0,ready:false};taskFrames.set(task.task_id,item);
-  frame.addEventListener('load',()=>{item.loads++;item.ready=true;notifyFrame(frame,item.visible);frame.contentWindow?.postMessage({type:'wb-task-language',task_id:task.task_id,language:L.lang},item.origin);frame.contentWindow?.postMessage({type:'wb-task-capabilities',task_id:task.task_id,allow_native:item.allowNative},item.origin);if(item.page)frame.contentWindow?.postMessage({type:'wb-task-route',task_id:task.task_id,page:item.page},item.origin);});
+  frame.hidden=true;const item={frame,host,origin:spec.origin,endpoint:task.endpoint_id,primary:taskPrimary(task),revision:task.revision,allowNative:spec.allowNative,allowed:true,scopeVerified:false,ownerContext:null,reason:t('正在核对任务归属。','Verifying task ownership.'),visible:false,page:spec.page,loads:0,ready:false};taskFrames.set(task.task_id,item);
+  frame.addEventListener('load',()=>{item.loads++;item.ready=true;taskNotifyOwner(item,task.task_id);taskApplyVisibility(item);frame.contentWindow?.postMessage({type:'wb-task-language',task_id:task.task_id,language:L.lang},item.origin);frame.contentWindow?.postMessage({type:'wb-task-capabilities',task_id:task.task_id,allow_native:item.allowNative},item.origin);if(item.page)frame.contentWindow?.postMessage({type:'wb-task-route',task_id:task.task_id,page:item.page},item.origin);});
   frame.src=spec.url;host.append(frame);return frame;
  }
- function taskVisibility(id,visible){const item=taskFrames.get(id);if(!item)return;item.visible=visible===true;if(item.ready)notifyFrame(item.frame,item.visible);}
- function taskUpdate(task){const item=taskFrames.get(task.task_id);if(!item)return false;const spec=taskFrameSpec(task);if(item.origin!==spec.origin||item.endpoint!==task.endpoint_id)return false;const changed=item.allowNative!==spec.allowNative;item.allowNative=spec.allowNative;if(changed&&item.ready)item.frame.contentWindow?.postMessage({type:'wb-task-capabilities',task_id:task.task_id,allow_native:item.allowNative},item.origin);return true;}
- function taskRoute(id,page){const item=taskFrames.get(id);if(!item||!taskPages.has(page)||['official-viz','calibration'].includes(page)&&!item.allowNative)return false;item.page=page;if(item.ready)item.frame.contentWindow?.postMessage({type:'wb-task-route',task_id:id,page},item.origin);return true;}
- window.HandSessions={show(id){if(window.TaskWorkspace?.openEndpoint?.(id))return;switchTo(id);},refresh:()=>fleetRefresh(),taskFrames:{mount:mountTaskFrame,update:taskUpdate,setVisible:taskVisibility,route:taskRoute,inspect:id=>{const item=taskFrames.get(id);return item?{endpoint:item.endpoint,origin:item.origin,loads:item.loads,visible:item.visible,allowNative:item.allowNative}:null;}}};
+ function taskVisibility(id,visible){const item=taskFrames.get(id);if(!item)return;item.visible=visible===true;taskApplyVisibility(item);}
+ function taskUpdate(task){const item=taskFrames.get(task.task_id);if(!item)return false;const spec=taskFrameSpec(task);
+  if(item.origin!==spec.origin||item.endpoint!==task.endpoint_id||item.primary!==taskPrimary(task)){const notify=item.allowed;item.allowed=false;item.scopeVerified=false;item.reason=t('任务所属设备或成员已变化，原视图已冻结。','The task device or members changed. The original view is frozen.');if(notify)taskNotifyOwner(item,task.task_id);taskApplyVisibility(item);return false;}
+  const changed=item.allowNative!==spec.allowNative,revisionChanged=item.revision!==task.revision,wasAllowed=item.allowed;item.allowNative=spec.allowNative;item.allowed=taskCurrent(task);
+  if(revisionChanged){item.revision=task.revision;item.scopeVerified=false;item.ownerContext=null;}
+  if(!item.allowed){item.scopeVerified=false;item.reason=taskScopeReason();}else if(revisionChanged)item.reason=t('正在核对新的任务会话。','Verifying the new task session.');
+  if(revisionChanged||wasAllowed!==item.allowed)taskNotifyOwner(item,task.task_id);if(changed&&item.ready)item.frame.contentWindow?.postMessage({type:'wb-task-capabilities',task_id:task.task_id,allow_native:item.allowNative},item.origin);taskApplyVisibility(item);return item.allowed;
+ }
+ function taskSuspend(id){const item=taskFrames.get(id);if(!item)return;const changed=item.allowed;item.allowed=false;item.scopeVerified=false;item.reason=taskScopeReason();if(changed)taskNotifyOwner(item,id);taskApplyVisibility(item);}
+ function taskRoute(id,page){const item=taskFrames.get(id);if(!item||!item.allowed||!taskPages.has(page)||['official-viz','calibration'].includes(page)&&!item.allowNative)return false;item.page=page;if(item.ready)item.frame.contentWindow?.postMessage({type:'wb-task-route',task_id:id,page},item.origin);return true;}
+ window.addEventListener('message',event=>{if(embedded||event.data?.type!=='wb-task-scope')return;const id=event.data.task_id,item=taskFrames.get(id);if(!item||event.source!==item.frame.contentWindow||event.origin!==item.origin||event.data.owner_revision!==item.revision)return;const value=event.data;item.scopeVerified=item.allowed&&value.current===true&&typeof value.owner_context==='string'&&/^[a-f0-9]{64}$/.test(value.owner_context);item.ownerContext=item.scopeVerified?value.owner_context:null;if(item.allowed)item.reason=item.scopeVerified?'':typeof value.reason==='string'?value.reason.slice(0,500):taskScopeReason();taskApplyVisibility(item);window.dispatchEvent(new CustomEvent('task-view-scope',{detail:{task_id:id}}));});
+ window.HandSessions={show(id){if(window.TaskWorkspace?.openEndpoint?.(id))return;switchTo(id);},refresh:()=>fleetRefresh(),taskFrames:{mount:mountTaskFrame,update:taskUpdate,current:taskCurrent,suspend:taskSuspend,setVisible:taskVisibility,route:taskRoute,inspect:id=>{const item=taskFrames.get(id);return item?{endpoint:item.endpoint,origin:item.origin,loads:item.loads,visible:item.visible,allowNative:item.allowNative,verified:item.scopeVerified,blockedReason:item.reason,primary:item.primary,revision:item.revision}:null;}}};
  window.addEventListener('wuji-language',()=>{for(const [id,item]of taskFrames)if(item.ready)item.frame.contentWindow?.postMessage({type:'wb-task-language',task_id:id,language:L.lang},item.origin);});
  let fleetBusy=false,fleetViewKey='',fleetChoicesKey='';
  const fleetStop=document.createElement('button');fleetStop.type='button';fleetStop.className='danger';

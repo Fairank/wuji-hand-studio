@@ -131,6 +131,34 @@ class TaskPairingTests(unittest.TestCase):
         self.assertEqual([action for action,_ in controller.calls],['pair_prepare'])
         self.assertFalse(controller.state['glove']['hardware']['active'])
 
+    def test_cancel_during_final_feedback_read_cannot_publish_paired_success(self):
+        host,service,source,target=self.fixture();entered=threading.Event();release=threading.Event();held=[False]
+        def read(endpoint):
+            state=service.read(endpoint)
+            if endpoint=='source' and state['glove'].get('feedback',{}).get('device_id') and not held[0]:
+                held[0]=True;entered.set();release.wait(2)
+            return state
+        pairing=TaskPairing(read,service.dispatch)
+        pairing.start(source,target);self.assertTrue(entered.wait(1))
+        try:
+            current=service.read('source')
+            self.assertTrue(pairing.cancel('source',context_digest(current),current))
+        finally:release.set();self.join(pairing)
+        self.assertEqual(pairing.snapshot()['phase'],'cancelled')
+        self.assertTrue(pairing.snapshot()['cancel_requested'])
+        self.assertEqual([a for a,_ in host._fleet.controllers['source'].calls],['pair_prepare'])
+
+    def test_cancel_after_terminal_commit_does_not_rewrite_completed_job(self):
+        host,service,source,target=self.fixture();current=service.read('source')
+        for phase in ('paired','error','cancelled'):
+            with self.subTest(phase=phase):
+                pairing=TaskPairing(service.read,service.dispatch)
+                pairing.state.update(busy=True,phase=phase,source_endpoint='source',
+                    source_serial=source['devices']['glove'],source_session=source['observed']['session'],
+                    source_user=source['intent']['sdk_user'],source_profile=source['intent']['profile_id'])
+                self.assertFalse(pairing.cancel('source',context_digest(current),current))
+                self.assertEqual(pairing.snapshot()['phase'],phase);self.assertFalse(pairing.cancel_event.is_set())
+
     def test_cancel_other_endpoint_does_not_cancel_and_completed_workflow_is_not_cancelled(self):
         host,service,source,target=self.fixture()
         current=service.read('source')

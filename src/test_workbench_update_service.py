@@ -12,10 +12,11 @@ import io
 import json
 import os
 from pathlib import Path
+import re
 import secrets
 import tempfile
 import threading
-from types import SimpleNamespace
+from types import MethodType, SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 from urllib.parse import parse_qs, urlsplit
@@ -433,7 +434,7 @@ def handler_method(name):
     tree = ast.parse(Path(__file__).with_name('console_server.py').read_text(encoding='utf-8'))
     handler = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name=='Handler')
     method = next(node for node in handler.body if isinstance(node, ast.FunctionDef) and node.name==name)
-    namespace = dict(json=json, secrets=secrets, os=os, ORIGIN='http://127.0.0.1:8781',
+    namespace = dict(json=json, secrets=secrets, os=os, re=re, ORIGIN='http://127.0.0.1:8781',
                      PORT=8781, urlsplit=urlsplit, parse_qs=parse_qs)
     exec(compile(ast.Module(body=[method], type_ignores=[]), 'actual-console-handler', 'exec'), namespace)
     return namespace[name]
@@ -449,6 +450,7 @@ class UpdateAPIBridgeTests(unittest.TestCase):
         handler = SimpleNamespace(path='/api/action', headers=headers, allowed_host=lambda:True,
             rfile=io.BytesIO(raw), reply=Mock(), server=SimpleNamespace(updates=update,
                 controller=SimpleNamespace(csrf='synthetic-token', action=Mock())))
+        handler._task_view_headers=MethodType(handler_method('_task_view_headers'),handler)
         return handler, update
 
     def test_get_status_and_all_three_actions_use_update_service_only(self):
@@ -478,6 +480,14 @@ class UpdateAPIBridgeTests(unittest.TestCase):
                 handler_method('do_POST')(handler)
                 self.assertEqual(handler.reply.call_args.args[0], 403)
                 update.apply.assert_not_called()
+
+    def test_unscoped_embedded_task_cannot_apply_a_global_update(self):
+        handler, update=self.handler({'name':'workbench_update_apply'})
+        handler.headers['Referer']='http://127.0.0.1:8781/?embedded=1&task_view=1&task_id='+'a'*24
+        handler_method('do_POST')(handler)
+        self.assertEqual(handler.reply.call_args.args[0],400)
+        update.apply.assert_not_called();update.start.assert_not_called()
+        handler.server.controller.action.assert_not_called()
 
 
 if __name__ == '__main__':

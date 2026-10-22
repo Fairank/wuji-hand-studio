@@ -12,10 +12,12 @@ import threading
 from types import SimpleNamespace as N
 import unittest
 from unittest.mock import Mock,patch
+import numpy as np  # Keep the real extension cached outside synthetic SDK patches.
 
 from calibrated_teleoperation import CalibratedTeleoperation
 from calibration_portability import CONTEXT_FIELDS
 from glove_bridge import GloveBridge
+from glove_protocol import CancellationNotDispatched
 from glove_agent import worker_glove
 from retarget_settings import defaults
 from test_calibration_portability import MODEL,bundle_context,completed
@@ -53,6 +55,165 @@ class ContinuationTests(unittest.TestCase):
             self.assertEqual(e.service.snapshot()['phase'],'preview')
             self.assertTrue(e.service.snapshot()['connected'])
             self.assertFalse(e.service.snapshot()['automatically_follows'])
+
+    def test_cancelled_receiving_bridge_stays_cancelling_until_exact_session_ends(self):
+        with self.environment() as e:
+            e.service.execute(self.command(e));self.finish(e)
+            bundle=e.start.call_args.args[0]
+            e.glove.update(connection='receiving',glove_serial=bundle['serial'],model_provenance=bundle)
+            before=e.service.snapshot()
+            result=e.service.cancel()
+            self.assertEqual(result['phase'],'cancelling');self.assertTrue(result['busy'])
+            self.assertFalse(result['connected']);self.assertFalse(result['can_continue'])
+            e.stop.assert_called_once_with(17)
+            e.glove.update(connection='disconnected',busy=False)
+            ended=e.service.snapshot()
+            self.assertEqual(ended['phase'],'cancelled');self.assertFalse(ended['busy']);self.assertFalse(ended['connected'])
+
+    def test_failed_exact_stop_remains_visible_instead_of_becoming_receiving_success(self):
+        with self.environment() as e:
+            e.service.execute(self.command(e));self.finish(e)
+            bundle=e.start.call_args.args[0]
+            e.glove.update(connection='receiving',glove_serial=bundle['serial'],model_provenance=bundle)
+            before=e.service.snapshot();e.stop.side_effect=ValueError('synthetic stop failed')
+            with self.assertRaisesRegex(ValueError,'stop failed'):
+                e.service.cancel()
+            result=e.service.snapshot()
+            self.assertEqual(result['phase'],'error');self.assertTrue(result['busy']);self.assertFalse(result['connected'])
+            self.assertIn('stop failed',result['cleanup_error']);self.assertFalse(result['can_continue'])
+
+    def test_new_idle_offer_uses_new_model_hash_and_discards_old_attempt_identity(self):
+        with self.environment() as e:
+            e.service.execute(self.command(e));self.finish(e);e.glove.update(connection='disconnected',busy=False)
+            new=e.root/'new.urdf';new.write_bytes(MODEL+b'\n')
+            e.state['run'].update(id='e'*32,serial='GLOVE-B',user='Bob')
+            e.state['run']['result']['result'].update(calibrated_urdf=str(new),sdk_user='Bob')
+            result=e.service.snapshot()
+            self.assertEqual(result['run_id'],'e'*32);self.assertEqual(result['serial'],'GLOVE-B');self.assertEqual(result['profile'],'Bob')
+            self.assertEqual(result['model_sha256'],__import__('hashlib').sha256(new.read_bytes()).hexdigest())
+            self.assertIsNone(result['attempt_id']);self.assertIsNone(result['sdk_session']);self.assertTrue(result['can_continue'])
+
+    def test_scoped_late_cancel_after_preview_or_follow_never_stops_active_session(self):
+        for following in (False,True):
+            with self.subTest(following=following),self.environment() as e:
+                e.service.execute(self.command(e));self.finish(e)
+                bundle=e.start.call_args.args[0]
+                before=e.service.snapshot()
+                e.glove.update(connection='receiving',glove_serial=bundle['serial'],model_provenance=bundle,
+                    hardware={'active':following},feedback={'device_id':'HAND'} if following else {})
+                with self.assertRaisesRegex(ValueError,'pause and disconnect'):
+                    e.service.cancel({key:before[key] for key in ('run_id','attempt_id')})
+                e.stop.assert_not_called();self.assertFalse(e.service._cancel.is_set())
+
+    def test_scoped_connecting_cancel_is_pending_only_and_does_not_hold_class_lock_for_callback(self):
+        with self.environment() as e:
+            e.service.execute(self.command(e));self.finish(e);before=e.service.snapshot()
+            read=[]
+            def glove():
+                thread=threading.Thread(target=lambda:(e.service.lock.acquire(),read.append(True),e.service.lock.release()))
+                thread.start();thread.join(1);self.assertFalse(thread.is_alive())
+                return copy.deepcopy(e.glove)
+            e.service.get_glove=glove
+            result=e.service.cancel({key:before[key] for key in ('run_id','attempt_id')})
+            self.assertTrue(read);self.assertFalse(result['connected']);self.assertTrue(result['busy'])
+            e.stop.assert_called_once_with(17,pending_only=True)
+
+    def test_scoped_cancel_rechecks_attempt_after_bridge_read_without_touching_replacement(self):
+        with self.environment() as e:
+            e.service.execute(self.command(e));self.finish(e);before=e.service.snapshot()
+            def replace():
+                with e.service.lock:e.service.state['attempt_id']='f'*32
+                return copy.deepcopy(e.glove)
+            e.service.get_glove=replace
+            with self.assertRaisesRegex(ValueError,'attempt changed'):
+                e.service.cancel({key:before[key] for key in ('run_id','attempt_id')})
+            e.stop.assert_not_called();self.assertFalse(e.service._cancel.is_set())
+
+    def test_destination_rejecting_completed_preview_or_follow_does_not_publish_cancellation(self):
+        for following in (False,True):
+            with self.subTest(following=following),self.environment() as e:
+                e.service.execute(self.command(e));self.finish(e)
+                bridge=GloveBridge(Mock());bridge.session=17;bridge.thread=N(is_alive=lambda:True)
+                bridge.stdin=io.StringIO();bridge.state.update(connection='connecting')
+                e.service.get_glove=bridge.snapshot
+                before=e.service.snapshot();stored=copy.deepcopy(e.service.state)
+                bundle=e.start.call_args.args[0]
+                def completed_before_destination(session,**kwargs):
+                    with bridge.lock:
+                        bridge.state.update(connection='receiving',glove_serial=bundle['serial'],model_provenance=bundle,
+                            hardware={'active':following},feedback={'device_id':'HAND'} if following else {})
+                    return bridge.disconnect_session(session,**kwargs)
+                e.stop.side_effect=completed_before_destination
+                with self.assertRaises(CancellationNotDispatched):
+                    e.service.cancel({key:before[key] for key in ('run_id','attempt_id')})
+                self.assertFalse(e.service._cancel.is_set());self.assertEqual(e.service.state,stored)
+                self.assertFalse(bridge.stopping);self.assertEqual(bridge.stdin.getvalue(),'')
+                result=e.service.snapshot()
+                self.assertEqual(result['phase'],'preview');self.assertFalse(result['busy']);self.assertTrue(result['connected'])
+                self.assertIsNone(result['error']);self.assertIsNone(result['cleanup_error'])
+                self.assertEqual(bridge.state['hardware']['active'],following)
+                e.stop.assert_called_once_with(17,pending_only=True)
+
+    def test_destination_rejecting_replaced_session_does_not_publish_cancellation(self):
+        with self.environment() as e:
+            e.service.execute(self.command(e));self.finish(e)
+            bridge=GloveBridge(Mock());bridge.session=17;bridge.thread=N(is_alive=lambda:True)
+            bridge.stdin=io.StringIO();bridge.state.update(connection='connecting')
+            e.service.get_glove=bridge.snapshot
+            before=e.service.snapshot();stored=copy.deepcopy(e.service.state)
+            def replace_before_destination(session,**kwargs):
+                with bridge.lock:bridge.session=18
+                return bridge.disconnect_session(session,**kwargs)
+            e.stop.side_effect=replace_before_destination
+            with self.assertRaises(CancellationNotDispatched):
+                e.service.cancel({key:before[key] for key in ('run_id','attempt_id')})
+            self.assertFalse(e.service._cancel.is_set());self.assertEqual(e.service.state,stored)
+            self.assertFalse(bridge.stopping);self.assertEqual(bridge.stdin.getvalue(),'')
+            self.assertEqual(e.service.snapshot()['phase'],'session_changed')
+
+    def test_rejected_pending_cancel_never_exposes_flag_to_publishing_worker(self):
+        with self.environment() as e:
+            published=threading.Event();resume=threading.Event();worker_flags=[]
+            original=e.service._set
+            def pause_after_publication(**values):
+                original(**values)
+                if 'sdk_session' in values:
+                    published.set();self.assertTrue(resume.wait(2));worker_flags.append(e.service._cancel.is_set())
+            e.service._set=pause_after_publication
+            e.service.execute(self.command(e));self.assertTrue(published.wait(2))
+            before=e.service.snapshot();bundle=e.start.call_args.args[0]
+            def reject_after_worker_can_observe(session,**kwargs):
+                self.assertEqual((session,kwargs),(17,dict(pending_only=True)))
+                e.glove.update(connection='receiving',glove_serial=bundle['serial'],model_provenance=bundle)
+                resume.set();self.finish(e)
+                raise CancellationNotDispatched('synthetic completed before destination check')
+            e.stop.side_effect=reject_after_worker_can_observe
+            try:
+                with self.assertRaises(CancellationNotDispatched):
+                    e.service.cancel({key:before[key] for key in ('run_id','attempt_id')})
+            finally:
+                resume.set();self.finish(e)
+            self.assertEqual(worker_flags,[False]);self.assertFalse(e.service._cancel.is_set())
+            e.stop.assert_called_once_with(17,pending_only=True)
+            result=e.service.snapshot();self.assertEqual(result['phase'],'preview')
+            self.assertTrue(result['connected']);self.assertFalse(result['busy']);self.assertIsNone(result['cleanup_error'])
+
+    def test_pending_cancel_stream_failure_stays_cancelled_and_cleanup_error_until_session_ends(self):
+        with self.environment() as e:
+            e.service.execute(self.command(e));self.finish(e)
+            class FailedStream:
+                def write(self,_):raise OSError('synthetic disconnect write failed')
+                def flush(self):raise AssertionError('write did not succeed')
+            bridge=GloveBridge(Mock());bridge.session=17;bridge.thread=N(is_alive=lambda:True)
+            bridge.stdin=FailedStream();bridge.state.update(connection='connecting')
+            e.service.get_glove=bridge.snapshot;e.stop.side_effect=bridge.disconnect_session
+            before=e.service.snapshot()
+            with self.assertRaisesRegex(OSError,'disconnect write failed'):
+                e.service.cancel({key:before[key] for key in ('run_id','attempt_id')})
+            self.assertTrue(bridge.stopping);self.assertTrue(e.service._cancel.is_set())
+            result=e.service.snapshot()
+            self.assertEqual(result['phase'],'error');self.assertTrue(result['busy']);self.assertFalse(result['connected'])
+            self.assertIn('disconnect write failed',result['cleanup_error']);self.assertFalse(result['can_continue'])
 
     def test_private_task_dispatch_releases_workflow_lock_before_async_start(self):
         with self.environment() as e:
@@ -98,6 +259,89 @@ class ContinuationTests(unittest.TestCase):
             def start(_):e.service.cancel();return 17
             e.start.side_effect=start;e.service.execute(self.command(e));self.finish(e)
             e.stop.assert_called_once_with(17)
+
+    def test_cancel_during_final_owner_check_does_not_launch_controller(self):
+        with self.environment() as e:
+            entered=threading.Event();release=threading.Event()
+            def owner(_):
+                if e.owner.call_count==2:
+                    entered.set();self.assertTrue(release.wait(2))
+            e.owner.side_effect=owner
+            e.service.execute(self.command(e));self.assertTrue(entered.wait(2))
+            e.service.cancel();release.set();self.finish(e)
+            e.export.assert_called_once();e.start.assert_not_called();e.stop.assert_not_called()
+            self.assertEqual(e.service.snapshot()['phase'],'cancelled')
+
+    def test_active_attempt_identity_survives_changed_calibration_snapshot(self):
+        with self.environment() as e:
+            entered=threading.Event();release=threading.Event()
+            def export(proof,**kw):
+                entered.set();self.assertTrue(release.wait(2));return proof
+            e.export.side_effect=export
+            reply=e.service.execute(self.command(e));self.assertTrue(entered.wait(2))
+            try:
+                e.state['run']['id']='b'*32
+                state=e.service.snapshot()
+                self.assertEqual(state['run_id'],'a'*32)
+                self.assertEqual(state['attempt_id'],reply['attempt_id'])
+                self.assertFalse(state['can_continue'])
+            finally:
+                e.service.cancel();release.set();self.finish(e)
+            e.start.assert_not_called()
+
+    def test_old_attempt_cancel_cannot_cancel_retry_of_the_same_saved_run(self):
+        with self.environment() as e:
+            sessions=iter((17,18))
+            def start(_):
+                session=next(sessions);e.glove.update(session_id=session,connection='connecting',busy=True)
+                return session
+            e.start.side_effect=start
+            command=self.command(e);first=e.service.execute(command);self.finish(e)
+            expected=dict(run_id=first['run_id'],attempt_id=first['attempt_id'])
+            e.service.cancel(expected);e.glove.update(connection='disconnected',busy=False)
+            second=e.service.execute(command);self.finish(e)
+            self.assertNotEqual(second['attempt_id'],first['attempt_id'])
+            self.assertFalse(e.service._cancel.is_set())
+            with self.assertRaisesRegex(ValueError,'changed'):
+                e.service.cancel(expected)
+            self.assertFalse(e.service._cancel.is_set());e.stop.assert_called_once_with(17,pending_only=True)
+            with self.assertRaisesRegex(ValueError,'changed'):
+                e.service.cancel(dict(run_id='b'*32,attempt_id=second['attempt_id']))
+            e.service.cancel(dict(run_id=second['run_id'],attempt_id=second['attempt_id']))
+            self.assertEqual(e.stop.call_args.args,(18,))
+
+    def test_idle_new_proof_does_not_inherit_old_attempt_error_or_cancel_identity(self):
+        with self.environment() as e:
+            e.owner.side_effect=ValueError('old attempt failed')
+            e.service.execute(self.command(e));self.finish(e)
+            self.assertEqual(e.service.snapshot()['phase'],'error')
+            e.state['run']['id']='b'*32
+            state=e.service.snapshot()
+            self.assertEqual(state['run_id'],'b'*32);self.assertTrue(state['can_continue'])
+            self.assertEqual(state['phase'],'idle');self.assertIsNone(state['error'])
+            self.assertIsNone(state['attempt_id'])
+
+    def test_late_stop_return_does_not_overwrite_retry_phase(self):
+        with self.environment() as e:
+            first=e.service.execute(self.command(e));self.finish(e)
+            stopping=threading.Event();stopped=threading.Event();exporting=threading.Event();exported=threading.Event()
+            def stop(_,**kwargs):
+                self.assertEqual(kwargs,dict(pending_only=True))
+                e.glove.update(connection='disconnected',busy=False)
+                stopping.set();self.assertTrue(stopped.wait(2))
+            e.stop.side_effect=stop
+            caller=threading.Thread(target=e.service.cancel,args=(dict(run_id=first['run_id'],attempt_id=first['attempt_id']),))
+            caller.start();self.assertTrue(stopping.wait(2))
+            def export(proof,**kw):exporting.set();self.assertTrue(exported.wait(2));return proof
+            e.export.side_effect=export
+            try:
+                retry=e.service.execute(self.command(e));self.assertTrue(exporting.wait(2))
+                stopped.set();caller.join(2);self.assertFalse(caller.is_alive())
+                self.assertEqual(e.service.state['attempt_id'],retry['attempt_id'])
+                self.assertEqual(e.service.state['phase'],'exporting')
+                self.assertFalse(e.service._cancel.is_set())
+            finally:
+                stopped.set();exported.set();caller.join(2);self.finish(e)
 
     def test_source_run_change_during_export_is_detected_without_device_command(self):
         with self.environment() as e:

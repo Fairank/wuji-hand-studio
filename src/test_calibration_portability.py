@@ -127,6 +127,41 @@ class PortabilityTests(unittest.TestCase):
             again=prepare_controller_model(manager,context,folder=root/'transfer',receipt_folder=root/'receipts')
             self.assertFalse(again['imported']);self.assertEqual(manager.imports,1)
 
+    def test_existing_owner_verification_archives_are_removed_on_early_return(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder);context=bundle_context(root/'transfer');manager=FakeManager(root/'sdk')
+            options=dict(folder=root/'transfer',receipt_folder=root/'receipts')
+            prepare_controller_model(manager,context,**options)
+            receipt_bytes=next((root/'receipts').glob('*.json')).read_bytes()
+            for _ in range(3):
+                self.assertFalse(prepare_controller_model(manager,context,**options)['imported'])
+                self.assertEqual(list((root/'receipts').glob('*.zip')),[])
+            self.assertEqual(manager.imports,1)
+            self.assertEqual(next((root/'receipts').glob('*.json')).read_bytes(),receipt_bytes)
+            self.assertTrue(Path(context['bundle_path']).is_file())
+
+    def test_failed_export_and_signature_rejection_remove_only_temporary_audit(self):
+        for failure in ('export','signature'):
+            with self.subTest(failure=failure),tempfile.TemporaryDirectory() as folder:
+                root=Path(folder);context=bundle_context(root/'transfer');manager=FakeManager(root/'sdk')
+                options=dict(folder=root/'transfer',receipt_folder=root/'receipts')
+                receipt=prepare_controller_model(manager,context,**options)
+                receipt_path=next((root/'receipts').glob('*.json'));receipt_bytes=receipt_path.read_bytes()
+                original=manager.export_user_data
+                def export(owner,path):
+                    report=original(owner,path)
+                    if failure=='export':raise RuntimeError('synthetic SDK failure after ZIP write')
+                    with zipfile.ZipFile(path,'w') as archive:archive.writestr('models/right_hand.urdf',b'changed audit')
+                    return report
+                manager.export_user_data=export
+                with self.assertRaises(ValueError):prepare_controller_model(manager,context,**options)
+                self.assertEqual(list((root/'receipts').glob('*.zip')),[])
+                self.assertEqual(manager.imports,1);self.assertEqual(receipt_path.read_bytes(),receipt_bytes)
+                self.assertEqual(Path(receipt['model_path']).read_bytes(),MODEL)
+                self.assertTrue(Path(context['bundle_path']).is_file())
+                manager.export_user_data=original
+                self.assertFalse(prepare_controller_model(manager,context,**options)['imported'])
+
     def test_unmanaged_same_owner_is_never_overwritten_or_matched_only_by_name(self):
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder);context=bundle_context(root/'transfer');manager=FakeManager(root/'sdk')

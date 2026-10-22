@@ -89,6 +89,28 @@ def command(task,action,**extra):
 
 
 class TaskServerIntegrationTests(unittest.TestCase):
+    def test_active_group_only_blocks_its_actual_participants_not_idle_catalog_sibling(self):
+        host,service=server(target=hand())
+        run=dict(active=True,members=[dict(id='a'),dict(id='b')])
+        host._workspaces=NS(lock=threading.RLock(),rows=[dict(id='catalog',members=['a','b','target'])],
+            coordinators={'catalog':NS(snapshot=lambda:copy.deepcopy(run))})
+        task=next(t for t in service.registry.snapshot()['tasks'] if t['endpoint_id']=='target')
+        service.check_group(task)
+        for member in ('a','b'):
+            with self.assertRaisesRegex(ValueError,'ensemble'):
+                service.check_group(dict(task,endpoint_id=member))
+        self.assertEqual(host._fleet.controllers['target'].calls,[])
+
+    def test_unknown_active_group_members_still_block_catalog_owners(self):
+        host,service=server(target=hand())
+        for members in (None,[],[dict(id='a')],[dict(id='a'),dict(id='a')],
+                [dict(id='a'),dict(id='outside')],['a','b']):
+            with self.subTest(members=members):
+                host._workspaces=NS(lock=threading.RLock(),rows=[dict(id='catalog',members=['a','b','target'])],
+                    coordinators={'catalog':NS(snapshot=lambda members=members:dict(active=True,members=members))})
+                with self.assertRaisesRegex(ValueError,'ensemble'):
+                    service.check_group(dict(endpoint_id='target'))
+
     def test_discovery_selection_and_snapshot_never_dispatch(self):
         state=empty();state['devices']=[dict(sn='HAND-A')];state['selected_device']='HAND-A'
         host,service=server(state)

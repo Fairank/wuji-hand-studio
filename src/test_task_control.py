@@ -58,6 +58,35 @@ class TaskControlTests(unittest.TestCase):
         c._task_context_dispatch.side_effect=None
         self.assertEqual(execute(c,scope,'disconnect'),{'ok':True})
 
+    def test_exact_continuation_cancel_is_deliverable_while_its_worker_owns_workflow_lock(self):
+        c=self.fixture();c.state['calibrated_teleoperation']=dict(busy=True,run_id='a'*32,attempt_id='b'*32,serial='GLOVE')
+        scope=context_digest(c.state);entered=threading.Event();release=threading.Event()
+        def own():
+            with c.calibration_handover.workflow_lock:entered.set();release.wait(2)
+        thread=threading.Thread(target=own);thread.start();self.assertTrue(entered.wait(1))
+        try:
+            self.assertEqual(execute(c,scope,'disconnect'),{'ok':True})
+            captured=c._task_context_dispatch.call_args.args[2]['calibrated_teleoperation']
+            self.assertEqual((captured['run_id'],captured['attempt_id']),('a'*32,'b'*32))
+            with self.assertRaisesRegex(ValueError,'switching'):execute(c,scope,'pause')
+            c.state['calibrated_teleoperation']['attempt_id']='c'*32
+            with self.assertRaisesRegex(ValueError,'session changed'):execute(c,scope,'disconnect')
+            self.assertEqual(c._task_context_dispatch.call_count,1)
+        finally:release.set();thread.join(2)
+
+    def test_replaced_continuation_attempt_after_snapshot_is_rejected_by_strict_cancel(self):
+        from calibrated_teleoperation import CalibratedTeleoperation
+        service=CalibratedTeleoperation(lambda:{},Mock(),Mock(),lambda:{},Mock(),Mock())
+        service.state.update(busy=True,run_id='a'*32,attempt_id='b'*32,serial='GLOVE')
+        c=self.fixture();c.state['calibrated_teleoperation']=copy.deepcopy(service.state)
+        def dispatch(action,payload,captured):
+            service.state['attempt_id']='c'*32
+            current=captured['calibrated_teleoperation']
+            return service.cancel(dict(run_id=current['run_id'],attempt_id=current['attempt_id']))
+        c._task_context_dispatch.side_effect=dispatch
+        with self.assertRaisesRegex(ValueError,'attempt changed'):execute(c,context_digest(c.state),'disconnect')
+        self.assertFalse(service._cancel.is_set());service.stop_session.assert_not_called()
+
 
 class ControllerContinuationTests(unittest.TestCase):
     @contextmanager
@@ -153,6 +182,14 @@ class ControllerContinuationTests(unittest.TestCase):
                 current=dict(glove={'busy':True,'hardware':hardware},hardware={'active':False})
                 with patch.object(c,'action') as action,self.assertRaises(ValueError):c._task_context_dispatch('disconnect',None,current)
                 action.assert_not_called()
+
+    def test_controller_forwards_captured_continuation_attempt_not_a_later_snapshot(self):
+        with self.environment() as e:
+            c=e.c;state=dict(calibrated_teleoperation=dict(busy=True,run_id='a'*32,attempt_id='b'*32))
+            with patch.object(c,'action',return_value={'cancelled':True}) as action, \
+                    patch.object(c.calibrated_teleoperation,'snapshot',side_effect=AssertionError('Do not replace captured attempt')):
+                self.assertEqual(c._task_context_dispatch('disconnect',None,state),{'cancelled':True})
+            action.assert_called_once_with(dict(name='calibrated_teleoperation_cancel',run_id='a'*32,attempt_id='b'*32))
 
     def test_task_unpair_waits_for_source_preserving_cleanup_then_clears_only_target_binding(self):
         with self.environment() as e:
