@@ -29,6 +29,10 @@
   for(const id of ['trial-cycles','trial-amplitude'])fields.append($(id).closest('.motion-field'));
   confirm.before(options);
   const preview=$('playback-panel');
+  // Reuse the existing preview controls. The explicit primary action precedes
+  // optional speed/repeat settings; no handler or device command is duplicated.
+  const previewActions=preview.querySelector(':scope > .button-row'),previewOptions=preview.querySelector(':scope > .field-row');
+  if(previewActions&&previewOptions)preview.insertBefore(previewActions,previewOptions);
   preview.querySelectorAll(':scope > .hint:not([id])').forEach(n=>details.body.append(n));
   // A short source statement remains on screen. Technical information is available in details.
   const source=document.createElement('p');source.className='wc-view-help';

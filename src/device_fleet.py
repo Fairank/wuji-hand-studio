@@ -60,14 +60,17 @@ class DeviceFleet:
                 try:sock.bind(('127.0.0.1', preferred))
                 except OSError:sock.bind(('127.0.0.1',0))
                 port = sock.getsockname()[1]
+            owner_token=secrets.token_urlsafe(32)
             env = dict(os.environ, WUJI_STUDIO_DATA=str(folder), WUJI_STUDIO_PORT=str(port),
-                       WUJI_FLEET_PARENT=self.origin, WUJI_FLEET_ID=ident)
+                       WUJI_FLEET_PARENT=self.origin, WUJI_FLEET_ID=ident,
+                       WUJI_FLEET_OWNER_TOKEN=owner_token)
             command = [sys.executable, '--serve'] if getattr(sys, 'frozen', False) else [sys.executable, str(self.resource/'desktop.py'), '--serve']
             with (folder/'console.log').open('ab') as log:
                 child = subprocess.Popen(command, env=env, stdin=subprocess.DEVNULL,
                                          stdout=log, stderr=log,
                                          creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
-            record = dict(id=ident, label=label.strip(), port=port, profile=profile, process=child)
+            record = dict(id=ident, label=label.strip(), port=port, profile=profile, process=child,
+                          owner_token=owner_token)
             self.children[ident] = record
         try:
             for _ in range(100):
@@ -110,6 +113,21 @@ class DeviceFleet:
                                    'X-Console-Token': state['csrf']})
         with urlopen(request, timeout=15 if command.get('name')=='session_close' else 4) as response:
             return json.load(response)
+
+    def scoped_post(self, r, expected_context, action, payload=None):
+        """Parent-only typed dispatch; the destination rechecks the live owner.
+
+        The private token is never persisted or returned by a browser endpoint.
+        Ordinary iframe requests retain their original CSRF boundary.
+        """
+        origin=f'http://127.0.0.1:{r["port"]}'
+        request=Request(origin+'/api/task-owner',
+            data=json.dumps(dict(expected_context=expected_context,action=action,payload=payload or {})).encode(),
+            headers={'Content-Type':'application/json','Origin':self.origin,
+                     'X-Workbench-Owner':r['owner_token']})
+        with urlopen(request,timeout=20) as response:result=json.load(response)
+        if result.get('ok') is not True:raise ValueError(result.get('error') or 'Task owner rejected the action')
+        return result
 
     def heartbeat(self):
         # One slow workspace must not delay refreshing the other control leases.

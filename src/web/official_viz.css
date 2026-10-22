@@ -1,99 +1,81 @@
-.ov-root{min-width:0;display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:12px;align-items:start}
-.ov-root>*{grid-column:1/-1}
-.ov-root>.ov-heading{grid-row:1;margin-bottom:12px}
-.ov-root .ov-heading h3{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}
-.ov-root>.ov-modes{grid-column:1;grid-row:2;justify-self:start}
-.ov-root>.ov-display-actions{grid-column:2;grid-row:2;align-self:start}
-.ov-modes{display:inline-flex;width:auto;max-width:100%;margin:0 0 18px;padding:4px;gap:4px}
-.ov-modes button{min-height:34px;padding:7px 18px;white-space:nowrap}
-.ov-root>.ov-display-actions{margin:0 0 12px;justify-content:flex-end}
-.ov-source-info{display:flex;align-items:center;flex-wrap:wrap;gap:10px 18px;min-width:0;margin:8px 0 12px}
-.ov-source-info #ov-message{flex:1 1 280px;margin:0}
-.ov-root[data-view-mode=offline]>.ov-source-info{padding:12px 14px;border:1px solid var(--wb-line);border-radius:12px;background:var(--wb-group);margin:0 0 14px}
-html #page-connection #ov-connect-device{flex:0 0 auto;width:auto;min-height:35px;padding:8px 13px;border:0;border-radius:9px;background:#007aff;color:#fff;font-size:12px;font-weight:550;box-shadow:none;white-space:nowrap}
-html #page-connection #ov-connect-device:not(:disabled):hover{background:#0068dc}
-.ov-root[data-view-mode=offline]>.ov-heading{margin-bottom:12px}
-.ov-root[data-view-mode=offline] .ov-stage{height:calc(100dvh - 350px);min-height:280px}
-.ov-root[data-view-mode=offline] .ov-logs{display:none}
-.ov-root>.ov-toolbar[hidden],.ov-root>.ov-session[hidden]{display:none!important}
-.ov-heading{display:flex;align-items:start;justify-content:space-between;gap:18px;margin:0 0 16px}.ov-heading h3{margin:0 0 6px;font-size:18px}.ov-heading p,.ov-note,.ov-session,#ov-message,#ov-error{font-size:12px;line-height:1.65;color:var(--wb-sub)}.ov-heading p{margin:0}#ov-state{font-size:12px;color:var(--wb-sub);white-space:nowrap}
-.ov-toolbar{display:flex;align-items:end;flex-wrap:wrap;gap:8px}.ov-device-field{display:grid;gap:6px;min-width:160px;max-width:420px;flex:1 1 240px;font-size:12px;color:var(--wb-sub)}.ov-device-field select{width:100%;min-width:0}.ov-display-actions{display:flex;flex-wrap:wrap;gap:8px;margin-left:auto}.ov-toolbar button{white-space:nowrap}
-html #page-connection .ov-toolbar button{min-height:36px;padding:8px 13px;border:1px solid var(--ui-line);border-radius:10px;background:var(--ui-fill);color:var(--ui-ink);font-size:13px;font-weight:500;line-height:1.35;box-shadow:0 1px 1px #00000004}html #page-connection .ov-toolbar button.primary{background:#007aff;color:#fff;border-color:transparent}html #page-connection .ov-toolbar #ov-stop{background:var(--ui-danger-fill);color:var(--ui-danger)}html #page-connection .ov-toolbar button:not(:disabled):hover{border-color:#85858b60}html #page-connection .ov-toolbar :disabled{opacity:.43;cursor:default;box-shadow:none}html #page-connection .ov-device-field select{min-height:36px;padding:8px 12px;border:1px solid var(--ui-line);border-radius:10px;background:var(--ui-fill);color:var(--ui-ink);font-size:13px}
-.ov-note{margin:12px 0 8px}.ov-session{display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap;overflow-wrap:anywhere}.ov-session span:empty{display:none}#ov-message{margin:8px 0}#ov-error{color:var(--ui-danger,#ba302a);overflow-wrap:anywhere}#ov-error:empty{display:none}
-.ov-stage{position:relative;min-width:0;min-height:430px;height:calc(100dvh - 370px);border:1px solid var(--wb-line);border-radius:14px;overflow:hidden;background:var(--wb-group)}#ov-frame{display:block;border:0;width:100%;height:100%}#ov-empty{display:flex;min-height:430px;height:100%;box-sizing:border-box;align-items:center;justify-content:center;flex-direction:column;gap:12px;padding:24px;text-align:center}#ov-empty[hidden]{display:none}#ov-empty p{font-size:13px;color:var(--wb-sub);max-width:48ch;line-height:1.7;margin:0}#ov-frame-status{display:block;font-size:11px;line-height:1.5;margin-top:6px;color:var(--wb-sub)}#ov-frame-status[hidden]{display:none}
-.ov-logs{padding:14px 0;margin-top:14px;border-top:1px solid var(--wb-line)}.ov-logs summary{cursor:pointer;font-size:12px;color:var(--wb-sub)}.ov-logs pre{max-height:240px;overflow:auto;font-size:11px;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere}
-body[data-official-viz-focus=true] .top,body[data-official-viz-focus=true] .directory{display:none!important}body[data-official-viz-focus=true] .page-area{position:fixed!important;inset:8px!important;margin:0!important;width:auto!important;height:auto!important;padding:16px!important;z-index:60}body[data-official-viz-focus=true] #page-connection>.page-heading,body[data-official-viz-focus=true] #page-connection>.page-body>.hub-tabs{display:none}body[data-official-viz-focus=true] #page-connection>.page-body{max-width:none}body[data-official-viz-focus=true] .ov-root{display:flex;flex-direction:column;height:calc(100dvh - 52px)}body[data-official-viz-focus=true] .ov-stage{flex:1 1 auto;height:auto;min-height:0;margin-top:12px}body[data-official-viz-focus=true] .ov-heading{margin-bottom:10px}body[data-official-viz-focus=true] :is(#ov-description,.ov-note,.ov-session,#ov-message,.ov-logs){display:none}body[data-official-viz-focus=true] #ov-frame-status{flex:none}
-@media(max-width:960px){.ov-display-actions{margin-left:0}.ov-stage{height:65dvh;min-height:400px}.ov-heading{flex-wrap:wrap;gap:8px}}
-@media(max-width:700px){.ov-device-field{max-width:none;flex-basis:100%}.ov-toolbar button{flex:1 1 auto}.ov-display-actions{display:flex;width:100%}.ov-session{gap:4px}.ov-stage{min-height:380px}.ov-heading h3{font-size:17px}}
-@media(max-width:600px){.ov-root{grid-template-columns:minmax(0,1fr)}.ov-root>.ov-display-actions{grid-column:1;grid-row:3;justify-content:flex-start}.ov-root>.ov-modes{grid-column:1}.ov-root[data-view-mode=offline] .ov-stage{height:55dvh;min-height:260px}}
-body[data-official-viz-focus=true] .ov-root{align-items:stretch}
-body[data-official-viz-focus=true] .ov-root>.ov-modes{align-self:flex-start}
-/* Empty-mode context stays visible even when the renderer is focused. */
-body[data-official-viz-focus=true] .ov-root[data-view-mode=offline] #ov-message{display:block}
-#connection-popover .connection-cli-status{display:block;font-size:11px;font-weight:400;line-height:1.5;color:var(--ui-sub,var(--wb-sub));overflow-wrap:anywhere}
-@media(forced-colors:active){.ov-root[data-view-mode=offline]>.ov-source-info{background:Canvas;border-color:CanvasText}html #page-connection #ov-connect-device{background:ButtonFace;color:ButtonText;border:1px solid ButtonText}}
-
-/* The live-device entry is primary. A no-device viewer stays an explicit option. */
-.ov-root[data-view-mode=device][data-phase=idle] .ov-stage{min-height:230px;height:clamp(230px,36dvh,340px)}
-.ov-root[data-view-mode=device][data-phase=idle] #ov-empty{min-height:230px}
-body[data-official-viz-focus=true] .ov-root[data-view-mode=device][data-phase=idle] .ov-stage{min-height:0;height:auto}
-
-/* Source is an optional action, not a second level of task navigation. */
-.ov-root>.ov-source-actions{grid-column:1;grid-row:2;display:flex;align-items:center;gap:8px;margin:0 0 12px}
-.ov-source-actions button{min-height:32px;padding:6px 10px;border:1px solid var(--wb-line);border-radius:9px;background:transparent;color:var(--wb-sub);font-size:11px;font-weight:400;box-shadow:none}
-.ov-root>.ov-toolbar{padding:0 0 16px;border-bottom:1px solid var(--wb-line);margin:0 0 8px}
-.ov-root>.hub-cli-calibration{grid-column:1/-1}
-html #page-connection .ov-toolbar #ov-calibrate{background:var(--wb-card);color:var(--wb-ink)}
-html #page-connection .ov-toolbar #ov-calibrate:not(:disabled):hover{background:var(--wb-group)}
-.ov-root>.ov-heading{margin-bottom:14px}
-.ov-root[data-view-mode=offline]>.ov-source-info{margin-top:8px}
-body[data-official-viz-focus=true] .ov-root>.ov-source-actions{display:none}
-@media(max-width:600px){.ov-root>.ov-source-actions{grid-column:1;grid-row:2}.ov-root>.ov-display-actions{grid-row:3}.ov-root>.ov-toolbar{gap:8px}.ov-toolbar #ov-start,.ov-toolbar #ov-calibrate{flex-basis:calc(50% - 4px)}}
-
-/* A device, a task and a single original-content display. */
-.ov-root{display:flex;flex-direction:column;gap:0;align-items:stretch}
-.ov-root>.ov-heading{margin:0 0 16px;gap:16px}
+/* One shared device toolbar and one original-content stage. */
+.ov-root{display:flex;flex-direction:column;align-items:stretch;gap:0;min-width:0;color:var(--wb-ink,#202126)}
+.ov-root [hidden]{display:none!important}
 .ov-root>.ov-heading{display:none}
-.ov-device-field>span{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}
-.ov-root>.ov-toolbar{display:flex;align-items:flex-end;gap:9px;padding:0;margin:0;border:0}
-.ov-root .ov-device-field{max-width:none;flex:1 1 240px;min-width:160px}
-html #page-connection .ov-toolbar>.ov-task-choice{display:flex;flex:0 0 auto;align-items:stretch;align-self:flex-end;gap:2px;padding:3px;min-height:36px;box-sizing:border-box;border:1px solid var(--wb-line);border-radius:11px;background:var(--wb-group)}
-html #page-connection .ov-task-choice>button{min-height:28px;padding:4px 16px;border:0;border-radius:8px;background:transparent;color:var(--wb-sub);font-size:12px;line-height:1.5;box-shadow:none;min-width:66px}
+.ov-device-field>span{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+.ov-toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;min-width:0;padding:0;margin:0}
+.ov-device-field{display:block;flex:1 1 230px;min-width:160px;max-width:none}
+html #page-connection .ov-device-field select{box-sizing:border-box;width:100%;min-width:0;min-height:38px;padding:8px 30px 8px 12px;font-size:13px;line-height:1.5;border:1px solid var(--wb-line);border-radius:10px;background:var(--wb-card);color:var(--wb-ink)}
+html #page-connection .ov-toolbar button{min-height:38px;padding:8px 13px;line-height:1.5;font-size:13px;font-weight:500;white-space:nowrap;border:1px solid var(--wb-line);border-radius:10px;background:var(--wb-card);color:var(--wb-ink);box-shadow:none}
+html #page-connection .ov-toolbar button.primary{background:#007aff;color:#fff;border-color:transparent}
+html #page-connection .ov-toolbar button:disabled{opacity:1;background:var(--wb-group);color:var(--wb-sub);border-color:var(--wb-line);cursor:default;box-shadow:none}
+html body #page-connection .ov-toolbar #ov-calibrate.primary:not(:disabled){background:#007aff;border-color:transparent;color:#fff}
+html body #page-connection .ov-toolbar #ov-calibrate.primary:disabled{background:var(--wb-group);border-color:var(--wb-line);color:var(--wb-sub);opacity:1}
+html #page-connection .ov-toolbar>:is(#ov-start,#ov-calibrate){flex:0 0 auto;min-width:116px}
+html #page-connection .ov-toolbar>.ov-task-choice{display:flex;align-items:stretch;flex:0 0 auto;gap:2px;padding:3px;min-height:38px;box-sizing:border-box;border:1px solid var(--wb-line);border-radius:11px;background:var(--wb-group)}
+html #page-connection .ov-task-choice>button{flex:1;min-width:66px;min-height:30px;padding:4px 15px;border:0;border-radius:8px;background:transparent;color:var(--wb-sub);font-size:13px;line-height:1.5;box-shadow:none}
 html #page-connection .ov-task-choice>button[aria-pressed=true]{color:var(--wb-ink);font-weight:550;background:var(--wb-card)}
 html #page-connection .ov-task-choice[data-nm-ready=true]>button{background:transparent!important;box-shadow:none!important}
-html #page-connection .ov-toolbar>:is(#ov-start,#ov-calibrate){flex:0 0 auto;min-width:112px;min-height:36px;border-radius:10px}
-.ov-root>.ov-source-actions{order:4;display:flex;margin:0 0 9px;align-self:flex-start}
-.ov-root>.ov-display-actions{display:flex;justify-content:flex-end;align-items:center;gap:7px;margin:10px 0 0;min-height:30px}
-.ov-display-actions .ov-session{flex:1 1 220px;justify-content:flex-start;gap:4px 12px;margin:0;font-size:10px;line-height:1.5;color:var(--wb-sub)}
-.ov-display-actions #ov-state{font-size:10px;line-height:1.5}
-html #page-connection .ov-display-actions :is(button,a){display:inline-flex;align-items:center;justify-content:center;min-height:30px;padding:5px 10px;border:1px solid var(--wb-line);border-radius:9px;background:var(--wb-card);color:var(--wb-sub);font-size:11px;line-height:1.5;text-decoration:none;box-shadow:none}
+.ov-display-actions{display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:8px;min-width:0;width:100%;box-sizing:border-box;margin:12px 0}
+.ov-session{display:flex;align-items:center;gap:4px 12px;flex:1 1 200px;flex-wrap:wrap;margin:0;min-width:0;font-size:12px;line-height:1.5;color:var(--wb-sub);overflow-wrap:anywhere}
+.ov-session span:empty{display:none}
+#ov-state{font-size:12px;line-height:1.5;color:var(--wb-sub)}
+html #page-connection .ov-display-actions :is(button,a){display:inline-flex;align-items:center;justify-content:center;min-height:34px;box-sizing:border-box;padding:6px 11px;border:1px solid var(--wb-line);border-radius:10px;background:var(--wb-card);color:var(--wb-sub);font-size:12px;line-height:1.5;text-decoration:none;box-shadow:none}
 html #page-connection .ov-display-actions :is(#ov-stop,#hub-calib-cancel){color:var(--ui-danger,#b73838)}
-.ov-root>.ov-source-info{margin:8px 0 10px;gap:8px 12px;min-height:0;order:3}
-.ov-root>.ov-source-info #ov-message:empty{display:none}
-.ov-root>.ov-session{margin:8px 0 0;font-size:10px;min-height:0}
-.ov-root>.ov-note{margin:6px 0 0;font-size:10px}
-.ov-root>.ov-stage{order:5;margin:0;flex:none}
-.ov-root>:is(#ov-frame-status,.ov-logs){order:6}
-.ov-root>#ov-error{order:4;margin:0 0 8px}
-#ov-shared-stage.ov-stage{height:clamp(340px,calc(100dvh - 310px),820px);min-height:340px;border-radius:15px;background:var(--wb-group);overflow:hidden}
+.ov-source-info{display:flex;align-items:center;flex-wrap:wrap;gap:8px 16px;order:3;min-width:0;margin:0 0 12px}
+.ov-source-info #ov-message{flex:1 1 280px;margin:0;font-size:13px;line-height:1.6;color:var(--wb-sub);overflow-wrap:anywhere}
+.ov-source-info #ov-message:empty{display:none}
+.ov-root[data-view-mode=offline]>.ov-source-info{padding:12px 16px;border:1px solid var(--wb-line);border-radius:12px;background:var(--wb-group)}
+html #page-connection #ov-connect-device{flex:0 0 auto;width:auto;min-height:36px;padding:7px 12px;border:0;border-radius:10px;background:#007aff;color:#fff;font-size:13px;font-weight:550;white-space:nowrap}
+.ov-source-actions{display:flex;align-items:center;gap:8px;order:4;align-self:flex-start;margin:0 0 12px}
+.ov-source-actions button{min-height:32px;padding:5px 10px;border:1px solid var(--wb-line);border-radius:9px;background:transparent;color:var(--wb-sub);font-size:12px;line-height:1.5;box-shadow:none}
+.ov-note{margin:0 0 12px;font-size:12px;line-height:1.6;color:var(--wb-sub);overflow-wrap:anywhere}
+#ov-error{order:4;margin:0 0 12px;font-size:14px;line-height:1.6;color:var(--ui-danger,#b73838);overflow-wrap:anywhere}
+#ov-error:empty{display:none}
+#ov-shared-stage.ov-stage{order:5;position:relative;flex:none;min-width:0;height:clamp(340px,calc(100dvh - 310px),820px);min-height:340px;margin:0;border:1px solid var(--wb-line);border-radius:14px;overflow:hidden;background:var(--wb-card)}
 #ov-view-stage{height:100%;width:100%;min-width:0}
-#ov-view-stage[hidden]{display:none!important}
-#ov-shared-stage #ov-empty{min-height:0;height:100%;gap:10px}
-#ov-shared-stage #ov-empty strong{font-size:17px;font-weight:550;letter-spacing:-.25px}
-#ov-shared-stage #ov-empty p{font-size:12px}
-.ov-root[data-task=calibration]>.ov-source-info{margin:9px 0 10px}
-.ov-root[data-task=calibration] .ov-source-info #ov-message{font-size:11px}
-.ov-root [hidden]{display:none!important}
-html body #page-connection .ov-toolbar #ov-calibrate.primary:not(:disabled){background:var(--ui-blue,#007aff);border-color:transparent;color:#fff}
-html body #page-connection .ov-toolbar #ov-calibrate.primary:disabled{background:var(--ui-fill);color:var(--ui-sub);border-color:var(--ui-line);opacity:1}
-body[data-official-viz-focus=true] #ov-shared-stage{flex:1;height:auto;min-height:0;margin-top:12px}
-body[data-official-viz-focus=true] .ov-root[data-task=calibration] #hub-calibration:not([hidden]){display:block!important}
-@media(max-width:960px){.ov-root .ov-device-field{flex-basis:220px}.ov-root>.ov-display-actions{margin-top:9px}#ov-shared-stage.ov-stage{height:clamp(340px,calc(100dvh - 315px),760px)}}
-@media(max-width:600px){.ov-root .ov-device-field{flex-basis:calc(100% - 110px)}html #page-connection .ov-toolbar #ov-scan{flex:0 0 auto}html #page-connection .ov-toolbar>.ov-task-choice{flex:1 1 auto}html #page-connection .ov-task-choice>button{flex:1}html #page-connection .ov-toolbar>:is(#ov-start,#ov-calibrate){flex:1 1 auto;min-width:112px}.ov-root>.ov-display-actions{width:auto;justify-content:flex-start;flex-wrap:wrap}.ov-display-actions .ov-session{flex-basis:100%;order:2}#ov-shared-stage.ov-stage{min-height:340px;height:56dvh}.ov-root>.ov-heading{align-items:center;gap:7px}.ov-root>.ov-heading p{font-size:11px}}
-@media(forced-colors:active){html #page-connection .ov-task-choice>button[aria-pressed=true]{outline:1px solid Highlight;background:Highlight;color:HighlightText}}
+#ov-frame{display:block;border:0;width:100%;height:100%}
+#ov-empty{display:flex;height:100%;min-height:0;box-sizing:border-box;align-items:center;justify-content:center;flex-direction:column;gap:12px;padding:24px;text-align:center}
+#ov-empty strong{font-size:22px;font-weight:550;letter-spacing:-.35px;line-height:1.35}
+#ov-empty p{max-width:48ch;margin:0;font-size:14px;line-height:1.6;color:var(--wb-sub);overflow-wrap:anywhere}
+#ov-frame-status{display:block;order:6;margin-top:10px;font-size:12px;line-height:1.5;color:var(--wb-sub);overflow-wrap:anywhere}
+.ov-logs{order:6;padding:16px 0 0;margin-top:16px;border-top:1px solid var(--wb-line);min-width:0}
+.ov-logs summary{font-size:13px;line-height:1.5;color:var(--wb-sub);cursor:pointer}
+.ov-logs pre{max-height:240px;overflow:auto;margin:16px 0 0;font-size:12px;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere}
+.ov-root[data-view-mode=offline] .ov-logs{display:none}
+.ov-root[data-view-mode=device][data-phase=idle][data-task=view] #ov-shared-stage{min-height:260px;height:clamp(260px,36dvh,340px)}
 .ov-root[data-guided=true] #ov-version{display:none}
 .ov-root[data-guided=true][data-task=calibration]>.ov-source-info{display:none}
-.ov-root[data-guided=true] #ov-start-note{font-size:10px}
-.ov-root>.ov-display-actions{align-self:stretch;width:100%;box-sizing:border-box;flex-wrap:wrap}
-.ov-root[data-guided=true] .ov-display-actions .ov-session{order:-1;flex:1 1 150px}
-html body #page-connection .ov-root[data-guided=true] .ov-toolbar #ov-calibrate{min-width:126px}
+.ov-root[data-task=calibration]:has(.oc-run[data-human-tty=false]) #ov-focus{display:none!important}
+.ov-root[data-task=calibration]:has(#hub-calibration[data-running=true]) #ov-calibrate,.ov-root[data-task=calibration]:has(.oc-run[data-cleanup-required=true]) #ov-calibrate{display:none!important}
+/* Calibration follows the page's scroll. The original Viewer retains a viewport. */
+html body #page-connection #ov-shared-stage[data-task=calibration]{height:auto;min-height:0;overflow:visible}
+html body #page-connection #ov-shared-stage[data-task=calibration]>#hub-calibration{height:auto;min-height:0;overflow:visible;scrollbar-gutter:auto;background:transparent}
+html body #page-connection #ov-shared-stage[data-task=calibration]>#hub-calibration>.hub-calibration{height:auto;min-height:0;padding:24px;box-sizing:border-box}
+html body #page-connection #hub-calibration[data-guided-native=true] .hub-calibration-workspace{max-width:520px;margin:0;gap:24px}
+html body #page-connection #hub-calibration[data-guided-native=true] .hub-calibration-session{padding:0;border:0;min-height:0;margin-top:16px}
+html body #page-connection #hub-calibration[data-guided-native=true] .hub-calibration-setup{padding:0;margin:0;border:0;background:transparent}
+html body #page-connection #hub-calibration[data-guided-native=true] .hub-calibration-form{gap:16px}
+html body #page-connection #hub-calibration[data-guided-native=true] .hub-calib-field-heading>label{font-size:14px;font-weight:550}
+html body #page-connection #hub-calibration[data-guided-native=true] .hub-calibration-form :is(select,input:not([type=checkbox])){min-height:38px;height:38px;font-size:14px;border-radius:10px}
+html body #page-connection #hub-calibration[data-guided-native=true] .hub-field-note{font-size:13px!important;line-height:1.6!important}
+html body #page-connection #hub-calibration[data-guided-native=true] .hub-replace{font-size:13px;line-height:1.6}
+html body #page-connection #hub-calibration[data-guided-native=true] #hub-calib-ready-title{display:none}
+html body #page-connection #hub-calibration[data-guided-native=true] #hub-calib-ready-note{font-size:14px;line-height:1.6;color:var(--wb-ink)}
+html body #page-connection #hub-calibration[data-guided-native=true] .hub-calib-readiness:has(#hub-calib-ready-note:empty):has(#hub-calib-next[hidden]){display:none}
+html body #page-connection #hub-calibration[data-guided-native=true] #hub-calib-advanced{margin-top:24px;padding-top:16px;font-size:13px}
+html body #page-connection #hub-calibration[data-guided-native=true] #hub-calib-previous{max-width:none;margin-top:24px;padding-top:16px;font-size:13px}
+html body #page-connection #hub-calibration[data-session-stage=disconnected] .hub-calibration-session{min-height:0;margin:0;justify-content:flex-start}
+html body #page-connection #hub-calibration[data-human-tty=true] #hub-calibration-guide{min-height:0}
+body[data-official-viz-focus=true] :is(.top,.directory){display:none!important}
+body[data-official-viz-focus=true] .page-area{position:fixed!important;inset:8px!important;width:auto!important;height:auto!important;margin:0!important;padding:16px!important;z-index:60;overflow:auto}
+body[data-official-viz-focus=true] #page-connection>.page-heading,body[data-official-viz-focus=true] #page-connection>.page-body>.hub-tabs{display:none}
+body[data-official-viz-focus=true] #page-connection>.page-body{max-width:none}
+body[data-official-viz-focus=true] .ov-root{min-height:calc(100dvh - 52px)}
+body[data-official-viz-focus=true] .ov-root[data-task=view] #ov-shared-stage{flex:1;height:calc(100dvh - 160px);min-height:260px}
+body[data-official-viz-focus=true] :is(.ov-note,.ov-session,.ov-source-actions,.ov-logs){display:none}
+body[data-official-viz-focus=true] .ov-root[data-view-mode=offline] #ov-message{display:block}
+#connection-popover .connection-cli-status{display:block;font-size:11px;font-weight:400;line-height:1.5;color:var(--ui-sub,var(--wb-sub));overflow-wrap:anywhere}
+@media(max-width:960px){.ov-device-field{flex-basis:220px}.ov-display-actions{margin:10px 0 14px}.ov-session{flex-basis:180px}}
+@media(max-width:600px){.ov-device-field{flex-basis:calc(100% - 110px)}html #page-connection .ov-toolbar #ov-scan{flex:0 0 auto}html #page-connection .ov-toolbar>.ov-task-choice{flex:1 1 auto}html #page-connection .ov-toolbar>:is(#ov-start,#ov-calibrate){flex:1 1 auto;min-width:112px}.ov-display-actions{justify-content:flex-start;gap:8px}.ov-session{flex-basis:100%;order:2}#ov-shared-stage.ov-stage{height:56dvh;min-height:300px}html body #page-connection #ov-shared-stage[data-task=calibration]>#hub-calibration>.hub-calibration{padding:18px}.ov-root[data-guided=true] .ov-display-actions .ov-session{flex-basis:100%}}
+@media(forced-colors:active){html #page-connection .ov-task-choice>button[aria-pressed=true]{outline:1px solid Highlight;background:Highlight;color:HighlightText}html #page-connection .ov-toolbar button.primary,html #page-connection #ov-connect-device{background:ButtonFace;color:ButtonText;border:1px solid ButtonText}}

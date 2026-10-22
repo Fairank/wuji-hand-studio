@@ -65,6 +65,17 @@ class ExitTests(unittest.TestCase):
         ticks=iter([0,1])
         self.assertFalse(close_sessions(c,timeout=.5,clock=lambda:next(ticks),sleep=lambda _:None)['ok'])
         self.assertEqual([x.args[0]['name'] for x in c.action.call_args_list],['calibration_cancel'])
+    def test_pending_handover_is_not_an_idle_closed_session_and_can_retry(self):
+        for key in ('calibration_connection','teleoperation_connection'):
+            with self.subTest(key=key):
+                s=state();s[key]=dict(busy=True,phase='starting')
+                c=self.controller(s)
+                self.assertTrue(needs_confirmation(s))
+                result=close_sessions(c,sleep=lambda _:None)
+                self.assertFalse(result['ok']);self.assertIn('handover',result['error'])
+                c.action.assert_not_called();c.official_cli.closed.set.assert_not_called()
+                s[key]['busy']=False
+                self.assertTrue(close_sessions(c,sleep=lambda _:None)['ok'])
     def test_local_origin_is_exact(self):
         self.assertTrue(same_origin('http://127.0.0.1:8789/viewer#x','http://127.0.0.1:8789'))
         for url in ['https://127.0.0.1:8789/','http://127.0.0.1:8790/','file:///x','https://example.org','http://127.0.0.1.evil:8789/']:

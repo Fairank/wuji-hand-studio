@@ -29,17 +29,16 @@
 
     class Group{
       constructor(host){
-        this.host=host;this.items=new Set();this.target=null;this.goal=null;this.animation=null;this.visible=false;
+        this.host=host;this.items=new Set();this.target=null;this.goal=null;this.animation=null;this.visible=false;this.move=null;
         this.position=host.style.position;this.positionChanged=getComputedStyle(host).position==='static';
         if(this.positionChanged)host.style.position='relative';
         host.classList.add('nm-host');
         this.indicator=document.createElement('span');this.indicator.className='nm-indicator';
         this.indicator.setAttribute('aria-hidden','true');this.indicator.hidden=true;host.append(this.indicator);
         this.resize=new ResizeObserver(()=>schedule(this,true));this.resize.observe(host);
-        this.intersection=new IntersectionObserver(entries=>{
-          if(entries.some(entry=>!entry.isIntersecting))this.suspend();
-          else schedule(this,true);
-        });this.intersection.observe(host);
+        // A reparent can queue an old "not intersecting" entry after the host
+        // is already visible elsewhere. Check its current layout in update.
+        this.intersection=new IntersectionObserver(()=>schedule(this,true));this.intersection.observe(host);
         this.collect();schedule(this,true);
       }
       collect(){
@@ -76,6 +75,19 @@
       suspend(){
         this.cancel();this.visible=false;this.indicator.hidden=true;this.host.dataset.nmReady='false';
       }
+      prepareMove(){
+        if(this.move&&performance.now()<this.move.until)return;
+        if(!this.goal)return;
+        let box={...this.goal};
+        if(this.visible&&this.host.getClientRects().length){
+          const host=this.host.getBoundingClientRect(),current=this.indicator.getBoundingClientRect();
+          const sx=host.width/this.host.offsetWidth||1,sy=host.height/this.host.offsetHeight||1;
+          box={x:(current.left-host.left)/sx-this.host.clientLeft+this.host.scrollLeft,
+            y:(current.top-host.top)/sy-this.host.clientTop+this.host.scrollTop,w:current.width/sx,h:current.height/sy};
+        }
+        this.move={box,ready:false,until:performance.now()+500};
+      }
+      finishMove(){if(this.move)this.move.ready=true;schedule(this,false);}
       geometry(target,hostRect,hostScale){
         const r=target.getBoundingClientRect(),style=getComputedStyle(target);
         // Individual press scale is visual only. Track the unpressed hit-area box.
@@ -88,7 +100,7 @@
       }
       keyframes(from,to){
         const distance=Math.max(Math.abs(to.x-from.x),Math.abs(to.y-from.y),Math.abs(to.w-from.w),Math.abs(to.h-from.h),1);
-        const cap=Math.min(1,2.4/(distance*.02)),zeta=.78,omega=11.5,damped=omega*Math.sqrt(1-zeta*zeta),frames=[];
+        const cap=Math.min(1,1.2/(distance*.02)),zeta=.86,omega=12,damped=omega*Math.sqrt(1-zeta*zeta),frames=[];
         for(let i=0;i<=50;i++){
           const time=i/50;
           let p=i===50?1:1-Math.exp(-zeta*omega*time)*(Math.cos(damped*time)+zeta/Math.sqrt(1-zeta*zeta)*Math.sin(damped*time));
@@ -99,7 +111,7 @@
         return frames;
       }
       update(snap){
-        this.collect();const target=this.selected(),previous=this.target;this.mark(target);
+        this.collect();const target=this.selected();this.mark(target);
         if(!target||document.hidden||forced.matches||!this.host.getClientRects().length||!target.getClientRects().length){this.suspend();return;}
         const bounds=this.host.getBoundingClientRect(),style=getComputedStyle(this.host);
         if(style.visibility==='hidden'||bounds.bottom<=0||bounds.top>=innerHeight||bounds.right<=0||bounds.left>=innerWidth){this.suspend();return;}
@@ -108,20 +120,26 @@
           y:bounds.height/(size('height',['paddingTop','paddingBottom','borderTopWidth','borderBottomWidth'])||bounds.height)};
         const goal=this.geometry(target,bounds,hostScale);
         if(goal.w<=0||goal.h<=0){this.suspend();return;}
-        if(this.visible&&previous===target&&near(goal,this.goal)){
+        if(this.move&&performance.now()>=this.move.until)this.move=null;
+        const moved=this.move?.ready?this.move.box:null;
+        // Status renderers can replace every option without changing selection
+        // geometry. Keep the same in-flight surface instead of snapping merely
+        // because a new DOM node represents the same destination.
+        if(this.visible&&near(goal,this.goal)&&!moved){
           if(reduced())this.cancel();
           return;
         }
         // Read the compositor's current position once before cancelling an interrupted spring.
         const current=this.visible?this.indicator.getBoundingClientRect():null;
-        const from=current?{x:(current.left-bounds.left)/hostScale.x-this.host.clientLeft+this.host.scrollLeft,
-          y:(current.top-bounds.top)/hostScale.y-this.host.clientTop+this.host.scrollTop,w:current.width/hostScale.x,h:current.height/hostScale.y}:goal;
-        const animate=this.visible&&!snap&&!reduced()&&!near(from,goal)&&typeof this.indicator.animate==='function';
+        const from=moved||(current?{x:(current.left-bounds.left)/hostScale.x-this.host.clientLeft+this.host.scrollLeft,
+          y:(current.top-bounds.top)/hostScale.y-this.host.clientTop+this.host.scrollTop,w:current.width/hostScale.x,h:current.height/hostScale.y}:goal);
+        const animate=(this.visible||!!moved)&&(!snap||!!moved)&&!reduced()&&!near(from,goal)&&typeof this.indicator.animate==='function';
+        if(moved)this.move=null;
         this.cancel();this.goal=goal;this.visible=true;this.indicator.hidden=false;this.host.dataset.nmReady='true';
         Object.assign(this.indicator.style,{width:goal.w+'px',height:goal.h+'px',transform:transform({x:goal.x,y:goal.y,sx:1,sy:1})});
         if(!animate)return;
         this.indicator.style.willChange='transform';
-        const animation=this.indicator.animate(this.keyframes(from,goal),{duration:460,easing:'linear',iterations:1});
+        const animation=this.indicator.animate(this.keyframes(from,goal),{duration:280,easing:'linear',iterations:1});
         this.animation=animation;
         animation.finished.then(()=>{if(this.animation===animation){this.animation=null;this.indicator.style.willChange='';}},()=>{});
       }
@@ -188,7 +206,7 @@
     reducedSystem.addEventListener('change',onPreference);forced.addEventListener('change',onPreference);
     const fonts=document.fonts;fonts?.addEventListener('loadingdone',onLayout);
     discover(scope);
-    const api={refresh:()=>refresh(true),destroy(){
+    const api={refresh:()=>refresh(true),prepareMove:host=>groups.get(host)?.prepareMove(),finishMove:host=>groups.get(host)?.finishMove(),destroy(){
       destroyed=true;if(frame)cancelAnimationFrame(frame);observer.disconnect();preferences.disconnect();
       for(const group of [...groups.values()])remove(group);
       window.removeEventListener('resize',onLayout);window.removeEventListener('wuji-language',onLayout);

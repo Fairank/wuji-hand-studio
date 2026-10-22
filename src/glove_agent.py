@@ -114,7 +114,8 @@ def paired_hand_worker(address, serial, selected, requests, events, factory, sou
             cleanup=cleanup and closed is not None and hardware.get('active') is False
         events.put(dict(type='hand_session_closed',cleanup_confirmed=cleanup))
 
-def worker_glove(requests,events):
+def worker_glove(requests,events,continuation=None):
+    import collections
     from device_profiles import controller_profile
     selected=controller_profile();source=GloveSource();glove=sub=session=None
     hand_thread=None;hand_requests=queue.Queue();hand_events=queue.Queue()
@@ -124,11 +125,37 @@ def worker_glove(requests,events):
     from retarget_settings import OutputMapping, defaults
     mapping=OutputMapping(defaults())
     sdk_q=None;latest_kp=None;glove_ownership=None;profile_lease=None;solver_engine='sdk';selected_user_active=False
+    model_receipt=None;model_provenance=None
+    hand_unpairing=False;hand_unpaired=False
+    bootstrap_commands=collections.deque()
+    class BootstrapCancelled(Exception):pass
+    def bootstrap_not_cancelled():
+        for _ in range(64):
+            try:command=requests.get_nowait()
+            except queue.Empty:return
+            if command.get('name') in ('disconnect','glove_disconnect'):raise BootstrapCancelled()
+            bootstrap_commands.append(command)
+        raise ValueError('Continuation startup command queue exceeds its limit')
     try:
         import numpy as np
         import wuji_sdk as sdk
         manager=sdk.SdkManager.instance();previous_user=manager.current_user();current=previous_user
         users=manager.list_users()
+        if continuation is not None:
+            from calibration_portability import validate_continuation,prepare_controller_model
+            continuation=validate_continuation(continuation,path=True)
+            if continuation['side']!=selected['side']:
+                raise ValueError('本次标定侧别与遥操作目标不符 / Calibration side differs from the teleoperation target')
+            bootstrap_not_cancelled()
+            if sys.platform.startswith('linux'):
+                from sdk_session import ProfileLease
+                with ProfileLease(exclusive=True):model_receipt=prepare_controller_model(manager,continuation)
+            else:model_receipt=prepare_controller_model(manager,continuation)
+            if manager.current_user().get('user_id')!=previous_user.get('user_id'):
+                raise ValueError('SDK user changed during calibration import; glove was not opened')
+            bootstrap_not_cancelled()
+            users=manager.list_users()
+            model_provenance={k:model_receipt[k] for k in ('source_run_id','source_workspace','source_profile','serial','side','model_sha256','owner_user_id','imported')}
         def new_solver(settings):
             if settings.get('engine','sdk')=='official_open':
                 from solver_session import SolverSession
@@ -144,9 +171,13 @@ def worker_glove(requests,events):
             from zenoh_route import managed_wsl
             return scan_gloves(manager,sdk,all_devices,allow_direct=managed_wsl())
         devices=scan();devices_at=time.time();state='ready';message='选择手套和标定用户 / Select glove and SDK user'
+        if continuation is not None:
+            if not any(d['serial']==continuation['serial'] for d in devices):
+                raise ValueError('未找到刚才标定的这只手套，未接入其它设备 / The calibrated glove was not found; no other device was opened')
+            events.put(dict(type='calibrated_ready',receipt=copy.deepcopy(model_provenance)))
         while True:
             now=time.monotonic()
-            try:c=requests.get_nowait()
+            try:c=bootstrap_commands.popleft() if bootstrap_commands else requests.get_nowait()
             except queue.Empty:c=None
             if c:
                 try:
@@ -160,6 +191,8 @@ def worker_glove(requests,events):
                         if c['serial'] not in {d['serial'] for d in devices}:raise ValueError('请先扫描并选择手套')
                         user_id=c.get('user_id',current['user_id'])
                         if user_id not in {u['user_id'] for u in users}:raise ValueError('Unknown SDK user')
+                        if continuation is not None and (c['serial']!=continuation['serial'] or user_id!=model_receipt['owner_user_id']):
+                            raise ValueError('Continuation device or SDK user differs from the saved calibration')
                         candidate=None;selection_lease=None;switched=False
                         try:
                             if sys.platform.startswith('linux'):
@@ -170,11 +203,19 @@ def worker_glove(requests,events):
                                 glove_ownership=DeviceOwnership(c['serial'])
                             previous_user=manager.current_user()
                             manager.switch_user(user_id);switched=True;selected_user_active=True;current=manager.current_user()
+                            if continuation is not None and (current.get('user_id')!=user_id or current.get('is_default') is not False
+                                    or current.get('display_name')!=continuation['source_profile']):
+                                raise ValueError('Controller did not confirm the calibrated SDK user')
                             from glove_discovery import connect_glove
                             candidate=connect_glove(manager,next(d for d in devices if d['serial']==c['serial']))
+                            if continuation is not None and not isinstance(candidate,sdk.WujiGlove):
+                                raise ValueError('Selected calibration continuation is not a typed Wuji Glove')
                             actual=str(candidate.hand_side().get()).lower()
                             if actual not in (selected['side'],'handedness.'+selected['side']):
                                 raise ValueError('手套左右与工作台所选型号不符 / Glove side differs from profile')
+                            if model_receipt is not None:
+                                from calibration_portability import verify_loaded_model
+                                verify_loaded_model(candidate,model_receipt)
                             session=new_solver(c.get('solver',{}));solver_engine=c.get('solver',{}).get('engine','sdk')
                             sub=candidate.hand_skeleton().subscribe()
                         except Exception:
@@ -221,9 +262,10 @@ def worker_glove(requests,events):
                         source.target(now)
                         allowed,reason=prepare_permission(hand_thread,hand_state)
                         if not allowed:raise ValueError(reason)
+                        if hand_unpairing:raise ValueError('Wait for hand unpair cleanup')
                         from glove_motion import GloveMotion
                         def factory(*args):return GloveMotion(*args,source=source)
-                        hand_state={};hand_identity={};hand_error='';hand_requests=queue.Queue();hand_events=queue.Queue()
+                        hand_state={};hand_identity={};hand_error='';hand_unpaired=False;hand_requests=queue.Queue();hand_events=queue.Queue()
                         hand_thread=threading.Thread(target=paired_hand_worker,args=(c.get('address',''),c.get('serial',''),selected,hand_requests,hand_events,factory,source),daemon=True)
                         hand_thread.start();message='正在连接灵巧手，只读反馈 / Connecting hand feedback only'
                     elif name=='glove_retarget':
@@ -233,12 +275,21 @@ def worker_glove(requests,events):
                         source.invalidate('等待应用新映射后的骨架 / Waiting for a new mapped frame')
                         message='映射已应用，等待下一帧 / Mapping applied; awaiting new frame'
                     elif name=='glove_follow':
+                        if hand_unpairing:raise ValueError('Hand cleanup is still in progress')
                         if not hand_thread or not hand_thread.is_alive():raise ValueError('先连接灵巧手反馈 / Prepare hand feedback first')
                         source.target(now)
                         hand_requests.put(dict(name='hardware_start',lease=c['lease'],workspace_clear=c['workspace_clear']))
                     elif name=='glove_keepalive':hand_requests.put(dict(name='hardware_keepalive',lease=c.get('lease')))
                     elif name=='glove_stop':hand_requests.put(dict(name='hardware_stop'))
-                except Exception as e:message=str(e);events.put(dict(type='glove_notice',message=message))
+                    elif name=='glove_unpair':
+                        if (glove is None or hand_thread is None or not hand_thread.is_alive()
+                                or hand_state.get('hardware',{}).get('active') is not False or hand_unpairing):
+                            raise ValueError('Pause and confirm hand disable before unpairing')
+                        hand_requests.put(dict(name='disconnect'));hand_unpairing=True
+                        message='正在释放灵巧手，手套预览保持打开 / Releasing hand; glove preview remains open'
+                except Exception as e:
+                    message=str(e);events.put(dict(type='glove_notice',message=message))
+                    if continuation is not None and c.get('name')=='glove_open':raise
             if glove is not None and now>=next_map:
                 next_map=now+1/120
                 try:
@@ -272,6 +323,14 @@ def worker_glove(requests,events):
                     if 'hardware' in event:hand_state['hardware']=event['hardware']
                 elif event['type']=='hand_session_closed':
                     hand_state['cleanup_confirmed']=event.get('cleanup_confirmed') is True
+            if hand_unpairing and hand_thread is not None and not hand_thread.is_alive():
+                hand_unpairing=False
+                if hand_state.get('cleanup_confirmed') is True and hand_state.get('hardware',{}).get('active') is False:
+                    hand_thread=None;hand_state={};hand_identity={};hand_error='';hand_unpaired=True
+                    message='已解除目标配对，手套预览保持打开 / Target unpaired; glove preview remains open'
+                else:
+                    hand_error='灵巧手释放尚未确认，请结束此会话并核对 / Hand cleanup unconfirmed; end and review this session'
+                    message=hand_error
             now=time.monotonic()
             if now-last_emit>=.05:
                 snapshot=source.snapshot(now)
@@ -292,10 +351,13 @@ def worker_glove(requests,events):
                     stream=snapshot,hardware=hw,feedback=feedback,hand_error=hand_error,
                     can_prepare=can_prepare,prepare_blocked_reason=prepare_reason,
                     hand_cleanup_confirmed=hand_state.get('cleanup_confirmed'),
+                    hand_unpairing=hand_unpairing,hand_unpaired=hand_unpaired,
                     parameters=__import__('official_policy').settings(),
+                    model_provenance=copy.deepcopy(model_provenance),
                     source='official_open_live_retarget' if solver_engine=='official_open' else 'official_sdk_live_retarget',hardware_validated=False)))
                 last_emit=now
             time.sleep(.001)
+    except BootstrapCancelled:events.put(dict(type='glove_notice',message='接续已取消，已保存的标定资料保留 / Continuation cancelled; saved calibration data is retained'))
     except Exception as e:events.put(dict(type='glove_error',message=str(e)))
     finally:
         source.invalidate('连接已结束 / Session closed')

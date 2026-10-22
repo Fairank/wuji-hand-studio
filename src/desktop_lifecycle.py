@@ -10,10 +10,25 @@ def needs_confirmation(state):
             or state.get('official_viz',{}).get('reserved',False)
             or state.get('recording',{}).get('active',False)
             or state.get('calibration',{}).get('running',False)
+            or state.get('calibration_connection',{}).get('busy',False)
+            or state.get('teleoperation_connection',{}).get('busy',False)
+            or state.get('calibrated_teleoperation',{}).get('busy',False)
             or state.get('hardware',{}).get('active') is not False or bool(unconfirmed(state)))
 
 def close_sessions(controller, timeout=6., clock=time.monotonic, sleep=time.sleep):
     state=controller.snapshot()
+    # A handover can be between releasing its Viewer and publishing its new
+    # run/bridge. Ordinary disconnect is not an acknowledgement of that pending
+    # transition. Keep the window open; retry works once its owner has finished.
+    if state.get('calibration_connection',{}).get('busy'):
+        return dict(ok=False,error='标定任务正在切换，请等待完成或在原任务中取消后重试 / Calibration handover is still in progress; wait or cancel it in its owning task before retrying')
+    if state.get('teleoperation_connection',{}).get('busy'):
+        return dict(ok=False,error='遥操作任务正在切换，请等待完成或在原任务中取消后重试 / Teleoperation handover is still in progress; wait or cancel it in its owning task before retrying')
+    continuation=getattr(controller,'calibrated_teleoperation',None)
+    if state.get('calibrated_teleoperation',{}).get('busy'):
+        if continuation is None or not continuation.cancel_and_wait(timeout):
+            return dict(ok=False,error='标定资料接续仍在结束，请稍后重试 / Calibration continuation is still closing; retry shortly')
+        state=controller.snapshot()
     if hasattr(controller,'official_cli'):controller.official_cli.closed.set()
     if state.get('official_viz',{}).get('active') or state.get('official_viz',{}).get('busy') or state.get('official_viz',{}).get('reserved'):
         try:controller.official_viz.stop()

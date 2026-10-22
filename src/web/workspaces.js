@@ -1,7 +1,9 @@
 /* workspaces.js — multi-hand workspace manager for #page-devices (vanilla JS, no dependencies). */
 (() => {
   'use strict';
-  if (new URLSearchParams(location.search).get('embedded') === '1') return;
+  const taskGroup=new URLSearchParams(location.search).get('task_group');
+  const embedded=new URLSearchParams(location.search).get('embedded')==='1';
+  if(embedded&&(!new URLSearchParams(location.search).get('task_view')||!taskGroup||!(/^(main|[a-f0-9]{16})$/).test(taskGroup)))return;
 
   const STORE = 'wsx.workspace', TIMEOUT_MS = 8000;
   const PROFILES = [['hand2_left', 2, 'left'], ['hand2_right', 2, 'right'], ['hand1_left', 1, 'left'], ['hand1_right', 1, 'right']];
@@ -40,7 +42,7 @@
 <div class="wsx-grid"><section class="wsx-card"><h3 data-wsx-t="members"></h3><p class="wsx-note wsx-empty" data-wsx-t="emptyWs" hidden></p>
   <div class="wsx-list wsx-members"></div><div class="wsx-row"><label class="wsx-field"><span data-wsx-t="previewModel"></span>
   <select class="wsx-prof"></select></label><button type="button" class="wsx-btn wsx-addprev" data-wsx-t="addPreview"></button></div></section>
-<section class="wsx-card wsx-group-card"><h3 data-wsx-t="group"></h3><div class="wsx-views"></div><p class="wsx-note wsx-nopanel" data-wsx-t="noPanel"></p><div class="wsx-panel"></div></section>
+<section class="wsx-card wsx-group-card"><h3 data-wsx-t="group"></h3><div class="wsx-panel"></div><div class="wsx-views"></div><p class="wsx-note wsx-nopanel" data-wsx-t="noPanel"></p></section>
 <section class="wsx-card"><h3 data-wsx-t="manage"></h3>
   <form class="wsx-row wsx-create"><label class="wsx-field"><span data-wsx-t="newName"></span><input name="label" maxlength="40"
   autocomplete="off" data-wsx-tp="namePh"></label><button class="wsx-btn wsx-primary" data-wsx-t="create"></button></form>
@@ -61,7 +63,7 @@
   let sel = 'main', selAt = 0, polling = false, again = false, pollErr = '';
   const leases = new Map(), leaseAt = new Map(), beatErr = new Map(), beating = new Set();
   const starting = new Set(), stopAsked = new Set(), inflight = new Set();
-  try { sel = localStorage.getItem(STORE) || 'main'; } catch (_) { /* storage blocked */ }
+  try { sel = taskGroup || localStorage.getItem(STORE) || 'main'; } catch (_) { /* storage blocked */ }
 
   const lang = () => forced || (window.WujiLocale && window.WujiLocale.lang === 'en' ? 'en' : 'zh');
   const T = k => (S[k] || [k, k])[lang() === 'en' ? 1 : 0];
@@ -408,6 +410,7 @@
       });
       top.prepend(topBtn);
     }
+    if(taskGroup){$('.wsx-ws').closest('label').hidden=true;$('.wsx-rmws').hidden=true;}
     $('.wsx-ws').addEventListener('change', e => choose(e.target.value));
     $('.wsx-members').addEventListener('click', onCard);
     $('.wsx-disc').addEventListener('click', onCard);
@@ -431,6 +434,8 @@
     }, true);
     document.addEventListener('visibilitychange', () => { if (!document.hidden) kick(); });
     window.addEventListener('pagehide', stopAll);
+    if(taskGroup){const heading=document.querySelector('#page-devices > .page-heading');if(heading)heading.hidden=true;}
+    window.WujiEnsemble={select:choose,selected:()=>sel};
     applyLang(); kick();
     setInterval(() => poll(false), 1000);
     setInterval(beat, 250);

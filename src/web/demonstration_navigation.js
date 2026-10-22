@@ -34,6 +34,7 @@
         return;
       }
       pendingFocus = focus ? option.button : null;
+      window.WujiNavigationMotion?.mount().prepareMove(group);
       // The existing hash router owns viewer placement and page lifecycle.
       // A choice never connects a device or starts/stops an action.
       location.hash = option.route;
@@ -95,6 +96,11 @@
     function sync() {
       const route = activeRoute();
       const selected = route === 'devices' ? 'devices' : 'library';
+      const heading = route === 'devices'
+        ? multiPage?.querySelector('.wsx-head') || multiPage?.querySelector(':scope > .page-heading')
+        : route === 'library' ? singlePage.querySelector(':scope > .page-heading') : null;
+      const moving = heading && heading.nextElementSibling !== group;
+      if (moving) window.WujiNavigationMotion?.mount().prepareMove(group);
       for (const option of options) {
         const active = option.route === selected;
         option.button.setAttribute('aria-selected', String(active));
@@ -103,10 +109,8 @@
       if (route === 'library' || route === 'devices') {
         // Move only this one group. Existing headers, controls, frames and state
         // remain untouched, including the page-specific header actions.
-        const heading = route === 'devices'
-          ? multiPage?.querySelector('.wsx-head') || multiPage?.querySelector(':scope > .page-heading')
-          : singlePage.querySelector(':scope > .page-heading');
-        if (heading && heading.nextElementSibling !== group) heading.after(group);
+        if (moving) heading.after(group);
+        window.WujiNavigationMotion?.mount().finishMove(group);
         singleLink.setAttribute('aria-current', 'page');
         multiLink?.removeAttribute('aria-current');
       }

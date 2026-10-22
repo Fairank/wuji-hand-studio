@@ -3,7 +3,11 @@
  'use strict';
  const ws=window.WujiWorkspace,L=window.WujiLocale,$=id=>document.getElementById(id),t=(zh,en)=>L.lang==='en'?en:zh;
  const embedded=new URLSearchParams(location.search).get('embedded')==='1';
+ const taskView=embedded&&new URLSearchParams(location.search).get('task_view')==='1';
+ const taskViewId=taskView?new URLSearchParams(location.search).get('task_id'):null;let taskNative=taskView&&new URLSearchParams(location.search).get('task_native')==='1';
  document.documentElement.dataset.embedded=String(embedded);
+ document.documentElement.dataset.taskView=String(taskView);
+ document.documentElement.dataset.taskNative=String(taskNative);
  let state=null,retarget=null;
  const speeds=[.1,.25,.5,.75,1,1.25,1.5,1.75,2,2.5,3,4];
  for(const id of ['trial-speed','play-speed']){
@@ -20,7 +24,7 @@
   label();window.addEventListener('wuji-language',label);return page.querySelector('.page-body');
  }
  const settings=addPage('settings','设置','Settings',{zh:'让工作台适合你的使用习惯。',en:'Make the workbench feel right for you.'});
- const devices=embedded?null:addPage('devices','多手演示','Hand ensemble',{zh:'选择参与的手，一起播放或双手衔接。',en:'Choose participating hands for same-action playback or a paired routine.'});
+ const devices=embedded&&!new URLSearchParams(location.search).has('task_group')?null:addPage('devices','多手演示','Hand ensemble',{zh:'选择参与的手，一起播放或双手衔接。',en:'Choose participating hands for same-action playback or a paired routine.'});
  settings.innerHTML=`<div class="wb-card"><h3 id="wb-appearance-title"></h3><p id="wb-appearance-note"></p><div class="wb-row"><label id="wb-theme-label" for="wb-theme"></label><select id="wb-theme"><option value="system"></option><option value="light"></option><option value="dark"></option></select></div></div>
  <div class="wb-card"><h3 id="wb-retarget-title"></h3><p id="wb-retarget-note"></p><div class="wb-row"><label for="wb-smoothing" id="wb-smoothing-label"></label><input id="wb-smoothing" type="number" min="0" max="1000" step="10" value="0"><span>ms</span></div><div id="wb-retarget-grid" class="wb-list"></div><div class="wb-actions"><button id="wb-retarget-default"></button><button id="wb-retarget-save" class="primary"></button></div><p id="wb-retarget-status" class="wb-status" role="status"></p></div>`;
  if(devices)devices.innerHTML=`<div class="wb-card"><h3 id="wb-device-title"></h3><p id="wb-device-note"></p><div class="wb-row"><label for="wb-device-name" id="wb-device-name-label"></label><input id="wb-device-name" maxlength="40"><label for="wb-device-profile" id="wb-device-profile-label"></label><select id="wb-device-profile"><option value="hand2_left">Hand 2 · Left</option><option value="hand2_right">Hand 2 · Right</option><option value="hand1_left">Hand 1 · Left</option><option value="hand1_right">Hand 1 · Right</option></select><button id="wb-device-add" class="primary"></button></div><p id="wb-device-status" role="status" class="wb-status"></p><div id="wb-device-list" class="wb-list"></div></div>`;
@@ -29,12 +33,12 @@
   return fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json','X-Console-Token':state.csrf},body:JSON.stringify({name,...payload})})
    .then(async r=>{const value=await r.json();if(!r.ok||!value.ok)throw Error(value.error||'Request failed');return value});
  }
- const frames=new Map();let active='main',fleet=[];
+ const frames=new Map(),taskFrames=new Map();let active='main',fleet=[];
  function themeApply(value){
   const theme=value==='system'?(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'):value;
   document.documentElement.dataset.theme=theme;
   $('wb-theme').value=value;
-  if(!embedded)for(const frame of frames.values())frame.contentWindow?.postMessage({type:'wb-theme',value},'*');
+  if(!embedded){for(const frame of frames.values())frame.contentWindow?.postMessage({type:'wb-theme',value},new URL(frame.src).origin);for(const item of taskFrames.values())if(item.ready)item.frame.contentWindow?.postMessage({type:'wb-theme',value},item.origin);}
  }
  let themeChoice=localStorage.getItem('wuji-workbench-theme')||'system';
  const fromParent=new URLSearchParams(location.search).get('theme');if(embedded&&['system','light','dark'].includes(fromParent))themeChoice=fromParent;
@@ -42,6 +46,16 @@
  $('wb-theme').onchange=()=>{themeChoice=$('wb-theme').value;localStorage.setItem('wuji-workbench-theme',themeChoice);themeApply(themeChoice)};
  matchMedia('(prefers-color-scheme: dark)').addEventListener('change',()=>themeApply(themeChoice));
  window.addEventListener('message',event=>{if(embedded&&document.referrer&&event.origin===new URL(document.referrer).origin&&event.data?.type==='wb-theme')themeApply(event.data.value)});
+ const taskPages=new Set(['home','library','feedback','parameters','connection','glove','records','devices','official-viz','calibration']);
+ window.addEventListener('message',event=>{
+  if(!taskView||event.source!==window.parent||!document.referrer||event.origin!==new URL(document.referrer).origin||event.data?.task_id!==taskViewId)return;
+  const value=event.data;
+  if(value.type==='wb-task-route'&&taskPages.has(value.page)){
+   if(['official-viz','calibration'].includes(value.page)){if(taskNative)window.WujiConnectionHub?.show(value.page==='calibration'?'calibration':'official');}
+   else{location.hash='#'+value.page;ws.showPage();}
+  }else if(value.type==='wb-task-language'&&['zh','en'].includes(value.language))window.WujiLocale?.setLanguage(value.language);
+  else if(value.type==='wb-task-capabilities'&&typeof value.allow_native==='boolean'){taskNative=value.allow_native;document.documentElement.dataset.taskNative=String(taskNative);}
+ });
  const fingerNames=()=>L.lang==='en'?['Thumb','Index','Middle','Ring','Little']:['拇指','食指','中指','无名指','小指'];
  let outputGrid=null,outputKind='gain';
  const kindSelect=document.createElement('select');kindSelect.id='wb-output-kind';kindSelect.setAttribute('aria-label',t('调整项','Adjustment'));
@@ -123,7 +137,30 @@
  sessionBack.onclick=()=>{switchTo('main');location.hash='#devices';ws.showPage();document.querySelector('.wsx-ws')?.focus();};
  window.addEventListener('resize',sessionLayout);if(!embedded)new ResizeObserver(sessionLayout).observe(document.querySelector('.top'));
  selector.onchange=()=>switchTo(selector.value);
- window.HandSessions={show:switchTo,refresh:()=>fleetRefresh()};
+ function taskFrameSpec(task){
+  if(!task||typeof task.task_id!=='string'||!/^[A-Za-z0-9_-]{1,80}$/.test(task.task_id)||!task.view||typeof task.view.url!=='string')throw Error(t('任务画面地址尚未核对','Task view address is unverified'));
+  const url=new URL(task.view.url),declared=task.view.origin;
+  if(url.protocol!=='http:'||url.hostname!=='127.0.0.1'||url.username||url.password||url.origin!==declared||!url.port||Number(url.port)<1024||Number(url.port)>65535)throw Error(t('任务画面必须来自已登记的本机工作区','Task views must use their registered loopback workspace'));
+  if(task.view.page&&!taskPages.has(task.view.page))throw Error(t('任务页面不受支持','Unsupported task page'));
+  const allowNative=task.endpoint_id==='main'&&task.view.allow_native===true;
+  if(['official-viz','calibration'].includes(task.view.page)&&!allowNative)throw Error(t('官方任务需由主工作台核对后进入','Official tasks require the main workbench preflight'));
+  url.searchParams.set('embedded','1');url.searchParams.set('task_view','1');url.searchParams.set('task_id',task.task_id);if(allowNative)url.searchParams.set('task_native','1');else url.searchParams.delete('task_native');if(task.view.page)url.hash=['official-viz','calibration'].includes(task.view.page)?'connection':task.view.page;
+  return {url:url.href,origin:url.origin,page:task.view.page||null,allowNative};
+ }
+ function mountTaskFrame(task,host){
+  if(embedded||!host)throw Error('Task frame host unavailable');
+  const spec=taskFrameSpec(task),old=taskFrames.get(task.task_id);
+  if(old){if(old.origin!==spec.origin||old.endpoint!==task.endpoint_id)throw Error(t('任务所属工作区已变化，请核对原会话','Task owner changed; review the original session'));if(old.host!==host)throw Error('A live task frame cannot be reparented');return old.frame;}
+  const frame=document.createElement('iframe');frame.className='tw-frame';frame.id='tw-frame-'+task.task_id;frame.title=task.label||t('设备任务','Device task');frame.dataset.taskId=task.task_id;
+  const item={frame,host,origin:spec.origin,endpoint:task.endpoint_id,allowNative:spec.allowNative,visible:false,page:spec.page,loads:0,ready:false};taskFrames.set(task.task_id,item);
+  frame.addEventListener('load',()=>{item.loads++;item.ready=true;notifyFrame(frame,item.visible);frame.contentWindow?.postMessage({type:'wb-task-language',task_id:task.task_id,language:L.lang},item.origin);frame.contentWindow?.postMessage({type:'wb-task-capabilities',task_id:task.task_id,allow_native:item.allowNative},item.origin);if(item.page)frame.contentWindow?.postMessage({type:'wb-task-route',task_id:task.task_id,page:item.page},item.origin);});
+  frame.src=spec.url;host.append(frame);return frame;
+ }
+ function taskVisibility(id,visible){const item=taskFrames.get(id);if(!item)return;item.visible=visible===true;if(item.ready)notifyFrame(item.frame,item.visible);}
+ function taskUpdate(task){const item=taskFrames.get(task.task_id);if(!item)return false;const spec=taskFrameSpec(task);if(item.origin!==spec.origin||item.endpoint!==task.endpoint_id)return false;const changed=item.allowNative!==spec.allowNative;item.allowNative=spec.allowNative;if(changed&&item.ready)item.frame.contentWindow?.postMessage({type:'wb-task-capabilities',task_id:task.task_id,allow_native:item.allowNative},item.origin);return true;}
+ function taskRoute(id,page){const item=taskFrames.get(id);if(!item||!taskPages.has(page)||['official-viz','calibration'].includes(page)&&!item.allowNative)return false;item.page=page;if(item.ready)item.frame.contentWindow?.postMessage({type:'wb-task-route',task_id:id,page},item.origin);return true;}
+ window.HandSessions={show(id){if(window.TaskWorkspace?.openEndpoint?.(id))return;switchTo(id);},refresh:()=>fleetRefresh(),taskFrames:{mount:mountTaskFrame,update:taskUpdate,setVisible:taskVisibility,route:taskRoute,inspect:id=>{const item=taskFrames.get(id);return item?{endpoint:item.endpoint,origin:item.origin,loads:item.loads,visible:item.visible,allowNative:item.allowNative}:null;}}};
+ window.addEventListener('wuji-language',()=>{for(const [id,item]of taskFrames)if(item.ready)item.frame.contentWindow?.postMessage({type:'wb-task-language',task_id:id,language:L.lang},item.origin);});
  let fleetBusy=false,fleetViewKey='',fleetChoicesKey='';
  const fleetStop=document.createElement('button');fleetStop.type='button';fleetStop.className='danger';
  if(devices){fleetStop.textContent=t('停止所有工作区动作','Stop motion in all workspaces');$('wb-device-status').before(fleetStop);

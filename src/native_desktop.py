@@ -264,7 +264,8 @@ class NativeDesktop:
         def decide():
             try:
                 state=self.server.controller.snapshot()
-                busy=state.get('parameter_sync',{}).get('busy') or self.server.controller.doctor.snapshot().get('running')
+                busy=(state.get('parameter_sync',{}).get('busy') or self.server.controller.doctor.snapshot().get('running')
+                      or state.get('calibrated_teleoperation',{}).get('busy'))
                 if needs_confirmation(state) or busy or (hasattr(self.server,'_fleet') and self.server.fleet.children):
                     self.window.evaluate_js('window.WujiDesktop?.confirmClose()')
                 else:self.stop_and_close()

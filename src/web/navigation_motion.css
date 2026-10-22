@@ -4,6 +4,7 @@
 .nm-host [data-nm-item]{position:relative;z-index:1}
 /* Selection fill belongs to the moving surface; keep the existing press scale. */
 html body .nm-host[data-nm-ready=true] [data-nm-item]{transition-property:scale,color!important}
+html body .nm-host [data-nm-item]:is(:disabled,[aria-disabled=true]){scale:1!important;transition:none!important}
 .nm-indicator{position:absolute;inset:0 auto auto 0;z-index:0;box-sizing:border-box;pointer-events:none;transform-origin:0 0;border-radius:var(--nm-radius);border:1px solid var(--nm-edge);background:var(--nm-fill);box-shadow:var(--nm-shadow);transition:none!important;animation:none!important}
 .nm-indicator[hidden]{display:none!important}
 html body .nm-host[data-nm-ready=true] :is([data-nm-visual-selected=true],[data-nm-item][aria-current=page],[data-nm-item][aria-selected=true],[data-nm-item][aria-pressed=true]){background:transparent!important;border-color:transparent!important;box-shadow:none!important}
@@ -27,6 +28,14 @@ html[data-theme=dark] .nm-host{--nm-fill:rgba(255,255,255,.13);--nm-edge:rgba(25
 html[data-reduce-transparency=true] .nm-host{--nm-fill:#fff}
 html[data-theme=dark][data-reduce-transparency=true] .nm-host{--nm-fill:#38383d}
 @media(prefers-reduced-transparency:reduce){.nm-host{--nm-fill:#fff}html[data-theme=dark] .nm-host{--nm-fill:#38383d}}
+/* A page settles once when revealed. Keep embedded viewers and live controls
+   at their real position: only the heading moves; the body receives a fade. */
+@keyframes nm-page-enter{from{opacity:.72;transform:translateY(3px)}to{opacity:1;transform:translateY(0)}}
+@keyframes nm-page-fade{from{opacity:.8}to{opacity:1}}
+html .workspace-page:not([hidden])>.page-heading{animation:nm-page-enter 160ms cubic-bezier(.2,.75,.3,1)}
+html .workspace-page:not([hidden])>.page-body{animation:nm-page-fade 160ms ease-out}
+html[data-reduce-motion=true] .workspace-page>:is(.page-heading,.page-body){animation:none!important}
+@media(prefers-reduced-motion:reduce){html .workspace-page>:is(.page-heading,.page-body){animation:none!important}}
 /* JavaScript cancels active WAAPI motion for either reduced-motion preference.
    Forced-colors mode retains the existing static, system-colored selection. */
-@media(forced-colors:active){.nm-indicator{display:none!important}}
+@media(forced-colors:active){.nm-indicator{display:none!important}html .workspace-page>:is(.page-heading,.page-body){animation:none!important}}

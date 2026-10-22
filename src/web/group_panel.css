@@ -71,3 +71,38 @@ html[data-reduce-motion=true] .hg-flow *{transition:none!important}@media(prefer
 @media(forced-colors:active){#page-devices .hg-flow .hg-member:has(input:checked),#page-devices .hg-flow .hg-opt:has(input:checked),#page-devices .hg-flow .hg-targets label:has(input:checked){outline:2px solid Highlight;box-shadow:none}}
 html[data-theme=dark] #page-devices .hg-flow [data-tone=ok]{color:#70ce8c}
 html[data-theme=dark] #page-devices .hg-flow [data-tone=warn]{color:#edbd79}
+
+/* Controls lead the ensemble; renderer panes remain supporting content. */
+html body #page-devices .wsx-grid>.wsx-group-card{grid-template-columns:300px minmax(0,1fr);gap:24px;align-items:start}
+html body #page-devices .wsx-group-card>.wsx-panel{grid-column:1;grid-row:1;min-width:0}
+html body #page-devices .wsx-group-card>.wsx-views{grid-column:2;grid-row:1;min-width:0;position:sticky;top:0}
+html body #page-devices .hg-flow{font-size:14px}
+html body #page-devices .hg-flow>.hg-status{padding-bottom:12px!important;margin-bottom:16px}
+html body #page-devices .hg-flow .hg-status-head{gap:10px;flex-wrap:wrap}
+html body #page-devices .hg-flow .hg-title,html body #page-devices .hg-flow .hg-step>.hg-legend{font-size:14px}
+html body #page-devices .hg-flow .hg-count,html body #page-devices .hg-flow .hg-badge{font-size:12px}
+html body #page-devices .hg-flow .hg-config{grid-template-columns:minmax(0,1fr);gap:16px}
+html body #page-devices .hg-flow .hg-body{gap:10px;margin-top:8px}
+html body #page-devices .hg-flow .hg-members{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+html body #page-devices .hg-flow .hg-member{padding:10px 9px;border-radius:10px;gap:8px}
+html body #page-devices .hg-flow .hg-member-name{font-size:13px}
+html body #page-devices .hg-flow .hg-chip{font-size:11px}
+html body #page-devices .hg-flow .hg-step-routine>.hg-body{grid-template-columns:minmax(0,1fr);gap:10px}
+html body #page-devices .hg-flow .hg-seg{width:100%;min-width:0}
+html body #page-devices .hg-flow .hg-opt,html body #page-devices .hg-flow .hg-targets label{min-height:32px;padding:6px 10px;font-size:14px}
+html body #page-devices .hg-flow .hg-opt-title{font-size:14px;font-weight:550}
+html body #page-devices .hg-flow .hg-label{font-size:12px}
+html body #page-devices .hg-flow .hg-select{min-height:36px;font-size:14px;border-radius:10px}
+html body #page-devices .hg-flow .hg-step-playback{padding-top:12px!important}
+html body #page-devices .hg-flow .hg-step-playback>.hg-body{grid-template-columns:minmax(0,1fr);gap:10px}
+html body #page-devices .hg-flow .hg-actions{grid-column:1;grid-row:4;min-width:0;width:100%}
+html body #page-devices .hg-flow .hg-options{grid-column:1;grid-row:2}
+html body #page-devices .hg-flow .hg-clear{grid-column:1;grid-row:3;font-size:13px}
+html body #page-devices .hg-flow .hg-btn{min-height:36px;padding:7px 12px;font-size:14px;font-weight:500}
+html body #page-devices .hg-flow .hg-actions button{min-height:38px;padding:8px 14px;font-size:14px}
+html body #page-devices .hg-flow .hg-btn:disabled{opacity:1;color:var(--hg-muted);background:var(--hg-fill);border-color:var(--hg-line)}
+html body #page-devices .hg-flow :is(.hg-options>summary,.hg-hint,.hg-msg,.hg-step-help,.hg-note,.hg-reason-row){font-size:12px;line-height:1.6}
+html body #page-devices .hg-flow .hg-options>summary{padding:6px 0}
+@media(max-width:1149px){html body #page-devices .wsx-grid>.wsx-group-card{grid-template-columns:minmax(0,1fr);gap:24px}html body #page-devices .wsx-group-card>.wsx-panel{grid-column:1;grid-row:1}html body #page-devices .wsx-group-card>.wsx-views{grid-column:1;grid-row:2;position:static}html body #page-devices .hg-flow .hg-config{grid-template-columns:minmax(220px,.9fr) minmax(280px,1.1fr);gap:16px 24px}html body #page-devices .hg-flow .hg-step-playback>.hg-body{grid-template-columns:220px minmax(0,1fr) auto;gap:10px 16px}html body #page-devices .hg-flow .hg-actions{grid-column:3;grid-row:1;width:auto;min-width:148px}html body #page-devices .hg-flow .hg-options{grid-column:2;grid-row:1}html body #page-devices .hg-flow .hg-clear{grid-column:1/-1;grid-row:2}}
+@media(max-width:700px){html body #page-devices .hg-flow .hg-config{grid-template-columns:minmax(0,1fr);gap:20px}html body #page-devices .hg-flow .hg-step-playback>.hg-body{display:flex;flex-direction:column;align-items:stretch;gap:12px}html body #page-devices .hg-flow .hg-actions{width:100%;min-width:0}html body #page-devices .hg-flow .hg-status-head{gap:8px}html body #page-devices .hg-flow .hg-members{grid-template-columns:repeat(2,minmax(0,1fr))}html body #page-devices .hg-flow .hg-main-fields{grid-template-columns:minmax(0,1fr) 86px}html body #page-devices .hg-flow .hg-run-details{font-size:12px}}
+@media(forced-colors:active){html body #page-devices .hg-flow .hg-btn:disabled{background:ButtonFace;color:GrayText;border-color:GrayText}}

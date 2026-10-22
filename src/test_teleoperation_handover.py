@@ -259,7 +259,8 @@ class TeleoperationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(dir=fixtures.TEST_TEMP) as folder,patch.dict(os.environ,WUJI_OFFICIAL_CLI_DATA=folder):
             controller=Controller(factory=Mock(),reports=Path(folder)/'reports')
             with patch.object(controller.glove,'action') as glove:
-                self.assertEqual(controller.state['teleoperation_view_mode'],'target')
+                # Customer UI now uses one automatic source, without a picker.
+                self.assertEqual(controller.state['teleoperation_view_mode'],'automatic')
                 for mode in ('feedback','target'):
                     result=controller.action({'name':'teleoperation_view_mode','mode':mode})
                     self.assertEqual(result['teleoperation_view_mode'],mode)

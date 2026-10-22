@@ -2,8 +2,8 @@
 (()=>{
  'use strict';
  const key='wuji-device-history-v1',t=(zh,en)=>window.WujiLocale?.lang==='en'?en:zh;
- const root=document.createElement('section');root.className='dh-root';root.setAttribute('aria-labelledby','dh-title');
- const title=document.createElement('h3');title.id='dh-title';const note=document.createElement('p');note.className='dh-note';
+ const root=document.createElement('details');root.className='dh-root';root.setAttribute('aria-labelledby','dh-title');
+ const title=document.createElement('summary');title.id='dh-title';const note=document.createElement('p');note.className='dh-note';
  const list=document.createElement('div');list.className='dh-list';const empty=document.createElement('p');empty.className='dh-empty';root.append(title,note,list,empty);
  let inventory=null,records=[],previous=new Set(),initialized=false,storageFailed=false;const cards=new Map();
  const serial=value=>typeof value==='string'&&value.length>0&&value.length<=128&&!/[\x00-\x1f]/.test(value)?value:'';

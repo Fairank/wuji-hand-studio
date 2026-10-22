@@ -2,12 +2,13 @@
 import re
 
 COMMANDS = {'glove_session','glove_scan','glove_open','glove_prepare',
-            'glove_follow','glove_keepalive','glove_stop','glove_disconnect','glove_retarget','glove_solver'}
+            'glove_follow','glove_keepalive','glove_stop','glove_disconnect','glove_unpair','glove_retarget','glove_solver'}
 
 def validate(c):
     if not isinstance(c,dict) or c.get('name') not in COMMANDS:
         raise ValueError('Unknown glove operation')
     allowed={'name'}
+    if c['name']=='glove_session':allowed|={'continuation'}
     if c['name']=='glove_open':allowed|={'serial','user_id','timeout_ms','retarget','solver'}
     if c['name']=='glove_solver':allowed|={'solver'}
     if c['name']=='glove_prepare':allowed|={'address','serial'}
@@ -15,6 +16,9 @@ def validate(c):
     if c['name']=='glove_follow':allowed|={'workspace_clear','lease'}
     if c['name']=='glove_keepalive':allowed|={'lease'}
     if set(c)-allowed:raise ValueError('Unexpected glove fields; joint targets are not accepted')
+    if 'continuation' in c:
+        from calibration_portability import validate_continuation
+        validate_continuation(c['continuation'],path=True)
     if 'solver' in c or c['name']=='glove_solver':
         solver=c.get('solver')
         if not isinstance(solver,dict) or set(solver)-{'engine','values'} or solver.get('engine') not in ('sdk','official_open'):

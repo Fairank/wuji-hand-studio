@@ -1,4 +1,5 @@
 """Pure display decoding tests; no SDK, renderer or device session."""
+import copy
 import unittest
 
 from glove_view import channel_ids,pose
@@ -93,7 +94,54 @@ class GloveViewTests(unittest.TestCase):
         self.assertIsNone(q);self.assertEqual(mode,'glove_live')
 
     def test_unknown_display_selection_is_rejected(self):
-        with self.assertRaises(ValueError):pose({},'hand2','automatic')
+        with self.assertRaises(ValueError):pose({},'hand2','invalid')
+
+    def test_automatic_uses_targets_only_before_a_hand_feedback_session(self):
+        for generation in ('hand1','hand2'):
+            glove=dict(stream=dict(q=[.5]*20,fresh=True),feedback={},hardware={})
+            self.assertEqual(pose(glove,generation,'automatic'),([.5]*20,'glove_preview',{}))
+            glove=self.measured(generation)
+            actual,mode,feedback=pose(glove,generation,'automatic')
+            self.assertEqual(actual,[(i+1)/100 for i in range(20)])
+            self.assertEqual(mode,'glove_live');self.assertIs(feedback,glove['feedback'])
+
+    def test_automatic_never_falls_back_after_feedback_becomes_stale_or_incomplete(self):
+        for generation in ('hand1','hand2'):
+            for invalid in ('stale','missing','generation'):
+                with self.subTest(generation=generation,invalid=invalid):
+                    glove=self.measured(generation,stale=invalid=='stale')
+                    if invalid=='missing':glove['feedback']['latest']['joints'].pop()
+                    selected=('hand2' if generation=='hand1' else 'hand1') if invalid=='generation' else generation
+                    q,mode,_=pose(glove,selected,'automatic')
+                    self.assertIsNone(q);self.assertEqual(mode,'glove_live')
+            glove=dict(stream=dict(q=[.5]*20,fresh=True),hardware={'active':False},feedback={})
+            self.assertEqual(pose(glove,generation,'automatic'),(None,'glove_live',{}))
+
+    def test_automatic_and_legacy_preview_reject_nonfinite_incomplete_and_boolean_targets(self):
+        for generation in ('hand1','hand2'):
+            for mode in ('automatic',None):
+                for q in ([1.]*19,[1.]*21,[float('nan')]*20,[float('inf')]*20,[True]*20,['1']*20,None):
+                    with self.subTest(generation=generation,mode=mode,q=q):
+                        self.assertEqual(pose(dict(stream=dict(q=q,fresh=True)),generation,mode),(None,'glove_preview',{}))
+
+    def test_actual_feedback_rejects_duplicate_or_malformed_channels_and_nonfinite_values(self):
+        for generation in ('hand1','hand2'):
+            original=self.measured(generation)
+            rows=original['feedback']['latest']['joints']
+            invalid=[rows+[rows[0]],rows[:-1],[None]*20,
+                [dict(j,position_rad=float('nan')) for j in rows],
+                [dict(j,position_rad=float('inf')) for j in rows],
+                [dict(j,position_rad=True) for j in rows],
+                [dict(j,nid=True) if i==0 else j for i,j in enumerate(rows)],
+                [dict(j,nid=rows[0]['nid']) if i==1 else j for i,j in enumerate(rows)]]
+            for mode in ('automatic','feedback',None):
+                for malformed in invalid:
+                    with self.subTest(generation=generation,mode=mode,rows=malformed):
+                        glove=copy.deepcopy(original);glove['feedback']['latest']['joints']=malformed
+                        self.assertIsNone(pose(glove,generation,mode)[0])
+                        self.assertEqual(pose(glove,generation,mode)[1],'glove_live')
+                glove=copy.deepcopy(original);glove['feedback']['latest']=['invalid']
+                self.assertIsNone(pose(glove,generation,mode)[0])
 
 
 if __name__=='__main__':unittest.main()

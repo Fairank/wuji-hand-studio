@@ -145,3 +145,145 @@ html::-webkit-scrollbar-corner,body::-webkit-scrollbar-corner,body ::-webkit-scr
 @media(pointer:coarse){html::-webkit-scrollbar,body::-webkit-scrollbar,body ::-webkit-scrollbar{width:16px;height:16px}}
 @media(forced-colors:active){html::-webkit-scrollbar-thumb,body::-webkit-scrollbar-thumb,body ::-webkit-scrollbar-thumb{background-color:ButtonText}}
 html :is(#page-home,#page-connection) .di-root button.primary:disabled{opacity:1!important;background:var(--ui-fill)!important;color:var(--ui-sub)!important;border-color:var(--ui-line)!important;box-shadow:none!important}
+
+/* Product-wide desktop rhythm. One palette, one control family, quiet surfaces.
+   Keep layout ancestors untransformed: the existing renderer can detach/floating. */
+html{
+ --ui-ink:#202126;--ui-sub:#676b73;--ui-fill:#f5f6f8;--ui-hover:#eceef2;
+ --ui-line:rgba(35,42,54,.105);--ui-card:#fff;--ui-blue:#007aff;
+ --wb-ink:var(--ui-ink);--wb-sub:var(--ui-sub);--wb-line:var(--ui-line);
+ --wb-group:var(--ui-fill);--wb-card:var(--ui-card);--wb-accent:var(--ui-blue);
+ --wb-ok:#247b52;--dg-text:var(--ui-ink);--dg-text-2:var(--ui-sub);
+ --dg-line:var(--ui-line);--dg-fill:var(--ui-fill);--dg-canvas:var(--ui-card);
+ --hw-space:24px;--hw-shadow:0 2px 16px rgba(25,35,55,.045),inset 0 1px 0 rgba(255,255,255,.6);
+}
+html[data-theme=dark]{
+ --ui-ink:#f1f2f5;--ui-sub:#b4b7c1;--ui-fill:#303137;--ui-hover:#3b3d45;
+ --ui-line:rgba(235,239,255,.13);--ui-card:#24252b;--ui-blue:#7ab8ff;
+ --wb-ok:#78cda3;--wb-bad:#ffaaa3;--ui-danger:#ffaaa3;--ui-danger-fill:#482e32;
+}
+html body{font-family:"Segoe UI Variable Text","Segoe UI","Microsoft YaHei UI",sans-serif;font-size:14px;line-height:1.5;color:var(--ui-ink)}
+html body :is(.top,.directory){box-shadow:var(--hw-shadow);border-radius:18px}
+html body .page-area{border-radius:18px;box-shadow:0 2px 14px rgba(25,35,55,.025);padding:24px}
+html body .page-heading{align-items:center;gap:12px 20px;margin-bottom:20px}
+html body .page-heading h2{font-size:27px;line-height:1.25;font-weight:650;letter-spacing:-.5px;margin:0}
+html body .page-heading p{font-size:13px;line-height:1.55;margin:5px 0 0;color:var(--ui-sub)}
+html body .page-heading :is(button,select){min-height:36px;font-size:13px!important}
+html body .page-body :is(button,select,textarea,input:not([type=checkbox],[type=radio],[type=range],[type=color],[type=file])){
+ font-family:inherit;font-size:14px;line-height:1.4;border-radius:10px;
+}
+html body .page-body :is(select,textarea,input:not([type=checkbox],[type=radio],[type=range],[type=color],[type=file])){
+ min-height:38px;padding:8px 12px;border:1px solid var(--ui-line);color:var(--ui-ink);background:var(--ui-card);box-shadow:none;
+}
+html body .page-body button:not(.joint-tile,.nm-indicator){box-shadow:none}
+html body .page-body :is(button,select,input,textarea):focus-visible{outline:2px solid var(--ui-blue);outline-offset:3px}
+html body .directory a{font-size:14px;min-height:40px;padding:10px 12px;border-radius:10px;gap:11px}
+html body .directory a svg{width:20px;height:20px;flex:none}
+html body .directory .nm-indicator{border:1px solid var(--ui-line);box-shadow:0 1px 4px rgba(25,35,55,.045);border-radius:10px}
+html body .page-body :is(.hub-tabs,.di-filters,.playback-modes,.dn-modes,.rt-segments){border-radius:11px;box-shadow:none}
+html body :is(.settings-card,.glove-source-card,.cr-device-card,.wsx-card){border-color:var(--ui-line);box-shadow:none;border-radius:14px}
+html body .settings-row{min-height:66px;padding-block:16px;border-color:var(--ui-line)}
+html body .settings-row :is(strong,h3){font-size:14px;font-weight:600}
+html body .settings-row p{font-size:13px;line-height:1.55;margin:4px 0 0;color:var(--ui-sub)}
+html body .settings-section{margin-block:24px}
+html body #page-glove .glove-source-card{padding:16px;border-radius:14px;background:var(--ui-fill)}
+html body #page-glove .glove-source-fields{gap:16px}
+html body #page-glove .glove-details{border-radius:12px;border-color:var(--ui-line);box-shadow:none}
+html body #page-glove .glove-source-title{font-size:16px}
+html body #page-connection .cr-device-grid{gap:20px}
+html body #page-connection .cr-device-card{padding:18px}
+html body #page-connection .cr-card-heading h3{font-size:18px}
+html body .hub-calib-readiness:has(#hub-calib-ready-note:empty):has(#hub-calib-next[hidden]){display:none}
+html body .hub-calib-readiness #hub-calib-ready-title:empty{display:none}
+
+/* The discovery list is the primary task; history is a stable native disclosure. */
+html body .experience-device-center{grid-template-columns:minmax(0,1fr);gap:20px}
+html body .experience-discovery-dock{order:0}
+html body .experience-history-dock{order:1;min-height:0;border:0;border-top:1px solid var(--ui-line);padding:14px 0 0}
+html body .dh-root{margin:0;padding:0;border:0;min-height:0;background:transparent}
+html body .dh-root>summary{cursor:pointer;font-size:14px;font-weight:600;line-height:1.5;list-style-position:inside;padding:8px 0;color:var(--ui-ink)}
+html body .dh-root>:not(summary){margin-top:12px}
+html body .dh-root .dh-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px}
+html body .dh-root :is(.dh-empty,.dh-note){font-size:13px;line-height:1.55;padding:0;margin:8px 0;color:var(--ui-sub)}
+html body #page-home .di-heading{align-items:center;margin-bottom:16px;gap:12px}
+html body #page-home .di-heading h3{font-size:17px;margin:0}
+html body #page-home .di-description{display:none}
+html body #page-home .di-list-toolbar{margin-block:12px}
+html body #page-home .di-device{min-height:68px;padding:12px;border:1px solid transparent;border-bottom-color:var(--ui-line);gap:12px}
+html body #page-home .di-device-copy{display:grid;grid-template-columns:auto 1fr;align-items:baseline;gap:3px 10px;min-width:0}
+html body #page-home .di-device-copy>strong{font-size:14px;line-height:1.5;font-weight:600}
+html body #page-home .di-device-meta{font-size:13px;line-height:1.5}
+html body #page-home .di-device-serial{grid-column:1/-1;font-size:12px;line-height:1.45;overflow-wrap:anywhere}
+html body #page-home .di-device[data-selected=true]{border:1px solid color-mix(in srgb,var(--ui-blue) 42%,var(--ui-line));background:color-mix(in srgb,var(--ui-blue) 6%,var(--ui-card))!important;box-shadow:none}
+html body #page-home .di-selected{margin-top:16px;padding:16px;border:1px solid var(--ui-line);border-radius:12px;background:var(--ui-fill)}
+
+/* Compact demonstration controls; keep the main action before long details. */
+html body #page-library .page-heading{margin-bottom:16px}
+html body #page-library .motion-layout{gap:20px;align-items:start}
+html body #page-library .motion-fields{gap:12px}
+html body #page-library .motion-field label{margin-bottom:5px;font-size:13px}
+html body #page-library #studio-action{font-size:14px;min-height:40px}
+html body #page-library #motion-amplitude-note{min-height:0;font-size:12px;line-height:1.5;margin:8px 0 12px}
+html body #page-library .symbol-shortcuts{gap:8px;margin-block:8px}
+html body #page-library .symbol-shortcuts button{min-height:36px;font-size:13px!important;padding:7px 10px}
+html body #page-library .motion-controls .panel{margin-block:0 16px}
+html body #page-library #playback-panel{padding-top:0;border:0}
+html body #page-library #playback-panel .field-row{margin-block:8px;gap:12px}
+html body #page-library #playback-panel .button-row{gap:8px;margin-block:12px 8px}
+html body #page-library .viewer-toolbar{gap:8px}
+html body #page-library .viewer-dock{border-radius:14px;box-shadow:none}
+html body #page-library :is(.viewer-actions,.viewer-toolbar) button{min-height:32px;padding:6px 10px;font-size:12px!important}
+html body #page-library .viewer-heading{padding-block:10px}
+@media(min-width:901px){html body #page-library .motion-layout{grid-template-columns:minmax(245px,285px) minmax(0,1fr)}}
+@media(max-width:900px){
+ html body .top{min-height:60px;padding:10px 14px;gap:10px}
+ html body .directory{padding:10px;gap:4px;border-radius:16px}
+ html body .directory a{min-height:36px;padding:8px 10px;font-size:13px;gap:8px}
+ html body .directory svg{width:18px;height:18px}
+ html body .directory .directory-tools>summary{min-height:36px;padding:8px 10px;font-size:13px}
+ html body .experience-mode{min-width:120px}
+ html body .page-area{padding:20px}
+ html body #page-library .motion-layout{grid-template-columns:minmax(0,1fr);gap:16px}
+ html body #page-library .viewer-dock{grid-row:auto}
+ html body .page-heading h2{font-size:25px}
+}
+@media(max-width:560px){
+ html body .top{display:grid;height:auto;min-height:0;grid-template-columns:minmax(0,1fr) auto auto;align-items:center;gap:8px;padding:10px 12px}
+ html body .top>div:first-child{min-height:24px;grid-column:1;grid-row:1}
+ html body .top .top-actions{display:contents}
+ html body .top .top-device-cluster{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));grid-column:1/-1;grid-row:2;min-width:0;width:100%;gap:6px}
+ html body .top .top-device-cluster>.top-connection{min-width:0;padding-left:3px}
+ html body .top .top-connection{min-width:0;padding:3px;gap:3px;border-radius:10px}
+ html body .top .top-connection-status{flex:1 1 auto;min-width:56px;min-height:28px;padding:3px 5px;gap:5px}
+ html body .top .top-connection-status strong{font-size:12px;line-height:1.4}
+ html body .top .top-connection-status small{display:none}
+ html body .top .top-connection-action{min-height:28px;padding:5px 7px;font-size:12px;border-radius:8px}
+ html body .top .desktop-tools{grid-column:3;grid-row:1;padding-left:0;margin-left:0}
+ html body .top #global-motion-stop{grid-column:2;grid-row:1;min-height:32px;padding:5px 8px;font-size:12px;margin:0}
+ html body .top #desktop-menu-button{min-height:32px;width:32px;padding:5px}
+ html body .top h1{font-size:15px!important}
+ html body .top-actions{gap:6px;flex-wrap:wrap}
+ html body .connection-device-card{padding:4px 6px;gap:5px;min-height:36px;border-radius:10px}
+ html body .connection-device-card :is(strong,.connection-device-name){font-size:12px}
+ html body .connection-device-card :is(span,small){font-size:11px}
+ html body .connection-device-card button{min-height:30px;padding:5px 8px;font-size:12px}
+ html body .directory{gap:2px}
+ html body .directory a{padding:7px 8px;min-height:34px}
+ html body .directory a svg{display:none}
+ html body .directory>.nav-advanced{margin:0;padding:0;border:0}
+ html body .directory>.nav-advanced>summary{padding:7px 8px;min-height:34px;font-size:13px}
+ html body .directory .experience-switcher{padding:0;margin-left:auto}
+ html body .directory .experience-mode{min-width:106px}
+ html body .directory .experience-mode button{min-height:30px;padding:5px 7px;font-size:12px}
+ html body .connection-popover{top:112px;max-height:calc(100dvh - 128px)}
+ html body .page-area{padding:18px 14px}
+ html body .page-heading{margin-bottom:16px;gap:10px}
+ html body .page-heading h2{font-size:24px}
+ html body #page-home .di-heading{align-items:flex-start}
+ html body #page-home .di-device-copy{column-gap:8px}
+}
+@media(forced-colors:active){
+ html body :is(.top,.directory,.page-area,.di-device,.dh-root){box-shadow:none;forced-color-adjust:auto}
+ html body .page-body :is(button,select,input,textarea):focus-visible{outline-color:Highlight}
+ html body #page-home .di-device[data-selected=true]{outline:2px solid Highlight;background:Canvas!important}
+}

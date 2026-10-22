@@ -373,7 +373,13 @@ def main():
                 process.terminate()
                 process.join(timeout=2.)
             process = None
-    emit(dict(type='ready',teleop_version=1))
+    continuation_version=0
+    if sys.platform.startswith('linux'):
+        try:
+            from calibration_portability import prepare_transfer_directory
+            prepare_transfer_directory();continuation_version=1
+        except (ValueError,OSError):pass  # Ordinary SDK sessions remain available.
+    emit(dict(type='ready',teleop_version=1,calibration_continuation_version=continuation_version))
     try:
         while True:
             if select.select([sys.stdin], [], [], .04)[0]:
@@ -392,7 +398,7 @@ def main():
                     if name == 'glove_session':
                         if process:raise ValueError('Already connected')
                         from glove_agent import worker_glove
-                        process=ctx.Process(target=worker_glove,args=(requests,events))
+                        process=ctx.Process(target=worker_glove,args=(requests,events,command.get('continuation')))
                         process.start();received_feedback=True;started=time.monotonic();glove_mode=True
                     elif name == 'connect':
                         if process:

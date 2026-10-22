@@ -1,13 +1,17 @@
-.official-terminal{min-width:0;display:grid;gap:12px;margin-top:8px}
-.official-terminal[hidden]{display:none}
-.official-terminal-heading{display:flex;align-items:baseline;justify-content:space-between;gap:10px;flex-wrap:wrap}
-.official-terminal-note{font-size:12px;color:var(--wb-sub)}
-.official-terminal-actions{display:flex;gap:7px;flex-wrap:wrap}
-#page-connection .official-terminal-actions button{min-height:34px;padding:7px 13px;font-size:12px}
-.official-terminal-scroll{min-width:0;max-width:100%;overflow-x:auto;border-radius:16px;border:1px solid var(--wb-line);background:#121820;padding:17px}
+/* Existing xterm keeps the official byte stream and its own viewport. */
+.official-terminal{display:grid;gap:16px;min-width:0;margin:0}
+.official-terminal[hidden]{display:none!important}
+.official-terminal-heading{display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.official-terminal-heading strong{font-size:15px;font-weight:550;line-height:1.5}
+.official-terminal-note{font-size:13px;line-height:1.5;color:var(--wb-sub)}
+.official-terminal-actions{display:flex;gap:8px;flex-wrap:wrap}
+#page-connection .official-terminal-actions button{min-height:36px;padding:7px 13px;border-radius:10px;font-size:13px;line-height:1.5}
+.official-terminal-scroll{min-width:0;max-width:100%;overflow-x:auto;border:1px solid var(--wb-line);border-radius:12px;background:#121820;padding:16px;box-sizing:border-box}
 .official-terminal-screen{min-width:640px;width:100%;height:616px}
 .official-terminal-screen .xterm{padding:0}
 .official-terminal-screen .xterm-viewport{border-radius:0;scrollbar-gutter:auto}
-.official-terminal-error{margin:0;font-size:12px;color:var(--wb-sub);overflow-wrap:anywhere}
-.oc-run[data-source=official_tty]>.oc-step,.oc-run[data-source=official_tty]>.oc-progress-row,.oc-run[data-source=official_tty]>.oc-feedback{display:none!important}
-@media(max-width:700px){.official-terminal-scroll{padding:12px}.official-terminal-screen{min-width:640px}}
+.official-terminal-error{margin:0;font-size:13px;line-height:1.6;color:var(--wb-sub);overflow-wrap:anywhere}
+.official-terminal-error:empty{display:none}
+.oc-run[data-source=official_tty] .oc-step,.oc-run[data-source=official_tty] .oc-progress-row,.oc-run[data-source=official_tty] .oc-feedback{display:none!important}
+@media(max-width:700px){.official-terminal-scroll{padding:12px}.official-terminal-actions{gap:8px}.official-terminal-screen{min-width:640px}}
+@media(forced-colors:active){.official-terminal-scroll{border-color:CanvasText}.official-terminal-error{color:CanvasText}}

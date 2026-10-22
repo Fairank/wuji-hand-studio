@@ -1,11 +1,14 @@
 """Native left MuJoCo geometry driven by validated display-only mappings.
 
-mj_forward updates measured kinematics only. There is no physics integration,
-actuator command, inverse control, contact estimation or invented motion.
+Measured and raw-target paths update kinematics only. Explicit constrained
+display uses a separate native model/data; it never writes a device target.
 """
 import io
+import hashlib
+import json
 from collections import deque
 import math
+import struct
 from pathlib import Path
 import threading
 import time
@@ -76,6 +79,97 @@ def validate_mapping(entries):
     return output
 
 
+class GloveCollisionPreview:
+    """Lazy display-only owner, independently testable without a physics import."""
+    def __init__(self,factory):
+        self.factory=factory
+        self.reset()
+
+    def _close_engine(self):
+        if self.preview is not None:self.preview.close()
+        self.preview=None;self.cached=None;self.last_seq=None;self.last_at=None
+
+    def reset(self):
+        if getattr(self,'preview',None) is not None:self.preview.close()
+        self.preview=None;self.cached=None;self.last_seq=None;self.last_at=None
+        self.key=None;self.error=None
+
+    close=reset
+
+    def update(self,state,*,now=None):
+        from collision_preview import TargetFrame,SOURCE,DISPLAY_MAX_PENETRATION_M,DISPLAY_MAX_LIMIT_EXCESS_RAD,MAX_SUBSTEPS
+        now=time.monotonic() if now is None else now
+        if state.get('view_source')!='glove' or state.get('teleoperation_view_mode')!='constrained':
+            self.reset();return None
+        g=state.get('glove');g=g if isinstance(g,dict) else {}
+        stream=g.get('stream');stream=stream if isinstance(stream,dict) else {}
+        device=state.get('device_profile');device=device if isinstance(device,dict) else {}
+        profile=device.get('id')
+        base=dict(source=SOURCE,preview_only=True,hardware_validated=False,target_modified=False,
+            profile=profile,bridge_session_id=g.get('session_id'),glove_serial=g.get('glove_serial'),
+            source_seq=stream.get('seq'),status='blocked',
+            message='碰撞约束预演 · 等待新鲜手套数据 / Collision-constrained preview requires fresh glove data')
+        q=stream.get('q');seq=stream.get('seq');session=g.get('session_id');user=g.get('user') or {}
+        age=stream.get('age_ms');timeout=stream.get('timeout_ms',250)
+        finite=lambda values:isinstance(values,(list,tuple)) and len(values)==20 and all(type(x) in (int,float) and math.isfinite(x) for x in values)
+        if not (type(now) in (int,float) and math.isfinite(now) and now>=0
+                and g.get('connection')=='receiving' and g.get('busy') is True and stream.get('fresh') is True
+                and finite(q) and type(seq) is int and seq>=0
+                and type(age) in (int,float) and math.isfinite(age) and age>=0
+                and type(timeout) in (int,float) and math.isfinite(timeout) and timeout>0 and age<=min(500,timeout)):
+            self._close_engine();return base
+        if not (g.get('profile')==profile and profile in ('hand1_left','hand1_right','hand2_left','hand2_right')
+                and isinstance(g.get('glove_serial'),str) and g['glove_serial']
+                and ((type(session) is int and session>=0) or (isinstance(session,str) and session))
+                and isinstance(user,dict) and isinstance(user.get('user_id'),str)):
+            self._close_engine();base['message']='预演来源身份不完整，未创建模型 / Preview source identity is incomplete';return base
+        try:
+            solver=stream.get('solver') or {};provenance=g.get('model_provenance') or {}
+            scope=(profile,session,g['glove_serial'],user['user_id'],stream.get('retarget'),
+                   solver.get('engine'),solver.get('values_sha256'),provenance.get('model_sha256'))
+            key=json.dumps(scope,sort_keys=True,allow_nan=False,separators=(',',':'))
+            raw=struct.pack('<20d',*q);sha=hashlib.sha256(raw).hexdigest()
+        except Exception:
+            self._close_engine();base['message']='预演来源设置无效 / Invalid preview source settings';return base
+        if self.key!=key:
+            self.reset();self.key=key
+        if self.error:
+            return dict(base,status='error',message=self.error)
+        if self.last_seq is not None and seq<=self.last_seq:
+            if seq==self.last_seq and self.cached is not None and self.cached.get('source_target_sha256')==sha:
+                return dict(self.cached)
+            self._close_engine();self.error='预演数据序号或目标冲突，请切换画面后重试 / Preview sequence or target changed unexpectedly; switch display source to retry'
+            return dict(base,status='error',message=self.error)
+        if self.last_at is not None and now-self.last_at>.5:self._close_engine()
+        try:
+            if self.preview is None:self.preview=self.factory(profile,hashlib.sha256(key.encode('utf-8')).hexdigest())
+            elapsed=.02 if self.last_at is None else min(.05,max(.002,now-self.last_at))
+            substeps=min(MAX_SUBSTEPS,max(1,round(elapsed/.002)))
+            result=self.preview.advance(TargetFrame(profile,self.preview.session_id,seq,now-age/1000,raw),now=now,substeps=substeps)
+            result=dict(result,bridge_session_id=session,glove_serial=g['glove_serial'])
+            self.last_seq=seq;self.last_at=now
+            required=('max_all_contact_penetration_m','limit_excess_rad')
+            known=all(type(result.get(k)) in (int,float) and math.isfinite(result[k]) and result[k]>=0 for k in required)
+            if result.get('stable') is not True or not known:
+                raise ValueError('原生求解状态未确认 / Native preview state is unverified')
+            if result.get('source_target_sha256')!=sha:raise ValueError('预演目标校验不一致 / Preview target checksum mismatch')
+            if result['limit_excess_rad']>DISPLAY_MAX_LIMIT_EXCESS_RAD:
+                result.update(status='blocked',message='预演超出模型行程，未更新画面 / Preview exceeded model limits; frame withheld')
+            elif result['max_all_contact_penetration_m']>DISPLAY_MAX_PENETRATION_M:
+                result.update(status='blocked',message='预演接触残余超过显示上限，未更新画面 / Contact residual exceeds display limit; frame withheld')
+            elif result.get('coverage')=='partial_original_hand1_masks':
+                result.update(status='partial',message='碰撞约束预演 · 非发送目标 · 一代覆盖有限 / Collision-constrained preview · Not sent to device · Hand 1 coverage limited')
+            elif result.get('coverage')=='original_hand2_masks_unvalidated':
+                result.update(status='ready',message='碰撞约束预演 · 非发送目标 / Collision-constrained preview · Not sent to device')
+            else:raise ValueError('碰撞覆盖范围未确认 / Collision coverage is unverified')
+            if result['status']=='blocked':result.pop('display_q',None)
+            self.cached=result
+            return dict(result)
+        except Exception as error:
+            self._close_engine();self.error='预演不可用：'+str(error)+' / Preview unavailable; switch display source to retry'
+            return dict(base,status='error',message=self.error)
+
+
 class PoseView:
     def __init__(self, controller):
         self.controller = controller
@@ -106,12 +200,15 @@ class PoseView:
 
     def run(self):
         renderer = None
+        collision = None
         try:
             self.wait_for_demand()
             import mujoco as mj
             import numpy as np
             from PIL import Image
             from device_profiles import load_native_model,FirstGenerationPreview
+            from collision_preview import create_display_preview
+            collision=GloveCollisionPreview(lambda p,s:create_display_preview(mj,p,s,HERE/'assets',mode='constrained',fresh_target=True))
             profile_id=self.controller.snapshot().get('device_profile',{}).get('id','hand2_left')
             m = load_native_model(profile_id)
             d = mj.MjData(m)
@@ -170,11 +267,37 @@ class PoseView:
                     d.qpos[:]=0;active=0;latest=None
                     for marker in markers:marker.update(status='unmapped',hz=None)
                 glove_display=None
+                collision_result=collision.update(state,now=tick)
                 if state.get('view_source')=='glove':
                     from glove_view import pose as glove_pose,channel_ids
                     glove_generation=state.get('device_profile',{}).get('generation')
                     glove_channels=channel_ids(glove_generation)
-                    gq,gmode,gfeedback=glove_pose(state.get('glove',{}),glove_generation,state.get('teleoperation_view_mode'))
+                    gq,gmode,gfeedback=glove_pose(state.get('glove',{}),glove_generation,state.get('teleoperation_view_mode','automatic'),collision=collision_result)
+                    if gmode in ('glove_live','glove_preview') and gq is None:
+                        with self.lock:
+                            # A pending/lost measured frame must never become
+                            # a fresh zero pose or a generated target image.
+                            self.meta=dict(ready=False,mode=gmode,
+                                message=('实机反馈未更新 / Hand feedback is unavailable or stale' if gmode=='glove_live'
+                                    else '手套预览数据无效或已过期 / Glove preview data is invalid or stale'),
+                                active_joints=0,joints=[],render_hz=0,source_seq=None,
+                                glove_seq=(state.get('glove',{}).get('stream') or {}).get('seq'),
+                                feedback=gfeedback,no_motion_commands=True,no_physics_step=True,
+                                device_profile=profile_id,view_source='glove')
+                        time.sleep(max(0,.05-(time.monotonic()-tick)))
+                        continue
+                    if gmode=='glove_constrained_unavailable':
+                        info=gfeedback.get('collision_preview') or {}
+                        with self.lock:
+                            # Keep the previous JPEG stale, never render a new
+                            # attractive zero/raw pose for an invalid result.
+                            self.meta=dict(ready=False,mode=gmode,message=info.get('message','预演不可用 / Preview unavailable'),
+                                collision_preview=info,active_joints=0,joints=[],render_hz=0,
+                                source_seq=None,glove_seq=(state.get('glove',{}).get('stream') or {}).get('seq'),
+                                no_physics_step=not bool(info.get('substeps')),no_motion_commands=True,simulation_only=True,
+                                device_profile=profile_id,view_source='glove')
+                        time.sleep(max(0,.05-(time.monotonic()-tick)))
+                        continue
                     d.qpos[:]=0;active=0;latest=None
                     if gq is not None:
                         for i,jid in enumerate(ids):d.qpos[m.jnt_qposadr[jid]]=gq[i]
@@ -228,6 +351,10 @@ class PoseView:
                         glove_seq=state.get('glove',{}).get('stream',{}).get('seq'),
                         message=('手套遥操作 · 实际灵巧手反馈' if active else '手套映射目标 · 非实测反馈' if gq is not None else '手套遥操作 · 等待新鲜数据'),
                         feedback=gfeedback if active else dict(latest=None,joint_rates=[],stale=True,metrics={}))
+                    if gmode=='glove_constrained':
+                        info=gfeedback['collision_preview']
+                        meta.update(message=info['message'],collision_preview=info,simulation_only=True,
+                                    no_physics_step=False,source_seq=None,active_joints=0)
                 with self.lock:
                     self.jpeg, self.meta = output.getvalue(), meta
                 time.sleep(max(0, .05-(time.monotonic()-tick)))
@@ -235,5 +362,6 @@ class PoseView:
             with self.lock:
                 self.meta = dict(ready=False, mode='error', message='三维模型加载失败：'+str(error), joints=[], render_hz=0)
         finally:
+            if collision:collision.close()
             if renderer:
                 renderer.close()

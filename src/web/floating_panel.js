@@ -1,5 +1,6 @@
 /* floating_panel.js — classic script. Exposes window.FloatingPanel = { create, clampRect }.
-   UI-only helper: moves one existing element between its home slot and a fixed overlay. */
+   UI-only helper: optionally moves one element between its home and a fixed overlay.
+   reparent:false preserves its DOM position, including nested iframe contexts. */
 (function (global) {
   'use strict';
 
@@ -50,6 +51,8 @@
     var title = options.title;
     var storageKey = options.storageKey ? String(options.storageKey) : '';
     var onChange = typeof options.onChange === 'function' ? options.onChange : null;
+    // In-place overlays need a visible home without a transformed fixed-position ancestor.
+    var reparent = options.reparent !== false;
     var limits = {
       minWidth: num(options.minWidth, 240),
       minHeight: num(options.minHeight, 120),
@@ -61,7 +64,7 @@
     var savedStyle = null;
     var lang = readLang();
     var addedClass = !panel.classList.contains('float-panel');
-    var placeholder = doc.createComment('float-panel-home');
+    var placeholder = reparent ? doc.createComment('float-panel-home') : null;
     var observer = typeof win.ResizeObserver === 'function' ? new win.ResizeObserver(syncSize) : null;
 
     var bar = doc.createElement('div');
@@ -180,12 +183,12 @@
       var box = panel.getBoundingClientRect();
       var stored = readStored();
       var initial = options.initialRect || {};
-      if (panel.parentNode) panel.parentNode.insertBefore(placeholder, panel);
+      if (reparent && panel.parentNode) panel.parentNode.insertBefore(placeholder, panel);
       savedStyle = {};
       STYLE_PROPS.forEach(function (prop) { savedStyle[prop] = panel.style[prop] || ''; });
       floating = true;
       render();
-      moveTo(doc.body, null);
+      if (reparent) moveTo(doc.body, null);
       intent = {
         x: num(stored.x, num(initial.x, box.left)), y: num(stored.y, num(initial.y, box.top)),
         width: num(stored.width, num(initial.width, box.width)), height: num(stored.height, num(initial.height, box.height))
@@ -205,9 +208,11 @@
       STYLE_PROPS.forEach(function (prop) { panel.style[prop] = savedStyle[prop]; });
       savedStyle = null;
       render();
-      var slot = isConnected(placeholder) ? placeholder.parentNode : null;
-      if (slot) moveTo(slot, placeholder); else moveTo(home, null);
-      if (placeholder.parentNode) placeholder.parentNode.removeChild(placeholder);
+      if (reparent) {
+        var slot = isConnected(placeholder) ? placeholder.parentNode : null;
+        if (slot) moveTo(slot, placeholder); else moveTo(home, null);
+        if (placeholder.parentNode) placeholder.parentNode.removeChild(placeholder);
+      }
       rect = null;
       emit('dock');
       return api;

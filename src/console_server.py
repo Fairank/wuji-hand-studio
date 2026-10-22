@@ -89,7 +89,7 @@ class Controller:
             recording=dict(active=False, frames=0, elapsed_s=0, label='baseline', seconds=30),
             sessions=[], log=[], read_only=True, recognition_enabled=False,
             motion_enabled=False, instance='wuji-studio-v1',motion_history=[],
-            camera=copy.deepcopy(DEFAULT_CAMERA),camera_revision=0,view_source='feedback',teleoperation_view_mode='target')
+            camera=copy.deepcopy(DEFAULT_CAMERA),camera_revision=0,view_source='feedback',teleoperation_view_mode='automatic')
         from device_profiles import selected_profile
         self.state['device_profile']=selected_profile()
         self.state['hardware'] = dict(ready=False,active=False,actions=[],probe_ready=False,reason='先连接左手，进行单关节试动')
@@ -113,6 +113,140 @@ class Controller:
                 self.state['mapping_device_id'] = config['device_id']
             except (ValueError, KeyError, TypeError):
                 self.log('已有显示映射无效，请重新核对')
+        from calibrated_teleoperation import CalibratedTeleoperation
+        from calibration_portability import export_native_bundle
+        self._continuation_profile=None
+        self.calibrated_teleoperation=CalibratedTeleoperation(
+            self._continuation_calibration,
+            lambda bundle:self.glove.start_calibrated(bundle,self._continuation_model_ready),
+            self.glove.disconnect_session,self.glove.snapshot,self._continuation_idle,
+            lambda proof,**kw:export_native_bundle(proof,self.reports.parent/'calibration_transfer',**kw),
+            owner_workspace=os.environ.get('WUJI_FLEET_ID','main'),
+            workflow_lock=self.calibration_handover.workflow_lock,
+            owner_check=self._continuation_owner_check)
+
+    def _continuation_calibration(self):
+        # No discovery, user refresh or SDK access in this read-only view.
+        with self.calibration.lock:
+            run=copy.deepcopy(self.calibration.run)
+        return dict(run=run,cleanup_required=(run.get('source') in ('official_tty','official_jsonl_native')
+            and run.get('running') is False and run.get('id') is not None and run.get('cleanup_confirmed') is not True))
+
+    def _continuation_idle(self):
+        from studio_component import require_idle
+        from cli_coordination import reservation
+        from managed_runtime import status as runtime_status
+        if getattr(self,'desktop_closing',False):raise ValueError('Session is closing')
+        if runtime_status().get('busy'):raise ValueError('Wait for controller installation')
+        state=self.snapshot()
+        if (state['calibration_connection'].get('busy') or state['teleoperation_connection'].get('busy')):
+            raise ValueError('Another device task is switching')
+        continuation=state.get('calibrated_teleoperation') or {}
+        if continuation.get('busy') and not self.calibrated_teleoperation.internal:
+            raise ValueError('Calibration continuation is still in progress')
+        if reservation(self.official_viz.folder) or any(state['official_viz'].get(k) for k in ('active','busy','reserved','scanning')):
+            raise ValueError('Finish the official CLI device session first')
+        if any(state['official_studio'].get(k) for k in ('active','busy','reserved')):
+            raise ValueError('Finish the Studio session first')
+        require_idle(state,self.doctor.snapshot())
+
+    def _continuation_owner_check(self,proof):
+        from studio_component import enforce_session_owner
+        from cli_coordination import enforce
+        # This private entry bypasses the ordinary action dispatcher, so it
+        # must retain both existing global native/component owner gates.
+        enforce_session_owner(dict(name='glove_scan'))
+        enforce(dict(name='glove_scan'))
+        with self.lock:
+            selected=self.state['device_profile']
+            if (getattr(self,'desktop_closing',False) or self._continuation_profile!=selected['id']
+                    or selected['side']!=proof['side']
+                    or proof['source_workspace']!=os.environ.get('WUJI_FLEET_ID','main')):
+                raise ValueError('工作区或目标型号已变化，请重新核对 / Workspace or target profile changed; review it first')
+
+    def _continuation_model_ready(self,receipt):
+        from calibration_portability import file_digest,IDENT
+        with self.lock:
+            proof=self.calibrated_teleoperation._current_proof()
+            self._continuation_owner_check(proof)
+            expected={k:proof[k] for k in ('source_run_id','source_workspace','source_profile','serial','side','model_sha256')}
+            if (not isinstance(receipt,dict) or any(receipt.get(k)!=v for k,v in expected.items())
+                    or not isinstance(receipt.get('owner_user_id'),str) or not IDENT.fullmatch(receipt['owner_user_id'])
+                    or type(receipt.get('imported')) is not bool
+                    or file_digest(proof['model_path'])!=(proof['model_sha256'],proof['model_bytes'])):
+                raise ValueError('标定接续证明已变化，未打开手套 / Calibration continuation identity changed; glove was not opened')
+            with self.glove.lock:
+                context=self.glove._continuation or {}
+                if self.glove.stopping or any(context.get(k)!=v for k,v in expected.items()):
+                    raise ValueError('Calibration controller session changed')
+            profile=self.state['device_profile']
+            binding=self.retarget.context(profile)['binding']
+            binding=dict(binding,glove_serial=proof['serial'],sdk_user=receipt['owner_user_id'])
+            context=self.retarget.select(binding,profile)
+            tuning=self.tuning.context(context['binding'])
+            # The human URDF stays in the official SDK user store. It is never
+            # assigned to the robot model or a custom hand_model_path override.
+            self.state['view_source']='glove'
+            return dict(timeout_ms=250,retarget=context['settings'],
+                solver=dict(engine=tuning['engine'],values=tuning['values']))
+
+    def task_context_action(self,expected_context,action,payload=None):
+        from task_control import execute
+        return execute(self,expected_context,action,payload)
+
+    def _task_context_dispatch(self,action,payload,state):
+        glove=state.get('glove') or {}
+        if action=='continue_teleoperation':
+            offered=self.calibrated_teleoperation.snapshot()
+            return self.action(dict(name='calibrated_teleoperation_continue',
+                run_id=offered.get('run_id'),expected_revision=offered.get('expected_revision')))
+        if action=='pair_prepare':
+            profile=state['device_profile'];binding=self.retarget.context(profile)['binding']
+            if (payload['profile']!=profile['id'] or payload['sdk_user']!=binding['sdk_user']
+                    or payload['sdk_user']!=(glove.get('user') or {}).get('user_id')
+                    or glove.get('connection')!='receiving' or not (glove.get('stream') or {}).get('fresh')
+                    or (glove.get('feedback') or {}).get('device_id')):
+                raise ValueError('Pairing source, user or target profile changed')
+            self.action(dict(name='retarget_binding_save',binding=dict(binding,hand_serial=payload['hand_serial'])))
+            return self.action(dict(name='glove_prepare',serial=payload['hand_serial']))
+        if action=='unpair':
+            session=glove.get('session_id')
+            old=self.retarget.context(state['device_profile'])['binding']
+            result=self.action(dict(name='glove_unpair'))
+            deadline=time.monotonic()+5.
+            while time.monotonic()<deadline:
+                current=self.glove.snapshot()
+                if current.get('session_id')!=session:raise ValueError('Glove session changed during unpair')
+                if current.get('hand_unpaired') is True and not (current.get('feedback') or {}).get('device_id'):
+                    with self.lock:
+                        binding=self.retarget.context(self.state['device_profile'])['binding']
+                        if binding!=old:raise ValueError('Pairing changed during hand cleanup')
+                        self.retarget.select(dict(binding,hand_serial=''),self.state['device_profile'])
+                    return dict(unpaired=True,glove=current)
+                if not current.get('busy') or current.get('connection')!='receiving':break
+                time.sleep(.025)
+            raise ValueError('灵巧手释放尚未确认，未标记解除配对 / Hand cleanup unconfirmed; unpair was not marked complete')
+        if action=='pause':
+            if glove.get('busy'):return self.action(dict(name='glove_stop'))
+            result=self.action(dict(name='program_stop'))
+            if self.hardware_lease or (state.get('hardware') or {}).get('active') is not False:
+                return self.action(dict(name='hardware_stop'))
+            return result
+        if action=='disconnect':
+            if (state.get('calibrated_teleoperation') or {}).get('busy'):
+                return self.action(dict(name='calibrated_teleoperation_cancel'))
+            if glove.get('busy'):
+                from device_termination import unconfirmed
+                if (glove.get('hardware') or {}).get('active',False) is not False or self.glove.lease or unconfirmed(state):
+                    raise ValueError('Pause and confirm the exact hand stop before disconnecting')
+                return self.action(dict(name='glove_disconnect'))
+            if (state.get('official_viz') or {}).get('active'):return self.action(dict(name='official_viz_stop'))
+            if (state.get('calibration') or {}).get('running'):return self.action(dict(name='calibration_cancel'))
+            from device_termination import unconfirmed
+            if self.hardware_lease or (state.get('hardware') or {}).get('active') is not False or unconfirmed(state):
+                raise ValueError('Pause and confirm the exact hand stop before disconnecting')
+            return self.action(dict(name='disconnect'))
+        raise ValueError('Unsupported typed task action')
 
     def log(self, text):
         self.state['log'].append(dict(time=datetime.now().strftime('%H:%M:%S'), text=text))
@@ -121,6 +255,7 @@ class Controller:
     def snapshot(self):
         with self.lock:
             result = copy.deepcopy(self.state)
+            result['session_generation']=getattr(self,'generation',0)
             result['solver_runtime']=self.solver_runtime.snapshot()
             result['official_studio']=self.studio.snapshot()
             result['official_viz']=self.official_viz.snapshot()
@@ -161,6 +296,8 @@ class Controller:
                     and self.calibration.run.get('cleanup_confirmed') is not True)
             result['calibration_connection']=self.calibration_handover.snapshot()
             result['teleoperation_connection']=self.teleoperation_handover.snapshot()
+            continuation=getattr(self,'calibrated_teleoperation',None)
+            result['calibrated_teleoperation']=continuation.snapshot() if continuation is not None else dict(busy=False,can_continue=False)
             return result
 
     def parameter_snapshot(self):
@@ -257,6 +394,22 @@ class Controller:
     def action(self, command):
         from calibration_handover import workflow_action
         name=command.get('name') if isinstance(command,dict) else None
+        continuation=getattr(self,'calibrated_teleoperation',None)
+        if name in {'task_owner','task_context_action','pair_prepare','unpair'}:
+            raise ValueError('Task owner operations require the private controller service')
+        if name=='calibrated_teleoperation_continue':
+            if not isinstance(command,dict) or set(command)!={'name','run_id','expected_revision'}:raise ValueError('Invalid continuation request')
+            if continuation.snapshot().get('busy'):raise ValueError('Continuation is still in progress')
+            with self.lock:self._continuation_profile=self.state['device_profile']['id']
+            return dict(calibrated_teleoperation=continuation.execute({k:command[k] for k in ('run_id','expected_revision')}))
+        if name=='calibrated_teleoperation_cancel':
+            if set(command)!={'name'}:raise ValueError('Invalid continuation cancellation')
+            return dict(calibrated_teleoperation=continuation.cancel())
+        if continuation is not None:
+            if name in {'glove_disconnect','session_close'} and continuation.snapshot().get('busy'):continuation.cancel()
+            if not continuation.internal and continuation.snapshot().get('busy') and (workflow_action(command) or name in {
+                    'retarget_binding_save','retarget_engine_select','retarget_tuning_save','retarget_save','retarget_apply'}):
+                raise ValueError('标定资料正在接续，请先等待或取消 / Calibration continuation is in progress; wait or cancel first')
         handover=self.calibration_handover
         teleoperation=getattr(self,'teleoperation_handover',None)
         if name=='teleoperation_handover':return self.teleoperation_handover.start(command)
@@ -626,8 +779,8 @@ class Controller:
                 if source=='feedback':self.player.command(dict(name='demo_stop'))
             return
         if isinstance(command,dict) and command.get('name')=='teleoperation_view_mode':
-            if set(command)-{'name','mode'} or command.get('mode') not in ('target','feedback'):
-                raise ValueError('Choose mapped target or measured feedback')
+            if set(command)-{'name','mode'} or command.get('mode') not in ('automatic','target','constrained','feedback'):
+                raise ValueError('Unknown teleoperation display source')
             self.state['teleoperation_view_mode']=command['mode'];self.state['view_source']='glove'
             return dict(teleoperation_view_mode=command['mode'])
         if isinstance(command, dict) and str(command.get('name','')).startswith('demo_'):
@@ -850,6 +1003,12 @@ class Handler(BaseHTTPRequestHandler):
         studio_view=urlsplit(self.path).path=='/official_studio_viewer.html'
         connect="'self' ws://127.0.0.1:*" if studio_view else "'self'"
         if studio_view:ancestor="'self'"
+        task_query=parse_qs(urlsplit(self.path).query)
+        if (urlsplit(self.path).path=='/' and task_query.get('task_view')==['1']
+                and task_query.get('embedded')==['1'] and not parent
+                and hasattr(self.server,'_tasks')
+                and self.server._tasks.allows_embedded_main(task_query.get('task_id',[None])[0])):
+            ancestor="'self'"
         styles="'self'"+(" 'nonce-"+style_nonce+"'" if style_nonce else '')
         self.send_header('Content-Security-Policy', "default-src 'self'; img-src 'self' data:; style-src "+styles+"; script-src 'self'; connect-src "+connect+"; frame-src http://127.0.0.1:*; frame-ancestors "+ancestor+"; base-uri 'none'; form-action 'self'")
         if filename:
@@ -864,6 +1023,9 @@ class Handler(BaseHTTPRequestHandler):
         if not self.allowed_host():
             return self.reply(403, dict(error='Local host required'))
         url = urlsplit(self.path)
+        if url.path=='/api/task-sessions':
+            if os.environ.get('WUJI_FLEET_PARENT'):return self.reply(403,dict(error='Use tasks in the main window'))
+            return self.reply(200,self.server.tasks.snapshot())
         if url.path=='/api/official-studio':return self.reply(200,self.server.studio.snapshot())
         if url.path=='/api/control-tools':return self.reply(200,self.server.controller.official_tools.snapshot())
         if url.path=='/api/official-cli':return self.reply(200,self.server.controller.official_cli.snapshot())
@@ -1028,6 +1190,8 @@ class Handler(BaseHTTPRequestHandler):
         for name in ('official_terminal.js','workbench_update.js','vendor/terminal/xterm.js','vendor/terminal/addon-fit.js'):assets['/'+name]=(name,'text/javascript; charset=utf-8')
         for name in ('official_terminal.css','workbench_update.css','vendor/terminal/xterm.css'):assets['/'+name]=(name,'text/css; charset=utf-8')
         assets['/official_studio_viewer.html']=('official_studio_viewer.html','text/html; charset=utf-8')
+        for name in ('task_workspace.js','calibration_continuation.js','viewport_resize.js'):assets['/'+name]=(name,'text/javascript; charset=utf-8')
+        for name in ('task_workspace.css','calibration_continuation.css','viewport_resize.css'):assets['/'+name]=(name,'text/css; charset=utf-8')
         assets['/favicon.ico']=('favicon.ico','image/x-icon')
         assets['/app-icon.png']=('app-icon.png','image/png')
         assets['/wuji-logo.png']=('wuji-logo.png','image/png')
@@ -1038,6 +1202,23 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         origin = self.headers.get('Origin')
+        if self.path=='/api/task-owner':
+            parent=os.environ.get('WUJI_FLEET_PARENT','')
+            token=os.environ.get('WUJI_FLEET_OWNER_TOKEN','')
+            if (not self.allowed_host() or not parent or origin!=parent or not token
+                    or not secrets.compare_digest(self.headers.get('X-Workbench-Owner',''),token)):
+                return self.reply(403,dict(ok=False,error='Parent task owner required'))
+            try:
+                length=int(self.headers.get('Content-Length','0'))
+                if not 0<length<=4096 or self.headers.get('Content-Type','').split(';')[0]!='application/json':
+                    raise ValueError('Invalid private task request')
+                payload=json.loads(self.rfile.read(length))
+                if not isinstance(payload,dict) or set(payload)!={'expected_context','action','payload'}:
+                    raise ValueError('Invalid private task fields')
+                result=self.server.controller.task_context_action(payload['expected_context'],payload['action'],payload['payload'])
+                return self.reply(200,dict(ok=True,**(result or {})))
+            except (ValueError,TypeError) as error:return self.reply(409,dict(ok=False,error=str(error)))
+            except Exception:return self.reply(503,dict(ok=False,error='Task owner unavailable'))
         if (not self.allowed_host() or origin not in {None, ORIGIN, f'http://localhost:{PORT}'}
                 or not secrets.compare_digest(self.headers.get('X-Console-Token', ''), self.server.controller.csrf)):
             return self.reply(403, dict(ok=False, error='本机控制会话校验失败，请刷新页面'))
@@ -1058,6 +1239,13 @@ class Handler(BaseHTTPRequestHandler):
                 result=dispatch(host,payload)
             elif payload.get('name') in ('desktop_open','desktop_viewer') and getattr(self.server,'desktop',None):
                 result=self.server.desktop.open_viewer() if payload['name']=='desktop_viewer' else dict(ok=True,native_opened=True)
+            elif payload.get('name')=='task_session_action':
+                if os.environ.get('WUJI_FLEET_PARENT'):raise ValueError('Use tasks in the main window')
+                result=self.server.tasks.action(payload)
+            elif (os.environ.get('WUJI_FLEET_PARENT') and payload.get('name') in {
+                    'official_viz_start','calibration_start','calibration_handover',
+                    'calibration_profile_create','calibration_profile_switch','official_cli_update','official_cli_rollback'}):
+                raise ValueError('请在主工作台执行官方标定任务 / Open official calibration in the main workbench')
             elif str(payload.get('name','')).startswith('official_studio_'):
                 if payload.get('name') not in {'official_studio_close','official_studio_probe'}:
                     raise ValueError('官方 Studio 已停用；请在设置中使用官方 CLI / SDK / Studio integration is retired; use official CLI / SDK in Settings')
@@ -1120,6 +1308,10 @@ class ConsoleHTTPServer(ThreadingHTTPServer):
                 local_teleop=getattr(self.controller,'teleoperation_handover',None)
                 if teleoperation.get('busy') and not (local and local_teleop is not None and local_teleop.internal):
                     raise ValueError('另一个工作区正在切换遥操作任务 / Another workspace is switching teleoperation tasks')
+                continuation=state.get('calibrated_teleoperation') or {}
+                local_continuation=getattr(self.controller,'calibrated_teleoperation',None)
+                if continuation.get('busy') and not (local and local_continuation is not None and local_continuation.internal):
+                    raise ValueError('另一个工作区正在接续标定任务 / Another workspace is continuing calibration')
                 if (state.get('calibration') or {}).get('cleanup_required') is True:
                     raise ValueError('标定退出尚未确认，请先核对原会话 / Calibration cleanup is unconfirmed; review its owning session')
                 viewer=state.get('official_viz') or {}
@@ -1158,6 +1350,7 @@ class ConsoleHTTPServer(ThreadingHTTPServer):
         self.controller.calibration.metadata_check=calibration_idle
         self.controller.calibration_handover.idle_check=all_idle
         if hasattr(self.controller,'teleoperation_handover'):self.controller.teleoperation_handover.idle_check=all_idle
+        if hasattr(self.controller,'calibrated_teleoperation'):self.controller.calibrated_teleoperation.idle_check=all_idle
         def profile_read_idle():
             # Native user list/show reads local SDK files, not a device. A
             # discovery/calibration reservation must not require a connected
@@ -1202,6 +1395,14 @@ class ConsoleHTTPServer(ThreadingHTTPServer):
                 from workspace_groups import WorkspaceGroups
                 self._workspaces=WorkspaceGroups(self.fleet,self.controller,DATA)
             return self._workspaces
+
+    @property
+    def tasks(self):
+        with self.controller.lock:
+            if not hasattr(self,'_tasks'):
+                from task_groups import TaskWorkspaces
+                self._tasks=TaskWorkspaces(self)
+            return self._tasks
 
     @property
     def fleet(self):

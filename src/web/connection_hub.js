@@ -177,11 +177,15 @@
   else if(!terminal&&hasModel&&!$('hub-replace').checked)reason=t('此侧已有手型。确认替换后再开始。','A model already exists for this hand. Confirm replacement before starting.');
   const ready=!reason&&!busy&&!running&&!cleanup,phaseLabels={starting:['正在准备标定','Preparing calibration'],collecting:['标定中','Calibrating'],solving:['正在生成手型','Creating hand model'],cancelling:['正在结束标定','Ending calibration'],terminal:['原版标定中','Official calibration running']},status=running?(phaseLabels[run.status]?t(...phaseLabels[run.status]):t('标定中','Calibrating')):cleanup?t('待结束确认','Awaiting session end'):connected?t('设备已接入','Device session connected'):t('尚未接入','Not connected');
   const runtime=typeof c.runtime==='string'?c.runtime:object(c.runtime)?[c.runtime.label,c.runtime.version].filter(Boolean).join(' · '):'';
-  const message=cleanup||!consoleState||!calibrationFresh?reason:running?'':reason||actionError||t('点击“切换到标定”会结束本设备画面并进入官方采集。','Switch to calibration ends this device’s Viewer and starts official capture.');
-  calib.querySelector('.hub-calib-readiness').dataset.state=running?'running':ready?'ready':'blocked';write('hub-calib-ready-title',running?status:ready?t('准备好后开始','Start when ready'):t('开始之前','Before you start'));write('hub-calib-ready-note',message);
-  nextAction=next;$('hub-calib-next').hidden=running||!nextLabel;$('hub-calib-next').disabled=busy;write('hub-calib-next',nextLabel);$('hub-calib-start').disabled=!ready;
+  const continuation=consoleState?.calibrated_teleoperation;
+  const continuationCurrent=continuation?.run_id===run.id&&(continuation.can_continue===true||continuation.busy===true||continuation.connected===true||typeof continuation.error==='string'&&!!continuation.error);
+  const ownResult=!running&&typeof run.id==='string'&&!!run.id&&(run.id===lastStartedRunId||continuationCurrent);
+  calib.dataset.currentResult=String(ownResult);
+  const message=cleanup||!consoleState||!calibrationFresh?reason:running?'':actionError||(ownResult?'':reason);
+  calib.querySelector('.hub-calib-readiness').dataset.state=running?'running':ready?'ready':'blocked';write('hub-calib-ready-title','');write('hub-calib-ready-note',message);
+  nextAction=ownResult?null:next;$('hub-calib-next').hidden=running||ownResult||!nextLabel;$('hub-calib-next').disabled=busy;write('hub-calib-next',nextLabel);$('hub-calib-start').disabled=!ready;
   officialViz?.setCalibrationState({running,busy:busy||cleanup,verified:calibrationFresh,ready,human:terminal,runtime,status,reason:message,terminal:run.source==='official_tty'&&!!run.id,actionLabel:t('切换到标定','Switch to calibration'),guided:true});
-  const hasRecord=typeof run.id==='string'&&!!run.id,ownResult=!running&&run.status==='completed'&&run.id===lastStartedRunId,showCurrent=running||cleanup||ownResult;
+  const hasRecord=typeof run.id==='string'&&!!run.id,showCurrent=running||cleanup||ownResult;
   previous.hidden=showCurrent||!hasRecord;write('hub-calib-previous-label',t('上次标定记录','Previous calibration record'));if(showCurrent){if(guideHost.parentElement!==calib)calib.append(guideHost);}else if(hasRecord){if(guideHost.parentElement!==previous)previous.append(guideHost);}guideHost.hidden=!showCurrent&&!hasRecord;
   guide?.render(c,{fresh:calibrationFresh,error:!consoleState?reason:actionError||refreshError,notice:message,previous:!showCurrent});
  }

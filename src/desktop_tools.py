@@ -19,6 +19,7 @@ def idle(state, doctor):
             and not state.get('calibration', {}).get('running')
             and not state.get('calibration_connection', {}).get('busy')
             and not state.get('teleoperation_connection', {}).get('busy')
+            and not state.get('calibrated_teleoperation', {}).get('busy')
             and not state.get('official_studio', {}).get('reserved')
             and not state.get('official_studio', {}).get('active')
             and not state.get('official_studio', {}).get('busy')
