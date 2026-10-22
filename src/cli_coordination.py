@@ -71,7 +71,7 @@ def reservation(folder=None):
         if not isinstance(row,dict):raise ValueError()
         # A dead visualization owner can leave a live Linux child. Only an
         # explicit runner probe/stop may clear this marker.
-        if row.get('kind')!='viz' and identity(row.get('pid'))!=row.get('start'):
+        if row.get('kind') not in {'viz','calibration'} and identity(row.get('pid'))!=row.get('start'):
             return {}
         return row
     except FileNotFoundError:return {}
@@ -104,7 +104,7 @@ def enforce(command,folder=None):
     if not isinstance(command,dict):return
     name=command.get('name','')
     blocked=(name in {'connect','parameters_sync','doctor_run','doctor_version','doctor_support','control_tools_check','runtime_install','runtime_select','bridge_config_save','device_profile_select','solver_install','hardware_start','hardware_trial','hardware_probe','program_start','program_resume'}
-        or name.startswith('calibration_') and name!='calibration_cancel'
+        or name.startswith('calibration_') and name not in {'calibration_cancel','calibration_terminal_input'}
         or name.startswith('glove_') and name not in {'glove_disconnect','glove_stop','glove_keepalive'}
         or name.startswith('group_') and name not in {'group_abort','group_beat','group_stop'})
     if blocked and reservation(folder):raise ValueError('请先结束官方可视化或 CLI 切换，再使用设备控制 / Close the official visualization or CLI handover first')

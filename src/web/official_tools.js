@@ -61,7 +61,7 @@
   $('ot-cli-check').disabled=busy;$('ot-cli-update').hidden=!u.available&&!u.preparing&&cliPending!=='official_cli_update';$('ot-cli-update').disabled=!cliFresh||busy||u.available!==true;$('ot-cli-rollback').hidden=!previous.version;$('ot-cli-rollback').disabled=!cliFresh||busy||!previous.version;
   $('ot-cli-release-error').textContent=cliTransportError||cliActionError||u.error||'';
   $('ot-cli-release-details-label').textContent=t('版本详情','Version details');
-  $('ot-cli-release-details').textContent=[t('当前：','Current: ')+version(current.version)+(current.commit?' · '+String(current.commit).slice(0,12):''),t('最新：','Latest: ')+version(u.latest_version),t('上次检查：','Last checked: ')+timestamp(u.checked_at),t('上一版：','Previous: ')+version(previous.version),u.auto_update===true?t('自动更新已开启','Automatic updates enabled'):t('自动更新未开启','Automatic updates not enabled')].join('\n');
+  $('ot-cli-release-details').textContent=[t('当前：','Current: ')+version(current.version)+(current.commit?' · '+String(current.commit).slice(0,12):''),t('最新：','Latest: ')+version(u.latest_version),t('上次检查：','Last checked: ')+timestamp(u.checked_at),t('上一版：','Previous: ')+version(previous.version),u.update_method==='workbench'?t('原版 CLI 随工作台软件更新，设备与标定共用同一版本。','The original CLI updates with the workbench. Discovery and calibration use the same version.'):u.auto_update===true?t('自动更新已开启','Automatic updates enabled'):t('自动更新未开启','Automatic updates not enabled')].join('\n');
  }
  async function loadCli(){
   if(cliPromise)return cliPromise;

@@ -61,9 +61,19 @@ class OfficialCLI:
     def snapshot(self):
         from managed_runtime import image_manifest
         saved=selected(self.folder);manifest=image_manifest() or {}
+        from bridge_config import load_config
+        from official_device_discovery import use_native
+        native=use_native(load_config())
         with self.lock:
             update=copy.deepcopy(self.state)
         current=saved.get('current') or dict(version=manifest.get('cli_version'),source='bundled',validated=False)
+        if native:
+            from native_cli import PINNED_VERSION,resolve
+            try:binary=resolve();validated=True
+            except (OSError,ValueError):binary=None;validated=False
+            current=dict(version=PINNED_VERSION,source='workbench_native',mode='windows_native',binary=binary,validated=validated,update_method='workbench')
+            update.update(auto_update=False,update_method='workbench')
+            return dict(update=update,current=current,previous=None,versions=[current],busy=bool(self.thread and self.thread.is_alive()) or update['checking'] or update['preparing'])
         versions=[v for v in (current,saved.get('previous')) if v]
         return dict(update=update,current=current,previous=saved.get('previous'),versions=versions,busy=bool(self.thread and self.thread.is_alive()) or update['checking'] or update['preparing'])
 
@@ -89,6 +99,12 @@ class OfficialCLI:
             if self.closed.is_set():return
             release_doc=self.store.fetch_release();version=release_doc['tag_name'].removeprefix('v')
             saved=selected(self.folder);current=saved.get('current') or {}
+            from bridge_config import load_config
+            from official_device_discovery import use_native
+            if use_native(load_config()):
+                from native_cli import PINNED_VERSION
+                self._set(latest_version=version,available=False,checked_at=time.time(),checking=False,phase='checked',auto_update=False,update_method='workbench',newer_cli_available=version_order(version)>version_order(PINNED_VERSION))
+                return
             available=(not current.get('version') or version_order(version)>version_order(current['version'])
                 or current.get('source')=='bundled' and version_order(version)==version_order(current['version']))
             self._set(latest_version=version,available=available,checked_at=time.time(),checking=False)
@@ -177,6 +193,9 @@ class OfficialCLI:
         self._set(error=None)
 
     def rollback(self):
+        from bridge_config import load_config
+        from official_device_discovery import use_native
+        if use_native(load_config()):raise ValueError('原版 CLI 随工作台版本更新和回退 / Update or roll back the workbench to change its native CLI')
         with self.lock:
             if self.thread and self.thread.is_alive():raise ValueError('Wait for the CLI update to finish')
         with gate(self.folder):

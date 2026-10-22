@@ -14,6 +14,9 @@
  function mount(host,{language=()=>window.WujiLocale?.lang||'zh'}={}){
   host.classList.add('oc-run');host.setAttribute('aria-labelledby','oc-title');
   host.innerHTML='<div class="oc-heading"><h4 id="oc-title"></h4><span id="oc-state"></span></div><p id="hub-calib-status" role="status" aria-live="polite"></p><dl class="oc-step"><dt id="oc-step-label"></dt><dd id="hub-calib-step"></dd><span id="oc-step-count"></span></dl><div class="oc-progress-row"><span id="oc-progress-label"></span><progress id="oc-progress" max="1" aria-labelledby="oc-progress-label"></progress><span id="oc-progress-text"></span></div><dl class="oc-feedback"><div><dt id="oc-stability-label"></dt><dd id="oc-stability"></dd></div><div><dt id="oc-constraints-label"></dt><dd id="oc-constraints"></dd></div><div id="oc-hold-row"><dt id="oc-hold-label"></dt><dd id="oc-hold"></dd></div><div id="oc-frames-row"><dt id="oc-frames-label"></dt><dd id="oc-frames"></dd></div></dl><div class="oc-result" hidden><strong id="oc-result-label"></strong><p id="oc-result-user"></p><p id="oc-result-location"></p><p id="oc-result-note"></p></div><details class="oc-details"><summary id="oc-details-label"></summary><pre id="oc-details"></pre></details>';
+  const empty=document.createElement('div');empty.id='oc-empty';empty.innerHTML='<strong id="oc-empty-title"></strong><p id="oc-empty-note"></p>';host.prepend(empty);
+  const terminalHost=document.createElement('section');host.querySelector('.oc-result').before(terminalHost);
+  const terminal=window.OfficialTerminal?.mount(terminalHost,{language});
   const $=id=>host.querySelector('#'+id),details=host.querySelector('details');let data={},context={};
   const write=(id,value)=>{if($(id).textContent!==value)$(id).textContent=value;};
   function raw(){
@@ -26,21 +29,26 @@
   details.addEventListener('toggle',raw);
   function render(next,options={}){
    data=next||{};context=options;const run=data.run||{},en=language()==='en',t=(zh,eng)=>en?eng:zh,fresh=context.fresh===true;
-   const done=completed(run),error=text(context.error)||text(run.error),status=typeof run.status==='string'?run.status:'idle';
+   const native=data.human_tty===true||run.source==='official_tty';host.dataset.source=native?'official_tty':'official_jsonl';host.dataset.humanTty=String(data.human_tty===true);terminal?.render(run,{fresh});
+   const done=!native&&completed(run),error=text(context.error)||text(run.error),status=typeof run.status==='string'?run.status:'idle';
    let label=t('尚未开始','Not started'),message=context.notice||t('选择用户和手套，再开始标定。','Select a user and glove, then start calibration.'),tone='idle';
    if(!fresh){label=t('状态未核对','Status unverified');message=error||t('无法读取当前状态。上次事件仍保留，刷新后再核对。','Current status is unavailable. Previous events remain; refresh to verify.');tone='unknown';}
    else if(context.error){label=t('操作未完成','Operation incomplete');message=error;tone='error';}
    else if(error||status==='error'||Number.isInteger(run.exit_code)&&run.exit_code!==0&&status!=='cancelled'){label=t('标定失败','Calibration failed');message=error||t('CLI 未正常结束，请查看详细记录。','The CLI did not finish normally. Review the detailed log.');tone='error';}
    else if(done){label=t('标定完成','Calibration completed');message=t('官方 result 已返回，CLI 退出代码为 0。','The official result was received and the CLI exited with code 0.');tone='completed';}
    else if(status==='completed'||status==='unconfirmed'){label=t('结果未确认','Result unconfirmed');message=t('等待官方 result 与正常退出结果，尚不能确认完成。','Completion requires the official result and a normal CLI exit.');tone='unknown';}
+   else if(native&&status==='session_ended'){label=t('原版会话已结束','Official session ended');message=t('CLI 已正常退出。标定结果请查看下方原版界面与刷新后的用户模型状态。','The CLI exited normally. Review the original output below and refresh the user model status for calibration results.');}
+   else if(native&&status==='stopped'){label=t('会话已停止','Session stopped');message=t('本次终端会话已停止，不代表标定完成。','The terminal session has stopped. This does not confirm a completed calibration.');}
    else if(status==='cancelled'){label=t('已取消','Cancelled');message=t('标定已取消。','Calibration was cancelled.');}
    else if(run.running===true){
-    const labels={starting:['正在核对身份','Verifying device identity'],collecting:['采集中','Collecting'],solving:['求解中','Solving'],cancelling:['正在取消','Cancelling']};
-    label=labels[status]?t(...labels[status]):t('运行中','Running');message=status==='starting'?t('正在核对所选手套、用户和左右手，尚未开始采集。','Verifying the selected glove, user and hand side. Capture has not started.'):status==='solving'?t('官方正在求解手型，请等待结果。','The official solver is fitting the hand model. Wait for its result.'):status==='cancelling'?t('正在结束本次采集，请等待官方进程退出。','Ending this capture. Wait for the official process to exit.'):t('跟随下方官方当前动作，采集条件由 CLI 判断。','Follow the official step below. Capture conditions are evaluated by the CLI.');tone='running';
+    const labels={starting:['正在核对身份','Verifying device identity'],terminal:['原版 CLI 运行中','Official CLI running'],collecting:['采集中','Collecting'],solving:['求解中','Solving'],cancelling:['正在取消','Cancelling']};
+    label=labels[status]?t(...labels[status]):t('运行中','Running');message=status==='starting'?(data.human_tty===true?t('正在核对所选手套并打开官方流程，尚未开始采集。','Verifying the selected glove and opening the official journey. Capture has not started.'):t('正在核对所选手套、用户和左右手，尚未开始采集。','Verifying the selected glove, user and hand side. Capture has not started.')):status==='solving'?t('官方正在求解手型，请等待结果。','The official solver is fitting the hand model. Wait for its result.'):status==='cancelling'?t('正在结束本次采集，请等待官方进程退出。','Ending this capture. Wait for the official process to exit.'):t('跟随下方官方当前动作，采集条件由 CLI 判断。','Follow the official step below. Capture conditions are evaluated by the CLI.');tone='running';
    }else if(status!=='idle'&&status!==''){label=t('状态未知','Status unknown');message=t('当前状态未识别，请查看详细记录。','The current status is unrecognized. Review the detailed log.');tone='unknown';}
    else if(data.available!==true){label=t('CLI 未就绪','CLI unavailable');message=error||t('刷新状态后重试。','Refresh status and retry.');tone='unknown';}
+   if(native&&fresh&&run.running&&status==='terminal')message=t('按原版界面完成用户确认与动作采集；动作图示和结果均由官方 CLI 显示。','Follow the original interface for profile confirmation and capture. Pose guidance and results are displayed by the official CLI.');
    write('oc-title',t('官方采集','Official capture'));write('oc-state',label);host.dataset.status=tone;write('hub-calib-status',message);
-   const hasRun=run.running===true||status!=='idle'&&status!=='';
+   const hasRun=run.running===true||status!=='idle'&&status!=='';host.dataset.hasRun=String(hasRun);empty.hidden=!native||hasRun;
+   write('oc-empty-title',t('原版手套标定','Original glove calibration'));write('oc-empty-note',context.notice||t('选择手套后，点击上方“开始标定”。','Select a glove, then choose Start calibration above.'));
    write('oc-step-label',fresh?t('当前步骤','Current step'):t('上次步骤（未核对）','Previous step (unverified)'));
    write('hub-calib-step',hasRun?(step(run,en?'en':'zh')||t('等待官方步骤','Waiting for the official step')):t('尚未开始','Not started'));
    const count=Number.isInteger(run.step)&&Number.isInteger(run.step_total)&&run.step_total>0&&run.step>=0&&run.step<run.step_total?(run.step+1)+' / '+run.step_total:'';write('oc-step-count',count);$('oc-step-count').hidden=!count;

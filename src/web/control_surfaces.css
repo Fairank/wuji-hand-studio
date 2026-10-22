@@ -1,6 +1,7 @@
 /* Shared desktop controls. Frost belongs to transient chrome, not every button. */
 html{--ui-fill:#f5f5f7;--ui-hover:#ebebef;--ui-card:#fff;--ui-ink:#202124;--ui-sub:#6e6e73;--ui-line:#00000014;--ui-blue:#007aff;--ui-danger:#ba302a;--ui-danger-fill:#fff2f1}
 html[data-theme=dark]{--ui-fill:#343438;--ui-hover:#414147;--ui-card:#29292d;--ui-ink:#f5f5f7;--ui-sub:#adadb5;--ui-line:#ffffff19;--ui-blue:#64a6ff;--ui-danger:#ffb4ae;--ui-danger-fill:#492d2f}
+@media(max-width:900px){html[data-theme=dark]{background:#151519}}
 html .page-body :is(.button-row,.wb-actions,.wc-heading-tools,.viewer-actions,.wsx-head)>button,
 html .hws-body :is(.button-row,.wb-actions)>button,
 html #page-library :is(.symbol-shortcuts button,#viewer-enlarge),

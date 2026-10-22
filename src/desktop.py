@@ -80,6 +80,18 @@ def self_check():
     return 0
 
 def main():
+    if '--terminal-software-check' in sys.argv:
+        from native_calibration import terminal_software_check
+        try:code=terminal_software_check(sys.argv[sys.argv.index('--terminal-software-check')+1])
+        except Exception:code=1
+        os._exit(code)
+    if '--native-calibration-worker' in sys.argv:
+        from native_calibration import worker_main
+        try:code=worker_main(sys.argv[sys.argv.index('--native-calibration-worker')+1:])
+        except Exception:code=1
+        # The PTY adapter has daemon readers blocked on inherited pipes. It is
+        # an internal child, so avoid interpreter shutdown acquiring their locks.
+        os._exit(code)
     if '--recognizer-input' in sys.argv:
         parser=argparse.ArgumentParser();parser.add_argument('--recognizer-input',required=True);parser.add_argument('--recognizer-output',required=True)
         args=parser.parse_args()

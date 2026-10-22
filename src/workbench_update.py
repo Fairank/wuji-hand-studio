@@ -1,0 +1,146 @@
+"""App-level updates. Checks/downloads never close a device or the application."""
+import copy
+import hashlib
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+import tempfile
+import threading
+import time
+import uuid
+
+from cli_coordination import atomic,gate,reservation
+from workbench_release import WorkbenchRelease,REPOSITORY,_plain,_directory
+
+APP_ID='44DF38B2-39A0-491F-B154-E587231C83CE'
+
+
+class WorkbenchUpdate:
+    def __init__(self,data_dir,edition,*,idle_check=None,desktop=None,store=None):
+        self.data=Path(data_dir);self.edition=edition;self.idle_check=idle_check or (lambda:None)
+        self.desktop=desktop or (lambda:None)
+        self.store=store or WorkbenchRelease(self.data,edition['version'])
+        self.lock=threading.RLock();self.closed=threading.Event();self.thread=None;self.latest=None;self.started=False
+        self.result_file=None;self.apply_token=None;self.helper=None
+        self.state=dict(current_version=edition['version'],phase='idle',busy=False,latest_version=None,
+            available=False,prepared=None,error=None,checked_at=None,source=REPOSITORY)
+
+    def _idle(self):
+        if reservation():raise ValueError('请结束官方 CLI 会话后更新 / End the official CLI session before updating')
+        self.idle_check()
+
+    def snapshot(self):
+        with self.lock:
+            result=copy.deepcopy(self.state)
+            if self.result_file:
+                try:
+                    if not _plain(self.result_file,directory=False) or self.result_file.stat().st_size>=65536:raise ValueError('No valid updater result')
+                    report=json.loads(self.result_file.read_text(encoding='utf-8-sig'))
+                    if not isinstance(report,dict) or report.get('token')!=self.apply_token or report.get('phase')!='error':
+                        raise ValueError('No matching updater error result')
+                    self.state.update(phase='error',busy=False,error=str(report.get('error') or 'Update helper failed')[:700]);result=copy.deepcopy(self.state)
+                except (OSError,ValueError,TypeError):
+                    if self.helper and self.helper.poll() is not None and self.state['phase']=='applying':
+                        self.state.update(phase='error',busy=False,error='更新助手未完成，请重试 / Update helper did not complete; retry');result=copy.deepcopy(self.state)
+        result['supported']=sys.platform=='win32' and bool(getattr(sys,'frozen',False)) and self.desktop() is not None
+        result['can_apply']=False
+        if result['supported'] and result.get('prepared') and not result['busy']:
+            try:self._idle();result['can_apply']=True
+            except (ValueError,OSError):pass
+        return result
+
+    def startup(self):
+        if os.environ.get('WUJI_FLEET_ID') or os.environ.get('WUJI_APP_AUTO_CHECK')=='0' or not self.snapshot()['supported']:return
+        with self.lock:
+            if self.started:return
+            self.started=True
+        self.start('check')
+
+    def start(self,operation):
+        if operation not in ('check','prepare'):raise ValueError('Unknown application update operation')
+        with self.lock:
+            if self.state['busy']:raise ValueError('软件更新正在处理 / Application update is busy')
+            if operation=='prepare' and (not self.latest or self.latest.get('available') is not True):raise ValueError('先检查可用的新版本 / Check for an available release first')
+            self.closed.clear();self.state.update(busy=True,error=None,phase='checking' if operation=='check' else 'downloading')
+            self.thread=threading.Thread(target=self._work,args=(operation,),name='Workbench software update',daemon=True);self.thread.start()
+        return self.snapshot()
+
+    def _work(self,operation):
+        try:
+            if operation=='check':
+                latest=self.store.check(cancel_event=self.closed)
+                with self.lock:
+                    self.latest=latest
+                    self.state.update(latest_version=latest.get('latest_version'),available=latest.get('available') is True,
+                        checked_at=time.time(),phase='ready' if self.state.get('prepared') else 'unpublished' if latest.get('reason')=='unpublished' else 'available' if latest.get('available') else 'up_to_date')
+            else:
+                prepared=self.store.prepare(self.latest,cancel_event=self.closed)
+                with self.lock:self.state.update(prepared=prepared,phase='ready')
+        except Exception as error:
+            with self.lock:self.state.update(phase='error',error=str(error)[:700])
+        finally:
+            with self.lock:self.state['busy']=False
+
+    def _stage_installer(self,prepared):
+        """Reuse the existing finite desktop prepare_update interface's layout."""
+        version=prepared['version'];digest=prepared['sha256'];name='HandWorkbench-'+version+'-windows-x64-setup.exe'
+        from desktop_tools import version_tuple
+        version_tuple(version)
+        source=Path(prepared['installer']);expected=self.data/'updates/versions'/version/name
+        if source!=expected or prepared.get('repository')!=REPOSITORY:raise ValueError('Unexpected prepared installer location or source')
+        _directory(source.parent)
+        if not _plain(source,directory=False):raise ValueError('Prepared installer disappeared')
+        with source.open('rb') as stream:
+            if stream.read(2)!=b'MZ':raise ValueError('Expected a Windows installer')
+            stream.seek(0)
+            if hashlib.file_digest(stream,'sha256').hexdigest()!=digest:raise ValueError('Prepared installer changed after download')
+        destination=self.data/'updates'/name
+        _directory(destination.parent)
+        _plain(destination,directory=False)
+        fd,temp=tempfile.mkstemp(prefix=name+'.',suffix='.partial',dir=destination.parent)
+        stage=Path(temp)
+        try:
+            with os.fdopen(fd,'wb') as output,source.open('rb') as incoming:
+                shutil.copyfileobj(incoming,output);output.flush();os.fsync(output.fileno())
+            with stage.open('rb') as stream:
+                if hashlib.file_digest(stream,'sha256').hexdigest()!=digest:raise ValueError('Installer changed while staging')
+            _plain(destination,directory=False);os.replace(stage,destination)
+        finally:stage.unlink(missing_ok=True)
+        return destination
+
+    def apply(self):
+        from runtime_paths import RESOURCE
+        if not self.snapshot()['supported']:raise ValueError('请在 Windows 已安装版本中使用软件更新 / Use software update in the installed Windows application')
+        with self.lock,gate():
+            if self.state['busy'] or not self.state.get('prepared'):raise ValueError('Download and verify the new installer first')
+            self._idle()
+            prepared=copy.deepcopy(self.state['prepared']);installer=self._stage_installer(prepared)
+            host=self.desktop();info=host.info()
+            if info.get('native') is not True or info.get('edition')!=self.edition['name'] or info.get('pid')!=os.getpid() or Path(info.get('data_dir',''))!=self.data:
+                raise ValueError('Application update host identity changed')
+            token=uuid.uuid4().hex;updates=self.data/'updates'
+            plan_file=updates/('apply-'+token+'.json');result_file=updates/('apply-'+token+'.result.json')
+            plan=dict(schema=1,app_id=APP_ID,repository=REPOSITORY,token=token,data_dir=str(self.data),
+                version=prepared['version'],sha256=prepared['sha256'],installer=str(installer),
+                executable=str(Path(sys.executable).absolute()),origin=host.origin,expected_app_pid=os.getpid(),
+                old_version=self.edition['version'],result_file=str(result_file))
+            atomic(plan_file,plan)
+            shell=Path(os.environ.get('SystemRoot',r'C:\Windows'))/'System32/WindowsPowerShell/v1.0/powershell.exe'
+            script=RESOURCE/'workbench_update_apply.ps1'
+            if not script.is_file():raise ValueError('Application updater is missing from this installation')
+            env=dict(os.environ)
+            for key in tuple(env):
+                if key.upper()=='PSMODULEPATH':env.pop(key)
+            self.helper=subprocess.Popen([str(shell),'-NoLogo','-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass',
+                '-File',str(script),'-PlanFile',str(plan_file)],creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0),env=env)
+            self.result_file=result_file;self.apply_token=token
+            self.state.update(phase='applying',busy=True,error=None)
+        return self.snapshot()
+
+    def cancel_and_wait(self,timeout=16):
+        self.closed.set()
+        if self.thread and self.thread is not threading.current_thread():self.thread.join(timeout)
+        return not self.thread or not self.thread.is_alive()

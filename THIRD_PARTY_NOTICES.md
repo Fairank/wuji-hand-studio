@@ -1,11 +1,12 @@
 # Attribution / 来源
 
-## Original Windows CLI on demand (0.2.23)
+## Original Windows CLI bundle (0.2.29)
 
-The Windows host-network path downloads the unmodified official Wuji CLI
-2026.10.12 x86_64 executable on explicit first use, from
+The Windows installer includes the unmodified official Wuji CLI
+2026.10.12 x86_64 release archive, originally obtained from
 [the official release asset](https://github.com/wuji-technology/wuji-cli/releases/download/v2026.10.12/wuji_2026.10.12_x86_64-pc-windows-msvc.zip).
-The repository and installer do not redistribute this Windows executable.
+The source repository contains the preparation script and pinned manifest;
+the binary build includes the verified archive for offline first use.
 The ZIP SHA-256 is
 `1c9a902386432c9afda160c28a438f4710e74f3c0329f2b9d52216456747bfe0`;
 the extracted `wuji.exe` SHA-256 is
@@ -17,6 +18,22 @@ remain the upstream authors' property and are not relicensed by Workbench's MIT
 grant. The native pin is separate from the Linux CLI updater. This does not
 install Studio or establish device/calibration acceptance. See
 [Windows glove networking](docs/Windows-glove-network.md).
+
+## Original terminal components (0.2.29)
+
+The original interactive CLI is displayed with unmodified
+[@xterm/xterm 5.5.0](https://www.npmjs.com/package/@xterm/xterm) and
+[@xterm/addon-fit 0.10.0](https://www.npmjs.com/package/@xterm/addon-fit),
+both MIT licensed. Their upstream license texts are included in
+`web/vendor/terminal/`. Exact source archives, integrity values, sizes and
+file hashes are recorded in `official_terminal_manifest.json` in the binary
+and `src/official_terminal_manifest.json` in the source tree. The preparation
+script verifies those pinned resources; no CDN script is loaded at runtime.
+Windows ConPTY transport uses [pywinpty 3.1.0](https://pypi.org/project/pywinpty/),
+MIT licensed, with its installed distribution license retained under
+`third-party-licenses`. Workbench's transport and theme adapters are separate
+from these original dependencies. Terminal output remains the original CLI's
+output and is not evidence that a real calibration has been completed.
 
 ## Device-free original Viewer (0.2.21)
 

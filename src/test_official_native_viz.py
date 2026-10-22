@@ -109,13 +109,13 @@ class NativeDiscoveryTests(unittest.TestCase):
             self.assertEqual(local.call_args.args[0], ['/explicit/custom/wuji', '--json', 'devices'])
             native.assert_called_once()
 
-    def test_user_list_does_not_silently_switch_to_windows_profiles(self):
+    def test_explicit_custom_cli_keeps_its_controller_profiles(self):
         with patch.object(discovery.sys, 'platform', 'win32'), \
              patch.object(discovery, 'native_devices', side_effect=AssertionError('No discovery/profile switch')) as native, \
              patch.object(calibration_cli, 'local_run', return_value=(0, '{"users":[]}', '')) as local, \
              patch.object(calibration_cli, 'controller_args', side_effect=lambda config, args: list(args)), \
              patch('official_cli.cli_path', return_value='/managed/linux/wuji'):
-            self.assertEqual(calibration_cli.cli_json(dict(mode='wsl', cli='wuji'), 'user', 'list'), {'users': []})
+            self.assertEqual(calibration_cli.cli_json(dict(mode='wsl', cli='/managed/linux/wuji'), 'user', 'list'), {'users': []})
             self.assertEqual(local.call_args.args[0], ['/managed/linux/wuji', '--json', 'user', 'list'])
             native.assert_not_called()
 

@@ -8,15 +8,39 @@
 
 ## Windows 下载和启动
 
-在 [Releases](../../releases) 选择实际已上传的安装包，各版本沿用同一 Windows 软件、安装身份和用户数据目录；0.2.28 的验证范围见 [验证记录](docs/VALIDATION_0.2.28.md)，公开安装包以实际 Release 为准。Windows 当前用户安装无需另装 Python；安装器检查微软 WebView2 运行时，缺少时联网安装。包暂未进行发布者代码签名，附有 SHA-256 校验文件。
+在 [Releases](../../releases) 选择实际已上传的安装包，各版本沿用同一 Windows 软件、安装身份和用户数据目录。0.2.30 的软件检查与设备验收边界见 [软件验证记录](docs/VALIDATION_0.2.30.md)；打包、安装和源码推送结果另记于外部最终交付清单。目前尚未发布本版二进制 Release，不能把源码实现当作已上传安装包。Windows 当前用户安装无需另装 Python；安装器检查微软 WebView2 运行时，缺少时联网安装。包暂未进行发布者代码签名，下载需核对实际发布的 SHA-256。
 
-## 0.2.28 滚动区域对齐
+## 0.2.30 直接使用完整官方标定流程
+
+0.2.29 虽然合并了入口，仍要求先在工作台填写用户、左右手和覆盖确认，再进入官方终端，保留了两套准备流程。用户指出这一点后，本版移除默认 Windows 路径的重复准备表单。
+
+打开「连接与校准 → 官方 CLI」，在上方只选择一次实际设备编号。「查看画面」打开原版 Viewer；选择手套后点「开始标定」，同一显示区直接进入原版 Human TTY。创建或切换用户、已有模型的覆盖确认、六步彩色动作指导和结果页都由固定官方 CLI **2026.10.12** 原流程提供。覆盖默认选择 No；工作台不替你创建用户、确认覆盖或按键。无需在工作台再次选择用户、左右手或设备。Viewer 用于查看骨架和触觉数据；标定使用同一区域中的官方终端。这里是原版终端菜单和动作图示，不是 Studio 图形界面；你直接按提示操作，不需要编写源码。
+
+设备发现记录必须新近有效、编号和手套类型匹配；启动前核对实际左右手及会话归属。其他工作区、Viewer、手套预览或遥操作仍占用设备时，先明确结束所属会话，再开始下一项。原版终端通过现成 pywinpty 3.1.0、xterm.js 5.5.0 与 fit 0.10.0 显示，保留官方动作与交互。显式旧 Linux/custom JSONL 路径继续保留命名用户、侧别和覆盖同意门禁。
+
+工作台不从终端文字推测当前用户或模型保存成功。退出码0只记为 `session_ended`；实际用户、左右手和 URDF 以官方终端的保存结果及档案为准。没有进行本轮真实手套采集或标定质量验收。步骤见 [标定说明](docs/CALIBRATION.md)。
+
+0.2.29 的软件更新框架、原生 CLI 离线包、同一安装身份与资料保留方式继续使用；0.2.30 会重新构建和核对。完整 Python 回归1085项，1083项通过、2项按条件跳过，用时49.954秒；90项标定专项与全量重叠，不重复累计。独立界面验收23个唯一场景全部通过，使用隔离HTTP接口、原版终端渲染组件与合成ANSI输出；不代表实际Viewer或手套通过。最终包及覆盖安装结果按 [0.2.30 软件验证记录](docs/VALIDATION_0.2.30.md) 与外部最终交付清单分别记录。本版二进制 Release 尚未发布，真实网络更新闭环不能据此称为已通过。
+
+## 历史：0.2.29 一个官方 CLI 工作区与软件更新
+
+「连接与校准 → 官方 CLI」现在把原版 Viewer 与手套标定放在同一个工作区，共用设备选择。「查看画面」明确打开所选设备的画面，「准备标定」展开用户与左右手准备项；实际标定仍需另点「开始标定」。不再有独立的“官方可视化 / 手套校准”顶层分页，切换或展开也不会自行启动、停止或换连设备。
+
+默认 Windows 路径的发现、Viewer、SDK 用户和手型标定使用同一固定版本 **2026.10.12** 的原生 CLI 及 Windows SDK 用户库。标定使用现成 **pywinpty 3.1.0、xterm.js 5.5.0 与 fit 0.10.0** 承载完整官方彩色终端动作指导，不重画姿势，不把 JSONL 文字反馈当作原版视觉界面。命名用户、覆盖同意、左右手和设备身份预检仍保留；终端运行时的档案以官方终端内实际选择为准。终端退出码0只表示会话结束，不能据此宣称模型保存成功；需结合官方结果并刷新 SDK 模型状态。操作见 [标定说明](docs/CALIBRATION.md)。
+
+原生 CLI 发布 ZIP 随安装包离线提供。默认 Windows CLI 以后随工作台软件一起更新，不再下载另一份 Linux binary 后把它当作当前实际使用的 CLI。已有 Linux 用户不静默迁移；现有 WSL 手套预览、映射和遥操作仍使用其自身 SDK 用户库，相同用户名不代表模型已同步。显式旧控制端兼容路径与默认 Windows 路径分别说明。
+
+「设置 → 关于 → 软件更新」提供检查、下载安装包、重启并安装。安装版启动会检查已发布版本；只有你点击下载才准备安装包，只有所有相关会话结束、条件满足后才可重启安装。更新面向工作台及配套 CLI、界面组件，保留用户资料。来源固定为本仓库，下载按发布资产的 SHA-256 或同名校验文件验证；没有公开安装包时明确显示“尚无已发布安装包”，不称为最新。维护者后续需要实际发布新版安装包，这个入口才有可下载的更新。
+
+最终源码回归执行1078项，1076项通过、2项按条件跳过，用时51.584秒。独立主流程与TTY33项、更新卡19项、生产CSP变更面8项及相关P2修复复验均通过，各组有交叉，不累加为总测试数。界面与终端测试使用合成数据，原生 PTY 生命周期测试使用合成子进程；用户手套仍断开，没有真实 SDK/手套采集或标定质量验收。跳过原因、证据和安装交付边界见 [0.2.29 软件验证记录](docs/VALIDATION_0.2.29.md)。后续多设备任务标签及拖出窗口尚未实现。下方版本小节为历史记录，不覆盖本节的运行环境与更新方式。
+
+## 历史：0.2.28 滚动区域对齐
 
 主面板的原生滚动条轨道上下避开圆角，滑块与面板边缘保留间距；长页面与设置弹窗共用原生滚动样式，保留滚轮、键盘和触屏行为。设备连接与标定逻辑沿用0.2.27。
 
-官方CLI的终端原本带有动作图示。当前标定页适配的是JSONL步骤与采集反馈，完整原版终端视觉引导尚未嵌入；不能把当前文字面板称作完整官方界面。后续优先整套复用官方流程与现成组件，形成一个官方工具工作区，避免重画姿势或重做官方功能。
+当时标定页只适配JSONL步骤与采集反馈，尚未嵌入完整原版终端视觉引导。此缺项由上方0.2.29实现说明取代；0.2.28的历史验证本身不能作为新终端功能的证据。
 
-## 0.2.27 手套标定准备与官方画面入口
+## 历史：0.2.27 手套标定准备与官方画面入口
 
 手套校准按设备、用户、左右手组织准备项，就地扫描并显示具体未就绪原因。Default 用户需要先创建或切换命名用户；设备过期、身份不符、状态未核对和会话占用分别说明。官方当前步骤、稳定性、约束与进度来自实际事件，不根据计时估算。完整操作与模型保存范围见 [标定使用说明](docs/CALIBRATION.md)。
 
@@ -102,7 +126,7 @@ Windows 内置 WSL 的默认配置改由主机原生官方 CLI 发现手套并�
 
 ## 历史：0.2.18 完整 Ubuntu Wuji Studio
 
-以下 0.2.18 及更早段落保留当时实现记录，当前功能以 0.2.20 说明为准。0.2.18 的 Studio 嵌入入口已取消，以下内容不是当前版本的安装或使用指引。
+以下 0.2.18 及更早段落保留当时实现记录，当前功能以上方0.2.30说明为准。0.2.18 的 Studio 嵌入入口已取消，以下内容不是当前版本的安装或使用指引。
 
 Windows 侧栏新增「Wuji Studio」，在工作台内部显示完整、未修改的官方 Ubuntu 应用，保留官方连接、Visualization、标定和隐私提示。首次使用从官方 GitHub 下载经 SHA-256 核对的程序，在已有内置 Linux 中安装专属图形组件，不另建大型虚拟机，不采集 Windows 桌面。
 
@@ -298,7 +322,13 @@ Ubuntu 已有历史 0.1.3 包。macOS 的原生构建在 GitHub Mac runner 上�
 
 ## English
 
-Version 0.2.20 embeds the original official `wuji viz` Viewer under Connection → Visualization. The outer controls follow Workbench styling; the vendor renderer remains unmodified. The main app checks CLI releases on startup, records the official git tag, verifies the release archive SHA-256, checks the required software interfaces and switches only while all workspaces are idle. Prior versions are retained for rollback. CLI updates do not update the SDK or device firmware. See the [CLI / Viewer guide](docs/OFFICIAL_CLI_VIEWER.md) and [0.2.20 validation](docs/VALIDATION_0.2.20.md). Physical-device acceptance remains separate from software tests.
+Version 0.2.30 removes the duplicate Workbench calibration preparation retained in 0.2.29. In Connection → Official CLI, select a device once. View device opens the original Viewer; Start calibration opens the original Human TTY in the same display stage. The pinned official CLI 2026.10.12 owns profile creation/switching, overwrite confirmation (No by default), six colored pose guides and its result journey. No second Workbench user, hand-side or device selection is required. Device identity, recent discovery and cross-workspace session checks remain enforced; the explicit legacy JSONL path retains its existing named-user and overwrite protections.
+
+The terminal uses pywinpty 3.1.0, xterm.js 5.5.0 and fit 0.10.0. Workbench does not infer model ownership or successful saving from terminal output: exit code 0 means only `session_ended`. Check the actual user, hand side and URDF in the official result/profile. No physical hand-model calibration or quality acceptance was performed in this release.
+
+The 0.2.29 application-update framework and offline native CLI bundle are retained and rebuilt for 0.2.30, using the same installation identity and user-data directory. The full Python source suite ran 1085 tests in 49.954 seconds: 1083 passed and 2 were conditionally skipped. The 90 calibration-specific checks overlap with that total. See [0.2.30 software validation](docs/VALIDATION_0.2.30.md) for the UI and delivery boundary; package hashes, installation and source publication belong to the external delivery record. No new binary Release is published yet. Existing Linux profiles are not silently migrated; WSL preview and teleoperation still use their own SDK profile store.
+
+Version 0.2.20 embedded the original official `wuji viz` Viewer under Connection → Visualization and introduced independent CLI release preparation and idle switching. That historical update policy does not describe the default Windows path in 0.2.29. See the [CLI / Viewer guide](docs/OFFICIAL_CLI_VIEWER.md) and [0.2.20 validation](docs/VALIDATION_0.2.20.md). Physical-device acceptance remains separate from software tests.
 
 For a source installation on Ubuntu 24.04 x86_64 with Python 3.12 and the pinned official CLI / SDK, see [Local Linux installation](docs/LINUX.md). Linux can run locally without SSH or a VM. The guide also covers official visualization and calibration commands; the workbench embeds the complete original CLI Viewer. A fresh Linux installation and physical-device view still require acceptance on the target system.
 

@@ -37,3 +37,57 @@ body[data-official-viz-focus=true] .ov-root[data-view-mode=offline] #ov-message{
 .ov-root[data-view-mode=device][data-phase=idle] .ov-stage{min-height:230px;height:clamp(230px,36dvh,340px)}
 .ov-root[data-view-mode=device][data-phase=idle] #ov-empty{min-height:230px}
 body[data-official-viz-focus=true] .ov-root[data-view-mode=device][data-phase=idle] .ov-stage{min-height:0;height:auto}
+
+/* Source is an optional action, not a second level of task navigation. */
+.ov-root>.ov-source-actions{grid-column:1;grid-row:2;display:flex;align-items:center;gap:8px;margin:0 0 12px}
+.ov-source-actions button{min-height:32px;padding:6px 10px;border:1px solid var(--wb-line);border-radius:9px;background:transparent;color:var(--wb-sub);font-size:11px;font-weight:400;box-shadow:none}
+.ov-root>.ov-toolbar{padding:0 0 16px;border-bottom:1px solid var(--wb-line);margin:0 0 8px}
+.ov-root>.hub-cli-calibration{grid-column:1/-1}
+html #page-connection .ov-toolbar #ov-calibrate{background:var(--wb-card);color:var(--wb-ink)}
+html #page-connection .ov-toolbar #ov-calibrate:not(:disabled):hover{background:var(--wb-group)}
+.ov-root>.ov-heading{margin-bottom:14px}
+.ov-root[data-view-mode=offline]>.ov-source-info{margin-top:8px}
+body[data-official-viz-focus=true] .ov-root>.ov-source-actions{display:none}
+@media(max-width:600px){.ov-root>.ov-source-actions{grid-column:1;grid-row:2}.ov-root>.ov-display-actions{grid-row:3}.ov-root>.ov-toolbar{gap:8px}.ov-toolbar #ov-start,.ov-toolbar #ov-calibrate{flex-basis:calc(50% - 4px)}}
+
+/* A device, a task and a single original-content display. */
+.ov-root{display:flex;flex-direction:column;gap:0;align-items:stretch}
+.ov-root>.ov-heading{margin:0 0 16px;gap:16px}
+.ov-root>.ov-heading{display:none}
+.ov-device-field>span{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}
+.ov-root>.ov-toolbar{display:flex;align-items:flex-end;gap:9px;padding:0;margin:0;border:0}
+.ov-root .ov-device-field{max-width:none;flex:1 1 240px;min-width:160px}
+html #page-connection .ov-toolbar>.ov-task-choice{display:flex;flex:0 0 auto;align-items:stretch;align-self:flex-end;gap:2px;padding:3px;min-height:36px;box-sizing:border-box;border:1px solid var(--wb-line);border-radius:11px;background:var(--wb-group)}
+html #page-connection .ov-task-choice>button{min-height:28px;padding:4px 16px;border:0;border-radius:8px;background:transparent;color:var(--wb-sub);font-size:12px;line-height:1.5;box-shadow:none;min-width:66px}
+html #page-connection .ov-task-choice>button[aria-pressed=true]{color:var(--wb-ink);font-weight:550;background:var(--wb-card)}
+html #page-connection .ov-task-choice[data-nm-ready=true]>button{background:transparent!important;box-shadow:none!important}
+html #page-connection .ov-toolbar>:is(#ov-start,#ov-calibrate){flex:0 0 auto;min-width:112px;min-height:36px;border-radius:10px}
+.ov-root>.ov-source-actions{order:4;display:flex;margin:0 0 9px;align-self:flex-start}
+.ov-root>.ov-display-actions{display:flex;justify-content:flex-end;align-items:center;gap:7px;margin:10px 0 0;min-height:30px}
+.ov-display-actions .ov-session{flex:1 1 220px;justify-content:flex-start;gap:4px 12px;margin:0;font-size:10px;line-height:1.5;color:var(--wb-sub)}
+.ov-display-actions #ov-state{font-size:10px;line-height:1.5}
+html #page-connection .ov-display-actions :is(button,a){display:inline-flex;align-items:center;justify-content:center;min-height:30px;padding:5px 10px;border:1px solid var(--wb-line);border-radius:9px;background:var(--wb-card);color:var(--wb-sub);font-size:11px;line-height:1.5;text-decoration:none;box-shadow:none}
+html #page-connection .ov-display-actions :is(#ov-stop,#hub-calib-cancel){color:var(--ui-danger,#b73838)}
+.ov-root>.ov-source-info{margin:8px 0 10px;gap:8px 12px;min-height:0;order:3}
+.ov-root>.ov-source-info #ov-message:empty{display:none}
+.ov-root>.ov-session{margin:8px 0 0;font-size:10px;min-height:0}
+.ov-root>.ov-note{margin:6px 0 0;font-size:10px}
+.ov-root>.ov-stage{order:5;margin:0;flex:none}
+.ov-root>:is(#ov-frame-status,.ov-logs){order:6}
+.ov-root>#ov-error{order:4;margin:0 0 8px}
+#ov-shared-stage.ov-stage{height:clamp(340px,calc(100dvh - 310px),820px);min-height:340px;border-radius:15px;background:var(--wb-group);overflow:hidden}
+#ov-view-stage{height:100%;width:100%;min-width:0}
+#ov-view-stage[hidden]{display:none!important}
+#ov-shared-stage #ov-empty{min-height:0;height:100%;gap:10px}
+#ov-shared-stage #ov-empty strong{font-size:17px;font-weight:550;letter-spacing:-.25px}
+#ov-shared-stage #ov-empty p{font-size:12px}
+.ov-root[data-task=calibration]>.ov-source-info{margin:9px 0 10px}
+.ov-root[data-task=calibration] .ov-source-info #ov-message{font-size:11px}
+.ov-root [hidden]{display:none!important}
+html body #page-connection .ov-toolbar #ov-calibrate.primary:not(:disabled){background:var(--ui-blue,#007aff);border-color:transparent;color:#fff}
+html body #page-connection .ov-toolbar #ov-calibrate.primary:disabled{background:var(--ui-fill);color:var(--ui-sub);border-color:var(--ui-line);opacity:1}
+body[data-official-viz-focus=true] #ov-shared-stage{flex:1;height:auto;min-height:0;margin-top:12px}
+body[data-official-viz-focus=true] .ov-root[data-task=calibration] #hub-calibration:not([hidden]){display:block!important}
+@media(max-width:960px){.ov-root .ov-device-field{flex-basis:220px}.ov-root>.ov-display-actions{margin-top:9px}#ov-shared-stage.ov-stage{height:clamp(340px,calc(100dvh - 315px),760px)}}
+@media(max-width:600px){.ov-root .ov-device-field{flex-basis:calc(100% - 110px)}html #page-connection .ov-toolbar #ov-scan{flex:0 0 auto}html #page-connection .ov-toolbar>.ov-task-choice{flex:1 1 auto}html #page-connection .ov-task-choice>button{flex:1}html #page-connection .ov-toolbar>:is(#ov-start,#ov-calibrate){flex:1 1 auto;min-width:112px}.ov-root>.ov-display-actions{width:auto;justify-content:flex-start;flex-wrap:wrap}.ov-display-actions .ov-session{flex-basis:100%;order:2}#ov-shared-stage.ov-stage{min-height:340px;height:56dvh}.ov-root>.ov-heading{align-items:center;gap:7px}.ov-root>.ov-heading p{font-size:11px}}
+@media(forced-colors:active){html #page-connection .ov-task-choice>button[aria-pressed=true]{outline:1px solid Highlight;background:Highlight;color:HighlightText}}

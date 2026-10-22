@@ -260,7 +260,7 @@ class Controller:
             return dict(official_viz=self.official_viz.stop())
         from cli_coordination import gate,enforce
         # Stop/close must remain available while a component owns the gate.
-        if isinstance(command,dict) and command.get('name') in {'session_close','disconnect','hardware_stop','glove_stop','glove_disconnect','calibration_cancel','program_stop','group_stop'}:
+        if isinstance(command,dict) and command.get('name') in {'session_close','disconnect','hardware_stop','glove_stop','glove_disconnect','calibration_cancel','calibration_terminal_input','program_stop','group_stop'}:
             return self._coordinated_action(command)
         with gate():
             enforce(command)
@@ -345,6 +345,9 @@ class Controller:
                 self.program.stop()
         if name=='calibration_cancel':
             return dict(calibration=self.calibration.cancel())
+        if name=='calibration_terminal_input':
+            if self.calibration.native is None:raise ValueError('No official terminal is active')
+            return self.calibration.native.input(command)
         if name in {'calibration_profile_create','calibration_profile_switch','calibration_start'}:
             if self.program.snapshot()['active'] or self.glove.busy or self.state['connection']!='disconnected' or self.state['hardware'].get('active') is not False or self.doctor.snapshot()['running']:
                 raise ValueError('End glove, hand and diagnostic sessions before calibration / 标定前请结束手套、灵巧手和诊断会话')
@@ -760,6 +763,10 @@ class Handler(BaseHTTPRequestHandler):
     def reply(self, status, body, mime='application/json; charset=utf-8', filename=None):
         if not isinstance(body, bytes):
             body = json.dumps(body, ensure_ascii=False, allow_nan=False).encode('utf-8')
+        style_nonce=None
+        if mime.startswith('text/html') and b'<head>' in body:
+            style_nonce=secrets.token_urlsafe(24)
+            body=body.replace(b'<head>',b'<head><meta name="workbench-style-nonce" content="'+style_nonce.encode('ascii')+b'">',1)
         self.send_response(status)
         self.send_header('Content-Type', mime)
         self.send_header('Content-Length', str(len(body)))
@@ -770,7 +777,8 @@ class Handler(BaseHTTPRequestHandler):
         studio_view=urlsplit(self.path).path=='/official_studio_viewer.html'
         connect="'self' ws://127.0.0.1:*" if studio_view else "'self'"
         if studio_view:ancestor="'self'"
-        self.send_header('Content-Security-Policy', "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src "+connect+"; frame-src http://127.0.0.1:*; frame-ancestors "+ancestor+"; base-uri 'none'; form-action 'self'")
+        styles="'self'"+(" 'nonce-"+style_nonce+"'" if style_nonce else '')
+        self.send_header('Content-Security-Policy', "default-src 'self'; img-src 'self' data:; style-src "+styles+"; script-src 'self'; connect-src "+connect+"; frame-src http://127.0.0.1:*; frame-ancestors "+ancestor+"; base-uri 'none'; form-action 'self'")
         if filename:
             self.send_header('Content-Disposition', f'attachment; filename="{filename}"')
         self.end_headers()
@@ -821,6 +829,16 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(200,result if url.path.endswith('/context') else result['settings'])
         if url.path == '/api/calibration':
             return self.reply(200,self.server.controller.calibration.snapshot(refresh=parse_qs(url.query).get('refresh')==['1']))
+        if url.path == '/api/workbench-update':
+            return self.reply(200,self.server.updates.snapshot())
+        if url.path == '/api/calibration-terminal':
+            try:
+                session=self.server.controller.calibration.native
+                if session is None:raise ValueError('No official terminal is available')
+                query=parse_qs(url.query);after=int(query.get('after',['0'])[0])
+                result=session.output(query.get('run',[''])[0],after)
+            except (ValueError,TypeError) as error:return self.reply(409,dict(error=str(error)))
+            return self.reply(200,result)
         if url.path == '/api/desktop':
             host=getattr(self.server,'desktop',None)
             return self.reply(200,host.info() if host else dict(native=False,api_version=1,operations=[]))
@@ -924,6 +942,8 @@ class Handler(BaseHTTPRequestHandler):
         for name in ('device_inventory.js','device_workflows.js','device_history.js','simple_mode.js','demonstration_navigation.js'):assets['/'+name]=(name,'text/javascript; charset=utf-8')
         assets['/device_inventory.css']=('device_inventory.css','text/css; charset=utf-8')
         for name in ('simple_mode.css','toolbar_refinement.css','demonstration_navigation.css'):assets['/'+name]=(name,'text/css; charset=utf-8')
+        for name in ('official_terminal.js','workbench_update.js','vendor/terminal/xterm.js','vendor/terminal/addon-fit.js'):assets['/'+name]=(name,'text/javascript; charset=utf-8')
+        for name in ('official_terminal.css','workbench_update.css','vendor/terminal/xterm.css'):assets['/'+name]=(name,'text/css; charset=utf-8')
         assets['/official_studio_viewer.html']=('official_studio_viewer.html','text/html; charset=utf-8')
         assets['/favicon.ico']=('favicon.ico','image/x-icon')
         assets['/app-icon.png']=('app-icon.png','image/png')
@@ -983,6 +1003,10 @@ class Handler(BaseHTTPRequestHandler):
                     try:self.server.controller.action(dict(name=name))
                     except (ValueError, OSError) as error:errors.append(dict(id='main',action=name,error=str(error)))
                 result=dict(errors=errors+self.server.fleet.stop_all())
+            elif payload.get('name') in {'workbench_update_check','workbench_update_prepare','workbench_update_apply'}:
+                name=payload['name']
+                if name=='workbench_update_apply':result=dict(workbench_update=self.server.updates.apply())
+                else:result=dict(workbench_update=self.server.updates.start('check' if name=='workbench_update_check' else 'prepare'))
             else:result = self.server.controller.action(payload)
             self.reply(200, {'ok':True, **(result or {})})
         except (ValueError, TypeError) as error:
@@ -1032,6 +1056,16 @@ class ConsoleHTTPServer(ThreadingHTTPServer):
         self.controller.calibration.metadata_check=calibration_idle
         self.controller.inventory_observer=lambda:self.fleet.inventory_snapshots() if hasattr(self,'_fleet') else []
         if startup:self.controller.official_cli.startup()
+
+    @property
+    def updates(self):
+        with self.controller.lock:
+            if not hasattr(self,'_workbench_updates'):
+                from workbench_update import WorkbenchUpdate
+                from runtime_paths import EDITION
+                self._workbench_updates=WorkbenchUpdate(DATA,EDITION,
+                    idle_check=lambda:self.controller.official_cli.idle_check(),desktop=lambda:getattr(self,'desktop',None))
+            return self._workbench_updates
 
     @property
     def studio(self):

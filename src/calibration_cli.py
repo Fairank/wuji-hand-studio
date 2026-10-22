@@ -1,7 +1,8 @@
 """Official Wuji CLI hand-model calibration on the configured SDK controller.
 
-This process never sends robot-hand motor commands. A named SDK user and an
-explicitly selected glove are required before the official six-pose flow.
+This process never sends robot-hand motor commands. Human TTY uses the original
+CLI's user and overwrite prompts; machine-mode controllers retain strict host
+preflight. Every path requires an explicitly selected glove.
 """
 import copy
 import json
@@ -47,6 +48,13 @@ def controller_args(config, args):
 
 
 def cli_json(config, *args):
+    from official_device_discovery import use_native
+    if use_native(config):
+        if args==('devices',):
+            from official_device_discovery import native_devices
+            return native_devices()
+        from native_cli import json_command
+        return json_command(*args)
     if args==('devices',):
         from official_device_discovery import use_native,native_devices
         if use_native(config):return native_devices()
@@ -141,6 +149,7 @@ class CalibrationCLI:
         self.device_provider=device_provider
         self.metadata_check=metadata_check or (lambda:None)
         self.process = None
+        self.native = None
         self.thread = None
         self.cache = None
         self.cached_at = 0.0
@@ -166,14 +175,26 @@ class CalibrationCLI:
                 try:
                     self.metadata_check()
                     config=load_config()
-                    users=cli_json(config,'user','list').get('users',[])
-                    current=cli_json(config,'user','show')
+                    from official_device_discovery import use_native
+                    native=use_native(config)
+                    if native:
+                        # Human TTY owns profile creation/switching and overwrite
+                        # confirmation. Status must not launch a second user flow.
+                        from native_cli import prepare
+                        component=prepare()
+                        users=[];current=None
+                    else:
+                        users=cli_json(config,'user','list').get('users',[])
+                        current=cli_json(config,'user','show')
                     devices=[] if self.device_provider is not None else cli_json(config,'devices').get('devices',[])
-                    if not isinstance(users,list) or not isinstance(current,dict) or not isinstance(devices,list):
+                    if not isinstance(users,list) or (not native and not isinstance(current,dict)) or not isinstance(devices,list):
                         raise ValueError('Unexpected official CLI list')
                     cache=dict(available=True,calibration_supported=config['mode']!='ssh',mode=config['mode'],users=users,
                                current=current,devices=[d for d in devices if is_glove_device(d)],error=None,
                                metadata_checked_at=time.time())
+                    if native:
+                        cache.update(runtime=dict(backend='windows_native',label='Windows CLI · Windows SDK',version=component['version']),guide='official_tty',human_tty=True)
+                    else:cache.update(runtime=dict(backend=config['mode'],label=config['mode']+' CLI / SDK'),guide='official_jsonl',human_tty=False)
                     with self.lock:
                         self.cache=copy.deepcopy(cache);self.cached_at=time.monotonic()
                     stale=False
@@ -193,7 +214,11 @@ class CalibrationCLI:
             except (OSError,ValueError,RuntimeError,TimeoutError) as error:
                 cache.update(devices=[],devices_error=str(error)[:400])
         with self.lock:run=copy.deepcopy(self.run)
-        return dict(**(cache or {}), run=run)
+        from cli_coordination import reservation,identity
+        marker=reservation()
+        cleanup=bool(marker.get('kind')=='calibration' and identity(marker.get('pid'))!=marker.get('start'))
+        return dict(**(cache or {}), run=run,cleanup_required=cleanup,
+                    cleanup_error='上次原版 CLI 退出尚未核对，请结束会话以恢复 / Previous CLI cleanup is unverified; end the session to recover' if cleanup else None)
 
     def profile(self, operation, name):
         if not isinstance(name, str) or not _NAME.fullmatch(name):
@@ -203,6 +228,7 @@ class CalibrationCLI:
                 raise ValueError('Finish calibration before changing SDK user')
             config = load_config()
             if config['mode']=='ssh':raise ValueError('Use built-in or local controller to change calibration profiles')
+            self.metadata_check()
             users = cli_json(config, 'user', 'list').get('users', [])
             if operation == 'create':
                 if any(isinstance(u, dict) and u.get('name') == name for u in users):
@@ -218,6 +244,29 @@ class CalibrationCLI:
         return self.snapshot(refresh=True)
 
     def start(self, side, serial, replace=False, timeout_s=900):
+        config=load_config()
+        from official_device_discovery import use_native
+        if use_native(config):
+            if not isinstance(serial,str) or not _SERIAL.fullmatch(serial):
+                raise ValueError('Select a discovered glove / 请选择已发现的手套')
+            if type(replace) is not bool or type(timeout_s) is not int or not 60<=timeout_s<=1800:
+                raise ValueError('Invalid calibration options')
+            with self.lock:
+                if self.run['running']:raise ValueError('Calibration is already running')
+                # Reuse the selected, recent shared inventory. Never rescan or
+                # silently choose a different glove inside the human journey.
+                devices=self.device_provider(False) if self.device_provider is not None else self.snapshot(refresh=False).get('devices',[])
+                if not isinstance(devices,list):raise ValueError('Unexpected shared device inventory')
+                matching=[d for d in devices if is_glove_device(d) and (d.get('sn') or d.get('serial'))==serial and d.get('selectable') is not False]
+                if len(matching)!=1:raise ValueError('Selected glove is not in the latest official scan / 请刷新设备目录并选择手套')
+                device=matching[0]
+                observed=device.get('observed_at')
+                if observed is not None and (type(observed) not in (int,float) or not math.isfinite(observed) or not 0<=time.time()-observed<=30):
+                    raise ValueError('Selected glove discovery is stale / 手套发现记录已过期，请重新扫描')
+                found_side=str(device.get('handedness') or device.get('side') or '').lower().removeprefix('handedness.')
+                from native_calibration import NativeCalibration
+                self.native=NativeCalibration(self)
+                return self.native.start_human(serial,expected_side=found_side if found_side in ('left','right') else None,timeout=timeout_s)
         if side not in ('left', 'right') or not isinstance(serial, str) or not _SERIAL.fullmatch(serial):
             raise ValueError('Select a discovered glove and its hand side')
         if type(replace) is not bool or type(timeout_s) is not int or not 60 <= timeout_s <= 1800:
@@ -252,16 +301,10 @@ class CalibrationCLI:
                 raise ValueError('Selected glove side does not match calibration side / 手套与标定左右手不符')
             config = load_config()
             from official_cli import cli_path
-            from official_device_discovery import use_native
-            if use_native(config):
-                from calibration_address import network_address
-                address=network_address(device.get('address') or device.get('ip'))
-                args=[cli_path(config),'--jsonl','calib','hand-model','--address',address,'--timeout-s',str(timeout_s)]
-                command=runner_command(config,'calibrate_address',args,current['name'],replace,serial,side)
-            else:
-                args = [cli_path(config), '--jsonl', 'calib', 'hand-model',
-                        '--sn', serial, '--handedness', side, '--timeout-s', str(timeout_s)]
-                command = runner_command(config, 'calibrate', args, current['name'], replace)
+            self.native=None
+            args = [cli_path(config), '--jsonl', 'calib', 'hand-model',
+                    '--sn', serial, '--handedness', side, '--timeout-s', str(timeout_s)]
+            command = runner_command(config, 'calibrate', args, current['name'], replace)
             flags = getattr(subprocess, 'CREATE_NO_WINDOW', 0) | getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0)
             process = subprocess.Popen(command, stdin=subprocess.PIPE,
                                        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -351,6 +394,12 @@ class CalibrationCLI:
                 except OSError:pass
 
     def cancel(self):
+        if self.native is not None and (self.run['running'] or self.native.token):return self.native.cancel()
+        from cli_coordination import reservation,gate
+        if reservation().get('kind')=='calibration':
+            from native_calibration import NativeCalibration
+            with gate():NativeCalibration(self).recover()
+            return self.snapshot(refresh=False)
         with self.lock:
             process = self.process
             if not process or process.poll() is not None:

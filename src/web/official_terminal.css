@@ -1,0 +1,13 @@
+.official-terminal{min-width:0;display:grid;gap:12px;margin-top:8px}
+.official-terminal[hidden]{display:none}
+.official-terminal-heading{display:flex;align-items:baseline;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.official-terminal-note{font-size:12px;color:var(--wb-sub)}
+.official-terminal-actions{display:flex;gap:7px;flex-wrap:wrap}
+#page-connection .official-terminal-actions button{min-height:34px;padding:7px 13px;font-size:12px}
+.official-terminal-scroll{min-width:0;max-width:100%;overflow-x:auto;border-radius:16px;border:1px solid var(--wb-line);background:#121820;padding:17px}
+.official-terminal-screen{min-width:640px;width:100%;height:616px}
+.official-terminal-screen .xterm{padding:0}
+.official-terminal-screen .xterm-viewport{border-radius:0;scrollbar-gutter:auto}
+.official-terminal-error{margin:0;font-size:12px;color:var(--wb-sub);overflow-wrap:anywhere}
+.oc-run[data-source=official_tty]>.oc-step,.oc-run[data-source=official_tty]>.oc-progress-row,.oc-run[data-source=official_tty]>.oc-feedback{display:none!important}
+@media(max-width:700px){.official-terminal-scroll{padding:12px}.official-terminal-screen{min-width:640px}}

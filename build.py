@@ -7,6 +7,11 @@ os.chdir(ROOT)
 config=json.loads((ROOT/'src/edition.json').read_text(encoding='utf-8'))
 from prepare_official_viewer import verify as verify_official_viewer
 verify_official_viewer()
+from prepare_official_terminal import verify as verify_official_terminal
+verify_official_terminal()
+if sys.platform=='win32':
+    from prepare_native_cli import verify as verify_native_cli
+    verify_native_cli()
 edition=config['name'];version=config['version']
 name='HandWorkbench'
 args=[sys.executable,'-m','PyInstaller','--noconfirm','--clean','--onedir','--name',name,'--paths','src',
@@ -54,7 +59,8 @@ for distribution in metadata.distributions():
             if f.is_file() and f.stat().st_size<2000000:
                 dest=licenses/distribution.metadata['Name']/str(item).replace('../','').replace('..\\','')
                 dest.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(f,dest)
-args+=['--add-data',str(licenses)+os.pathsep+'third-party-licenses','src/desktop.py']
+if sys.platform=='win32':args+=['--collect-all','winpty','--hidden-import','native_terminal_worker','--hidden-import','native_calibration','--add-data','runtime_payload/official-cli-native'+os.pathsep+'official-cli-native']
+args+=['--add-data','src/workbench_update_apply.ps1'+os.pathsep+'.','--add-data','src/official_terminal_manifest.json'+os.pathsep+'.','--add-data',str(licenses)+os.pathsep+'third-party-licenses','src/desktop.py']
 if '--package-only' not in sys.argv:subprocess.run(args,check=True)
 binary=ROOT/'dist'/name/(name+('.exe' if sys.platform=='win32' else ''))
 if sys.platform=='darwin':binary=ROOT/'dist'/(name+'.app')/'Contents/MacOS'/name

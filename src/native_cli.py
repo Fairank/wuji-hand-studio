@@ -305,4 +305,28 @@ def resolve(version=PINNED_VERSION, *, folder=None):
 
 
 def prepare(version=PINNED_VERSION, *, folder=None, release=None, archive=None):
+    if version in (PINNED_VERSION,'v'+PINNED_VERSION) and release is None and archive is None:
+        from runtime_paths import RESOURCE
+        bundled=RESOURCE/'official-cli-native'
+        if (bundled/ARCHIVE_NAME).is_file() and (bundled/'release.json').is_file():
+            metadata=bundled/'release.json'
+            if metadata.stat().st_size>MAX_METADATA:raise ReleaseStoreError('Bundled CLI release metadata exceeds its limit')
+            release=json.loads(metadata.read_text(encoding='utf-8'));archive=bundled/ARCHIVE_NAME
     return NativeCLIStore(folder).prepare(version, release=release, archive=archive)
+
+
+def json_command(*arguments):
+    """Same Windows executable and SDK HOME; no shell or web-supplied argv."""
+    from windows_process_job import OwnedProcess
+    component=prepare()
+    with OwnedProcess([component['binary'],'--json',*arguments],stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,encoding='utf-8',errors='replace',
+            env={**os.environ,'WUJI_NO_UPDATE_CHECK':'1','WUJI_TELEMETRY_DISABLE':'1'}) as owned:
+        try:out,err=owned.process.communicate(timeout=20)
+        except subprocess.TimeoutExpired as error:raise ValueError('Official CLI metadata request timed out') from error
+        if owned.process.returncode:raise ValueError((err or out or 'Official CLI failed').strip()[:400])
+    if len(out)>2*1024*1024:raise ValueError('Official CLI metadata exceeds its limit')
+    try:value=json.loads(out)
+    except (ValueError,TypeError) as error:raise ValueError('Official CLI did not return JSON') from error
+    if not isinstance(value,dict):raise ValueError('Unexpected official CLI response')
+    return value

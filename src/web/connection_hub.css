@@ -132,3 +132,37 @@ html body #page-connection #hub-calibration #hub-calibration-guide{order:2;paddi
 html body #page-connection #hub-calibration[data-running=true] #hub-calibration-guide{order:0;padding-top:0;border-top:0}
 html body #page-connection #hub-calibration[data-running=true] .hub-calib-readiness{display:none}
 html body #page-connection #hub-calibration[data-running=true] .hub-calibration-actions{order:1}
+
+/* One official CLI workspace: one device selector, existing task callbacks. */
+html body #page-connection .hub-cli-calibration{margin:8px 0 18px;border:1px solid var(--wb-line);border-radius:14px;background:var(--wb-card);min-width:0}
+html body #page-connection .hub-cli-calibration>summary{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px 16px;list-style:none;cursor:pointer;font-size:12px;font-weight:550;line-height:1.5}
+html body #page-connection .hub-cli-calibration>summary::-webkit-details-marker{display:none}
+html body #page-connection .hub-cli-calibration>summary:after{content:'';width:6px;height:6px;flex:none;border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;transform:rotate(45deg);margin-left:2px;transition:transform 180ms ease}
+html body #page-connection .hub-cli-calibration[open]>summary:after{transform:rotate(225deg)}
+html body #page-connection #hub-cli-calibration-state{margin-left:auto;font-size:11px;font-weight:400;color:var(--wb-sub)}
+html body #page-connection #hub-calibration>.hub-calibration{padding:16px;border-top:1px solid var(--wb-line);border-radius:0 0 14px 14px}
+html body #page-connection #hub-calibration .hub-cli-device-context .hub-calib-field-heading{margin-bottom:5px}
+html body #page-connection #hub-calib-selected-device{display:block;font-size:12px;font-weight:550;line-height:1.6;overflow-wrap:anywhere}
+html body #page-connection #hub-calib-runtime{display:block;margin-top:5px;font-size:10px;color:var(--wb-sub);line-height:1.5;overflow-wrap:anywhere}
+html body #page-connection #hub-calibration #hub-calibration-guide{width:100%;min-width:0;margin-top:18px;padding-top:16px;border-top:1px solid var(--wb-line)}
+html body #page-connection #hub-calibration[data-running=true] #hub-calibration-guide{margin-top:18px;padding-top:16px;border-top:1px solid var(--wb-line)}
+body[data-official-viz-focus=true] #hub-calibration[hidden]{display:none!important}
+@media(max-width:600px){html body #page-connection #hub-calibration>.hub-calibration{padding:13px}html body #page-connection .hub-cli-calibration>summary{padding:12px 13px;gap:8px}html body #page-connection #hub-cli-calibration-state{max-width:45%;text-align:right}}
+@media(prefers-reduced-motion:reduce){html body #page-connection .hub-cli-calibration>summary:after{transition:none}}
+html[data-reduce-motion=true] body #page-connection .hub-cli-calibration>summary:after{transition:none}
+html body #page-connection #hub-calibration button:disabled{opacity:1!important;background:var(--ui-fill)!important;color:var(--ui-sub)!important;border-color:var(--ui-line)!important;box-shadow:none!important;cursor:default}
+@media(forced-colors:active){html body #page-connection #hub-calibration button:disabled{background:ButtonFace!important;color:GrayText!important;border-color:GrayText!important}}
+
+/* The official task owns one display stage, never a second disclosure panel. */
+html body #page-connection #ov-shared-stage>#hub-calibration{height:100%;min-height:0;overflow:auto;margin:0;border:0;border-radius:0;background:transparent;scrollbar-gutter:stable}
+html body #page-connection #ov-shared-stage>#hub-calibration[hidden]{display:none!important}
+html body #page-connection #ov-shared-stage>#hub-calibration>.hub-calibration{height:100%;min-height:100%;box-sizing:border-box;padding:20px;margin:0;border:0;border-radius:0}
+html body #page-connection #hub-calibration[data-human-tty=true]>.hub-calibration{display:flex;flex-direction:column;padding:0}
+html body #page-connection #hub-calibration[data-human-tty=true] .hub-calibration-workspace{display:none!important}
+html body #page-connection #hub-calibration[data-human-tty=true] #hub-calibration-guide{margin:0;padding:0;border:0;flex:1;min-height:100%}
+html body #page-connection #hub-calibration[data-human-tty=false] .hub-calibration-workspace{grid-template-columns:minmax(0,1.2fr) minmax(180px,.8fr)}
+html body #page-connection #hub-calibration .hub-calibration-actions #hub-calib-start[hidden]{display:none!important}
+html body #page-connection #hub-calibration[data-human-tty=false] #hub-calibration-guide[data-has-run=false]{display:none}
+html body #page-connection #hub-calibration .hub-cli-device-context{display:none}
+html body #page-connection #hub-calibration[data-human-tty=false] .hub-calib-number{display:none}
+@media(max-width:700px){html body #page-connection #hub-calibration[data-human-tty=false] .hub-calibration-workspace{grid-template-columns:minmax(0,1fr)}html body #page-connection #ov-shared-stage>#hub-calibration>.hub-calibration{padding:15px}html body #page-connection #hub-calibration[data-human-tty=true]>.hub-calibration{padding:0}}

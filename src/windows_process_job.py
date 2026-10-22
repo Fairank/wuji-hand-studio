@@ -14,7 +14,7 @@ import time
 
 CREATE_SUSPENDED = 0x00000004
 CREATE_NO_WINDOW = 0x08000000
-_VIZ_JOB = re.compile(r'Local\\HandWorkbench-OfficialViz-[0-9a-f]{32}\Z')
+_VIZ_JOB = re.compile(r'Local\\HandWorkbench-Official(?:Viz|Calibration)-[0-9a-f]{32}\Z')
 
 
 def _is_windows():
@@ -205,6 +205,21 @@ def recover_viz_job(name, timeout=5):
             except OSError:
                 confirmed = False
     return confirmed
+
+
+def current_in_named_job(name):
+    """Verify an internal worker belongs to the exact recorded private job."""
+    name = _job_name(name)
+    if not _is_windows():return False
+    api = _WindowsAPI();handle = api.open_named(name)
+    if handle is None:return False
+    try:
+        c,w,k=api.ctypes,api.w,api.kernel
+        k.GetCurrentProcess.argtypes=[];k.GetCurrentProcess.restype=w.HANDLE
+        k.IsProcessInJob.argtypes=[w.HANDLE,w.HANDLE,c.POINTER(w.BOOL)];k.IsProcessInJob.restype=w.BOOL
+        result=w.BOOL();api._check(k.IsProcessInJob(k.GetCurrentProcess(),handle,c.byref(result)))
+        return bool(result.value)
+    finally:api.close(handle)
 
 
 class OwnedProcess:

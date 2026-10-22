@@ -73,6 +73,7 @@ class NativeDesktop:
         self.server.controller=Controller();self.server.pose=PoseView(self.server.controller)
         self.server.configure_official_cli()
         self.server.desktop=self
+        self.server.updates.startup()
         self.service_thread=threading.Thread(target=self.server.serve_forever,name='Wuji local service',daemon=True)
         self.service_thread.start()
 
@@ -223,9 +224,18 @@ class NativeDesktop:
         self.window.destroy();return dict(ok=True)
 
     def stop_and_close(self,require_idle=False):
+        if require_idle:
+            from cli_coordination import gate
+            with gate():return self._stop_and_close(require_idle=True)
+        return self._stop_and_close()
+
+    def _stop_and_close(self,require_idle=False):
         if not self.session_lock.acquire(blocking=False):return dict(ok=False,error='正在结束会话 / Closing session')
         try:
+            if hasattr(self.server,'_workbench_updates') and not self.server.updates.cancel_and_wait():
+                return dict(ok=False,error='软件更新下载正在结束，请稍后重试 / Application update download is closing; retry shortly')
             from desktop_tools import idle
+            if require_idle:self.server.controller.official_cli.idle_check()
             if hasattr(self.server,'_fleet'):
                 if require_idle and any(x.get('connection')!='disconnected' or x.get('hardware') is not False for x in self.server.fleet.snapshot()):
                     return dict(ok=False,error='先断开其他设备工作区 / Disconnect other device workspaces first')

@@ -7,6 +7,7 @@ from contextlib import ExitStack, contextmanager
 import copy
 import io
 import json
+import time
 from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
@@ -286,18 +287,18 @@ class NativeDiscoveryAdapterTests(unittest.TestCase):
                 calibration_cli.cli_json({'mode': 'wsl', 'cli': 'wuji'}, 'devices')
             local.assert_not_called()
 
-    def test_user_model_queries_stay_on_linux_even_when_device_scan_is_native(self):
+    def test_user_model_queries_share_the_same_native_cli_as_discovery(self):
         config = {'mode': 'wsl', 'cli': 'wuji'}
         for args in [('user', 'list'), ('user', 'show')]:
             with self.subTest(args=args), patch.object(official_device_discovery.sys, 'platform', 'win32'), \
                     patch.object(official_device_discovery, 'native_devices') as native, \
-                    patch('official_cli.cli_path', return_value='/fake/linux/wuji'), \
-                    patch.object(calibration_cli, 'controller_args', side_effect=lambda _config, argv: ['fake-linux', *argv]) as wrap, \
-                    patch.object(calibration_cli, 'local_run', return_value=(0, '{"name":"Demo"}', '')) as local:
+                    patch('native_cli.json_command', return_value={'name':'Demo'}) as native_json, \
+                    patch.object(calibration_cli, 'controller_args') as wrap, \
+                    patch.object(calibration_cli, 'local_run') as local:
                 self.assertEqual(calibration_cli.cli_json(config, *args), {'name': 'Demo'})
                 native.assert_not_called()
-                wrap.assert_called_once_with(config, ['/fake/linux/wuji', '--json', *args])
-                self.assertEqual(local.call_args.args[0][0], 'fake-linux')
+                native_json.assert_called_once_with(*args)
+                wrap.assert_not_called(); local.assert_not_called()
 
     def test_explicit_custom_cli_and_non_windows_discovery_keep_existing_path(self):
         for platform, config in [('linux', {'mode': 'local', 'cli': 'wuji'}),
@@ -331,22 +332,18 @@ class NativeCaptureAdapterTests(unittest.TestCase):
             stack.enter_context(patch.object(official_device_discovery, 'use_native', return_value=native))
             command = stack.enter_context(patch.object(calibration_cli, 'runner_command', return_value=['fake-linux-envelope']))
             spawn = stack.enter_context(patch.object(calibration_cli.subprocess, 'Popen', return_value=process))
+            native_factory = stack.enter_context(patch('native_calibration.NativeCalibration'))
+            native_factory.return_value.start_human.return_value = {'native': True}
             stack.enter_context(patch.object(calibration_cli.threading, 'Thread', NoThread))
-            yield SimpleNamespace(service=service, snapshot=snapshot, command=command, spawn=spawn)
+            yield SimpleNamespace(service=service, snapshot=snapshot, command=command, spawn=spawn,
+                                  native=native_factory)
 
-    def test_native_scan_identity_is_wrapped_for_linux_address_capture(self):
+    def test_native_scan_identity_is_delegated_to_native_capture(self):
         with self.environment() as e:
-            e.service.start('left', SERIAL)
-            args = ['/fake/linux/wuji', '--jsonl', 'calib', 'hand-model', '--address', ADDRESS,
-                    '--timeout-s', '900']
-            e.command.assert_called_once_with(self.config, 'calibrate_address', args,
-                                             'Demo', False, SERIAL, 'left')
-            e.spawn.assert_called_once()
-            self.assertEqual(e.spawn.call_args.args[0], ['fake-linux-envelope'])
-            self.assertEqual(e.service.run['serial'], SERIAL)
-            self.assertEqual(e.service.run['user'], 'Demo')
-            self.assertEqual(e.service.run['status'], 'starting')
-            self.assertTrue(e.service.thread.started)
+            self.assertEqual(e.service.start('left', SERIAL), {'native': True})
+            e.native.assert_called_once_with(e.service)
+            e.native.return_value.start_human.assert_called_once_with(SERIAL, expected_side='left', timeout=900)
+            e.command.assert_not_called(); e.spawn.assert_not_called()
 
     def test_runner_envelope_keeps_identity_outside_single_official_selector(self):
         config = {'mode': 'local', 'agent_directory': '/fake/controller', 'python': 'python-test'}
@@ -359,7 +356,7 @@ class NativeCaptureAdapterTests(unittest.TestCase):
         self.assertEqual(command.count('--address'), 1)
         self.assertNotIn('--sn', command); self.assertNotIn('--handedness', command)
 
-    def test_host_default_overwrite_and_side_checks_still_prevent_launch(self):
+    def test_legacy_default_overwrite_and_side_checks_still_prevent_launch(self):
         cases = [('default', lambda s: s['current'].update(name='Default'), False),
                  ('current_marked_default', lambda s: s['current'].update(is_default=True), False),
                  ('profile_marked_default', lambda s: s['users'][0].update(is_default=True), False),
@@ -370,19 +367,74 @@ class NativeCaptureAdapterTests(unittest.TestCase):
                  ('non_boolean_model', lambda s: s['current']['left_hand'].update(calibrated=0), False),
                  ('existing_model', lambda s: s['current']['left_hand'].update(calibrated=True), False),
                  ('side_mismatch', lambda s: s['devices'][0].update(handedness='right'), False),
-                 ('missing_address', lambda s: s['devices'][0].pop('address'), False)]
+                 ('missing_selected_sn', lambda s: s['devices'][0].update(sn='WG_OTHER'), False)]
         original = copy.deepcopy(self.status)
         for label, mutate, replace in cases:
             self.status = copy.deepcopy(original); mutate(self.status)
-            with self.subTest(case=label), self.environment() as e:
+            with self.subTest(case=label), self.environment(native=False) as e:
                 with self.assertRaises(ValueError):e.service.start('left', SERIAL, replace=replace)
                 e.command.assert_not_called(); e.spawn.assert_not_called()
+                e.native.assert_not_called()
 
-    def test_explicit_host_replacement_is_carried_into_locked_linux_envelope(self):
+    def test_native_existing_model_is_decided_by_original_human_prompt(self):
         self.status['current']['left_hand']['calibrated'] = True
         with self.environment() as e:
             e.service.start('left', SERIAL, replace=True)
-            self.assertEqual(e.command.call_args.args[3:], ('Demo', True, SERIAL, 'left'))
+            e.native.return_value.start_human.assert_called_once_with(SERIAL, expected_side='left', timeout=900)
+            e.command.assert_not_called(); e.spawn.assert_not_called()
+
+    def test_native_exact_sn_capture_does_not_depend_on_linux_network_address(self):
+        self.status['devices'][0].pop('address')
+        with self.environment() as e:
+            self.assertEqual(e.service.start('left', SERIAL), {'native': True})
+            e.native.return_value.start_human.assert_called_once_with(SERIAL, expected_side='left', timeout=900)
+            e.command.assert_not_called(); e.spawn.assert_not_called()
+
+    def test_native_human_default_unknown_profile_and_missing_side_need_no_preparation(self):
+        for current in [None, {}, {'name':'Default','is_default':True},
+                        {'name':'Demo','left_hand':{'calibrated':'unknown'}}]:
+            with self.subTest(current=current), self.environment() as e:
+                self.status['current'] = current
+                self.status['users'] = []
+                self.status['metadata_current'] = False
+                e.service.start(None, SERIAL)
+                e.native.return_value.start_human.assert_called_once_with(SERIAL, expected_side='left', timeout=900)
+                e.command.assert_not_called();e.spawn.assert_not_called()
+
+    def test_native_inventory_side_is_authoritative_over_caller_side(self):
+        with self.environment() as e:
+            self.status['devices'][0]['handedness'] = 'right'
+            e.service.start('left', SERIAL)
+            e.native.return_value.start_human.assert_called_once_with(SERIAL, expected_side='right', timeout=900)
+        with self.environment() as e:
+            self.status['devices'][0].pop('handedness', None)
+            e.service.start('left', SERIAL)
+            e.native.return_value.start_human.assert_called_once_with(SERIAL, expected_side=None, timeout=900)
+
+    def test_native_reuses_shared_selection_without_rescan_or_profile_requests(self):
+        with self.environment() as e, patch.object(calibration_cli, 'cli_json') as query:
+            rows = copy.deepcopy(self.status['devices'])
+            rows[0].update(selectable=True, observed_at=time.time())
+            provider = Mock(return_value=rows)
+            e.service.device_provider = provider
+            e.service.start(None, SERIAL)
+            provider.assert_called_once_with(False)
+            e.snapshot.assert_not_called()
+            query.assert_not_called()
+            e.native.return_value.start_human.assert_called_once_with(SERIAL, expected_side='left', timeout=900)
+
+    def test_native_stale_missing_duplicate_or_non_glove_selection_never_launches(self):
+        original = copy.deepcopy(self.status['devices'][0])
+        cases = [[], [dict(original, observed_at=time.time()-31)],
+                 [dict(original, selectable=False)], [dict(original, sn='WG_OTHER')],
+                 [dict(original, model='Wuji Hand 2',sn='WH2_SYNTHETIC')],
+                 [dict(original), dict(original)]]
+        for rows in cases:
+            with self.subTest(rows=rows), self.environment() as e:
+                e.service.device_provider = Mock(return_value=rows)
+                with self.assertRaises(ValueError):e.service.start(None, SERIAL)
+                e.service.device_provider.assert_called_once_with(False)
+                e.native.assert_not_called();e.command.assert_not_called();e.spawn.assert_not_called()
 
     def test_non_native_capture_retains_serial_and_handedness_flags(self):
         with self.environment(native=False) as e:
