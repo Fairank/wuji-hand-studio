@@ -4,7 +4,9 @@ from pathlib import Path
 from runtime_paths import DATA,RESOURCE
 
 _source=RESOURCE.parents[1]/'controller/source' if getattr(sys,'frozen',False) else RESOURCE
-DEFAULT=dict(mode='local' if sys.platform.startswith('linux') else 'ssh',host='',port=22,username='',key_filename='',known_hosts='',agent_directory=str(_source) if sys.platform.startswith('linux') else '',python='python3',cli='wuji')
+# Fresh Windows installs discover through the native CLI before optional WSL setup.
+# Existing files, including legacy SSH files without a mode, keep their own route.
+DEFAULT=dict(mode='local' if sys.platform.startswith('linux') else 'wsl' if sys.platform=='win32' else 'ssh',host='',port=22,username='',key_filename='',known_hosts='',agent_directory=str(_source) if sys.platform.startswith('linux') else '',python='python3',cli='wuji')
 
 def validate(values):
     if not isinstance(values,dict) or set(values)!=set(DEFAULT):raise ValueError('Unexpected connection fields')
