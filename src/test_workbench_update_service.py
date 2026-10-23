@@ -325,11 +325,13 @@ class ServiceTests(unittest.TestCase):
             env.service.apply()
             old_token = env.service.apply_token
             env.service.result_file.write_text(json.dumps(dict(token=old_token, phase='error', error='synthetic preflight failed')), encoding='utf-8')
+            env.helper.poll.return_value = 1  # The failed helper has actually exited before retry.
             failed = env.service.snapshot()
             self.assertEqual(failed['phase'], 'error')
             self.assertFalse(failed['busy'])
             self.assertEqual(failed['prepared'], env.prepared)
             self.assertIn('preflight failed', failed['error'])
+            env.popen.return_value = SimpleNamespace(poll=Mock(return_value=None))  # A retry creates a new helper.
             env.service.apply()
             self.assertNotEqual(env.service.apply_token, old_token)
             self.assertEqual(env.service.state['phase'], 'applying')

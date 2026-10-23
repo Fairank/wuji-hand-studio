@@ -6,6 +6,8 @@ These tests never run discovery, query, firmware writes, or motor operations.
 import copy
 import io
 import json
+import os
+import subprocess
 import threading
 import time
 from pathlib import Path
@@ -40,6 +42,29 @@ class FakeProcess:
     def setwinsize(self, rows, cols):self.sizes.append((rows, cols))
     def close(self):self.closed=True
     def terminate(self):raise AssertionError('Firmware child must never be terminated')
+
+
+class FakeReadProcess:
+    def __init__(self,*,kill_required=False,unconfirmed=False):
+        self.returncode=None;self.entered=threading.Event();self.terminated=0;self.killed=0
+        self.kill_required=kill_required;self.unconfirmed=unconfirmed
+    def communicate(self,timeout):
+        self.entered.set()
+        if self.unconfirmed:raise OSError('synthetic pipe failure')
+        if self.killed or self.terminated and not self.kill_required:
+            self.returncode=-9 if self.killed else -15
+            return ('query output','')
+        time.sleep(.005);raise subprocess.TimeoutExpired(['synthetic-check'],timeout)
+    def poll(self):return self.returncode
+    def terminate(self):self.terminated+=1
+    def kill(self):
+        self.killed+=1
+        if self.unconfirmed:raise OSError('synthetic child kill denied')
+
+
+class FakeReadOwner:
+    def __init__(self,process):self.process=process;self.closed=0
+    def close(self,timeout):self.closed+=1;return self.process.poll() is not None
 
 
 class FirmwareHostTests(unittest.TestCase):
@@ -84,6 +109,118 @@ class FirmwareHostTests(unittest.TestCase):
         self.assertEqual(runner.call_args.kwargs['timeout'],40)
         self.assertEqual(runner.call_args.kwargs['env']['WUJI_NO_UPDATE_CHECK'],'1')
         self.assertFalse(runner.call_args.kwargs.get('shell',False))
+
+    def test_catalog_and_background_interactive_paths_are_rejected_before_process(self):
+        with patch.object(self.host,'_component') as component:
+            with self.assertRaises(ValueError):self.host(['upgrade','--sn',SN,'--list','--json'])
+            with self.assertRaises(ValueError):self.host(['upgrade','--sn',SN],mutating=True,interactive=True,background=True)
+        component.assert_not_called()
+
+    def test_user_priority_only_terminates_exact_read_child_and_proves_exit(self):
+        read=FakeReadProcess();flash=FakeProcess(alive=True)
+        self.host.process=flash;result=[]
+        owned=FakeReadOwner(read)
+        with patch.object(self.host,'_component',return_value=self.component),patch.object(self.host,'_spawn_background',return_value=owned) as popen:
+            thread=threading.Thread(target=lambda:result.append(self.host(['upgrade','--sn',SN,'--check','--json'],background=True)))
+            thread.start();self.assertTrue(read.entered.wait(2));self.assertTrue(self.host.cancel_background_check());thread.join(2)
+        self.assertFalse(thread.is_alive());self.assertTrue(result[0]['exited'])
+        self.assertIn('deferred',result[0]['stderr']);self.assertEqual(read.terminated,1)
+        self.assertIsNone(self.host.query_process);self.assertIsNone(self.host.query_cancel)
+        self.assertIs(self.host.process,flash);self.assertTrue(flash.alive);self.assertFalse(flash.closed)
+        self.assertEqual(owned.closed,1);self.assertIsNone(self.host.query_job)
+        self.assertEqual(popen.call_args.args[0],['verified-wuji.exe','upgrade','--sn',SN,'--check','--json'])
+        self.assertFalse(popen.call_args.kwargs.get('shell',False))
+
+    def test_read_cleanup_can_kill_only_a_read_child_after_bounded_terminate_wait(self):
+        read=FakeReadProcess(kill_required=True);result=[]
+        with patch.object(self.host,'_component',return_value=self.component),patch.object(self.host,'_spawn_background',return_value=FakeReadOwner(read)):
+            thread=threading.Thread(target=lambda:result.append(self.host(['upgrade','--sn',SN,'--check','--json'],background=True)))
+            thread.start();self.assertTrue(read.entered.wait(2));self.host.cancel_background_check();thread.join(2)
+        self.assertTrue(result[0]['exited']);self.assertEqual(read.killed,1);self.assertEqual(read.returncode,-9)
+
+    def test_unconfirmed_read_exit_retains_handle_and_is_not_safe_to_release(self):
+        from firmware_service import ReadOnlyQueryUnconfirmed
+        read=FakeReadProcess(unconfirmed=True)
+        owned=FakeReadOwner(read)
+        with patch.object(self.host,'_component',return_value=self.component),patch.object(self.host,'_spawn_background',return_value=owned):
+            with self.assertRaises(ReadOnlyQueryUnconfirmed):self.host(['upgrade','--sn',SN,'--check','--json'],background=True)
+        self.assertIs(self.host.query_process,read);self.assertIsNotNone(self.host.query_cancel)
+        self.assertIs(self.host.query_job,owned)
+
+    def test_cancel_without_background_read_never_touches_firmware_pty(self):
+        flash=FakeProcess(alive=True);self.host.process=flash
+        self.assertFalse(self.host.cancel_background_check());self.assertIs(self.host.process,flash)
+
+    def test_cancel_during_binary_verification_is_remembered_before_any_spawn(self):
+        entered,resume=threading.Event(),threading.Event();cancelled=[False];result=[]
+        def component():entered.set();self.assertTrue(resume.wait(2));return self.component
+        with patch.object(self.host,'_component',side_effect=component),patch.object(self.host,'_spawn_background') as popen:
+            thread=threading.Thread(target=lambda:result.append(self.host(['upgrade','--sn',SN,'--check','--json'],background=True,cancelled=lambda:cancelled[0])))
+            thread.start();self.assertTrue(entered.wait(2));cancelled[0]=True
+            self.assertFalse(self.host.cancel_background_check());resume.set();thread.join(2)
+        self.assertFalse(thread.is_alive());popen.assert_not_called();self.assertTrue(result[0]['exited'])
+        self.assertTrue(self.host.query_exit_confirmed);self.assertIn('deferred',result[0]['stderr'])
+
+    def test_service_cancellation_during_transport_verification_releases_before_connect(self):
+        from firmware_service import FirmwareService
+        entered,resume=threading.Event(),threading.Event()
+        def component():entered.set();self.assertTrue(resume.wait(2));return self.component
+        service=FirmwareService(self.host,lambda:self.component,self.controller.official_cli.idle_check,
+            self.host.acquire,self.host.release,self.host.device,clock=lambda:1000.,
+            cancel_query=self.host.cancel_background_check,recovery_check=self.host.recovery_check)
+        with patch.object(self.host,'_component',side_effect=component),patch.object(self.host,'_spawn_background') as popen:
+            service.start_check(SN,notification_only=True);self.assertTrue(entered.wait(2))
+            self.assertFalse(service.cancel_notification_check(timeout=.02))
+            self.assertEqual(cli_coordination.reservation(self.folder)['kind'],'firmware_check')
+            resume.set();service.thread.join(2);popen.assert_not_called()
+        self.assertFalse(service.thread.is_alive());self.assertEqual(service.snapshot()['phase'],'deferred')
+        self.assertEqual(cli_coordination.reservation(self.folder),{})
+
+    def test_read_only_recovery_checks_original_child_without_querying_device(self):
+        self.write_marker(kind='firmware_check',pid=os.getpid(),start=cli_coordination.identity(os.getpid()))
+        read=FakeReadProcess(unconfirmed=True)
+        self.host.query_process=read;self.host.query_token=TOKEN;self.host.query_serial=SN
+        with patch('native_cli.json_command') as query:
+            with self.assertRaisesRegex(ValueError,'still running'):
+                self.host.recovery_check(SN,reservation_token=TOKEN,read_only=True)
+            read.returncode=-9
+            result=self.host.recovery_check(SN,reservation_token=TOKEN,read_only=True)
+            query.assert_not_called()
+        self.assertEqual(result,dict(read_only=True,process_exited=True,sn=SN,reservation_token=TOKEN))
+        self.assertEqual(cli_coordination.reservation(self.folder)['token'],TOKEN)
+        self.host.release(TOKEN);self.assertEqual(cli_coordination.reservation(self.folder),{})
+
+    def test_read_only_recovery_cannot_clear_another_token_or_flash_marker(self):
+        self.write_marker(kind='firmware_check',pid=os.getpid(),start=cli_coordination.identity(os.getpid()))
+        self.host.query_exit_confirmed=True
+        self.host.query_token='b'*32;self.host.query_serial=SN
+        with self.assertRaises(ValueError):self.host.recovery_check(SN,reservation_token=TOKEN,read_only=True)
+        self.write_marker();self.host.query_token=TOKEN
+        with self.assertRaises(ValueError):self.host.recovery_check(SN,reservation_token=TOKEN,read_only=True)
+        self.assertEqual(cli_coordination.reservation(self.folder)['token'],TOKEN)
+
+    def test_default_read_transport_reuses_kernel_contained_suspended_job_only(self):
+        with patch('windows_process_job.OwnedProcess') as owned:
+            result=self.host._spawn_background(['verified-wuji.exe','upgrade','--sn',SN,'--check','--json'],{'test':'fixed'})
+        self.assertIs(result,owned.return_value)
+        self.assertEqual(owned.call_args.args[0],['verified-wuji.exe','upgrade','--sn',SN,'--check','--json'])
+        self.assertFalse(owned.call_args.kwargs.get('shell',False));self.assertNotIn('job_name',owned.call_args.kwargs)
+        self.assertEqual(owned.call_args.kwargs['stdin'],subprocess.DEVNULL)
+
+    def test_read_tree_must_be_empty_even_if_root_read_process_has_exited(self):
+        from firmware_service import ReadOnlyQueryUnconfirmed
+        read=FakeReadProcess();read.returncode=0
+        read.communicate=lambda timeout:('report','')
+        owned=N(process=read,close=Mock(return_value=False))
+        with patch.object(self.host,'_component',return_value=self.component),patch.object(self.host,'_spawn_background',return_value=owned):
+            with self.assertRaises(ReadOnlyQueryUnconfirmed):self.host(['upgrade','--sn',SN,'--check','--json'],background=True)
+        self.assertIs(self.host.query_job,owned);self.assertFalse(self.host.query_exit_confirmed)
+
+    def test_job_startup_uncertainty_never_becomes_confirmed_read_exit(self):
+        from firmware_service import ReadOnlyQueryUnconfirmed
+        with patch.object(self.host,'_component',return_value=self.component),patch.object(self.host,'_spawn_background',side_effect=RuntimeError('failed startup child exit is unconfirmed')):
+            with self.assertRaises(ReadOnlyQueryUnconfirmed):self.host(['upgrade','--sn',SN,'--check','--json'],background=True)
+        self.assertFalse(self.host.query_exit_confirmed)
 
     def test_server_inventory_identity_is_required_not_client_metadata(self):
         self.assertEqual(self.host.device(SN)['serial'],SN)
@@ -252,31 +389,58 @@ class FirmwareHostTests(unittest.TestCase):
 
     def test_recovery_cannot_query_or_unlock_a_known_live_original_child(self):
         self.write_marker()
-        with patch('firmware_host.process_state',return_value='live'),patch('native_cli.json_command') as getter:
+        with patch('firmware_host.process_state',return_value='live'),patch.object(self.host,'_component') as getter:
             with self.assertRaises(ValueError):self.host.recovery_check(SN,reservation_token=TOKEN)
         getter.assert_not_called()
 
     def test_recovery_requires_matching_device_identity_and_actual_version(self):
         self.write_marker()
-        with patch('firmware_host.process_state',return_value='dead'),patch('native_cli.json_command',return_value=dict(sn='other',value='2.5.1')):
-            with self.assertRaises(ValueError):self.host.recovery_check(SN,reservation_token=TOKEN)
-        self.assertEqual(cli_coordination.reservation(self.folder)['token'],TOKEN)
+        valid=dict(devices=[dict(sn=SN,device_type='wuji_hand_2',current_version='2.5.1',latest_version='2.5.1',status='up to date',error=None)])
+        wrong=copy.deepcopy(valid);wrong['devices'][0]['sn']='other'
+        failed=copy.deepcopy(valid);failed['devices'][0]['error']='Device unavailable'
+        for report,code in ((dict(sn=SN,value='2.5.1'),0),(wrong,0),(failed,0),(valid,1)):
+            with self.subTest(report=report,code=code):
+                self.host.runner=Mock(return_value=N(returncode=code,stdout=json.dumps(report),stderr=''))
+                with patch('firmware_host.process_state',return_value='dead'),patch.object(self.host,'_component',return_value=self.component):
+                    with self.assertRaises(ValueError):self.host.recovery_check(SN,reservation_token=TOKEN)
+                self.assertEqual(cli_coordination.reservation(self.folder)['token'],TOKEN)
 
     def test_recovery_cannot_interpret_inaccessible_process_as_dead(self):
         self.write_marker()
-        with patch('firmware_host.process_state',return_value='unknown'),patch('native_cli.json_command') as getter:
+        with patch('firmware_host.process_state',return_value='unknown'),patch.object(self.host,'_component') as getter:
             with self.assertRaises(ValueError):self.host.recovery_check(SN,reservation_token=TOKEN)
         getter.assert_not_called()
         self.assertEqual(cli_coordination.reservation(self.folder)['token'],TOKEN)
 
     def test_recovery_requires_host_dead_process_and_exact_sn_version_readback(self):
         self.write_marker()
-        with patch('firmware_host.process_state',return_value='dead'),patch('native_cli.json_command',return_value=dict(sn=SN,value='2.5.1')) as getter:
+        report=dict(devices=[dict(sn=SN,device_type='wuji_hand_2',current_version='2.5.1',latest_version='2.6.0',status='update available',error=None)])
+        self.host.runner=Mock(return_value=N(returncode=0,stdout=json.dumps(report),stderr=''))
+        with patch('firmware_host.process_state',return_value='dead'),patch.object(self.host,'_component',return_value=self.component),patch('native_cli.json_command') as getter:
             result=self.host.recovery_check(SN,reservation_token=TOKEN)
-        getter.assert_called_once_with('get','firmware_version','--sn',SN)
+        getter.assert_not_called()
+        self.assertEqual(self.host.runner.call_args.args[0],['verified-wuji.exe','upgrade','--sn',SN,'--check','--json'])
         self.assertEqual(result,dict(process_exited=True,identity_verified=True,sn=SN,
                                      reservation_token=TOKEN,firmware_version='2.5.1'))
         # A successful probe is evidence; only the service releases the lease.
+        self.assertEqual(cli_coordination.reservation(self.folder)['token'],TOKEN)
+
+    def test_recovery_does_not_query_for_another_token_and_waits_for_prior_read_exit(self):
+        self.write_marker()
+        process=FakeReadProcess();self.host.query_cancel=threading.Event()
+        self.host.query_token=TOKEN;self.host.query_serial=SN
+        self.host.query_process=process;self.host.query_job=FakeReadOwner(process)
+        with patch('firmware_host.process_state',return_value='dead'),patch.object(self.host,'_component') as component:
+            with self.assertRaises(ValueError):self.host.recovery_check(SN,reservation_token='b'*32)
+            with self.assertRaises(ValueError):self.host.recovery_check(SN,reservation_token=TOKEN)
+        component.assert_not_called()
+        self.assertEqual(cli_coordination.reservation(self.folder)['token'],TOKEN)
+        process.returncode=0
+        report=dict(devices=[dict(sn=SN,device_type='wuji_hand_2',current_version='2.5.1',latest_version='2.5.1',status='up to date',error=None)])
+        self.host.runner=Mock(return_value=N(returncode=0,stdout=json.dumps(report),stderr=''))
+        with patch('firmware_host.process_state',return_value='dead'),patch.object(self.host,'_component',return_value=self.component):
+            result=self.host.recovery_check(SN,reservation_token=TOKEN)
+        self.assertEqual(result['firmware_version'],'2.5.1')
         self.assertEqual(cli_coordination.reservation(self.folder)['token'],TOKEN)
 
     def test_windows_process_lookup_is_tristate_on_access_and_query_failures(self):

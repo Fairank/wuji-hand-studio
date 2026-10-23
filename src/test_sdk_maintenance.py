@@ -3,6 +3,8 @@ import copy
 import json
 from pathlib import Path
 import tempfile
+import threading
+import time
 from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock,patch
@@ -30,8 +32,72 @@ class SDKMaintenanceTests(unittest.TestCase):
     def test_check_uses_actual_selected_proof_and_never_installs(self):
         self.service.start('check');state=self.finish()
         self.assertEqual(state['phase'],'available');self.assertTrue(state['can_update'])
-        self.assertEqual(self.lease.call_args.args,('sdk_check',));self.updater.assert_not_called()
-        self.unlock.assert_called_once_with(self.token)
+        self.lease.assert_not_called();self.updater.assert_not_called()
+        self.unlock.assert_not_called();self.service.idle.assert_not_called()
+
+    def test_active_viewer_allows_read_only_check_but_blocks_update(self):
+        self.service.idle.side_effect=ValueError('Finish the official CLI session first')
+        self.lease.side_effect=ValueError('Finish the official CLI session first')
+        self.service.start('check');state=self.finish()
+        self.assertEqual(state['phase'],'available');self.lease.assert_not_called()
+        self.service.idle.assert_not_called();self.unlock.assert_not_called()
+        with self.assertRaisesRegex(ValueError,'official CLI session'):self.service.start('update')
+        self.lease.assert_called_once_with('sdk_update');self.updater.assert_not_called()
+
+    def test_failed_refresh_keeps_last_known_versions_without_current_permission(self):
+        self.proof=proof_fixture();self.service.start('check');before=self.finish()
+        self.service.resolver=Mock(side_effect=ValueError('Connect to the internet'))
+        self.service.start('check');after=self.finish()
+        self.assertEqual(after['phase'],'error');self.assertEqual(after['last_operation'],'check')
+        self.assertEqual(after['proof'],before['proof']);self.assertEqual(after['release'],before['release'])
+        self.assertFalse(after['compatible']);self.assertFalse(after['can_update'])
+        self.assertIn('internet',after['error']);self.lease.assert_not_called();self.unlock.assert_not_called()
+
+    def test_manual_probe_failure_retains_facts_but_never_claims_stable(self):
+        self.proof=proof_fixture();self.service.start('check');before=self.finish()
+        self.service.probe=Mock(side_effect=OSError('External controller SDK probe failed'))
+        self.service.start('check');after=self.finish()
+        self.assertEqual(after['phase'],'error');self.assertFalse(after['compatible'])
+        self.assertEqual(after['proof'],before['proof']);self.assertEqual(after['release'],before['release'])
+        self.assertFalse(after['can_update']);self.updater.assert_not_called()
+
+    def test_read_only_check_never_releases_or_replaces_an_existing_token(self):
+        self.service.token='b'*32
+        self.service.start('check');self.finish()
+        self.assertEqual(self.service.token,'b'*32);self.lease.assert_not_called();self.unlock.assert_not_called()
+
+    def test_controller_change_during_manual_check_discards_result(self):
+        entered=threading.Event();resume=threading.Event()
+        def probe(config):
+            entered.set();resume.wait(2);return proof_fixture()
+        self.service.probe=probe;self.service.start('check');self.assertTrue(entered.wait(1))
+        self.config['mode']='ssh';resume.set();after=self.finish()
+        self.assertEqual(after['phase'],'changed');self.assertFalse(after['compatible'])
+        self.assertIsNone(after['proof']);self.assertIsNone(after['release'])
+
+    def test_late_manual_check_cannot_overwrite_an_unknown_update(self):
+        entered=threading.Event();resume=threading.Event()
+        def probe(config):
+            entered.set();resume.wait(2);return proof_fixture()
+        self.service.probe=probe;self.service.start('check');self.assertTrue(entered.wait(1))
+        self.service.restore_unknown(dict(kind='sdk_update',token=self.token))
+        resume.set();after=self.finish()
+        self.assertEqual(after['phase'],'unknown');self.assertTrue(after['recovery_required'])
+        self.assertFalse(after['busy']);self.assertFalse(after['compatible']);self.assertFalse(after['can_update'])
+        self.assertIsNone(after['proof']);self.assertEqual(self.service.token,self.token);self.unlock.assert_not_called()
+
+    def test_expired_catalog_never_reports_up_to_date_or_authorizes_update(self):
+        self.proof=proof_fixture();self.service.start('check');self.finish()
+        self.service.state['release']['checked_at']=time.time()-901
+        after=self.service.snapshot();self.assertEqual(after['phase'],'expired')
+        self.assertFalse(after['compatible']);self.assertFalse(after['can_update'])
+        self.assertEqual(after['proof']['version'],self.proof['version'])
+
+    def test_manually_resolved_expired_catalog_is_a_failed_check(self):
+        self.release['checked_at']=time.time()-901;self.proof=proof_fixture()
+        self.service.start('check');after=self.finish()
+        self.assertEqual(after['phase'],'error');self.assertFalse(after['compatible'])
+        self.assertIsNone(after['proof']);self.assertFalse(after['can_update'])
 
     def test_background_check_only_reads_catalog_and_selected_sdk_without_reservation(self):
         self.assertTrue(self.service.check_background())
@@ -127,7 +193,7 @@ class SDKMaintenanceTests(unittest.TestCase):
         self.service.resolver=Mock(side_effect=ValueError('offline'))
         self.service.start('check');state=self.finish()
         self.assertEqual(state['phase'],'error');self.assertFalse(state['recovery_required'])
-        self.updater.assert_not_called();self.unlock.assert_called_once_with(self.token)
+        self.updater.assert_not_called();self.unlock.assert_not_called();self.lease.assert_not_called()
 
     def test_changed_controller_invalidates_old_proof_and_update_action(self):
         self.service.start('check');self.finish()

@@ -4,6 +4,7 @@ The deliberately opaque check/catalog fixture is not represented as a captured
 official schema. The only write route is the original interactive confirmation.
 """
 import copy
+import json
 import threading
 import unittest
 
@@ -63,8 +64,10 @@ class FakeHost:
             return value
         return dict(exited=True, returncode=0, stdout='opaque official report', stderr='')
 
-    def recover(self, sn, *, reservation_token):
+    def recover(self, sn, *, reservation_token, read_only=False):
         result = self.recovery
+        if read_only and result is None:
+            return dict(read_only=True,process_exited=True,sn=sn,reservation_token=reservation_token)
         if result is None:
             result = dict(process_exited=True, identity_verified=True, sn=sn,
                           reservation_token=reservation_token, firmware_version='2.5.1')
@@ -102,7 +105,7 @@ class FirmwareServiceTests(unittest.TestCase):
         self.service.start_check(SN,notification_only=True);state=self.join()
         self.assertEqual(state['phase'],'available');self.assertTrue(state['notification']['update_available'])
         self.assertIsNone(state['preview']);self.assertFalse(state['can_upgrade'])
-        self.assertEqual([x[0] for x in self.host.calls],[['upgrade','--sn',SN,'--check']])
+        self.assertEqual([x[0] for x in self.host.calls],[['upgrade','--sn',SN,'--check','--json']])
         self.assertFalse(self.host.calls[0][1]['mutating']);self.assertFalse(self.host.calls[0][1]['interactive'])
         self.assertEqual(len(self.host.released),1)
 
@@ -121,8 +124,7 @@ class FirmwareServiceTests(unittest.TestCase):
         self.assertTrue(state['preview']['requires_official_confirmation'])
         self.assertEqual(state['check_report']['stdout'], 'opaque official report')
         self.assertEqual([call[0] for call in self.host.calls], [
-            ['upgrade', '--sn', SN, '--check', '--json'],
-            ['upgrade', '--sn', SN, '--list', '--json']])
+            ['upgrade', '--sn', SN, '--check', '--json']])
         self.assertEqual(self.host.acquired[0][0], 'firmware_check')
         self.assertEqual(len(self.host.released), 1)
 
@@ -147,7 +149,7 @@ class FirmwareServiceTests(unittest.TestCase):
         for confirmed in (False, None, 1, 'yes'):
             with self.subTest(confirmed=confirmed), self.assertRaises(ValueError):
                 self.service.start_upgrade(token, confirmed=confirmed)
-        self.assertEqual(len(self.host.calls), 2)
+        self.assertEqual(len(self.host.calls), 1)
 
     def test_client_metadata_cannot_substitute_for_server_inventory(self):
         for serial in (self.host.row, ['WH2'], '', '--all', 'x y', SN+'\n', 'A'*81):
@@ -175,7 +177,7 @@ class FirmwareServiceTests(unittest.TestCase):
         self.host.idle = False
         with self.assertRaises(ValueError):
             self.service.start_upgrade(token, confirmed=True)
-        self.assertEqual(len(self.host.calls), 2)
+        self.assertEqual(len(self.host.calls), 1)
         self.assertFalse(self.service.snapshot()['can_upgrade'])
 
     def test_token_expires_and_clock_rollback_cannot_revalidate_it(self):
@@ -201,7 +203,7 @@ class FirmwareServiceTests(unittest.TestCase):
             host.row[field] = value
             with self.subTest(field=field), self.assertRaises(ValueError):
                 service.start_upgrade(token, confirmed=True)
-            self.assertEqual(len(host.calls), 2)
+            self.assertEqual(len(host.calls), 1)
         token = self.ready()
         self.host.cli['sha256'] = 'replacement'
         with self.assertRaises(ValueError):
@@ -211,7 +213,8 @@ class FirmwareServiceTests(unittest.TestCase):
         self.host.results = [dict(exited=True, returncode=1, stdout='', stderr='catalog offline')]
         self.service.start_check(SN)
         state = self.join()
-        self.assertEqual(state['phase'], 'failed')
+        self.assertEqual(state['phase'], 'check_failed')
+        self.assertEqual(state['operation'], 'check')
         self.assertIn('catalog offline', state['error'])
         self.assertIsNone(state['preview'])
         self.assertEqual(self.host.released, ['reservation-0'])
@@ -220,7 +223,7 @@ class FirmwareServiceTests(unittest.TestCase):
         self.host.results = [dict(exited=False, returncode=None)]
         self.service.start_check(SN)
         state = self.join()
-        self.assertEqual(state['phase'], 'failed')
+        self.assertEqual(state['phase'], 'check_failed')
         self.assertFalse(state['locked'])
         self.assertEqual(self.host.released, ['reservation-0'])
 
@@ -250,7 +253,7 @@ class FirmwareServiceTests(unittest.TestCase):
         self.assertEqual(len(self.host.released), 1)
         with self.assertRaises(ValueError):
             self.service.start_check(SN)
-        self.assertEqual(len(self.host.calls), 3)
+        self.assertEqual(len(self.host.calls), 2)
 
     def test_executor_exception_during_write_is_unknown_not_safe_failure(self):
         token = self.ready()
@@ -301,7 +304,7 @@ class FirmwareServiceTests(unittest.TestCase):
         self.assertFalse(state['locked'])
         self.assertEqual(self.host.released[-1], 'reservation-1')
         self.assertEqual(state['result']['firmware_version'], '2.5.1')
-        self.assertEqual(len(self.host.calls), 3)
+        self.assertEqual(len(self.host.calls), 2)
 
     def test_snapshot_and_progress_cannot_mutate_service_or_claim_percent(self):
         self.ready()
@@ -314,7 +317,7 @@ class FirmwareServiceTests(unittest.TestCase):
         self.assertEqual(len(self.service.snapshot()['events']), 1)
         self.assertNotIn('percent', self.service.snapshot())
 
-    def test_slow_catalog_does_not_retimestamp_an_old_observation(self):
+    def test_unknown_check_does_not_retimestamp_an_old_observation(self):
         original = self.host.execute
         def slow(argv, **kwargs):
             result = original(argv, **kwargs)
@@ -325,7 +328,93 @@ class FirmwareServiceTests(unittest.TestCase):
         self.assertEqual(self.host.row['observed_at'], 1000.)
         with self.assertRaises(ValueError):
             self.service.start_upgrade(token, confirmed=True)
-        self.assertEqual(len(self.host.calls), 2)
+        self.assertEqual(len(self.host.calls), 1)
+
+    def report(self,current='2.5.0',latest='2.5.1',status='update available'):
+        value=dict(devices=[dict(sn=SN,device_type='wuji_hand_2',current_version=current,
+                                latest_version=latest,status=status,error=None)])
+        return dict(exited=True,returncode=0,stdout=json.dumps(value),stderr='')
+
+    def test_actual_check_json_versions_are_published_and_list_is_unnecessary(self):
+        self.host.results=[self.report()]
+        self.service.start_check(SN);state=self.join()
+        self.assertEqual(state['phase'],'available');self.assertEqual(state['operation'],'check')
+        self.assertEqual(state['current_version'],'2.5.0');self.assertEqual(state['target_version'],'2.5.1')
+        self.assertTrue(state['notification']['update_available']);self.assertTrue(state['can_upgrade'])
+        self.assertIsNone(state['catalog_report'])
+        self.assertEqual([call[0] for call in self.host.calls],[['upgrade','--sn',SN,'--check','--json']])
+
+    def test_current_device_never_offers_a_reflash_confirmation(self):
+        self.host.results=[self.report('2.5.1','2.5.1','up to date')]
+        self.service.start_check(SN);state=self.join()
+        self.assertEqual(state['phase'],'up_to_date');self.assertFalse(state['can_upgrade'])
+        self.assertIsNone(state['preview']);self.assertEqual(len(self.host.calls),1)
+
+    def test_confirmed_exact_check_survives_discovery_expiry_but_not_preview_expiry(self):
+        self.host.results=[self.report()]
+        self.service.start_check(SN);state=self.join();token=state['preview']['token']
+        self.host.now+=40;self.host.row.update(stale=True,selectable=False)
+        self.service.start_upgrade(token,confirmed=True);state=self.join()
+        self.assertEqual(state['phase'],'completed');self.assertEqual(state['operation'],'upgrade')
+        self.assertEqual(self.host.calls[-1][0],['upgrade','--sn',SN])
+        host=FakeHost();service=host.service();host.results=[self.report()]
+        service.start_check(SN);service.thread.join(3);token=service.snapshot()['preview']['token'];host.now+=121
+        with self.assertRaises(ValueError):service.start_upgrade(token,confirmed=True)
+        self.assertEqual(len(host.calls),1)
+
+    def test_check_error_preserves_raw_report_and_is_never_upgrade_failure(self):
+        self.host.results=[dict(exited=True,returncode=1,stdout='official query detail',stderr='query unavailable')]
+        self.service.start_check(SN);state=self.join()
+        self.assertEqual(state['phase'],'check_failed');self.assertEqual(state['operation'],'check')
+        self.assertEqual(state['check_report']['stdout'],'official query detail')
+        self.assertIsNone(state['result']);self.assertIsNone(state['notification'])
+
+    def test_user_priority_cancels_only_background_read_and_confirms_release(self):
+        entered,release=threading.Event(),threading.Event()
+        def execute(argv,**options):
+            self.assertTrue(options['background']);self.assertFalse(options['mutating']);self.assertFalse(options['interactive'])
+            entered.set();self.assertTrue(release.wait(3));raise ValueError('synthetic read cancelled')
+        self.service.executor=execute;self.service.cancel_query=release.set
+        self.service.start_check(SN,notification_only=True);self.assertTrue(entered.wait(2))
+        self.assertTrue(self.service.cancel_notification_check(timeout=2))
+        state=self.service.snapshot();self.assertEqual(state['phase'],'deferred');self.assertIsNone(state['error'])
+        self.assertFalse(state['busy']);self.assertEqual(self.host.released,['reservation-0'])
+
+    def test_user_priority_cannot_cancel_manual_check_or_firmware_terminal(self):
+        token=self.ready();self.host.block=True;self.service.start_upgrade(token,confirmed=True)
+        self.assertTrue(self.host.inside.wait(2));cancelled=[];self.service.cancel_query=lambda:cancelled.append(True)
+        self.assertTrue(self.service.cancel_notification_check());self.assertEqual(cancelled,[])
+        self.assertTrue(self.service.snapshot()['busy']);self.host.resume.set();self.join()
+
+    def test_unconfirmed_background_cancellation_keeps_user_action_waiting(self):
+        entered,finish=threading.Event(),threading.Event()
+        def execute(argv,**options):
+            entered.set();self.assertTrue(finish.wait(3));raise ValueError('synthetic cancelled late')
+        self.service.executor=execute;self.service.cancel_query=lambda:None
+        self.service.start_check(SN,notification_only=True);self.assertTrue(entered.wait(2))
+        self.assertFalse(self.service.cancel_notification_check(timeout=.02));self.assertEqual(self.host.released,[])
+        finish.set();self.join();self.assertEqual(self.host.released,['reservation-0'])
+
+    def test_actual_unconfirmed_read_exit_cannot_be_unlocked_by_priority_callback(self):
+        from firmware_service import ReadOnlyQueryUnconfirmed
+        self.host.results=[ReadOnlyQueryUnconfirmed('read child still alive')]
+        self.service.start_check(SN,notification_only=True);state=self.join()
+        self.assertEqual(state['phase'],'unknown');self.assertTrue(state['locked'])
+        self.assertEqual(self.host.released,[]);self.assertFalse(self.service.cancel_notification_check())
+        state=self.service.verify_recovery()
+        self.assertEqual(state['phase'],'checked');self.assertFalse(state['locked'])
+        self.assertEqual(state['result']['verdict'],'readonly_query_exited')
+        self.assertNotIn('firmware_version',state['result']);self.assertEqual(self.host.released,['reservation-0'])
+
+    def test_read_recovery_requires_exact_read_exit_proof_not_firmware_write_verdict(self):
+        from firmware_service import ReadOnlyQueryUnconfirmed
+        self.host.results=[ReadOnlyQueryUnconfirmed('read child still alive')]
+        self.service.start_check(SN,notification_only=True);self.join()
+        good=dict(read_only=True,process_exited=True,sn=SN,reservation_token='reservation-0')
+        for field,value in (('read_only',False),('process_exited',False),('sn','OTHER'),('reservation_token','other')):
+            self.host.recovery=dict(good,**{field:value})
+            with self.subTest(field=field),self.assertRaises(ValueError):self.service.verify_recovery()
+            self.assertTrue(self.service.snapshot()['locked']);self.assertEqual(self.host.released,[])
 
     def test_restarted_root_restores_exact_marker_without_unlocking_it(self):
         token = 'a'*32

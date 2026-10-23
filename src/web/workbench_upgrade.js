@@ -111,10 +111,10 @@
   $('wb-theme').value=value;
   if(!embedded){for(const frame of frames.values())frame.contentWindow?.postMessage({type:'wb-theme',value},new URL(frame.src).origin);for(const item of taskFrames.values())if(item.ready)item.frame.contentWindow?.postMessage({type:'wb-theme',value},item.origin);}
  }
- let themeChoice=localStorage.getItem('wuji-workbench-theme')||'system';
+ let themeChoice='system';try{const saved=localStorage.getItem('wuji-workbench-theme');if(['system','light','dark'].includes(saved))themeChoice=saved;}catch{}
  const fromParent=new URLSearchParams(location.search).get('theme');if(embedded&&['system','light','dark'].includes(fromParent))themeChoice=fromParent;
  themeApply(themeChoice);
- $('wb-theme').onchange=()=>{themeChoice=$('wb-theme').value;localStorage.setItem('wuji-workbench-theme',themeChoice);themeApply(themeChoice)};
+ $('wb-theme').onchange=()=>{themeChoice=$('wb-theme').value;try{localStorage.setItem('wuji-workbench-theme',themeChoice);}catch{}themeApply(themeChoice)};
  matchMedia('(prefers-color-scheme: dark)').addEventListener('change',()=>themeApply(themeChoice));
  window.addEventListener('message',event=>{if(embedded&&document.referrer&&event.origin===new URL(document.referrer).origin&&event.data?.type==='wb-theme')themeApply(event.data.value)});
  const taskPages=new Set(['home','library','feedback','parameters','connection','glove','records','devices','official-viz','calibration']);

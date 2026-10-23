@@ -69,6 +69,22 @@ def prepare_permission(hand_thread,hand_state):
     return True,''
 
 
+def scan_preview_hands(manager,glove,connection,solver_engine,source,now,
+                       hand_thread,hand_state,hand_unpairing):
+    """Refresh hand advertisements without reopening the existing glove."""
+    if glove is None or connection!='receiving' or solver_engine!='sdk':
+        raise ValueError('请先打开官方 SDK 手套预览 / Open the official SDK glove preview first')
+    allowed,reason=prepare_permission(hand_thread,hand_state)
+    if not allowed:raise ValueError(reason)
+    if hand_unpairing or hand_state.get('device_id'):
+        raise ValueError('先解除灵巧手配对并确认退出 / Unpair the hand and confirm cleanup first')
+    if (hand_state.get('hardware') or {}).get('stop_confirmed') is False:
+        raise ValueError('灵巧手停用结果未确认 / Hand disable is unconfirmed')
+    source.target(now)
+    from device_discovery import candidates
+    return candidates(list(manager.scan()))
+
+
 def paired_hand_worker(address, serial, selected, requests, events, factory, source=None):
     """Choose one fresh serial and verify side/model before creating a driver."""
     from device_discovery import connect_discovered, SelectionRequired
@@ -126,7 +142,7 @@ def worker_glove(requests,events,continuation=None,sdk_requirement=None):
     mapping=OutputMapping(defaults())
     sdk_q=None;latest_kp=None;glove_ownership=None;profile_lease=None;solver_engine='sdk';selected_user_active=False
     model_receipt=None;model_provenance=None
-    hand_unpairing=False;hand_unpaired=False
+    hand_unpairing=False;hand_unpaired=False;hand_scan_error=''
     bootstrap_commands=collections.deque()
     class BootstrapCancelled(Exception):pass
     def bootstrap_not_cancelled():
@@ -193,6 +209,11 @@ def worker_glove(requests,events,continuation=None,sdk_requirement=None):
                     if name=='glove_scan':
                         if glove is not None:raise ValueError('先断开手套再扫描 / Disconnect glove before scanning')
                         devices=scan();devices_at=time.time();message='扫描完成 / Scan completed'
+                    elif name=='glove_hand_scan':
+                        hands=scan_preview_hands(manager,glove,state,solver_engine,source,now,
+                                                 hand_thread,hand_state,hand_unpairing)
+                        hand_scan_error=''
+                        message='灵巧手查找完成，请选择后连接 / Hand search completed; choose a hand to connect'
                     elif name=='glove_open':
                         if glove is not None:raise ValueError('手套已连接，修改配置请先断开')
                         if c['serial'] not in {d['serial'] for d in devices}:raise ValueError('请先扫描并选择手套')
@@ -279,6 +300,7 @@ def worker_glove(requests,events,continuation=None,sdk_requirement=None):
                         from glove_motion import GloveMotion
                         def factory(*args):return GloveMotion(*args,source=source)
                         hand_state={};hand_identity={};hand_error='';hand_unpaired=False;hand_requests=queue.Queue();hand_events=queue.Queue()
+                        hand_scan_error=''
                         hand_thread=threading.Thread(target=paired_hand_worker,args=(c.get('address',''),c.get('serial',''),selected,hand_requests,hand_events,factory,source),daemon=True)
                         hand_thread.start();message='正在连接灵巧手，只读反馈 / Connecting hand feedback only'
                     elif name=='glove_retarget':
@@ -304,6 +326,7 @@ def worker_glove(requests,events,continuation=None,sdk_requirement=None):
                         hand_requests.put(dict(name='disconnect'));hand_unpairing=True
                         message='正在释放灵巧手，手套预览保持打开 / Releasing hand; glove preview remains open'
                 except Exception as e:
+                    if c.get('name')=='glove_hand_scan':hand_scan_error=str(e)[:400]
                     if c.get('name')=='glove_follow' and not follow_dispatch_attempted:
                         serial=hand_identity.get('serial');nonce=c.get('lease')
                         if (serial and hand_identity.get('source')=='sdk_identity'
@@ -374,7 +397,7 @@ def worker_glove(requests,events,continuation=None,sdk_requirement=None):
                     feedback['metrics']['age_ms']=max(0,now-feedback['latest']['host_s'])*1000
                 events.put(dict(type='glove_state',state=dict(version=1,connection=state,message=message,
                     devices=devices,devices_at=devices_at,hands=hands,users=users,user=current,profile=selected['id'],glove_serial=glove_sn,device_version=device_version,
-                    stream=snapshot,hardware=hw,feedback=feedback,hand_error=hand_error,
+                    stream=snapshot,hardware=hw,feedback=feedback,hand_error=hand_error,hand_scan_error=hand_scan_error,
                     can_prepare=can_prepare,prepare_blocked_reason=prepare_reason,
                     hand_cleanup_confirmed=hand_state.get('cleanup_confirmed'),
                     hand_unpairing=hand_unpairing,hand_unpaired=hand_unpaired,

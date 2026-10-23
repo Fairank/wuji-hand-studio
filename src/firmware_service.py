@@ -1,6 +1,6 @@
 """One root-owned firmware workflow, using the official CLI's own confirmation.
 
-There is deliberately no guessed firmware-catalog or --check/--list JSON schema.
+The pinned CLI's captured --check JSON and documented table are read-only facts.
 Read-only reports may be displayed, but only the embedded official interactive
 flow can write. Opening that flow never answers its confirmation prompt.
 
@@ -30,6 +30,10 @@ _MAX_EVENTS = 60
 
 class _UnconfirmedProcess(ValueError):
     pass
+
+
+class ReadOnlyQueryUnconfirmed(ValueError):
+    """The host retained a read-only child whose actual exit is not proven."""
 
 
 def _text(value, limit=1024):
@@ -81,7 +85,7 @@ class FirmwareService:
 
     def __init__(self, executor, cli_identity, idle_check, acquire, release,
                  device_provider, *, recovery_check=None, clock=time.time,
-                 preview_ttl=120, freshness_ttl=30):
+                 preview_ttl=120, freshness_ttl=30, cancel_query=None):
         if not all(callable(value) for value in (executor, cli_identity, idle_check, acquire, release, device_provider, clock)):
             raise TypeError('Firmware host callbacks are required')
         if not _finite(preview_ttl) or not 1 <= preview_ttl <= 600:
@@ -90,19 +94,24 @@ class FirmwareService:
             raise ValueError('Invalid device freshness lifetime')
         if recovery_check is not None and not callable(recovery_check):
             raise TypeError('Invalid firmware recovery callback')
+        if cancel_query is not None and not callable(cancel_query):
+            raise TypeError('Invalid read-only cancellation callback')
         self.executor, self.cli_identity = executor, cli_identity
         self.idle_check, self.acquire, self.release = idle_check, acquire, release
         self.device_provider, self.recovery_check = device_provider, recovery_check
+        self.cancel_query = cancel_query
         self.clock, self.preview_ttl, self.freshness_ttl = clock, float(preview_ttl), float(freshness_ttl)
         self.lock = threading.RLock()
         self.thread = None
         self._reservation = None
         self._preview = None
+        self._cancelled = False
         self.state = dict(busy=False, locked=False, phase='idle', device=None,
                           preview=None, check_report=None, catalog_report=None,
                           result=None, error=None, events=[], checked_at=None,
                           finished_at=None, recovery_required=False,
-                          notification=None,
+                          notification=None, current_version=None, target_version=None,
+                          operation=None, automatic=False,
                           mode='official_confirmation', machine_write_supported=False)
 
     def _now(self):
@@ -220,7 +229,7 @@ class FirmwareService:
             self.thread = thread
             thread.start()
         except Exception:
-            self._finish('failed', '无法启动固件任务 / Cannot start firmware task')
+            self._finish('check_failed' if self.state['operation']=='check' else 'failed', '无法启动固件任务 / Cannot start firmware task')
             raise
 
     def start_check(self, sn, *, notification_only=False):
@@ -229,7 +238,11 @@ class FirmwareService:
         self._begin('checking')
         with self.lock:
             self._preview = None
-            self.state.update(preview=None, check_report=None, catalog_report=None, device=None,notification=None,checked_at=None)
+            self._cancelled = False
+            self.thread = None
+            self.state.update(preview=None, check_report=None, catalog_report=None, device=None,
+                              notification=None,checked_at=None,current_version=None,target_version=None,
+                              operation='check',automatic=notification_only)
         try:
             device, cli = self._device(sn), _identity(self.cli_identity())
             self._reserve('firmware_check')
@@ -237,7 +250,7 @@ class FirmwareService:
                 self.state['device'] = device
             self._launch(self._check, device, cli, notification_only)
         except Exception as error:
-            self._finish('failed', str(error)[:800])
+            self._finish('check_failed', str(error)[:800])
             raise
         return self.snapshot()
 
@@ -250,58 +263,98 @@ class FirmwareService:
             raise ValueError('官方报告超出限制 / Official report exceeds its limit')
         return value['returncode'], stdout, stderr
 
-    def _query(self, argv):
+    def _query(self, argv, *, automatic=False):
         try:
-            value = self.executor(argv, mutating=False, interactive=False, on_event=self._event)
+            value = self.executor(argv, mutating=False, interactive=False,
+                                  on_event=self._event, background=automatic,
+                                  cancelled=(lambda:self._cancelled) if automatic else None)
+        except ReadOnlyQueryUnconfirmed:
+            raise
         except Exception as error:
             raise _UnconfirmedProcess('官方检查进程结束状态未确认 / Official query process exit is unconfirmed') from error
         code, out, err = self._response(value)
-        if code:
-            raise ValueError((err or '官方固件检查失败 / Official firmware check failed')[:800])
         # Preserve the official original rather than interpreting an unverified
         # envelope/status enum into an application-generated firmware plan.
         return dict(stdout=out, stderr=err, returncode=code)
 
     def _check(self, device, cli, notification_only=False):
         try:
+            with self.lock:
+                if notification_only and self._cancelled:raise ValueError('Background check deferred')
             sn = device['sn']
-            if notification_only:
-                from device_versions import parse_official_check_table
-                check=self._query(['upgrade','--sn',sn,'--check'])
-                if _identity(self.cli_identity())!=cli:raise ValueError('Official CLI changed during version check')
-                expected_type='wuji_glove' if device.get('kind')=='glove' else 'wuji_hand_2' if device.get('generation')=='hand2' else 'wuji_hand' if device.get('generation')=='hand1' else None
-                report=parse_official_check_table(check['stdout'],sn,expected_type) if expected_type else None
-                with self.lock:self.state.update(check_report=check,notification=report,checked_at=self._now())
-                self._finish('available' if report and report['update_available'] else 'up_to_date' if report else 'checked')
-                return
-            check = self._query(['upgrade', '--sn', sn, '--check', '--json'])
+            from device_versions import parse_official_check_report
+            check = self._query(['upgrade', '--sn', sn, '--check', '--json'], automatic=notification_only)
             with self.lock:
                 self.state['check_report'] = check
-            catalog = self._query(['upgrade', '--sn', sn, '--list', '--json'])
-            # Discovery pauses while we own the reservation. Catalog queries may
-            # outlast the 30-second advertisement lifetime; do not pretend a
-            # cached observation was refreshed by them. Opening the interactive
-            # flow later requires a genuinely fresh server observation again.
+            if check['returncode']:
+                raise ValueError((check['stderr'] or check['stdout'] or '暂时无法检查设备更新 / Device update check is unavailable')[:800])
             if _identity(self.cli_identity()) != cli:
                 raise ValueError('官方 CLI 已变化，请重新检查 / Official CLI changed; check again')
+            expected_type='wuji_glove' if device.get('kind')=='glove' else 'wuji_hand_2' if device.get('generation')=='hand2' else 'wuji_hand' if device.get('generation')=='hand1' else None
+            report = parse_official_check_report(check['stdout'],sn,expected_type) if expected_type else None
             now, token = self._now(), secrets.token_urlsafe(24)
             public = dict(token=token, sn=sn, device=copy.deepcopy(device),
                           mode='official_confirmation', target_version=None,
                           expires_at=now + self.preview_ttl,
                           requires_official_confirmation=True)
             with self.lock:
-                self._preview = dict(token=token, device=copy.deepcopy(device), cli=cli,
-                                     created_at=now, expires_at=now + self.preview_ttl,
-                                     public=public)
-                self.state.update(catalog_report=catalog, checked_at=now)
-            self._finish('ready')
+                if not notification_only and (report is None or report['update_available']):
+                    self._preview = dict(token=token, device=copy.deepcopy(device), cli=cli,
+                                         checked_device=copy.deepcopy(report),
+                                         created_at=now, expires_at=now + self.preview_ttl,
+                                         public=public)
+                self.state.update(notification=report, checked_at=now,
+                                  current_version=report['current'] if report else None,
+                                  target_version=report['latest'] if report else None)
+            self._finish('available' if report and report['update_available'] else 'up_to_date' if report else 'checked' if notification_only else 'ready')
         except Exception as error:
             with self.lock:
                 self._preview = None
             # The host's finite read-only executor owns timeout cleanup and must
             # confirm its query process has ended before returning/raising. A
             # read never enters the non-cancellable flash lifecycle.
-            self._finish('failed', str(error)[:800])
+            if isinstance(error,ReadOnlyQueryUnconfirmed):
+                self._finish('unknown',str(error)[:800],unknown=True)
+            elif notification_only and self._cancelled:
+                self._finish('deferred')
+            else:self._finish('check_failed', str(error)[:800])
+
+    def cancel_notification_check(self, timeout=3):
+        """Give explicit user actions priority over a finite background read.
+
+        The host callback only cancels the separate --check subprocess. No
+        interactive firmware child or manual operation is ever cancelled here.
+        A true return means the read thread and exact reservation ended.
+        """
+        with self.lock:
+            if self.state['operation']=='check' and self.state['automatic'] and self.state['locked']:
+                return False
+            if not self.state['busy'] or self.state['operation']!='check' or not self.state['automatic']:
+                return True
+            self._cancelled = True
+            thread = self.thread
+        if self.cancel_query is not None:self.cancel_query()
+        deadline=time.monotonic()+timeout
+        while time.monotonic()<deadline:
+            with self.lock:
+                if not self.state['busy']:
+                    return not self.state['locked'] and self._reservation is None
+                thread=self.thread
+            if thread is threading.current_thread():return False
+            if thread is not None:thread.join(min(.05,max(0,deadline-time.monotonic())))
+            else:time.sleep(.01)
+        return False
+
+    def _preview_device(self, preview):
+        # A successful exact-SN official check remains confirmation authority
+        # for this bounded preview lifetime, even when discovery advertisements
+        # expire after 30 s. This is not a target firmware/revision write plan:
+        # the unchanged CLI reconnects the exact SN and asks its own confirmation.
+        if preview.get('checked_device') is not None:
+            if not preview['created_at'] <= self._now() < preview['expires_at']:
+                raise ValueError('固件预览已过期，请重新检查 / Firmware preview expired; check again')
+            return copy.deepcopy(preview['device'])
+        return self._device(preview['device']['sn'])
 
     def start_upgrade(self, preview_token, *, confirmed=False):
         if confirmed is not True:
@@ -315,27 +368,28 @@ class FirmwareService:
                 self._preview = None
                 raise ValueError('固件预览已过期，请重新检查 / Firmware preview expired; check again')
             self._begin('upgrading')
+            self.state.update(operation='upgrade',automatic=False)
             # One use even when idle check subsequently refuses the action.
             self._preview = None
         try:
-            device = self._device(preview['device']['sn'])
+            device = self._preview_device(preview)
             if device != preview['device'] or _identity(self.cli_identity()) != preview['cli']:
                 raise ValueError('设备或官方 CLI 已变化，请重新检查 / Device or official CLI changed; check again')
             self._reserve()
             # No --yes: the human sees and answers the actual CLI plan. No --all,
             # --type, raw file, --force, downgrade, rollback or implicit retries.
-            self._launch(self._upgrade, device, preview['cli'])
+            self._launch(self._upgrade, device, preview)
         except Exception as error:
             self._finish('failed', str(error)[:800])
             raise
         return self.snapshot()
 
-    def _upgrade(self, device, cli):
+    def _upgrade(self, device, preview):
         attempted = False
         try:
             # The exact CLI and server inventory are rechecked immediately before
             # launch, after obtaining the shared reservation.
-            if self._device(device['sn']) != device or _identity(self.cli_identity()) != cli:
+            if self._preview_device(preview) != device or _identity(self.cli_identity()) != preview['cli']:
                 self._finish('failed', '设备或官方 CLI 已变化 / Device or official CLI changed')
                 return
             attempted = True
@@ -367,6 +421,16 @@ class FirmwareService:
         try:
             with self.lock:
                 token = self._reservation
+                read_only = self.state['operation']=='check'
+            if read_only:
+                result=self.recovery_check(sn,reservation_token=token,read_only=True)
+                if (not isinstance(result,dict) or result.get('process_exited') is not True
+                        or result.get('read_only') is not True or result.get('sn')!=sn
+                        or result.get('reservation_token')!=token):
+                    raise ValueError('版本检查进程尚未确认退出 / Version-check process exit remains unconfirmed')
+                with self.lock:self.state['result']=dict(verdict='readonly_query_exited',sn=sn)
+                self._finish('checked')
+                return self.snapshot()
             result = self.recovery_check(sn, reservation_token=token)
             if (not isinstance(result, dict) or result.get('process_exited') is not True or
                     result.get('identity_verified') is not True or result.get('sn') != sn or

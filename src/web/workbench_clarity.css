@@ -18,6 +18,9 @@ html .nav-advanced[open]>summary:after{transform:rotate(45deg)}
 html .settings-research{padding:14px 0;margin:18px 0;border-top:1px solid var(--ui-line)}
 html .settings-research>summary{cursor:pointer;font-size:13px;font-weight:500;color:var(--ui-sub);padding:8px 0}
 html .settings-research .settings-footnote{margin-bottom:14px}
+.settings-workflow{margin-top:16px;padding-top:14px;border-top:1px solid var(--wb-line)}
+.settings-workflow>summary{font-size:12px;color:var(--wb-sub);cursor:pointer;line-height:1.7}
+.settings-workflow[open]>summary{margin-bottom:8px}
 html body .settings-route{padding:15px 10px;border-radius:10px;transition:background-color 140ms ease}
 html body .settings-route:hover{background:var(--dg-fill)!important}
 html body .settings-route:hover strong{text-decoration:none}
@@ -41,6 +44,7 @@ html[data-reduce-transparency=true] :is(.top,.directory,.page-area){background:v
 @media(prefers-reduced-transparency:reduce),(forced-colors:active){html[data-external-backdrop=true] :is(.top,.directory,.page-area){background:var(--dg-canvas)!important;backdrop-filter:none!important;-webkit-backdrop-filter:none!important}html[data-external-backdrop=true] #page-connection .cr-device-card{background:var(--dg-canvas)!important}}
 html .page-heading{display:flex;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:22px}
 html .page-heading h2{margin:0;font-size:24px}.page-heading>p{flex-basis:100%}
+html :is(#page-connection,#page-settings)>.page-heading>p{display:none}
 .wc-heading-tools{display:flex;gap:8px;margin-left:auto}
 html #page-library .motion-layout{grid-template-columns:292px minmax(0,1fr);gap:28px;align-items:start}
 html #page-library .motion-controls{padding:0;min-width:0}
@@ -63,6 +67,8 @@ html #page-library .workspace-confirmation input{vertical-align:middle}
 html #real-motion-panel .button-row{gap:8px;margin:8px 0}
 html #real-motion-panel #trial-start,html #play-start{font-size:13px;background:#007aff;color:white;border:0;box-shadow:none;min-height:40px}
 html #real-motion-panel #hardware-pause{font-size:13px;min-height:40px}
+html #real-motion-panel :is(#hardware-pause,#hardware-stop):disabled{display:none}
+html #real-motion-panel[data-has-motion-record=false] :is(#trial-progress,#trial-progress-text){display:none}
 html #real-motion-panel #hardware-stop{min-height:34px;font-size:12px;border-color:transparent;background:transparent;box-shadow:none;margin:0}
 html #real-motion-panel .motion-progress progress{height:4px;margin-top:12px;border:0}
 html #real-motion-panel #trial-progress-text{font-size:11px;color:var(--dg-text-2);margin:5px 0}

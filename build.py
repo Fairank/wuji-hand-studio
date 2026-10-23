@@ -1,5 +1,5 @@
 """Build on the target OS. This does not cross-compile or start hardware."""
-import hashlib,json,os,platform,shutil,subprocess,sys,tempfile,zipfile
+import hashlib,json,os,platform,shutil,ssl,subprocess,sys,tempfile,zipfile
 from pathlib import Path
 
 ROOT=Path(__file__).resolve().parent
@@ -34,6 +34,15 @@ args=[sys.executable,'-m','PyInstaller','--noconfirm','--clean','--onedir','--na
     '--add-data','src/studio_manifest.json'+os.pathsep+'.',
     '--add-data','src/network_setup_windows.ps1'+os.pathsep+'.',
     '--add-data','THIRD_PARTY_NOTICES.md'+os.pathsep+'.']
+# Some Python distributions load an auxiliary OpenSSL distrust policy from
+# SSLContext.__new__. Preserve that selected interpreter's exact policy bytes
+# beside frozen ssl.py; PyInstaller cannot discover the dynamic file access.
+tls_policy_name='codex-rejected-cas.pem'
+tls_constructor=getattr(ssl.SSLContext.__new__,'__code__',None)
+if tls_constructor is not None and tls_policy_name in tls_constructor.co_consts:
+    tls_policy=Path(ssl.__file__).with_name(tls_policy_name)
+    if not tls_policy.is_file():raise RuntimeError('Selected Python TLS policy is missing: '+str(tls_policy))
+    args+=['--add-data',str(tls_policy)+os.pathsep+'.']
 if (ROOT/'src/private_models').exists():raise RuntimeError('Private models are optional local data and must not be bundled')
 if sys.platform=='win32':args+=['--windowed','--icon','src/WujiStudio.ico','--collect-all','webview','--collect-all','pythonnet','--collect-all','clr_loader','--hidden-import','webview.platforms.winforms','--hidden-import','webview.platforms.edgechromium']
 elif sys.platform=='darwin':

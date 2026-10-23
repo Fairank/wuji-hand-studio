@@ -3,6 +3,7 @@
 These observations are display-only. They never authorize an upgrade, select a
 firmware package, or open a device. Unknown metadata/report formats stay unknown.
 """
+import json
 import re
 
 
@@ -39,6 +40,60 @@ def read_handle_version(handle, expected_sn):
         return dict(serial=serial, firmware_version=version, source='sdk_handle_info')
     except Exception:
         return None
+
+
+def parse_official_check_json(text, expected_sn, expected_type=None):
+    """Recognize the pinned CLI's captured exact-SN read-only check envelope.
+
+    The ``devices``/``current_version`` contract was verified against the real
+    2026.10.12 native CLI report. This produces a reminder, never a flash plan.
+    Catalog/download/manifests are intentionally not interpreted here.
+    """
+    if (not _plain(expected_sn, 128) or type(text) is not str or len(text) > 262144
+            or (expected_type is not None and (type(expected_type) is not str or expected_type not in _DEVICE_TYPES))):
+        return None
+    def unique(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:raise ValueError('Duplicate official report field')
+            result[key] = value
+        return result
+    def invalid(value):raise ValueError('Non-finite official report value')
+    try:
+        value = json.loads(text, object_pairs_hook=unique, parse_constant=invalid)
+    except (TypeError, ValueError, RecursionError):
+        return None
+    if type(value) is not dict or set(value) != {'devices'}:
+        return None
+    devices = value['devices']
+    # --sn is an exact single-device operation. A broader/mixed report is not
+    # accepted as authority for either a reminder or the confirmation entry.
+    if type(devices) is not list or len(devices) != 1 or type(devices[0]) is not dict:
+        return None
+    row = devices[0]
+    fields = {'sn', 'device_type', 'current_version', 'latest_version', 'status', 'error'}
+    if set(row) != fields or row['error'] is not None:
+        return None
+    serial, kind = row['sn'], row['device_type']
+    current, latest, status = row['current_version'], row['latest_version'], row['status']
+    if (serial != expected_sn or type(kind) is not str or kind not in _DEVICE_TYPES
+            or (expected_type is not None and kind != expected_type)
+            or type(current) is not str or type(latest) is not str
+            or _VERSION.fullmatch(current) is None or _VERSION.fullmatch(latest) is None
+            or status not in ('update available', 'up to date')):
+        return None
+    before, after = tuple(map(int,current.split('.'))), tuple(map(int,latest.split('.')))
+    available = status == 'update available'
+    if (available and after <= before) or (not available and after > before):
+        return None
+    return dict(serial=serial, device_type=kind, current=current, latest=latest,
+                update_available=available)
+
+
+def parse_official_check_report(text, expected_sn, expected_type=None):
+    """Read the verified JSON or the publicly documented human table only."""
+    return (parse_official_check_json(text, expected_sn, expected_type)
+            or parse_official_check_table(text, expected_sn, expected_type))
 
 
 def parse_official_check_table(text, expected_sn, expected_type=None):

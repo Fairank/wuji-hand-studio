@@ -66,6 +66,28 @@ def self_check():
     validate(DEFAULT)
     assert len(catalog()['actions'])>=40
     data=dict(ok=True,edition=EDITION['name'],version=EDITION['version'],joints=m.nu,profiles=list(PROFILES),actions=len(catalog()['actions']),hardware_connected=False)
+    # Always exercise TLS initialization in the packaged executable offline.
+    # A missing runtime policy must fail the build before it reaches users.
+    import ssl
+    try:
+        context=ssl.create_default_context()
+        assert context.check_hostname is True and context.verify_mode==ssl.CERT_REQUIRED
+        data['tls']=dict(ok=True,check_hostname=context.check_hostname,verify_mode=int(context.verify_mode))
+    except Exception as error:
+        data['tls']=dict(ok=False,type=type(error).__name__,error=str(error));data['ok']=False
+    if '--release-check' in sys.argv:
+        # Explicit packaging diagnostic: the same fixed public metadata readers
+        # as the updater, without preparing, installing or opening a device.
+        import traceback
+        from cli_release_store import CLIReleaseStore
+        from sdk_release import _read_official,parse_catalog
+        readers={'cli':lambda:CLIReleaseStore(DATA/'official-cli/versions',socket_timeout=20).fetch_release()['tag_name'],
+                 'sdk':lambda:parse_catalog(_read_official())['version']}
+        results={}
+        for name,read in readers.items():
+            try:results[name]=dict(ok=True,version=read())
+            except Exception as error:results[name]=dict(ok=False,type=type(error).__name__,error=str(error),traceback=traceback.format_exc())
+        data['release_checks']=results;data['ok']=data['ok'] and all(row['ok'] for row in results.values())
     if '--render-check' in sys.argv:
         import mujoco as mj
         d=mj.MjData(m);mj.mj_forward(m,d)
@@ -77,7 +99,7 @@ def self_check():
         destination=Path(sys.argv[sys.argv.index('--self-check-output')+1])
         destination.write_text(encoded,encoding='utf-8')
     if sys.stdout is not None:print(encoded)
-    return 0
+    return 0 if data['ok'] else 1
 
 def main():
     if '--jsonl-software-check' in sys.argv:
@@ -102,7 +124,7 @@ def main():
         args=parser.parse_args()
         from model_pack import run_file
         run_file(args.recognizer_input,args.recognizer_output);return
-    if '--self-check' in sys.argv:return self_check()
+    if '--self-check' in sys.argv:raise SystemExit(self_check())
     initialize()
     if '--serve' in sys.argv:
         from console_server import main as serve

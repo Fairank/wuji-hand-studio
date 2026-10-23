@@ -66,7 +66,7 @@ class FirmwareHost:
         self.controller = controller
         self.folder = Path(folder or root_folder())
         self.spawn = spawn
-        self.runner = runner or subprocess.run
+        self.runner = runner
         self.lock = threading.RLock()
         self.process = None
         self.session = None
@@ -74,6 +74,13 @@ class FirmwareHost:
         self.pending_serial = None
         self.chunks = deque(maxlen=128)
         self.sequence = 0
+        self.query_process = None
+        self.query_job = None
+        self.query_cancel = None
+        self.query_automatic = False
+        self.query_token = None
+        self.query_serial = None
+        self.query_exit_confirmed = False
 
     def _component(self):
         # Until another OS has the same verified interactive transport, do not
@@ -124,10 +131,26 @@ class FirmwareHost:
             if current and current.get('token')!=token:raise ValueError('Maintenance ownership changed')
             release(token, self.folder)
 
-    def recovery_check(self, serial, *, reservation_token):
+    def recovery_check(self, serial, *, reservation_token, read_only=False):
         """Confirm exact process exit and actual firmware readback, never retry."""
         with gate(self.folder):
             marker=reservation(self.folder)
+            if read_only:
+                if marker.get('kind')!='firmware_check' or marker.get('token')!=reservation_token or marker.get('serial')!=serial:
+                    raise ValueError('Version-check recovery ownership changed')
+                with self.lock:
+                    if self.query_token!=reservation_token or self.query_serial!=serial:
+                        raise ValueError('Original version-check identity is unavailable')
+                    if self.query_job is not None and not self.query_job.close(timeout=1):
+                        raise ValueError('版本检查进程尚未结束 / Version-check process is still running')
+                    if self.query_process is not None:
+                        if type(self.query_process.poll()) is not int:
+                            raise ValueError('版本检查进程尚未结束 / Version-check process is still running')
+                        self.query_exit_confirmed=True
+                        self.query_process=None;self.query_job=None;self.query_cancel=None
+                    if not self.query_exit_confirmed:
+                        raise ValueError('版本检查进程尚未确认退出 / Version-check process exit remains unconfirmed')
+                return dict(read_only=True,process_exited=True,sn=serial,reservation_token=reservation_token)
             if marker.get('kind')!='firmware' or marker.get('token')!=reservation_token or marker.get('serial')!=serial:
                 raise ValueError('Firmware recovery ownership changed')
             with self.lock:
@@ -139,14 +162,26 @@ class FirmwareHost:
             observation=process_state(pid,start)
             if observation!='dead':
                 raise ValueError('原升级进程尚未确认退出 / The original update process exit is not verified')
-            from native_cli import json_command
-            report=json_command('get','firmware_version','--sn',serial)
-            version=report.get('value')
-            if not isinstance(version,str) or not re.fullmatch(r'\d+(?:\.\d+){1,3}(?:[-+][A-Za-z0-9.-]+)?',version):
-                raise ValueError('设备固件版本尚未读回 / Device firmware version is not yet available')
-            device=report.get('device')
-            returned=report.get('sn') or report.get('serial') or (device.get('sn') if isinstance(device,dict) else None)
-            if returned!=serial:raise ValueError('设备身份尚未读回 / Device identity is not yet verified')
+            # Reuse the exact-SN JSON contract captured from the pinned CLI.
+            # `get` help documents a value, but does not establish an identity
+            # envelope; guessing sn/device/value could strand real recovery.
+            # Keep the firmware lease while this bounded read runs. It is not
+            # a second flash, a catalog target, or proof the target installed.
+            with self.lock:
+                if self.query_cancel is not None:
+                    if self.query_token!=reservation_token or self.query_serial!=serial:
+                        raise ValueError('Firmware version-read ownership changed')
+                    if self.query_job is not None and not self.query_job.close(timeout=1):
+                        raise ValueError('版本核验进程尚未结束 / Version-verification process is still running')
+                    if self.query_process is None or type(self.query_process.poll()) is not int:
+                        raise ValueError('版本核验进程退出尚未确认 / Version-verification process exit remains unconfirmed')
+                    self.query_process=None;self.query_job=None;self.query_cancel=None
+            report=self(['upgrade','--sn',serial,'--check','--json'])
+            from device_versions import parse_official_check_json
+            observed=(parse_official_check_json(report.get('stdout'),serial)
+                if type(report.get('returncode')) is int and report['returncode']==0 and report.get('exited') is True else None)
+            if observed is None:raise ValueError('设备身份与固件版本尚未读回 / Device identity and firmware version are not yet verified')
+            version=observed['current']
             if reservation(self.folder).get('token')!=reservation_token:raise ValueError('Firmware recovery ownership changed')
             return dict(process_exited=True,identity_verified=True,sn=serial,
                         reservation_token=reservation_token,firmware_version=version)
@@ -195,23 +230,119 @@ class FirmwareHost:
                 self.sequence += 1
                 self.chunks.append(dict(sequence=self.sequence, text=text[at:at+4096]))
 
-    def __call__(self, argv, *, mutating=False, interactive=False, on_event=None):
-        if (not isinstance(argv, list) or not 3 <= len(argv) <= 8
+    def cancel_background_check(self):
+        """Request cancellation of only our finite read-only --check process.
+
+        The owning query thread confirms its actual process exit before the
+        service releases the shared reservation. The firmware PTY is unrelated.
+        """
+        with self.lock:
+            if self.query_cancel is None or not self.query_automatic:return False
+            self.query_cancel.set()
+            return True
+
+    def _spawn_background(self,command,env):
+        # Read-only checks, unlike the interactive flash PTY, must never outlive
+        # a crashing root. Reuse the existing suspended-before-assignment,
+        # non-inherited kill-on-close Job rather than a naked Popen child.
+        from windows_process_job import OwnedProcess
+        return OwnedProcess(command,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,
+            text=True,encoding='utf-8',errors='replace',env=env)
+
+    def _background_query(self, command, env, external_cancelled):
+        cancelled=threading.Event()
+        with self.lock:
+            if self.query_cancel is not None:raise ValueError('A background firmware check is already running')
+            self.query_cancel=cancelled
+        process=None;owned=None;startup_unknown=False
+        def stop_read():
+            try:process.terminate()
+            except OSError:pass
+            try:return process.communicate(timeout=1)
+            except (subprocess.TimeoutExpired,OSError):
+                process.kill()
+                return process.communicate(timeout=1)
+        try:
+            if cancelled.is_set() or external_cancelled():return dict(returncode=1,stdout='',stderr='Background check deferred',exited=True)
+            try:owned=self._spawn_background(command,env)
+            except RuntimeError:
+                startup_unknown=True
+                from firmware_service import ReadOnlyQueryUnconfirmed
+                raise ReadOnlyQueryUnconfirmed('版本检查子进程启动状态尚未确认 / Version-check child startup is unconfirmed') from None
+            process=owned.process
+            with self.lock:self.query_process=process;self.query_job=owned
+            deadline=time.monotonic()+40
+            while True:
+                if cancelled.is_set() or external_cancelled() or time.monotonic()>=deadline:
+                    # This path is reachable only for the fixed noninteractive
+                    # --check argv below. Never terminate the firmware PTY.
+                    out,err=stop_read()
+                    return dict(returncode=1,stdout=out,stderr='Background check deferred' if cancelled.is_set() or external_cancelled() else 'Firmware check timed out',exited=process.returncode is not None)
+                try:
+                    out,err=process.communicate(timeout=.1)
+                    if len(out or '')+len(err or '')>2*1024*1024:raise ValueError('Official firmware report exceeds its limit')
+                    return dict(returncode=process.returncode,stdout=out,stderr=err,exited=True)
+                except subprocess.TimeoutExpired:continue
+        except BaseException:
+            if process is not None and process.poll() is None:
+                try:stop_read()
+                except Exception:
+                    from firmware_service import ReadOnlyQueryUnconfirmed
+                    raise ReadOnlyQueryUnconfirmed('后台版本检查进程尚未确认退出，请稍后重试 / Background version-check process exit is unconfirmed') from None
+            raise
+        finally:
+            # A root crash closes this private non-inherited handle in the
+            # kernel, killing the read subtree. Normal completion also proves
+            # the entire read tree empty before releasing its shared lease.
+            clean=not startup_unknown
+            if owned is not None:
+                try:clean=owned.close(timeout=1)
+                except Exception:clean=False
+            with self.lock:
+                # Do not clear a reference to a child whose exit is uncertain.
+                if clean and (process is None or process.poll() is not None):
+                    self.query_exit_confirmed=True
+                    self.query_process=None;self.query_job=None;self.query_cancel=None
+            if not clean:
+                from firmware_service import ReadOnlyQueryUnconfirmed
+                raise ReadOnlyQueryUnconfirmed('版本检查进程组退出尚未确认 / Version-check process tree exit is unconfirmed') from None
+
+    def __call__(self, argv, *, mutating=False, interactive=False, on_event=None, background=False, cancelled=None):
+        if (type(background) is not bool or not isinstance(argv, list) or not 3 <= len(argv) <= 8
                 or argv[0] != 'upgrade' or argv[1] != '--sn'
-                or not isinstance(argv[2], str) or not SERIAL.fullmatch(argv[2])):
+                or not isinstance(argv[2], str) or not SERIAL.fullmatch(argv[2])
+                or (cancelled is not None and (not background or not callable(cancelled)))):
             raise ValueError('Unsupported official firmware command')
         serial = argv[2]
         if interactive:
-            if not mutating or argv != ['upgrade', '--sn', serial]:raise ValueError('Firmware confirmation must remain with the official CLI')
-        elif mutating or argv[3:] not in (['--check', '--json'], ['--list', '--json'], ['--check']):
+            if background or not mutating or argv != ['upgrade', '--sn', serial]:raise ValueError('Firmware confirmation must remain with the official CLI')
+        elif mutating or argv[3:] not in (['--check', '--json'], ['--check']):
             raise ValueError('Unsupported firmware read operation')
-        component = self._component()
+        if not interactive:
+            marker=reservation(self.folder)
+            with self.lock:
+                self.query_token=marker.get('token') if marker.get('kind') in {'firmware_check','firmware'} and marker.get('serial')==serial else None
+                self.query_serial=serial;self.query_exit_confirmed=False;self.query_automatic=background
+        try:component = self._component()
+        except Exception:
+            if not interactive:
+                with self.lock:self.query_exit_confirmed=True
+            raise
         command = [component['binary'], *argv]
         env = {**os.environ, 'WUJI_NO_UPDATE_CHECK':'1', 'WUJI_TELEMETRY_DISABLE':'1'}
         if not interactive:
-            result = self.runner(command, stdin=subprocess.DEVNULL, capture_output=True,
-                text=True, encoding='utf-8', errors='replace', timeout=40, env=env,
-                creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+            cancelled=cancelled or (lambda:False)
+            if self.runner is None:return self._background_query(command,env,cancelled)
+            if background and cancelled():
+                with self.lock:self.query_exit_confirmed=True
+                return dict(returncode=1,stdout='',stderr='Background check deferred',exited=True)
+            try:
+                result = (self.runner or subprocess.run)(command, stdin=subprocess.DEVNULL, capture_output=True,
+                    text=True, encoding='utf-8', errors='replace', timeout=40, env=env,
+                    creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+            finally:
+                # subprocess.run owns finite child cleanup before propagating.
+                with self.lock:self.query_exit_confirmed=True
             if len(result.stdout or '') + len(result.stderr or '') > 2 * 1024 * 1024:
                 raise ValueError('Official firmware report exceeds its limit')
             return dict(returncode=result.returncode, stdout=result.stdout, stderr=result.stderr, exited=True)

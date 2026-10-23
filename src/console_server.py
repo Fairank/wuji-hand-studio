@@ -409,6 +409,12 @@ class Controller:
         self.stdin.flush()
 
     def action(self, command):
+        if isinstance(command,dict) and command.get('name') in {'connect','official_viz_start','glove_connect','glove_open','glove_scan','calibration_start','calibration_handover','teleoperation_handover','calibrated_teleoperation_continue'}:
+            priority=getattr(self,'version_check_priority',None)
+            if priority and not priority():raise ValueError('只读版本检查正在结束，请稍候重试 / Finishing the background version check; retry shortly')
+        if isinstance(command,dict) and command.get('name')=='official_viz_start':
+            preflight=getattr(self,'connection_version_check',None)
+            if preflight:preflight(command.get('serial'))
         from firmware_host import enforce_maintenance
         enforce_maintenance(command)
         # A long-lived preview may outlast the official stable catalog. Do the
@@ -526,7 +532,7 @@ class Controller:
                 self.group.stop('手动停止 / Manually stopped')
             elif name not in {'session_keepalive','hardware_keepalive','view_camera','display_selected'}:
                 raise ValueError('请先停止编组 / Stop the group before changing this hand')
-        if self.calibration.run['running'] and name in {'program_start','connect','hardware_start','hardware_trial','hardware_probe','demo_start','glove_scan','glove_open','glove_prepare','glove_follow','doctor_run','doctor_version','doctor_support'}:
+        if self.calibration.run['running'] and name in {'program_start','connect','hardware_start','hardware_trial','hardware_probe','demo_start','glove_scan','glove_hand_scan','glove_open','glove_prepare','glove_follow','doctor_run','doctor_version','doctor_support'}:
             raise ValueError('Finish hand-model calibration first / 请先结束手部模型标定')
         if name=='session_keepalive':
             if self.program.lease:self.program.keepalive(self.program.lease)
@@ -544,7 +550,7 @@ class Controller:
         if name=='program_pause':return self.program.pause(True)
         if name=='program_resume':return self.program.pause(False)
         if self.program.snapshot()['active'] and threading.current_thread() is not self.program.thread:
-            if name in {'hardware_start','hardware_trial','hardware_probe','demo_start','glove_scan','glove_open','glove_prepare','glove_follow'}:
+            if name in {'hardware_start','hardware_trial','hardware_probe','demo_start','glove_scan','glove_hand_scan','glove_open','glove_prepare','glove_follow'}:
                 raise ValueError('请先停止节目单 / Stop the active playlist first')
             if name in {'hardware_stop','disconnect','glove_stop','glove_disconnect'}:
                 self.program.stop()
@@ -1404,7 +1410,7 @@ class ConsoleHTTPServer(ThreadingHTTPServer):
                 from firmware_service import FirmwareService
                 host=self.firmware_transport
                 service=FirmwareService(host,host.cli_identity,self.controller.official_cli.idle_check,
-                    host.acquire,host.release,host.device,recovery_check=host.recovery_check)
+                    host.acquire,host.release,host.device,recovery_check=host.recovery_check,cancel_query=host.cancel_background_check)
                 from cli_coordination import reservation
                 marker=reservation(host.folder)
                 if marker.get('kind')=='firmware':service.restore_unknown(marker)
@@ -1415,9 +1421,83 @@ class ConsoleHTTPServer(ThreadingHTTPServer):
         from bridge_config import load_config
         from official_device_discovery import use_native
         result=self.firmware.snapshot()
-        result['run']=self.firmware_transport.run_snapshot()
+        run=self.firmware_transport.run_snapshot()
+        device=result.get('device') or {}
+        # A subsequent read belongs to a new operation. Do not attach the old
+        # completed PTY (or another device's PTY) to its progress and controls.
+        result['run']=run if (result.get('operation')=='upgrade' and isinstance(run,dict)
+            and run.get('serial')==(device.get('sn') or device.get('serial'))) else None
         result['supported']=use_native(load_config())
+        viewer=self.controller.official_viz.snapshot()
+        result['viewer']=dict(active=viewer.get('active') is True,phase=viewer.get('phase'),
+            serial=(viewer.get('reported_device') or {}).get('sn'),session_id=viewer.get('session_id'))
         return result
+
+    def firmware_check_from_viewer(self,serial,viewer_token):
+        """One explicit action ends only its exact read-only Viewer, then checks."""
+        viewer=self.controller.official_viz;workflow=self.controller.calibration_handover.workflow_lock
+        if not workflow.acquire(blocking=False):raise ValueError('设备任务正在切换，请稍候 / A device task is switching')
+        try:
+            from cli_coordination import gate
+            with gate(viewer.folder):
+                if getattr(self.controller,'desktop_closing',False):raise ValueError('Workbench is closing')
+                viewer.connection_record(serial,viewer_token,require_glove=False)
+                self.firmware_preview_idle(viewer_token)
+            viewer.stop_owned(serial,viewer_token,require_glove=False)
+            self.controller.official_cli.idle_check()
+            rows=self.controller.calibration_devices(fresh=True)
+            if not any((row.get('serial') or row.get('sn'))==serial for row in rows):
+                raise ValueError('所选设备暂不可见，未检查其它设备 / Selected device is unavailable; no other device was checked')
+            return self.firmware.start_check(serial)
+        finally:workflow.release()
+
+    def start_firmware_check(self,serial):
+        """An explicit version check refreshes expired discovery once, for this SN."""
+        if not isinstance(serial,str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_-]{0,79}',serial):
+            raise ValueError('Select a discovered device')
+        workflow=self.controller.calibration_handover.workflow_lock
+        if not workflow.acquire(blocking=False):raise ValueError('设备任务正在切换，请稍候 / A device task is switching')
+        try:
+            if getattr(self.controller,'desktop_closing',False):raise ValueError('Workbench is closing')
+            self.controller.official_cli.idle_check()
+            rows=self.controller.calibration_devices()
+            if not any((row.get('serial') or row.get('sn'))==serial for row in rows):
+                rows=self.controller.calibration_devices(fresh=True)
+            if not any((row.get('serial') or row.get('sn'))==serial for row in rows):
+                raise ValueError('所选设备暂不可见，未检查其它设备 / Selected device is unavailable; no other device was checked')
+            # The service repeats freshness and reserves the shared gate before
+            # its exact-SN read. Discovery alone never authorizes an upgrade.
+            return self.firmware.start_check(serial)
+        finally:workflow.release()
+
+    def check_connect_version(self,serial):
+        """A bounded read in an explicit connection, never a mandatory update.
+
+        It precedes the Viewer opening its SDK handle. Offline reads may be
+        skipped only after their child has certainly ended and released its
+        lease. An uncertain exit never permits a competing device connection.
+        """
+        if not isinstance(serial,str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_-]{0,79}',serial):return
+        from bridge_config import load_config
+        from official_device_discovery import use_native
+        if not use_native(load_config()):return
+        from native_cli import resolve
+        try:resolve()
+        except (OSError,ValueError):return  # Existing connection prepares CLI.
+        service=self.firmware;state=service.snapshot();report=state.get('notification') or {}
+        if report.get('serial')==serial and type(state.get('checked_at')) in (int,float) and 0<=time.time()-state['checked_at']<24*3600:return
+        from cli_coordination import reservation
+        if reservation(self.firmware_transport.folder):return  # Original gate explains its current owner.
+        started=time.monotonic()
+        try:service.start_check(serial,notification_only=True)
+        except Exception:
+            if service.snapshot().get('locked'):raise
+            return
+        thread=service.thread
+        if thread:thread.join(max(0.,3.-(time.monotonic()-started)))
+        if service.snapshot().get('busy') and not service.cancel_notification_check(timeout=2):
+            raise ValueError('版本检查退出尚未确认，未打开另一会话 / Version check exit is unconfirmed; no competing session was opened')
+        if service.snapshot().get('locked'):raise ValueError('版本检查退出尚未确认 / Version check exit is unconfirmed')
 
     def maintenance_action(self,command):
         name=command.get('name')
@@ -1425,8 +1505,10 @@ class ConsoleHTTPServer(ThreadingHTTPServer):
             return dict(sdk_maintenance=self.sdk_maintenance.start('check' if name=='sdk_release_check' else 'update'))
         if name=='sdk_update_recover' and set(command)=={'name'}:
             return dict(sdk_maintenance=self.sdk_maintenance.recover())
-        if name=='firmware_check' and set(command)=={'name','serial'}:
-            self.firmware.start_check(command['serial'])
+        if name=='firmware_check' and set(command)=={'name','serial','viewer_token'}:
+            self.firmware_check_from_viewer(command['serial'],command['viewer_token'])
+        elif name=='firmware_check' and set(command)=={'name','serial'}:
+            self.start_firmware_check(command['serial'])
         elif name=='firmware_upgrade' and set(command)=={'name','preview_token','confirmed'}:
             self.firmware.start_upgrade(command['preview_token'],confirmed=command['confirmed'])
         elif name=='firmware_terminal_input':
@@ -1465,6 +1547,8 @@ class ConsoleHTTPServer(ThreadingHTTPServer):
                     sdk=lambda:self.sdk_maintenance,firmware=lambda:self.firmware,
                     devices=self.controller.calibration_devices,idle=lambda:self.controller.official_cli.idle_check())
                 self.controller.version_observer=self._update_notifications.observe
+                self.controller.version_check_priority=self._update_notifications.give_user_priority
+                self.controller.connection_version_check=self.check_connect_version
             return self._update_notifications
 
     def configure_official_cli(self,startup=True):
@@ -1522,6 +1606,10 @@ class ConsoleHTTPServer(ThreadingHTTPServer):
             all_idle()
         self.controller.calibration.metadata_check=calibration_idle
         self.controller.calibration_handover.idle_check=all_idle
+        def firmware_preview_idle(token):
+            from studio_component import require_idle
+            check_workspaces(require_idle,token)
+        self.firmware_preview_idle=firmware_preview_idle
         if hasattr(self.controller,'teleoperation_handover'):self.controller.teleoperation_handover.idle_check=all_idle
         if hasattr(self.controller,'calibrated_teleoperation'):self.controller.calibrated_teleoperation.idle_check=all_idle
         def profile_read_idle():

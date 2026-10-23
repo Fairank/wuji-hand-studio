@@ -7,7 +7,9 @@ import math
 from pathlib import Path
 import re
 import secrets
+import ssl
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 
@@ -16,6 +18,44 @@ MAX_BYTES=4*1024*1024
 MAX_AGE=15*60
 _VERSION=re.compile(r'20\d{2}\.\d{1,2}\.\d{1,2}')
 _SHA=re.compile(r'[0-9a-f]{64}')
+
+
+class SDKCatalogError(ValueError):
+    """Keep the original failure category and bounded details for diagnostics."""
+    def __init__(self,kind,error):
+        messages={
+            'local':'SDK 版本检查无法访问所需本地文件，请修复软件后重试 / The official SDK check cannot access a required local file; repair the software and retry',
+            'cache':'SDK 版本记录无法保存，请检查软件数据目录后重试 / Cannot save the official SDK version record; check the application data folder and retry',
+            'certificate':'官方 SDK 连接证书未通过验证，请检查系统时间与证书后重试 / Cannot verify the official SDK connection certificate; check the system clock and certificates',
+            'tls':'官方 SDK 安全连接未建立，请重试并查看版本详情 / The official SDK secure connection could not be established; retry and review the version details',
+            'network':'无法读取官方 SDK 版本资料，请检查网络后重试 / Cannot read official SDK release data; check the network and retry',
+            'http':'官方 SDK 版本服务暂不可用，请稍后重试 / The official SDK release service is unavailable; retry later',
+            'metadata':'官方 SDK 版本资料未通过校验，请稍后重试 / The official SDK release data did not pass validation; retry later',
+            'check':'SDK 版本检查未完成，请重试并查看版本详情 / The official SDK version check did not complete; retry and review the version details',
+        }
+        self.kind=kind;self.original=error
+        detail=type(error).__name__+': '+str(error)
+        reason=getattr(error,'reason',None)
+        if isinstance(reason,BaseException):detail+='; caused by '+type(reason).__name__+': '+str(reason)
+        self.detail=detail[:650]
+        super().__init__('[SDK_CATALOG_'+kind.upper()+'] '+messages[kind]+'\n'+self.detail)
+
+    def record(self):return dict(kind=self.kind,exception_type=type(self.original).__name__,detail=self.detail)
+
+
+def catalog_error(error,*,cache=False):
+    if isinstance(error,SDKCatalogError):return error
+    reason=getattr(error,'reason',None)
+    cause=reason if isinstance(reason,BaseException) else error
+    if cache:kind='cache'
+    elif isinstance(cause,(FileNotFoundError,PermissionError,NotADirectoryError,IsADirectoryError)):kind='local'
+    elif isinstance(cause,ssl.SSLCertVerificationError):kind='certificate'
+    elif isinstance(cause,ssl.SSLError):kind='tls'
+    elif isinstance(error,urllib.error.HTTPError):kind='http'
+    elif isinstance(error,urllib.error.URLError) or isinstance(cause,(TimeoutError,ConnectionError)):kind='network'
+    elif isinstance(error,(ValueError,TypeError,KeyError,AttributeError)):kind='metadata'
+    else:kind='check'
+    return SDKCatalogError(kind,error)
 
 
 def stable_version(value):
@@ -105,14 +145,19 @@ def resolve_release(path=None,*,force=False,fetch=None,now=None):
     if cached is not None and not force:return dict(cached,offline=False)
     try:
         value=parse_catalog((fetch or _read_official)(),now=now)
-    except Exception:
-        if cached is not None:return dict(cached,offline=True)
-        raise ValueError('无法核对官方稳定 SDK，请联网后在设置中刷新组件 / Connect to the internet and refresh official SDK components in Settings') from None
-    path.parent.mkdir(parents=True,exist_ok=True)
+    except Exception as error:
+        failure=catalog_error(error)
+        if cached is not None:return dict(cached,offline=True,refresh_error=failure.record())
+        raise failure from error
     pending=path.with_name(path.name+'.'+secrets.token_hex(8)+'.pending')
     try:
+        path.parent.mkdir(parents=True,exist_ok=True)
         pending.write_text(json.dumps(value,sort_keys=True),encoding='utf-8');pending.replace(path)
-    finally:pending.unlink(missing_ok=True)
+    except Exception as error:
+        # A cleanup failure must not replace the original diagnostic cause.
+        try:pending.unlink(missing_ok=True)
+        except OSError:pass
+        raise catalog_error(error,cache=True) from error
     return dict(value,offline=False)
 
 

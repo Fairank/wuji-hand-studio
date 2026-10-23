@@ -32,7 +32,7 @@ class SDKMaintenance:
         self.check_generation=0
         self.lock=threading.RLock();self.thread=None;self.token=None
         self.state=dict(busy=False,phase='unchecked',release=None,proof=None,error=None,
-                        compatible=False,can_update=False,recovery_required=False)
+                        compatible=False,can_update=False,recovery_required=False,last_operation=None)
 
     def check_background(self,*,cancelled=lambda:False):
         """Read software metadata/imports only; never reserve/open a device.
@@ -50,8 +50,9 @@ class SDKMaintenance:
         release=self.resolver(force=True)
         if cancelled():return False
         proof=self.background_probe(config)
+        expected=requirement(release)
         compatible=False
-        try:verify_proof(proof,requirement(release));compatible=True
+        try:verify_proof(proof,expected);compatible=True
         except ValueError:pass
         owned=(config.get('mode') in ('wsl','macvm')
             and config.get('agent_directory')=='/opt/hand-workbench'
@@ -61,7 +62,7 @@ class SDKMaintenance:
                     or digest!=self._config_digest(self.config())):return False
             self.checked_config_digest=digest
             self.state.update(release=release,proof=proof,compatible=compatible,
-                can_update=owned and not compatible,error=None,
+                can_update=owned and not compatible,error=None,last_operation='check',
                 phase='up_to_date' if compatible else 'available' if owned else 'external')
         return True
 
@@ -73,6 +74,13 @@ class SDKMaintenance:
             if not current:
                 state.update(compatible=False,can_update=False,proof=None,context_current=False)
                 if not state['busy'] and not state['recovery_required']:state['phase']='changed'
+        if state.get('release'):
+            from sdk_release import validate_release
+            try:validate_release(state['release'])
+            except (ValueError,TypeError,KeyError):
+                state.update(compatible=False,can_update=False,catalog_current=False)
+                if not state['busy'] and not state['recovery_required'] and state['phase'] in ('up_to_date','available','external'):
+                    state['phase']='expired'
         return state
 
     @staticmethod
@@ -84,7 +92,8 @@ class SDKMaintenance:
             raise ValueError('Invalid SDK maintenance owner')
         with self.lock:
             self.check_generation+=1
-            self.token=marker['token'];self.state.update(phase='unknown',recovery_required=True,
+            self.token=marker['token'];self.state.update(busy=False,phase='unknown',recovery_required=True,
+                compatible=False,can_update=False,last_operation='update',
                 error='组件更新退出状态未确认，请核对组件 / Component update exit is unconfirmed; verify components')
         path=self.folder/'sdk-maintenance.json'
         try:
@@ -133,16 +142,54 @@ class SDKMaintenance:
             if operation=='update' and self.checked_config_digest!=self._config_digest(self.config()):
                 raise ValueError('控制端已改变，请重新检查 / Controller changed; check again')
             self.check_generation+=1
-            self.state.update(busy=True,phase='checking' if operation=='check' else 'updating',error=None)
+            generation=self.check_generation
+            self.state.update(busy=True,phase='checking' if operation=='check' else 'updating',error=None,last_operation=operation)
         try:
-            self.token=self.acquire('sdk_check' if operation=='check' else 'sdk_update')
-            self.thread=threading.Thread(target=self._work,args=(operation,),name='Official SDK maintenance',daemon=True)
+            # A check imports the selected interpreter and reads release metadata.
+            # It neither owns nor opens a device, and must not ask users to close
+            # a Viewer, calibration or teleoperation just to read SDK versions.
+            if operation=='update':self.token=self.acquire('sdk_update')
+            target=self._check_work if operation=='check' else self._work
+            arguments=(generation,) if operation=='check' else (operation,)
+            self.thread=threading.Thread(target=target,args=arguments,name='Official SDK maintenance',daemon=True)
             self.thread.start()
-        except BaseException:
-            if self.token:self.release(self.token);self.token=None
-            with self.lock:self.state.update(busy=False,phase='error')
+        except BaseException as error:
+            if operation=='update' and self.token:self.release(self.token);self.token=None
+            with self.lock:self.state.update(busy=False,phase='error',compatible=False,can_update=False,error=str(error)[:900])
             raise
         return self.snapshot()
+
+    def _check_work(self, generation):
+        try:
+            from sdk_release import requirement
+            from sdk_runtime import verify_proof
+            config=self.config();digest=self._config_digest(config)
+            release=self.resolver(force=True)
+            proof=self.probe(config)
+            expected=requirement(release)
+            compatible=False
+            try:verify_proof(proof,expected);compatible=True
+            except ValueError:pass
+            owned=(config.get('mode') in ('wsl','macvm')
+                and config.get('agent_directory')=='/opt/hand-workbench'
+                and config.get('python')=='/opt/hand-workbench-venv/bin/python')
+            with self.lock:
+                if generation!=self.check_generation or self.state['recovery_required']:return
+                if digest!=self._config_digest(self.config()):
+                    self.state.update(phase='changed',compatible=False,can_update=False,error=None);return
+                self.checked_config_digest=digest
+                self.state.update(release=release,proof=proof,compatible=compatible,
+                    can_update=owned and not compatible,error=None,
+                    phase='up_to_date' if compatible else 'available' if owned else 'external')
+        except Exception as error:
+            with self.lock:
+                if generation==self.check_generation and not self.state['recovery_required']:
+                    # Keep last-known facts for diagnosis without treating a
+                    # failed refresh as current proof or update permission.
+                    self.state.update(phase='error',error=str(error)[:900],compatible=False,can_update=False)
+        finally:
+            with self.lock:
+                if generation==self.check_generation and not self.state['recovery_required']:self.state['busy']=False
 
     def _work(self, operation):
         uncertain=False;updater_started=False

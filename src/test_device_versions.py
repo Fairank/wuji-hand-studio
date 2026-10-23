@@ -1,4 +1,5 @@
 import copy
+import json
 import os
 import queue
 import sys
@@ -8,7 +9,7 @@ import unittest
 from types import SimpleNamespace as N
 from unittest.mock import Mock, patch
 
-from device_versions import parse_official_check_table, read_handle_version
+from device_versions import parse_official_check_json, parse_official_check_report, parse_official_check_table, read_handle_version
 
 
 def table(rows):
@@ -113,6 +114,57 @@ class DocumentedCheckTableTests(unittest.TestCase):
     def test_output_is_bounded_and_not_coerced(self):
         for value in (None,[],True,'x'*262145,('\n'*2049)+table(ROWS),('x'*4097)+'\n'+table(ROWS)):
             with self.subTest(value=type(value)):self.assertIsNone(parse_official_check_table(value,ROWS[0][0]))
+
+
+class CapturedCheckJsonTests(unittest.TestCase):
+    def report(self,**changes):
+        row=dict(sn='EXACT',device_type='wuji_glove',current_version='1.0.0',
+                 latest_version='1.0.3',status='update available',error=None)
+        row.update(changes)
+        return json.dumps(dict(devices=[row]))
+
+    def test_real_cli_check_envelope_produces_exact_version_notice_only(self):
+        expected=dict(serial='EXACT',device_type='wuji_glove',current='1.0.0',latest='1.0.3',update_available=True)
+        self.assertEqual(parse_official_check_json(self.report(),'EXACT','wuji_glove'),expected)
+        self.assertEqual(parse_official_check_report(self.report(),'EXACT','wuji_glove'),expected)
+        self.assertNotIn('download_url',expected)
+
+    def test_only_exact_serial_type_and_unambiguous_device_scope_are_accepted(self):
+        base=json.loads(self.report());row=base['devices'][0]
+        for value in (dict(devices=[row,row]),dict(devices=[]),dict(devices=[row,dict(row,sn='OTHER')]),
+                      dict(devices=dict(row)),dict(devices=[row],status='ok')):
+            with self.subTest(value=value):self.assertIsNone(parse_official_check_json(json.dumps(value),'EXACT'))
+        self.assertIsNone(parse_official_check_json(self.report(),'OTHER'))
+        self.assertIsNone(parse_official_check_json(self.report(),'EXACT','wuji_hand_2'))
+        self.assertIsNone(parse_official_check_json(self.report(),'EXACT',[]))
+
+    def test_failed_malformed_and_inconsistent_rows_never_become_update_advice(self):
+        for changes in (dict(error='device unavailable'),dict(error=False),dict(current_version=True),
+                        dict(latest_version=None),dict(latest_version='1.0.0'),dict(latest_version='0.9.0'),
+                        dict(status='ok'),dict(status='up to date'),dict(device_type='other'),
+                        dict(latest_version='1.0.3-beta'),dict(current_version='01.0.0')):
+            with self.subTest(changes=changes):self.assertIsNone(parse_official_check_json(self.report(**changes),'EXACT'))
+
+    def test_current_or_ahead_device_never_suggests_downgrade(self):
+        for version in ('1.0.3','1.1.0'):
+            result=parse_official_check_json(self.report(current_version=version,status='up to date'),'EXACT')
+            self.assertIs(result['update_available'],False)
+
+    def test_duplicate_keys_catalog_and_flash_reports_are_not_check_authority(self):
+        row=json.loads(self.report())['devices'][0]
+        for text in ('{"devices":[],"devices":['+json.dumps(row)+']}',
+                     self.report().replace('"current_version": "1.0.0"','"current_version": "1.0.0", "current_version": "0.1.0"'),
+                     json.dumps(dict(devices=[dict(row,firmwares=[])])),
+                     json.dumps(dict(devices=[dict(sn='EXACT',status='ok',before='1.0.0',after='1.0.3')]))):
+            with self.subTest(text=text):self.assertIsNone(parse_official_check_json(text,'EXACT'))
+
+    def test_unknown_or_unbounded_formats_remain_unknown(self):
+        for text in (None,[],True,'x'*262145,'['*1100+']'*1100,'{"devices":[NaN]}'):
+            with self.subTest(value=type(text)):self.assertIsNone(parse_official_check_json(text,'EXACT'))
+
+    def test_public_table_fallback_remains_supported_without_json_guessing(self):
+        result=parse_official_check_report(table(ROWS),ROWS[0][0],'wuji_glove')
+        self.assertTrue(result['update_available'])
 
 
 class WorkerVersionTests(unittest.TestCase):

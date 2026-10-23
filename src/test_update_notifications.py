@@ -1,5 +1,6 @@
 """Automatic reminders use synthetic software authorities and exact fake SNs."""
 import copy
+import json
 import os
 from types import SimpleNamespace
 import unittest
@@ -152,6 +153,103 @@ class NotificationTests(unittest.TestCase):
         self.app.snapshot.side_effect=lambda:(self.monitor.close() or dict(busy=False))
         self.monitor.tick();self.app.start.assert_not_called();self.cli.start.assert_not_called()
         self.sdk.check_background.assert_not_called()
+
+    def viewer(self,sn='SYNTHETIC-GLOVE'):
+        return dict(official_viz=dict(active=True,phase='running',session_id='owned-viewer',
+            reported_device=dict(sn=sn,handedness='right'),
+            device=dict(sn=sn,device_type='wuji_glove',transport='Udp',address='192.0.2.1:50001',handedness='right')))
+
+    def real_check(self,sn='SYNTHETIC-GLOVE',current='1.0.0',latest='1.0.3'):
+        report=dict(devices=[dict(sn=sn,device_type='wuji_glove',current_version=current,
+                    latest_version=latest,status='update available',error=None)])
+        return dict(device=dict(sn=sn,kind='glove',generation='glove1'),check_report=dict(returncode=0,stdout=json.dumps(report),stderr=''),
+                    checked_at=self.now,phase='failed',busy=False,locked=False)
+
+    def test_real_viewer_shape_remembers_exact_family_without_guessing_serial(self):
+        self.monitor.observe([self.viewer()])
+        self.assertEqual(self.monitor.known['SYNTHETIC-GLOVE']['kind'],'glove')
+        for changed in (dict(sn='ANOTHER',device_type='wuji_glove'),dict(sn='SYNTHETIC-GLOVE',device_type='unknown'),
+                        dict(sn='SYNTHETIC-GLOVE',device_type='wuji_hand_2')):
+            self.monitor.known.clear();state=self.viewer();state['official_viz']['device']=changed
+            self.monitor.observe([state])
+            if changed.get('device_type')=='wuji_hand_2':self.assertEqual(self.monitor.known['SYNTHETIC-GLOVE']['kind'],'hand')
+            else:self.assertEqual(self.monitor.known,{})
+
+    def test_successful_manual_json_check_is_a_notice_even_while_viewer_is_active(self):
+        self.states=[self.viewer()];self.idle.side_effect=ValueError('Viewer owns glove')
+        self.firmware.snapshot.return_value=self.real_check()
+        self.monitor.tick();items=self.monitor.snapshot()['items']
+        self.assertEqual(len(items),1);self.assertEqual(items[0]['kind'],'firmware')
+        self.assertEqual(items[0]['current_version'],'1.0.0');self.assertEqual(items[0]['version'],'1.0.3')
+        self.firmware.start_check.assert_not_called()
+
+    def test_first_connected_viewer_exposes_completed_preflight_on_next_get_without_tick(self):
+        self.monitor.observe([self.viewer()]);self.firmware.snapshot.return_value=self.real_check()
+        items=self.monitor.snapshot()['items']
+        self.assertEqual([(item['current_version'],item['version']) for item in items],[('1.0.0','1.0.3')])
+        self.firmware.start_check.assert_not_called();self.app.start.assert_not_called();self.cli.start.assert_not_called()
+        self.sdk.check_background.assert_not_called();self.idle.assert_not_called()
+
+    def test_wrong_or_failed_check_cannot_create_notice_from_active_viewer(self):
+        self.states=[self.viewer()];self.idle.side_effect=ValueError('Viewer owns glove')
+        for state in (self.real_check('ANOTHER'),dict(self.real_check(),check_report=dict(returncode=1,stdout=''))):
+            self.monitor.reports.clear();self.firmware.snapshot.return_value=state
+            self.monitor.tick();self.assertEqual(self.monitor.snapshot()['items'],[])
+        self.firmware.start_check.assert_not_called()
+
+    def test_user_action_cancels_only_background_read_and_defers_new_checks(self):
+        self.firmware.cancel_notification_check.return_value=True
+        self.monitor.observe([self.connected()]);self.monitor.idle_since=self.now-31;self.rows=[self.fresh()]
+        self.assertTrue(self.monitor.give_user_priority(timeout=2))
+        self.firmware.cancel_notification_check.assert_called_once_with(timeout=2)
+        self.monitor.tick();self.firmware.start_check.assert_not_called()
+        self.now+=61;self.monitor.tick()
+        self.firmware.start_check.assert_called_once_with('SYNTHETIC-GLOVE',notification_only=True)
+
+    def test_user_action_is_not_authorized_when_read_exit_is_unconfirmed(self):
+        self.firmware.cancel_notification_check.return_value=False
+        self.assertFalse(self.monitor.give_user_priority())
+        self.assertGreater(self.monitor.user_priority_until,self.now)
+
+    def test_late_scheduler_dispatch_cannot_overtake_a_user_action(self):
+        self.monitor.observe([self.connected()]);self.monitor.idle_since=self.now-31;self.rows=[self.fresh()]
+        self.firmware.cancel_notification_check.return_value=True
+        self.monitor.devices=lambda:(self.monitor.give_user_priority() or copy.deepcopy(self.rows))
+        # Return rows after the user priority callback occurs inside inventory
+        # reading, after the first deadline check but before final dispatch.
+        def rows():self.monitor.give_user_priority();return copy.deepcopy(self.rows)
+        self.monitor.devices=rows;self.monitor.tick();self.firmware.start_check.assert_not_called()
+
+    def test_new_official_check_overrides_old_handle_metadata_after_upgrade(self):
+        self.monitor.observe([self.connected()]);self.firmware.snapshot.return_value=self.real_check()
+        self.assertEqual(len(self.monitor.snapshot()['items']),1)
+        self.now+=10
+        state=self.real_check(current='1.0.3',latest='1.0.3')
+        report=json.loads(state['check_report']['stdout']);report['devices'][0]['status']='up to date'
+        state['check_report']['stdout']=json.dumps(report);self.firmware.snapshot.return_value=state
+        self.assertEqual(self.monitor.snapshot()['items'],[])
+        self.assertEqual(self.monitor.snapshot()['devices'][0]['firmware_version'],'1.0.3')
+        for _ in range(3):
+            self.now+=1;self.monitor.observe([self.connected()])
+            self.assertEqual(self.monitor.snapshot()['items'],[])
+            self.assertEqual(self.monitor.snapshot()['devices'][0]['firmware_version'],'1.0.3')
+        self.assertFalse(any(key.startswith('_') for key in self.monitor.snapshot()['devices'][0]))
+
+    def test_new_check_can_update_current_and_available_version_over_older_metadata(self):
+        self.monitor.observe([self.connected()]);self.firmware.snapshot.return_value=self.real_check()
+        self.monitor.snapshot();self.now+=10
+        self.firmware.snapshot.return_value=self.real_check(current='1.0.3',latest='1.0.4')
+        items=self.monitor.snapshot()['items']
+        self.assertEqual([(item['current_version'],item['version']) for item in items],[('1.0.3','1.0.4')])
+
+    def test_new_connection_metadata_invalidates_an_older_contradictory_check(self):
+        state=self.connected();state['glove']['session_id']=1
+        self.monitor.observe([state]);self.firmware.snapshot.return_value=self.real_check()
+        self.monitor.snapshot();self.now+=10
+        state['glove']['session_id']=2;state['glove']['device_version']['firmware_version']='1.0.3'
+        self.monitor.observe([state])
+        self.assertEqual(self.monitor.snapshot()['items'],[])
+        self.assertEqual(self.monitor.snapshot()['devices'][0]['firmware_version'],'1.0.3')
 
 
 if __name__=='__main__':unittest.main()

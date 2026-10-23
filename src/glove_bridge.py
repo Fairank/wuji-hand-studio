@@ -261,6 +261,17 @@ class GloveBridge:
                 elif not self.busy:self.state['connection']='disconnected'
                 return
             if not self.busy:raise ValueError('先扫描控制端 / Scan controller first')
+            if name=='glove_hand_scan':
+                state=self.snapshot();hardware=state.get('hardware') or {};proof=self._sdk_proof or {}
+                if (self.stopping or state.get('connection')!='receiving'
+                        or state.get('can_prepare') is not True or not _actual_sdk_solver(state)
+                        or proof.get('available') is not True or proof.get('api_compatible') is not True
+                        or not state.get('stream',{}).get('fresh')
+                        or self.lease or self._follow_unconfirmed or state.get('hand_unpairing')
+                        or (state.get('feedback') or {}).get('device_id')
+                        or ('active' in hardware and hardware['active'] is not False)
+                        or hardware.get('stop_confirmed') is False):
+                    raise ValueError('仅可在未配对的新鲜 SDK 手套预览中查找灵巧手 / Search hands from a fresh unpaired SDK glove preview')
             if name=='glove_prepare':
                 state=self.snapshot()
                 if state.get('can_prepare') is not True:

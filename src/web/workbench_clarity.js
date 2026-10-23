@@ -20,6 +20,8 @@
   // Keep errors/blockers and confirmation on the main screen. Only reference copy is moved.
   const real=$('real-motion-panel');
   for(const node of [...real.querySelectorAll('.motion-notes')])details.body.append(node);
+  // Keep the current blocker by Start; retain secondary status in Run details.
+  details.body.append($('trial-status'));
   details.body.append($('command-timing'));
   for(const node of [...$('page-library').querySelectorAll('.library-reference')])details.body.append(node);
   const confirm=$('trial-clear').closest('label');
@@ -83,6 +85,8 @@
   // Mode controls select the source only through the existing display control, never a motor command.
   const observer=new MutationObserver(mode);observer.observe($('mode-preview'),{attributes:true,attributeFilter:['aria-pressed']});
   window.addEventListener('console-state',e=>{
+   const hardware=e.detail?.hardware||{};
+   real.dataset.hasMotionRecord=String(hardware.active===true||hardware.active===null||Number(hardware.planned_duration_s)>0||(e.detail?.unconfirmed_devices||[]).length>0);
    const p=e.detail?.program;running.hidden=!p?.active;
    controls.hidden=!!p?.active;
    playlistStop.disabled=$('wb-program-stop').disabled;

@@ -45,6 +45,7 @@ html #page-connection #ov-connect-device{flex:0 0 auto;width:auto;min-height:36p
 .ov-root[data-view-mode=offline] .ov-logs{display:none}
 .ov-root[data-view-mode=device][data-phase=idle][data-task=view] #ov-shared-stage{min-height:260px;height:clamp(260px,36dvh,340px)}
 .ov-root[data-guided=true] #ov-version{display:none}
+.ov-root[data-live-owned=true] :is(#ov-start,#ov-scan,.ov-source-actions,.ov-session){display:none!important}
 .ov-root[data-guided=true][data-task=calibration]>.ov-source-info{display:none}
 .ov-root[data-task=calibration]:has(.oc-run[data-human-tty=false]) #ov-focus{display:none!important}
 .ov-root[data-task=calibration]:has(#hub-calibration[data-running=true]) #ov-calibrate,.ov-root[data-task=calibration]:has(.oc-run[data-cleanup-required=true]) #ov-calibrate{display:none!important}

@@ -367,6 +367,23 @@ class NativeVisualizationTests(unittest.TestCase):
             self.assertFalse(value.snapshot()['busy'])
             self.assertTrue(value.snapshot()['error'])
 
+    def test_confirmed_stop_retry_clears_old_cleanup_error_only_after_release(self):
+        with self.fixture() as (value, job, _, _, recover, _, _):
+            token = self.marker(value)
+            value.native_job = job
+            job.close.return_value = False
+            with self.assertRaisesRegex(ValueError, 'cleanup'):
+                value.stop()
+            self.assertEqual(coordination.reservation(value.folder)['token'], token)
+            self.assertTrue(value.snapshot()['error'])
+            job.close.return_value = True
+            value.stop()
+            self.assertEqual(coordination.reservation(value.folder), {})
+            self.assertEqual(value.snapshot()['phase'], 'idle')
+            self.assertFalse(value.snapshot()['active'])
+            self.assertIsNone(value.snapshot()['error'])
+            recover.assert_called_once()
+
 
 if __name__ == '__main__':
     unittest.main()

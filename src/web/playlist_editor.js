@@ -3,7 +3,7 @@
  'use strict';
  const $=id=>document.getElementById(id),L=window.WujiLocale,t=(zh,en)=>L.lang==='en'?en:zh;
  const speeds=[.1,.25,.5,.75,1,1.25,1.5,1.75,2,2.5,3,4];
- let entries=[],catalog=[],state=null,lease=null,pending=false,starting=false,leaseSeen=false,error='',loadError=false,sheet=null,mode='preview';
+ let entries=[],catalog=[],state=null,lease=null,runId=null,runEpoch=0,pending=false,starting=false,error='',loadError=false,sheet=null,mode='preview';
  const program=document.createElement('section');program.id='wb-program';program.className='pe-editor';
  program.innerHTML=`<div class="pe-queue">
   <div class="pe-section-heading"><h3 id="pe-queue-title"></h3><span id="wb-program-count"></span></div>
@@ -115,15 +115,15 @@
   $('pe-catalog-error').hidden=$('pe-retry').hidden=!loadError;
  }
  $('pe-retry').onclick=refreshCatalog;
- async function request(name,payload={}){
+ async function request(name,payload={},signal){
   if(!state?.csrf)throw Error(t('本机服务尚未就绪，请稍后重试。','Local service is not ready. Try again shortly.'));
-  const r=await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json','X-Console-Token':state.csrf},body:JSON.stringify({name,...payload})});
+  const r=await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json','X-Console-Token':state.csrf},body:JSON.stringify({name,...payload}),signal});
   const v=await r.json();if(!r.ok||!v.ok)throw Error(v.error||'Request failed');return v;
  }
  async function command(name,payload={}){
-  pending=true;error='';update();
-  try{const v=await request(name,payload);if(v.program_lease){lease=v.program_lease;leaseSeen=false;}if(name==='program_stop')lease=null;
-   if(name==='program_start'){starting=!state?.program?.active;$('mode-'+payload.mode)?.click();sheet?.close();}
+  pending=true;error='';if(name==='program_start')runEpoch++;update();
+  try{const v=await request(name,payload);if(v.program_lease){lease=v.program_lease;runId=typeof v.program_run_id==='string'?v.program_run_id:null;}if(name==='program_stop'){lease=null;runId=null;runEpoch++;starting=false;}
+   if(name==='program_start'){starting=state?.program?.run_id!==runId||state?.program?.active!==true;$('mode-'+payload.mode)?.click();sheet?.close();}
   }catch(e){error=e.message;}finally{pending=false;update();}
  }
  function start(target){
@@ -134,9 +134,30 @@
  $('wb-program-preview').onclick=()=>start('preview');$('wb-program-hardware').onclick=()=>start('hardware');
  $('wb-program-pause').onclick=()=>command(state?.program?.paused?'program_resume':'program_pause');
  $('wb-program-stop').onclick=()=>command('program_stop');
- let beating=false;setInterval(async()=>{if(!lease||beating)return;beating=true;try{await request('program_keepalive',{lease});}catch(e){lease=null;starting=false;error=e.message;update();}finally{beating=false;}},250);
+ // A completed run can clear its lease before the next state poll reaches us.
+ // Identify both the issued lease and its public run before accepting a late
+ // heartbeat result. A fresh, exact-run end state is the only completion proof.
+ const ended=(value,id)=>!!id&&value?.program?.run_id===id&&value.program.active===false;
+ function releaseRun(){lease=null;runId=null;runEpoch++;starting=false;}
+ let beating=null;setInterval(async()=>{
+  if(!lease||beating?.epoch===runEpoch)return;
+  const beat={lease,id:runId,epoch:runEpoch};beating=beat;
+  const current=()=>lease===beat.lease&&runId===beat.id&&runEpoch===beat.epoch;
+  try{await request('program_keepalive',{lease:beat.lease},AbortSignal.timeout(2500));}
+  catch(e){
+   if(!current())return;
+   try{
+    const r=await fetch('/api/state',{cache:'no-store',signal:AbortSignal.timeout(2500)});
+    const value=r.ok?await r.json():null;
+    if(!current())return;
+    if(ended(value,beat.id)){state=value;releaseRun();update();return;}
+   }catch{}
+   if(!current())return;
+   lease=null;starting=false;error=e.message;update();
+  }finally{if(beating===beat)beating=null;}
+ },250);
  window.addEventListener('pagehide',()=>{if(lease)request('program_stop').catch(()=>{});});
- window.addEventListener('console-state',e=>{state=e.detail;if(state?.program?.active){starting=false;leaseSeen=true;}else if(leaseSeen&&!pending){lease=null;starting=false;}update();});
+ window.addEventListener('console-state',e=>{state=e.detail;if(runId&&state?.program?.run_id===runId){if(state.program.active===true)starting=false;else if(ended(state,runId)&&!pending)releaseRun();}update();});
  function labels(){
   const text={
    'pe-queue-title':['动作列表','Routines'],'pe-add-label':['添加动作','Add a routine'],'wb-dance-add-button':['添加','Add'],'wb-dance-all':['补齐全部动作','Add missing routines'],'pe-autosave':['编辑自动保存','Edits saved automatically'],

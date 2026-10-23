@@ -6,30 +6,45 @@
  const card=document.createElement('section');card.className='sdk-maintenance';card.id='sdk-maintenance';
  card.innerHTML='<div class="sdk-maintenance-heading"><h4></h4><span role="status" aria-live="polite"></span></div><p class="sdk-maintenance-note"></p><div class="sdk-maintenance-actions"><button type="button" data-action="check"></button><button type="button" data-action="update" class="primary" hidden></button></div><p class="sdk-maintenance-error" role="alert" hidden></p><details><summary></summary><pre></pre></details>';
  host.querySelector('#ot-system')?.before(card);
- let state=null,fresh=false,pending=false,loading=null,failure='',epoch=0;
+ let state=null,fresh=false,pending=false,loading=null,failure='',failureKind='',epoch=0;
  const title=card.querySelector('h4'),status=card.querySelector('[role=status]'),note=card.querySelector('.sdk-maintenance-note'),error=card.querySelector('[role=alert]'),check=card.querySelector('[data-action=check]'),update=card.querySelector('[data-action=update]'),details=card.querySelector('details');
  function render(){
   title.textContent=t('遥操作组件','Teleoperation components');title.tabIndex=-1;
   const phase=state?.phase||'unchecked',busy=pending||state?.busy===true;
-  const labels={unchecked:['启动遥操作时自动核对','Verified when starting teleoperation'],changed:['控制端已改变，请重新检查','Controller changed; check again'],checking:['正在核对…','Checking…'],verifying:['正在核验…','Verifying…'],updating:['正在更新…','Updating…'],up_to_date:['已使用官方稳定版','Official stable version verified'],available:['有可用更新','Update available'],external:['控制端需要更新','Controller update required'],unknown:['更新状态待核对','Update status unconfirmed'],error:['检查未完成','Check incomplete']};
-  status.textContent=t(...(labels[phase]||labels.unchecked));
-  note.textContent=phase==='external'?t('请在对应控制端更新 SDK，或使用内置控制组件。','Update the SDK on the selected controller, or use the built-in components.'):t('使用官方公开稳定版，在空闲时更新。','Uses the official public stable release. Updates run while devices are idle.');
-  check.textContent=!fresh?t('重新读取','Reload status'):busy?t('处理中…','Working…'):state?.recovery_required?t('核对组件','Verify components'):t('检查更新','Check updates');check.disabled=busy;
-  update.textContent=t('更新组件','Update components');update.hidden=state?.can_update!==true;update.disabled=!fresh||busy||state?.recovery_required===true;
-  const issue=failure||state?.error||'';error.hidden=!issue;error.textContent=issue?t('操作未完成，请查看版本详情。','The operation did not complete. See version details.'):'';
+  const labels={unchecked:['自动检查更新','Updates are checked automatically'],changed:['控制端已改变','Controller changed'],expired:['版本记录待刷新','Version record needs refreshing'],checking:['正在检查更新…','Checking for updates…'],verifying:['正在核对上次更新…','Verifying the previous update…'],updating:['正在更新组件…','Updating components…'],up_to_date:['已是最新稳定版','Latest stable version'],available:['有可用更新','Update available'],external:['请在外部控制端更新','Update on the external controller'],unknown:['更新状态待核对','Update status unconfirmed'],error:['','']};
+  const issue=failure||state?.error||'';
+  status.textContent=t(...(labels[phase]||labels.unchecked))+(phase==='up_to_date'&&state?.proof?.version?' · '+state.proof.version:'');status.hidden=!!issue&&!busy;
+  note.hidden=phase!=='external'||!!issue;note.textContent=t('在所选控制端更新官方 SDK，或切换到内置控制组件。','Update the official SDK on the selected controller, or select the built-in components.');
+  check.textContent=!fresh||failure?t('重新读取','Reload status'):state?.recovery_required?t('核对上次更新','Verify previous update'):t('检查更新','Check updates');check.disabled=busy;check.parentElement.hidden=busy;
+  update.textContent=t('更新组件','Update components');update.hidden=state?.can_update!==true||!fresh||busy||!!failure||state?.recovery_required===true;update.disabled=false;
+  error.hidden=!issue||busy;error.dataset.kind=state?.recovery_required?'danger':'notice';error.textContent=issue?explain(issue):'';
   details.querySelector('summary').textContent=t('版本详情','Version details');
-  const lines=[];if(state?.proof?.version)lines.push(t('控制端 SDK：','Controller SDK: ')+state.proof.version);if(state?.release?.version)lines.push(t('官方稳定版：','Official stable: ')+state.release.version);if(state?.release?.offline)lines.push(t('使用有效期内的官方版本记录','Using a recent official version record'));if(issue)lines.push(issue);details.querySelector('pre').textContent=lines.join('\n');details.hidden=!lines.length;
+  const lines=[];if(state?.proof?.version)lines.push(t('控制端 SDK：','Controller SDK: ')+state.proof.version);if(state?.release?.version)lines.push(t('官方稳定版：','Official stable: ')+state.release.version);if(state?.release?.offline)lines.push(t('使用有效期内的官方版本记录','Using a recent official version record'));if(state?.release?.refresh_error?.detail)lines.push(t('本次官方资料刷新未完成：','The current catalog refresh did not complete: ')+state.release.refresh_error.detail);if(issue&&state?.proof)lines.push(t('以上为上次读取结果，本次检查尚未完成。','The versions above are from the last read; this check has not completed.'));if(issue)lines.push(issue);details.querySelector('pre').textContent=lines.join('\n');details.hidden=!lines.length;
  }
- async function load(){
+ function explain(issue){
+  if(state?.recovery_required)return t('上次更新的退出状态未确认，请先核对组件。','The previous update has not been verified. Verify components before continuing.');
+  if(/^\[SDK_CATALOG_(LOCAL|CACHE)\]/.test(issue))return t('版本检查遇到本地文件问题，请修复软件后重试。','The version check encountered a local file problem. Repair the software and retry.');
+  if(/^\[SDK_CATALOG_CERTIFICATE\]/.test(issue))return t('无法验证更新连接，请检查系统时间与证书后重试。','The update connection could not be verified. Check the system clock and certificates, then retry.');
+  if(/^\[SDK_CATALOG_TLS\]/.test(issue))return t('无法建立安全更新连接，请重试；具体原因已保留在版本详情。','A secure update connection could not be established. Retry; the cause is saved in Version details.');
+  if(/^\[SDK_CATALOG_METADATA\]/.test(issue))return t('官方版本资料未通过校验，请稍后重试。','The official version data did not pass validation. Retry later.');
+  if(/^\[SDK_CATALOG_HTTP\]/.test(issue))return t('官方版本服务暂不可用，请稍后重试。','The official version service is unavailable. Retry later.');
+  if(/^\[SDK_CATALOG_CHECK\]/.test(issue))return t('版本检查未完成，请重试；具体原因已保留在版本详情。','The version check did not complete. Retry; the cause is saved in Version details.');
+  if(/internet|offline|network|timed out|联网|网络/i.test(issue))return t('暂时无法检查更新，请联网后重试。','Cannot check for updates right now. Connect to the internet and try again.');
+  if(/finish|idle|busy|workspace|session|先.*结束|正在运行|有设备任务|任务.*运行/i.test(issue))return t('设备任务正在运行，结束任务后再更新。','A device task is running. Finish the task before updating.');
+  if(/stopped|not.ready|not.installed|probe failed|wsl|未安装|依赖|无法加载|组件.*修复/i.test(issue))return t('控制组件暂时无法读取，请启动或修复内置组件后重试。','The controller components cannot be read. Start or repair the built-in components, then try again.');
+  if(/status is unavailable|Incomplete component status|无法读取组件状态|Failed to fetch/i.test(issue))return t('暂时无法读取组件状态，请重新读取。','Component status is unavailable. Reload the status.');
+  return t('本次检查未完成，请重试；详细原因已保留在版本详情。','This check did not complete. Try again; the cause is saved in Version details.');
+ }
+ async function load({explicit=false}={}){
   if(loading)return loading;
   const version=epoch;
-  loading=(async()=>{try{const r=await fetch('/api/sdk-maintenance',{cache:'no-store',signal:AbortSignal.timeout(6000)});if(!r.ok)throw Error(t('无法读取组件状态','Component status is unavailable'));const s=await r.json();if(!s||typeof s.busy!=='boolean'||typeof s.phase!=='string')throw Error('Incomplete component status');if(version!==epoch)return;state=s;fresh=true;failure='';}catch(e){if(version===epoch){fresh=false;failure=e.message;}}finally{loading=null;render();}})();return loading;
+  loading=(async()=>{try{const r=await fetch('/api/sdk-maintenance',{cache:'no-store',signal:AbortSignal.timeout(6000)});if(!r.ok)throw Error(t('无法读取组件状态','Component status is unavailable'));const s=await r.json();if(!s||typeof s.busy!=='boolean'||typeof s.phase!=='string')throw Error('Incomplete component status');if(version!==epoch)return;state=s;fresh=true;if(explicit||failureKind!=='action'){failure='';failureKind='';}}catch(e){if(version===epoch){fresh=false;failure=e.message;failureKind='load';}}finally{loading=null;render();}})();return loading;
  }
  async function act(name){
-  if(pending)return;pending=true;epoch++;failure='';render();
-  try{const r=await fetch('/api/state',{cache:'no-store',signal:AbortSignal.timeout(5000)});if(!r.ok)throw Error('Workbench state is unavailable');const s=await r.json();if(!s.csrf)throw Error('Reload workbench state');const response=await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json','X-Console-Token':s.csrf},body:JSON.stringify({name}),signal:AbortSignal.timeout(12000)}),body=await response.json();if(!response.ok||body.ok===false)throw Error(body.error||'Component maintenance did not complete');state=body.sdk_maintenance;fresh=true;}catch(e){fresh=false;failure=e.message;}finally{pending=false;render();if(fresh)load();}
+  if(pending)return;pending=true;epoch++;failure='';failureKind='';render();
+  try{const r=await fetch('/api/state',{cache:'no-store',signal:AbortSignal.timeout(5000)});if(!r.ok)throw Error('Workbench state is unavailable');const s=await r.json();if(!s.csrf)throw Error('Reload workbench state');const response=await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json','X-Console-Token':s.csrf},body:JSON.stringify({name}),signal:AbortSignal.timeout(12000)}),body=await response.json();if(!response.ok||body.ok===false)throw Error(body.error||'Component maintenance did not complete');if(!body.sdk_maintenance||typeof body.sdk_maintenance.busy!=='boolean'||typeof body.sdk_maintenance.phase!=='string')throw Error('Incomplete component status');state=body.sdk_maintenance;fresh=true;}catch(e){fresh=false;failure=e.message;failureKind='action';}finally{pending=false;render();if(fresh)load();}
  }
- check.onclick=()=>fresh?act(state?.recovery_required?'sdk_update_recover':'sdk_release_check'):load();update.onclick=()=>act('sdk_update_prepare');
+ check.onclick=()=>fresh&&!failure?act(state?.recovery_required?'sdk_update_recover':'sdk_release_check'):load({explicit:true});update.onclick=()=>act('sdk_update_prepare');
  window.WujiSDKMaintenance=Object.freeze({open(){location.hash='#settings';window.WujiWorkspace?.showPage();document.getElementById('settings-tab-devices')?.click();title.focus({preventScroll:true});card.scrollIntoView({block:'start'});load();},refresh:load});
  window.addEventListener('wuji-language',render);
  setInterval(()=>{if(state?.busy||card.getClientRects().length&&!document.hidden)load();},2000);

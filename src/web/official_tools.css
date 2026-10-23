@@ -1,4 +1,13 @@
 .official-tools{min-width:0;scroll-margin-top:18px}
+.official-tools .ot-environment{margin-top:20px;padding-top:16px;border-top:1px solid var(--wb-line)}
+.official-tools .ot-environment>summary{display:flex;align-items:center;justify-content:space-between;gap:12px;cursor:pointer;font-size:13px;line-height:1.6;color:var(--wb-ink);list-style:none}
+.official-tools .ot-environment>summary::-webkit-details-marker{display:none}
+.official-tools .ot-environment>summary>span:first-child{display:flex;align-items:center;gap:8px}
+.official-tools .ot-environment>summary>span:first-child:before{content:'';width:5px;height:5px;border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;transform:rotate(-45deg);transition:transform 180ms ease}
+.official-tools .ot-environment[open]>summary>span:first-child:before{transform:rotate(45deg)}
+.official-tools .ot-environment[open]>summary{margin-bottom:18px}
+.official-tools .ot-environment .ot-badge{font-size:11px;padding:3px 7px;border:0;background:transparent}
+.official-tools #ot-status:empty{display:none}
 .official-tools .ot-component[hidden]{display:none}
 .ot-cli-release{margin-top:18px;padding-top:16px;border-top:1px solid var(--wb-line);min-width:0}.ot-cli-release-row{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}#ot-cli-release-state{font-size:12px;line-height:1.6;overflow-wrap:anywhere}.ot-cli-release-actions{display:flex;gap:8px;flex-wrap:wrap}.official-tools .ot-cli-release-actions button{font-size:12px;min-height:34px;padding:7px 11px}.ot-cli-release details{margin-top:12px}.ot-cli-release summary{font-size:12px;cursor:pointer;color:var(--wb-sub)}#ot-cli-release-details{font-size:11px;line-height:1.7;white-space:pre-line;overflow-wrap:anywhere}#ot-cli-release-error{font-size:12px;color:var(--ui-danger,#ba302a);overflow-wrap:anywhere}#ot-cli-release-error:empty{display:none}
 html .official-tools .ot-cli-release-actions button{border:1px solid var(--ui-line);border-radius:10px;background:var(--ui-fill);color:var(--ui-ink);font-weight:500;line-height:1.35;box-shadow:0 1px 1px #00000004}html .official-tools .ot-cli-release-actions button:disabled{opacity:.43;cursor:default;box-shadow:none}
@@ -40,3 +49,7 @@ html[data-theme=dark] .official-tools[data-status=failed] .ot-badge,html[data-th
  .official-tools .ot-actions{align-items:stretch}
  .official-tools .ot-actions button{flex:1 1 190px}
 }
+/* The CLI and SDK are the main actions; environment repair follows them. */
+.official-tools>.ot-cli-release{margin-top:0;padding-top:0;border-top:0}
+html[data-reduce-motion=true] .ot-environment>summary>span:first-child:before{transition:none}
+@media(prefers-reduced-motion:reduce){.ot-environment>summary>span:first-child:before{transition:none}}

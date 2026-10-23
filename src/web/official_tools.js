@@ -17,7 +17,13 @@
  const releases=document.createElement('div');releases.className='ot-cli-release';
  releases.innerHTML='<div class="ot-cli-release-row"><span id="ot-cli-release-state" role="status"></span><div class="ot-cli-release-actions"><button id="ot-cli-check" type="button"></button><button id="ot-cli-update" type="button"></button><button id="ot-cli-rollback" type="button"></button></div></div><p id="ot-cli-release-error" role="alert"></p><details><summary id="ot-cli-release-details-label"></summary><p id="ot-cli-release-details"></p></details>';
  card.querySelector('#ot-system').before(releases);host.prepend(card);
- let data=null,fresh=false,pending='',pollPromise=null,transportError='',actionError='',systemMessage='',lastRefresh=0;
+ // Daily version controls stay first. Environment repair keeps the same
+ // controls and listeners in a disclosure rather than another dashboard.
+ const environment=document.createElement('details');environment.id='ot-environment';environment.className='ot-environment';
+ const environmentSummary=document.createElement('summary'),environmentTitle=document.createElement('span');environmentTitle.id='ot-environment-title';environmentSummary.append(environmentTitle,$('ot-state'));environment.append(environmentSummary);
+ for(const selector of ['#ot-description','.ot-table','.ot-runtime','#ot-checked-at','#ot-status','#ot-error','.ot-actions'])environment.append(card.querySelector(selector));
+ card.append(environment);
+ let data=null,fresh=false,pending='',pollPromise=null,transportError='',actionError='',systemMessage='',lastRefresh=0,lastEnvironmentIssue='';
  let cliData=null,cliFresh=false,cliPending='',cliPromise=null,cliTransportError='',cliActionError='',cliLastRefresh=0;
  function version(value){return typeof value==='string'&&value.trim()?value:t('未检查','Not checked');}
  function timestamp(value){
@@ -28,8 +34,8 @@
  function render(){
   const r=data?.runtime||{},check=data?.check||{},target=data?.target||{},busy=!!pending||!!r.busy||!!check.busy;
   const installed=!!r.installed,mismatch=check.status==='ready'&&!check.compatible,selected=['wsl','macvm'].includes(window.WujiInstallation?.snapshot()?.bridge?.mode);
-  const labels={'ot-title':['官方 CLI / SDK','Official CLI / SDK'],'ot-subtitle':['内置控制组件','Built-in control components'],
-   'ot-description':['用于工作台的设备连接、手套标定与遥操作。Windows 的内置 Linux 控制组件由工作台管理。','Used for device connections, glove calibration and teleoperation. Workbench manages the built-in Linux control components on Windows.'],
+  const labels={'ot-title':['控制组件','Control components'],'ot-subtitle':['CLI 与遥操作 SDK','CLI and teleoperation SDK'],'ot-environment-title':['控制环境','Controller environment'],
+   'ot-description':['内置环境用于设备连接、标定与遥操作。','The built-in environment supports connections, calibration and teleoperation.'],
    'ot-component-label':['组件','Component'],'ot-checked-label':['实际检查版本','Checked version'],'ot-target-label':['内置基线','Bundled baseline'],
    'ot-runtime-label':['内置控制组件','Built-in control components'],'ot-system-title':['Windows 系统支持','Windows system support'],
    'ot-system-note':['首次使用可能需要安装 Windows 系统组件。若系统要求重启，请重启后返回这里继续安装。','First use may require Windows components. If Windows requests a restart, return here afterwards to continue setup.'],
@@ -44,13 +50,18 @@
   $('ot-runtime-note').textContent=t('安装状态来自环境记录；上方版本只显示实际软件检查结果。','Installation status comes from environment records. Versions above come only from an actual software check.');
   const status=!fresh?t('状态待核对','Status unconfirmed'):check.busy?t('正在检查','Checking'):check.status==='ready'?(check.compatible?t('配套版本已确认','Bundled versions verified'):t('检查已完成','Check completed')):check.status==='failed'?t('检查未通过','Check failed'):t('尚未检查','Not checked');
   $('ot-state').textContent=status;card.dataset.status=!fresh?'unknown':check.busy?'checking':check.status||'unchecked';
-  $('ot-status').textContent=!fresh?(data?t('当前状态读取失败，保留上次检查结果。重新读取后可重试。','Current status is unavailable. Previous check results remain visible; reload to retry.'):t('正在读取组件状态。','Loading component status.')):check.busy?t('只检查软件版本与导入，不连接设备。','Checking software versions and imports only; no devices are connected.'):check.status==='ready'&&!check.compatible?t('实际版本与配套目标不同。更新至配套版本后可重新检查。','Checked versions differ from the bundled target. Update to the bundled version, then check again.'):t('安装、检查和选用控制组件均不会启动灵巧手。','Installing, checking and selecting control components do not start hand motion.');
+  $('ot-state').hidden=fresh&&check.status==='ready'&&check.compatible===true&&!busy;
+  $('ot-status').textContent=!fresh?(data?t('状态暂不可用，请重新读取。','Status unavailable. Reload to retry.'):t('正在读取组件状态。','Loading component status.')):check.busy?t('正在检查软件版本，不连接设备。','Checking software versions without connecting devices.'):check.status==='ready'&&!check.compatible?t('内置环境需要修复。','The built-in environment needs repair.'):'';
   $('ot-error').textContent=transportError||actionError||check.error||r.error||'';
   $('ot-check').textContent=!fresh?t('重新读取状态','Reload status'):check.busy||pending==='control_tools_check'?t('正在检查…','Checking…'):check.status==='failed'?t('重新检查内置组件','Retry component check'):t('检查内置组件','Check built-in components');
   $('ot-check').disabled=busy;
-  $('ot-install').hidden=!r.supported;$('ot-install').textContent=r.busy?t('正在准备…','Preparing…'):r.ready&&!mismatch?t('配套组件已安装','Bundled components installed'):installed?t('更新至配套版本','Update to bundled version'):t('安装内置控制组件','Install built-in components');
+  $('ot-install').hidden=!r.supported||fresh&&r.ready&&!mismatch&&!r.busy;$('ot-install').textContent=r.busy?t('正在准备…','Preparing…'):r.ready&&!mismatch?t('配套组件已安装','Bundled components installed'):installed?t('更新至配套版本','Update to bundled version'):t('安装内置控制组件','Install built-in components');
   $('ot-install').disabled=!fresh||busy||!!r.ready&&!mismatch;
-  $('ot-select').hidden=!r.supported||!r.ready;$('ot-select').textContent=selected?t('已使用内置组件','Built-in components selected'):t('使用内置组件','Use built-in components');$('ot-select').disabled=!fresh||busy||selected;
+  $('ot-select').hidden=!r.supported||!r.ready||fresh&&selected;$('ot-select').textContent=selected?t('已使用内置组件','Built-in components selected'):t('使用内置组件','Use built-in components');$('ot-select').disabled=!fresh||busy||selected;
+  const environmentIssue=!!pending||r.busy===true||check.busy===true||!!transportError||!!actionError||!!check.error||!!r.error||fresh&&(mismatch||r.supported&&!r.ready);
+  const issueKey=environmentIssue?JSON.stringify([pending,r.busy,r.stage,check.busy,check.status,check.compatible,transportError,actionError,check.error,r.error,r.ready]):'';
+  if(issueKey&&issueKey!==lastEnvironmentIssue)environment.open=true;
+  lastEnvironmentIssue=issueKey;
   $('ot-system').hidden=!r.supported||r.mode==='macvm';$('ot-system-install').disabled=busy;$('ot-system-status').textContent=systemMessage;renderCli();
  }
  function renderCli(){

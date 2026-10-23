@@ -2,6 +2,7 @@
 import copy
 import hashlib
 import json
+import logging
 import os
 from pathlib import Path
 import re
@@ -129,6 +130,7 @@ class OfficialCLI:
                     self._set(phase='waiting_idle',preparing=False,error=str(error))
                     if self.closed.wait(10):break
         except Exception as error:
+            if not self.closed.is_set():logging.getLogger(__name__).exception('Official CLI release maintenance failed')
             self._set(phase='cancelled' if self.closed.is_set() else 'error',error=None if self.closed.is_set() else str(error)[:700])
         finally:
             if self.closed.is_set():self._set(phase='cancelled',error=None)

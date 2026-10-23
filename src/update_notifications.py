@@ -39,6 +39,12 @@ def _type_matches(kind,device_type):
     return device_type in ({'wuji_glove'} if kind=='glove' else {'wuji_hand','wuji_hand_2'} if kind=='hand' else set())
 
 
+def _device_kind(device):
+    if not isinstance(device,dict):return None
+    kind=device.get('device_type')
+    return {'wuji_glove':'glove','wuji_hand':'hand','wuji_hand_2':'hand'}.get(kind) if isinstance(kind,str) else None
+
+
 class UpdateNotifications:
     def __init__(self,*,states,app,cli,sdk,firmware,devices,idle,clock=time.time):
         self.states,self.app,self.cli,self.sdk=states,app,cli,sdk
@@ -48,6 +54,7 @@ class UpdateNotifications:
         self.thread=None;self.next_check={};self.known={};self.reports={}
         self.pending_firmware=None
         self.idle_since=None;self.checked_at=None
+        self.user_priority_until=0
 
     def startup(self):
         if (os.environ.get('WUJI_FLEET_ID') or os.environ.get('WUJI_FLEET_PARENT')
@@ -76,18 +83,26 @@ class UpdateNotifications:
             except Exception:pass  # Unavailable/offline is not an update notice.
             if self.closed.wait(15):return
 
-    def _remember(self,sn,kind,version=None):
+    def _remember(self,sn,kind,version=None,observation=None):
         sn=_serial(sn)
         if not sn or kind not in ('hand','glove'):return
         with self.lock:
             previous=self.known.get(sn,{})
-            row=dict(serial=sn,kind=kind,last_connected=self.clock())
+            now=self.clock();row=copy.deepcopy(previous)
+            row.update(serial=sn,kind=kind,last_connected=now)
             if isinstance(version,dict) and version.get('source')=='sdk_handle_info' and version.get('serial')==sn:
-                row['firmware_version']=version.get('firmware_version')
+                value=version.get('firmware_version')
+                # Handle metadata is sampled once per connection. Reading an
+                # unchanged snapshot again is not a new device observation and
+                # must not roll back a later exact official --check result.
+                new=(value!=previous.get('_sdk_firmware_version') or observation!=previous.get('_sdk_observation'))
+                if new:
+                    row.update(firmware_version=value,firmware_observed_at=now,firmware_version_source='sdk_handle_info')
+                row.update(_sdk_firmware_version=value,_sdk_observation=observation)
                 report=self.reports.get(sn)
-                if report and report.get('current')!=row['firmware_version']:
+                if report and report.get('current')!=row.get('firmware_version'):
+                    row['_rejected_check']=(report.get('current'),report.get('latest'),report.get('checked_at'))
                     self.reports.pop(sn,None);self.next_check.pop('firmware:'+sn,None)
-            elif previous.get('firmware_version'):row['firmware_version']=previous['firmware_version']
             self.known[sn]=row
             # Session-local, bounded memory; history alone never authorizes I/O.
             while len(self.known)>128:self.known.pop(next(iter(self.known)))
@@ -97,19 +112,28 @@ class UpdateNotifications:
             if not isinstance(state,dict):continue
             identity=state.get('identified_device') or {}
             if state.get('connection')=='connected' and identity.get('source')=='sdk_identity' and identity.get('serial')==state.get('device_id'):
-                self._remember(identity.get('serial'),'hand',state.get('device_version'))
+                self._remember(identity.get('serial'),'hand',state.get('device_version'),('hand',state.get('session_generation')))
             glove=state.get('glove') or {}
             if glove.get('connection')=='receiving':
-                self._remember(glove.get('glove_serial'),'glove',glove.get('device_version'))
+                self._remember(glove.get('glove_serial'),'glove',glove.get('device_version'),('glove',glove.get('session_id')))
             feedback=glove.get('feedback') or {};hand=feedback.get('identified_device') or {}
             if hand.get('source')=='sdk_identity' and hand.get('serial')==feedback.get('device_id'):
-                self._remember(hand.get('serial'),'hand',feedback.get('device_version'))
+                self._remember(hand.get('serial'),'hand',feedback.get('device_version'),('paired',glove.get('session_id')))
             calibration=state.get('calibration') or {}
             if calibration.get('running') is True and calibration.get('id') and calibration.get('source') in ('official_tty','official_jsonl_native'):
                 self._remember(calibration.get('serial'),'glove')
             viewer=state.get('official_viz') or {};device=viewer.get('reported_device') or {}
             if viewer.get('active') is True and viewer.get('phase')=='running' and viewer.get('session_id'):
-                self._remember(device.get('serial') or device.get('sn'),device.get('kind'))
+                sn=device.get('serial') or device.get('sn')
+                selected=viewer.get('device') or {};selected=selected if isinstance(selected,dict) else {}
+                selected_sn=selected.get('serial') or selected.get('sn')
+                # The real native Viewer reports sn/handedness, while its
+                # selected device contains the authoritative device_type. Both
+                # must agree exactly; never guess a family from an SN prefix.
+                kind=_device_kind(selected) if selected_sn==sn else None
+                if not selected and kind is None and device.get('kind') in ('hand','glove'):
+                    kind=device['kind']
+                self._remember(sn,kind)
 
     def _due(self,key,now):
         return now>=self.next_check.get(key,0)
@@ -138,17 +162,9 @@ class UpdateNotifications:
                 self.next_check['sdk']=now+(SDK_INTERVAL if done else 60)
             except Exception:self.next_check['sdk']=now+RETRY
 
-    def _hardware(self,now):
-        if self.closed.is_set():return
-        try:self.idle()
-        except Exception:self.idle_since=None;return
-        if self.closed.is_set():return
-        if self.idle_since is None:self.idle_since=now;return
-        # Discovery authority expires after 30 seconds. A 5-second grace lets
-        # the next 15-second tick use that evidence without starting a new scan.
-        if now-self.idle_since<5:return
-        service=self.firmware();state=service.snapshot()
-        if state.get('busy') or state.get('locked') or state.get('can_upgrade'):return
+    def _ingest_firmware(self,state,now):
+        # Consume facts already obtained by an explicit check even while the
+        # user's Viewer is active. This never opens a second CLI or device.
         if self.pending_firmware:
             sn,started=self.pending_firmware;device=state.get('device') or {}
             finished=state.get('finished_at')
@@ -156,11 +172,60 @@ class UpdateNotifications:
                 if not state.get('notification'):self.next_check['firmware:'+sn]=now+RETRY
                 self.pending_firmware=None
         report=state.get('notification')
+        if not isinstance(report,dict):
+            check=state.get('check_report') or {};device=state.get('device') or {}
+            sn=_serial(device.get('sn') or device.get('serial'));known=self.known.get(sn)
+            if known and check.get('returncode')==0:
+                from device_versions import parse_official_check_report
+                expected='wuji_glove' if known['kind']=='glove' else 'wuji_hand_2' if device.get('generation')=='hand2' else 'wuji_hand' if device.get('generation')=='hand1' else None
+                candidate=parse_official_check_report(check.get('stdout'),sn,expected)
+                if candidate and _type_matches(known['kind'],candidate.get('device_type')):report=candidate
         if isinstance(report,dict) and _serial(report.get('serial')) in self.known:
             known=self.known[report['serial']];current=known.get('firmware_version')
-            if _type_matches(known['kind'],report.get('device_type')) and (current is None or current==report.get('current')):
-                report=copy.deepcopy(report);report['checked_at']=state.get('checked_at')
-                with self.lock:self.reports[report['serial']]=report
+            checked=state.get('checked_at');observed=known.get('firmware_observed_at',0)
+            valid_time=type(checked) in (int,float) and 0<=now-checked<FIRMWARE_INTERVAL
+            rejected=known.get('_rejected_check')==(report.get('current'),report.get('latest'),checked)
+            if (valid_time and _type_matches(known['kind'],report.get('device_type'))
+                    and not (rejected and current!=report.get('current'))
+                    and (current is None or current==report.get('current') or checked>=observed)):
+                report=copy.deepcopy(report);report['checked_at']=checked
+                with self.lock:
+                    previous=self.reports.get(report['serial']) or {}
+                    if checked>=previous.get('checked_at',0):
+                        self.reports[report['serial']]=report
+                        if checked>=observed:
+                            known.update(firmware_version=report['current'],firmware_observed_at=checked,firmware_version_source='official_cli_check')
+
+    def give_user_priority(self,timeout=3):
+        """Defer new background checks and finish any existing finite read.
+
+        Controller calls this before an explicit connection or task start. A
+        false return preserves normal maintenance refusal; no write is stopped.
+        """
+        with self.dispatch_lock:
+            self.user_priority_until=self.clock()+60
+            service=self.firmware()
+            return service.cancel_notification_check(timeout=timeout)
+
+    def _dispatch_firmware(self,service,sn):
+        with self.dispatch_lock:
+            if self.closed.is_set() or self.clock()<self.user_priority_until:return False
+            service.start_check(sn,notification_only=True)
+            return True
+
+    def _hardware(self,now):
+        if self.closed.is_set():return
+        service=self.firmware();state=service.snapshot()
+        self._ingest_firmware(state,now)
+        if state.get('busy') or state.get('locked') or state.get('can_upgrade'):return
+        if now<self.user_priority_until:return
+        try:self.idle()
+        except Exception:self.idle_since=None;return
+        if self.closed.is_set():return
+        if self.idle_since is None:self.idle_since=now;return
+        # Discovery authority expires after 30 seconds. A 5-second grace lets
+        # the next 15-second tick use that evidence without starting a new scan.
+        if now-self.idle_since<5:return
         rows=self.devices()
         if self.closed.is_set():return
         for row in rows:
@@ -171,7 +236,7 @@ class UpdateNotifications:
             # The service repeats freshness, exact identity and the global gate.
             # Only a finite read-only --check runs; no --list/write/yes action.
             try:
-                if not self._dispatch(lambda:service.start_check(sn,notification_only=True)):return
+                if not self._dispatch_firmware(service,sn):return
                 self.pending_firmware=(sn,now)
                 self.next_check['firmware:'+sn]=now+FIRMWARE_INTERVAL
             except Exception:self.next_check['firmware:'+sn]=now+RETRY
@@ -186,6 +251,11 @@ class UpdateNotifications:
 
     def snapshot(self):
         # Pure status: never starts a query from GET or from an embedded task.
+        # A just-connected Viewer can expose an already completed exact-SN
+        # preflight report immediately, without waiting for the next scheduler
+        # tick or starting a second query against the connected device.
+        try:self._ingest_firmware(self.firmware().snapshot(),self.clock())
+        except Exception:pass
         items=[]
         try:
             app=self.app().snapshot()
@@ -205,7 +275,10 @@ class UpdateNotifications:
                 items.append(dict(kind='sdk',version=release['version']))
         except Exception:pass
         with self.lock:
-            reports=copy.deepcopy(self.reports);devices=copy.deepcopy(list(self.known.values()));stamp=self.checked_at
+            reports=copy.deepcopy(self.reports)
+            devices=[{key:copy.deepcopy(value) for key,value in device.items() if not key.startswith('_')}
+                     for device in self.known.values()]
+            stamp=self.checked_at
         for sn,row in sorted(reports.items()):
             age=self.clock()-(row.get('checked_at') or 0)
             known=next((d for d in devices if d['serial']==sn),{});current=known.get('firmware_version')

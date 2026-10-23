@@ -94,3 +94,4 @@ html :is(#page-connection,#page-home) .di-root button.primary{background:#007aff
  :is(#page-home,#page-connection) .di-scan-controls{width:100%;max-width:100%;justify-content:space-between;flex:none;gap:8px}
  :is(#page-home,#page-connection) .di-discovery-state{white-space:normal;min-width:0}
 }
+.di-more{position:relative;align-self:center}.di-more>summary{list-style:none;cursor:pointer;min-height:38px;padding:9px 13px;border:1px solid var(--wb-line);border-radius:10px;white-space:nowrap;font:inherit}.di-more>summary::-webkit-details-marker{display:none}.di-more-actions{display:flex;flex-direction:column;gap:5px;position:absolute;right:0;top:calc(100% + 7px);min-width:155px;padding:6px;border:1px solid var(--wb-line);border-radius:12px;background:var(--wb-card,#fff);box-shadow:0 8px 24px #00000012;z-index:20}.di-more:not([open])>.di-more-actions{display:none}.di-more-actions>button{width:100%;text-align:left;white-space:nowrap}

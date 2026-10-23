@@ -24,12 +24,8 @@
  });
  body.replaceChildren(tabs,...Object.values(sections));sections.appearance.append(appearance);
  function card(parent,zh,en,noteZh,noteEn){const node=el('div',undefined,undefined,'wb-card');node.append(el('h3',zh,en));if(noteZh)node.append(el('p',noteZh,noteEn));parent.append(node);return node;}
- const discovery=card(sections.devices,'设备发现与接入','Device discovery & connection','未接入时每5秒自动查找，不会自动连接设备。','The workbench searches every 5 seconds while disconnected. Devices never connect automatically.');
+ const discovery=card(sections.devices,'设备连接','Device connections','在设备页选择并连接。自动查找每 5 秒运行，接入后暂停；添加设备时继续查找。','Choose and connect on Devices. Discovery runs every 5 seconds and pauses after connection; Add device resumes it.');
  discovery.id='settings-device-discovery';
- discovery.append(el('p','在设备目录中选择具体设备，再点击对应的连接操作。','Select a specific device in the directory, then choose its connection action.','settings-footnote'));
- discovery.append(el('p','接入成功后暂停自动查找。需要更多设备时，点击“添加设备”继续查找。','Automatic discovery pauses after a successful connection. Choose Add device to search for another device.','settings-footnote'));
- discovery.append(el('p','添加设备不会断开当前会话。若设备正在用于动作、手套预览或标定，先按页面提示处理；动作与跟随仍需你单独开启。','Adding a device does not disconnect active sessions. Follow the page guidance if motion, glove preview or calibration owns a device. Motion and follow always require a separate action.','settings-footnote'));
- discovery.append(el('p','未识别时显示 Wuji Hand；SDK 确认真实身份后才显示代际、左右手和编号。默认地址探测只适用于未改 IP/端口的手套。','Shows Wuji Hand until the SDK verifies generation, side and serial. Factory-address fallback applies only to gloves with default network settings.','settings-footnote'));
  const appearanceRow=$('wb-theme').closest('.wb-row');appearanceRow.classList.add('settings-row');
  const languageRow=el('div',undefined,undefined,'wb-row settings-row'),languageLabel=el('label','语言','Language'),language=el('select');language.id='settings-language';languageLabel.htmlFor=language.id;
  language.append(new Option('简体中文','zh'),new Option('English','en'));language.value=L.lang;language.onchange=()=>L.setLanguage(language.value);languageRow.append(languageLabel,language);appearanceRow.after(languageRow);
@@ -45,7 +41,7 @@
  appearance.append(el('p','系统不支持透明材质时使用实色背景。减少动态效果会关闭界面过渡。','A solid background is used when native transparency is unavailable. Reduce motion disables interface transitions.','settings-footnote'));
  function route(parent,zh,en,noteZh,noteEn,callback){const button=el('button',undefined,undefined,'settings-route');button.type='button';const copy=el('span');copy.append(el('strong',zh,en),el('small',noteZh,noteEn));const arrow=document.createElementNS('http://www.w3.org/2000/svg','svg');arrow.setAttribute('viewBox','0 0 16 16');arrow.setAttribute('aria-hidden','true');arrow.innerHTML='<path d="m6 3 5 5-5 5"/>';button.append(copy,arrow);button.onclick=callback;parent.append(button);return button;}
  const openPage=key=>{location.hash='#'+key;window.WujiWorkspace.showPage();};
- const connections=card(sections.devices,'设备工作流','Device workflow');
+ const connections=el('details',undefined,undefined,'settings-workflow');connections.append(el('summary','设备快捷入口','Device shortcuts'));discovery.append(connections);
  route(connections,'手与手套连接','Hand & glove connections','设备识别、控制端与实时反馈','Discovery, controller and live feedback',()=>window.WujiConnectionHub.show('device'));
  route(connections,'手套可视化与遥操作','Glove visualization & teleoperation','连接手套、检查映射、开始或停止跟随','Connect, inspect mapping, start or stop follow',()=>window.WujiConnectionHub.show('visual'));
  route(connections,'手型标定','Hand-model calibration','SDK 用户、左右手标定与状态','SDK profiles, hand side and calibration status',()=>window.WujiConnectionHub.show('calibration'));
@@ -70,7 +66,7 @@
   ['desktop-viewer','独立三维窗口','Separate 3D window','移动窗口、调整视角','Move the viewer and adjust the camera']]){
   const button=route(tools,zh,en,noteZh,noteEn,()=>{window.WujiDesktop.setMenu(true);$(target).click();});button.dataset.desktopAction=target;button.disabled=$(target).disabled;
  }
- const about=card(sections.tools,'关于工作台','About Hand Workbench');about.append(el('p','非官方个人展示工具，不代表舞肌科技官方产品。','Unofficial personal demonstration tool, not a Wuji Technology product.'));
+ const about=card(sections.tools,'关于工作台','About Hand Workbench');
  const version=el('p');version.id='settings-version';about.append(version);
  function syncNative(){for(const button of tools.querySelectorAll('[data-desktop-action]'))button.disabled=$(button.dataset.desktopAction).disabled;version.textContent=$('desktop-about').textContent;}
  const observer=new MutationObserver(syncNative);observer.observe($('desktop-about'),{childList:true,subtree:true});syncNative();

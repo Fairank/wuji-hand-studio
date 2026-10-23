@@ -8,7 +8,17 @@
 
 ## Windows 下载和启动
 
-在 [Releases](../../releases) 选择实际已上传的安装包，各版本沿用同一 Windows 软件、安装身份和用户数据目录。0.2.36 的软件检查与设备验收边界见 [软件验证记录](docs/VALIDATION_0.2.36.md)；打包、安装和源码推送结果另记于外部最终交付清单。目前尚未发布本版二进制 Release，不能把源码实现当作已上传安装包。Windows 当前用户安装无需另装 Python；安装器检查微软 WebView2 运行时，缺少时联网安装。包暂未进行发布者代码签名，下载需核对实际发布的 SHA-256。
+在 [Releases](../../releases) 选择实际已上传的安装包，各版本沿用同一 Windows 软件、安装身份和用户数据目录。0.2.40 的软件检查与设备验收边界见 [软件验证记录](docs/VALIDATION_0.2.40.md)及[逐任务证据索引](docs/TASK_ACCEPTANCE_0.2.40.md)；打包、安装和源码推送结果另记于外部最终交付清单。目前尚未发布本版二进制 Release，不能把源码实现当作已上传安装包。Windows 当前用户安装无需另装 Python；安装器检查微软 WebView2 运行时，缺少时联网安装。包暂未进行发布者代码签名，下载需核对实际发布的 SHA-256。
+
+## 0.2.40 版本检查、实体手与完整任务复验
+
+修复安装版遗漏所选 Python 的 TLS 策略文件导致版本检查在联网前失败的问题；构建携带原文件并必须通过离线 TLS 初始化。版本检查保留本地文件、证书、网络、HTTP 与资料格式等具体原因，不再统一说成未联网。最终正式包及安装后的联网读取按同一冻结摘要独立核对。
+
+遥操作直接提供实体灵巧手的查找、选择和连接，手套接收中可保留原档案与会话查找目标；连接反馈与开始跟随仍分开。当前发现、已有任务和最近连接分别显示，发现过期不冒称物理断联；准确停止确认后恢复查找，重新发现仍由你选择连接。存储异常、配对、编组、采集、映射和导出各自补录失败恢复与再次使用。范围与未测实物项目见[本版记录](docs/VALIDATION_0.2.40.md)。
+
+## 历史：0.2.39 连接、使用与更新
+
+在设备页明确连接手套或灵巧手，查看、标定和遥操作沿用原任务。可用更新显示提醒，可选择稍后；设备更新收在“更多”中，不在连接时打开升级窗口。固件检查过期时自动重新查找原设备；升级仍通过官方提示确认，结束后核对实际版本。SDK 版本读取与预览可以并行，更新时保留原空闲门禁。界面与完整软件流程、安装包和实物效果分别验收，见[本版记录](docs/VALIDATION_0.2.39.md)。
 
 ## 0.2.36 任务归属与取消修复
 
@@ -363,6 +373,8 @@ Ubuntu 已有历史 0.1.3 包。macOS 的原生构建在 GitHub Mac runner 上�
 0.2.0 的本地 Claude 按用户当时偏好使用 `claude-opus-5-5 --effort max`，仅辅助边界明确的播放列表基础设计；实际返回模型为 `claude-opus-5-5`。输出经主维护者审核，控制逻辑、设备边界和真实结果由主维护者核验。代码接口用于检视软件，不操作桌面。来源和许可证见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
 ## English
+
+Version 0.2.40 fixes a packaged Python TLS policy file omission that caused release checks to fail before any network request. Builds preserve the selected interpreter's exact policy and require offline TLS initialization; certificate and hostname validation remain enabled. Teleoperation exposes explicit physical-hand discovery, selection and connection while retaining the receiving glove session. Current discovery, retained tasks and local connection history remain separate. Task-specific failure/recovery evidence, package/install evidence and physical acceptance are recorded separately in [0.2.40 validation](docs/VALIDATION_0.2.40.md) and the [task evidence index](docs/TASK_ACCEPTANCE_0.2.40.md).
 
 Version 0.2.32 requires an explicit connection before calibration. Discovery and selection never connect. Connect and view starts the selected official Viewer; Switch to calibration explicitly releases only that owned session and starts the same glove's official calibration. The default graphical guide reads official schema-v2 JSONL, with official six-pose references cached privately from pinned URLs. Capture, solver and publishing remain in the unmodified CLI/SDK. Original Human TTY remains an advanced alternative. Background refresh and discovery age do not obscure an active run. Guided completion requires a matching official result, actual exit zero and confirmed cleanup. See [0.2.32 validation](docs/VALIDATION_0.2.32.md). No physical calibration-quality acceptance is claimed.
 

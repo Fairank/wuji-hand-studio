@@ -317,7 +317,7 @@ class OfficialVisualization:
                 with gate(self.folder):release(self.token,self.folder);self.token=None
             else:self._set(phase='error',busy=False,active=False,viewer_url=None,error='原生 CLI 退出未确认，请重试停止 / Native CLI cleanup unconfirmed; retry Stop')
 
-    def connection_record(self,serial,session_id):
+    def connection_record(self,serial,session_id,*,require_glove=True):
         """Verify an actual local native Viewer, independently of scan TTL.
 
         Only the CLI's exact startup report establishes the current task's
@@ -340,16 +340,16 @@ class OfficialVisualization:
                     or self.process is None or self.process.poll() is not None or self.native_job is None):
                 raise ValueError('设备画面会话已变化或尚未接入，请先接入所选设备 / The Viewer session changed or is not connected; connect the selected device first')
             from calibration_cli import is_glove_device
-            if not is_glove_device(reported):raise ValueError('标定需要本次接入的手套 / Calibration requires the connected glove')
+            if require_glove and not is_glove_device(reported):raise ValueError('标定需要本次接入的手套 / Calibration requires the connected glove')
             side=reported.get('handedness',reported.get('side'))
             side=side.lower().removeprefix('handedness.') if isinstance(side,str) else None
             return dict(serial=serial,side=side if side in ('left','right') else None,
                 source='native_viewer',viewer_token=session_id,cli_version=self.state.get('cli_version'),
                 checked_at=time.time(),owner_pid=marker['pid'],owner_start=marker['start'])
 
-    def stop_owned(self,serial,session_id):
+    def stop_owned(self,serial,session_id,*,require_glove=True):
         """Stop only the explicitly selected local Viewer, then verify release."""
-        result=self._stop(expected_token=session_id,expected_serial=serial)
+        result=self._stop(expected_token=session_id,expected_serial=serial,require_glove=require_glove)
         with self.lock:
             if (self.token is not None or self.process is not None or self.native_job is not None
                     or self.transport is not None or self.thread and self.thread.is_alive()
@@ -368,9 +368,9 @@ class OfficialVisualization:
                             error='原生 CLI 退出未确认，请重试停止 / Native CLI cleanup unconfirmed: '+str(error)[:400])
             raise
 
-    def _stop(self,*,expected_token=None,expected_serial=None):
+    def _stop(self,*,expected_token=None,expected_serial=None,require_glove=True):
         if expected_token is not None:
-            with gate(self.folder):self.connection_record(expected_serial,expected_token)
+            with gate(self.folder):self.connection_record(expected_serial,expected_token,require_glove=require_glove)
         stale=reservation(self.folder)
         if expected_token is not None and stale.get('token')!=expected_token:
             raise ValueError('Viewer ownership changed before handover')
@@ -417,5 +417,5 @@ class OfficialVisualization:
         with self.lock:
             if self.token not in (None,expected_token):return self.snapshot()
             if native:self.native_job=None;self.process=None;self.token=None
-            self.state.update(phase='idle',busy=False,active=False,viewer_url=None)
+            self.state.update(phase='idle',busy=False,active=False,viewer_url=None,error=None)
         return self.snapshot()

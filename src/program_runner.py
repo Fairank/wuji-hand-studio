@@ -15,7 +15,7 @@ class ProgramRunner:
         self.thread=None
         self.cancel=threading.Event()
         self.lock=threading.RLock()
-        self.state=dict(active=False, paused=False, mode=None, current=None, completed=0, reason='')
+        self.state=dict(active=False, paused=False, mode=None, current=None, completed=0, reason='',run_id=None)
         self.lease=None
         self.heartbeat=0.
 
@@ -43,11 +43,19 @@ class ProgramRunner:
             if s['connection']!='connected' or s['stale']:raise ValueError('先连接灵巧手 / Connect the hand first')
             if s['device_profile']['generation']!='hand2':raise ValueError('一代手指舞当前仅可预览 / Hand 1 dances are preview-only')
             if s['hardware'].get('gesture_library_version',0)<4:raise ValueError('先升级控制端动作库 / Update controller dance library')
-        self.cancel.clear();self.heartbeat=time.monotonic();self.lease=secrets.token_hex(16)
-        self.update(active=True,paused=False,mode=mode,current=None,completed=0,reason='',plan=plan)
-        self.thread=threading.Thread(target=self.run,args=(plan,mode,amplitude),daemon=True,name='Selected dance playlist')
-        self.thread.start()
-        return dict(program_lease=self.lease)
+        self.cancel.clear();self.heartbeat=time.monotonic();self.lease=lease=secrets.token_hex(16)
+        # Public observation identity is independent of the secret control lease
+        # and remains available after completion to reconcile late UI replies.
+        run_id=secrets.token_hex(16)
+        self.update(active=True,paused=False,mode=mode,current=None,completed=0,reason='',plan=plan,run_id=run_id)
+        self.thread=None
+        try:
+            self.thread=threading.Thread(target=self.run,args=(plan,mode,amplitude),daemon=True,name='Selected dance playlist')
+            self.thread.start()
+        except Exception as error:
+            self.lease=None;self.update(active=False,paused=False,reason=str(error))
+            raise
+        return dict(program_lease=lease,program_run_id=run_id)
 
     def keepalive(self, lease):
         if not self.lease or not secrets.compare_digest(str(lease),self.lease):raise ValueError('Expired playlist lease')

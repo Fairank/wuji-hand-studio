@@ -32,6 +32,11 @@ class WorkbenchUpdate:
         if reservation():raise ValueError('请结束官方 CLI 会话后更新 / End the official CLI session before updating')
         self.idle_check()
 
+    def _helper_settled(self):
+        if self.helper is None:return self.result_file is None
+        try:return type(self.helper.poll()) is int
+        except (OSError,ValueError):return False
+
     def snapshot(self):
         with self.lock:
             result=copy.deepcopy(self.state)
@@ -43,11 +48,11 @@ class WorkbenchUpdate:
                         raise ValueError('No matching updater error result')
                     self.state.update(phase='error',busy=False,error=str(report.get('error') or 'Update helper failed')[:700]);result=copy.deepcopy(self.state)
                 except (OSError,ValueError,TypeError):
-                    if self.helper and self.helper.poll() is not None and self.state['phase']=='applying':
+                    if self.helper and self._helper_settled() and self.state['phase']=='applying':
                         self.state.update(phase='error',busy=False,error='更新助手未完成，请重试 / Update helper did not complete; retry');result=copy.deepcopy(self.state)
         result['supported']=sys.platform=='win32' and bool(getattr(sys,'frozen',False)) and self.desktop() is not None
         result['can_apply']=False
-        if result['supported'] and result.get('prepared') and not result['busy']:
+        if result['supported'] and result.get('prepared') and not result['busy'] and self._helper_settled():
             try:self._idle();result['can_apply']=True
             except (ValueError,OSError):pass
         return result
@@ -61,9 +66,18 @@ class WorkbenchUpdate:
 
     def start(self,operation):
         if operation not in ('check','prepare'):raise ValueError('Unknown application update operation')
+        # Observe the exact helper result before a deliberate retry. A previous
+        # failure must not keep overwriting the next check's ready state.
+        if self.result_file:self.snapshot()
         with self.lock:
             if self.state['busy']:raise ValueError('软件更新正在处理 / Application update is busy')
             if operation=='prepare' and (not self.latest or self.latest.get('available') is not True):raise ValueError('先检查可用的新版本 / Check for an available release first')
+            if self.result_file:
+                if self.state['phase']!='error' or not self._helper_settled():
+                    raise ValueError('更新助手正在结束，请稍候重试 / Update helper is still finishing; retry shortly')
+                # Keep the old plan and result files as history. Only retire
+                # this completed association, under the same service lock.
+                self.result_file=None;self.apply_token=None;self.helper=None
             self.closed.clear();self.state.update(busy=True,error=None,phase='checking' if operation=='check' else 'downloading')
             self.thread=threading.Thread(target=self._work,args=(operation,),name='Workbench software update',daemon=True);self.thread.start()
         return self.snapshot()
@@ -116,6 +130,7 @@ class WorkbenchUpdate:
         if not self.snapshot()['supported']:raise ValueError('请在 Windows 已安装版本中使用软件更新 / Use software update in the installed Windows application')
         with self.lock,gate():
             if self.state['busy'] or not self.state.get('prepared'):raise ValueError('Download and verify the new installer first')
+            if not self._helper_settled():raise ValueError('更新助手正在结束，请稍候重试 / Update helper is still finishing; retry shortly')
             self._idle()
             prepared=copy.deepcopy(self.state['prepared']);installer=self._stage_installer(prepared)
             host=self.desktop();info=host.info()
