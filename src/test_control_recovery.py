@@ -340,6 +340,7 @@ def glove_worker_fixture(disconnect_error=False, solver_close_error=False, wrong
     calls = []
     leases = []
     manager = NS(active='A', connected=False)
+    failing = dict(disconnect=disconnect_error, solver=solver_close_error)
     users = [dict(user_id='A'), dict(user_id='B')]
     manager.current_user = lambda: dict(user_id=manager.active)
     manager.list_users = lambda: users
@@ -361,7 +362,7 @@ def glove_worker_fixture(disconnect_error=False, solver_close_error=False, wrong
         def __exit__(self, *args):self.close()
     def disconnect():
         calls.append(dict(call='glove_disconnect'))
-        if disconnect_error:raise OSError('injected glove disconnect error')
+        if failing['disconnect']:raise OSError('injected glove disconnect error')
         manager.connected = False
     def connect(*args):
         manager.connected = True
@@ -372,7 +373,7 @@ def glove_worker_fixture(disconnect_error=False, solver_close_error=False, wrong
                   hand_skeleton=lambda: NS(subscribe=subscribe))
     def close_solver():
         calls.append(dict(call='solver_close'))
-        if solver_close_error:raise OSError('injected solver cleanup error')
+        if failing['solver']:raise OSError('injected solver cleanup error')
     def solver(*args, **kwargs):
         calls.append(dict(call='solver', user=manager.active))
         return NS(close=close_solver)
@@ -408,12 +409,34 @@ def glove_worker_fixture(disconnect_error=False, solver_close_error=False, wrong
     commands.put(dict(name='glove_solver', solver=dict(engine='sdk')))
     commands.put(dict(name='glove_disconnect'))
     raised = None
+    first_cleanup=None
     with patch.dict(sys.modules, modules):
-        try:worker(commands, events)
-        except Exception as error:raised = repr(error)
-    recorded = []
+        def run():
+            nonlocal raised
+            try:worker(commands, events)
+            except Exception as error:raised = repr(error)
+        thread=threading.Thread(target=run,daemon=True);thread.start()
+        recorded=[]
+        try:
+            while True:
+                event=events.get(timeout=2);recorded.append(event)
+                if event['type']=='glove_closed':first_cleanup=copy.deepcopy(event);break
+            if first_cleanup.get('session_cleanup',{}).get('retryable'):
+                assert thread.is_alive(), 'Failed original handles were discarded'
+                assert manager.active=='B', 'Selected user changed before failed cleanup was confirmed'
+                assert any(not lease.selection and not lease.closed for lease in leases), 'Original profile lease was lost'
+                before=list(calls);time.sleep(.02)
+                assert calls==before, 'Cleanup retried without an explicit command'
+                failing.update(disconnect=False,solver=False)
+                commands.put(dict(name='glove_disconnect'))
+            thread.join(2)
+            assert not thread.is_alive(), 'Explicit cleanup retry did not finish'
+        finally:
+            failing.update(disconnect=False,solver=False)
+            commands.put(dict(name='glove_disconnect'));thread.join(2)
+            assert not thread.is_alive(), 'Synthetic original worker remained alive'
     while not events.empty():recorded.append(events.get_nowait())
-    return NS(calls=calls, leases=leases, manager=manager, events=recorded, raised=raised)
+    return NS(calls=calls, leases=leases, manager=manager, events=recorded, raised=raised,first_cleanup=first_cleanup)
 
 
 class GloveProfileCrosscheck(unittest.TestCase):

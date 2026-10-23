@@ -75,6 +75,10 @@ class Controller:
         self.calibration_handover=CalibrationHandover(self)
         from teleoperation_handover import TeleoperationHandover
         self.teleoperation_handover=TeleoperationHandover(self)
+        from connection_switch import ConnectionSwitch
+        self.connection_switch=ConnectionSwitch(self)
+        self.feedback_sessions={}
+        self.sdk_session_configs={}
         from program_runner import ProgramRunner
         self.program=ProgramRunner(self)
         from group_participant import GroupParticipant
@@ -118,12 +122,18 @@ class Controller:
         self._continuation_profile=None
         self.calibrated_teleoperation=CalibratedTeleoperation(
             self._continuation_calibration,
-            lambda bundle:self.glove.start_calibrated(bundle,self._continuation_model_ready),
+            self._start_calibrated_session,
             self.glove.disconnect_session,self.glove.snapshot,self._continuation_idle,
             lambda proof,**kw:export_native_bundle(proof,self.reports.parent/'calibration_transfer',**kw),
             owner_workspace=os.environ.get('WUJI_FLEET_ID','main'),
             workflow_lock=self.calibration_handover.workflow_lock,
             owner_check=self._continuation_owner_check)
+
+    def _start_calibrated_session(self,bundle):
+        config=self.connection_switch._config()
+        session=self.glove.start_calibrated(bundle,self._continuation_model_ready,expected_profile=self._continuation_profile)
+        self.sdk_session_configs[session]=config
+        return session
 
     def _continuation_calibration(self):
         # No discovery, user refresh or SDK access in this read-only view.
@@ -139,6 +149,8 @@ class Controller:
         if getattr(self,'desktop_closing',False):raise ValueError('Session is closing')
         if runtime_status().get('busy'):raise ValueError('Wait for controller installation')
         state=self.snapshot()
+        switch=getattr(self,'connection_switch',None)
+        if switch is not None and switch.internal:state['connection_switch']={}
         if (state['calibration_connection'].get('busy') or state['teleoperation_connection'].get('busy')):
             raise ValueError('Another device task is switching')
         continuation=state.get('calibrated_teleoperation') or {}
@@ -300,6 +312,7 @@ class Controller:
             result['playback'] = self.player.snapshot()
             result['parameter_sync']=dict(self.parameters.sync_status)
             result['glove']=self.glove.snapshot()
+            result['glove']['controller_config']=getattr(self,'sdk_session_configs',{}).get(result['glove'].get('session_id'))
             result['unconfirmed_devices']=self.termination.snapshot()
             result['program']=self.program.snapshot()
             result['group']=self.group.snapshot()
@@ -312,6 +325,8 @@ class Controller:
             result['teleoperation_connection']=self.teleoperation_handover.snapshot()
             continuation=getattr(self,'calibrated_teleoperation',None)
             result['calibrated_teleoperation']=continuation.snapshot() if continuation is not None else dict(busy=False,can_continue=False)
+            switch=getattr(self,'connection_switch',None)
+            if switch is not None:result['connection_switch']=switch.snapshot(result)
             observer=getattr(self,'version_observer',None)
             if observer:observer([result])
             return result
@@ -409,7 +424,7 @@ class Controller:
         self.stdin.flush()
 
     def action(self, command):
-        if isinstance(command,dict) and command.get('name') in {'connect','official_viz_start','glove_connect','glove_open','glove_scan','calibration_start','calibration_handover','teleoperation_handover','calibrated_teleoperation_continue'}:
+        if isinstance(command,dict) and command.get('name') in {'connection_switch','connect','official_viz_start','glove_connect','glove_open','glove_scan','calibration_start','calibration_handover','teleoperation_handover','calibrated_teleoperation_continue'}:
             priority=getattr(self,'version_check_priority',None)
             if priority and not priority():raise ValueError('只读版本检查正在结束，请稍候重试 / Finishing the background version check; retry shortly')
         if isinstance(command,dict) and command.get('name')=='official_viz_start':
@@ -423,6 +438,21 @@ class Controller:
         if isinstance(command,dict) and command.get('name')=='glove_follow':self.glove.verify_follow_sdk()
         from calibration_handover import workflow_action
         name=command.get('name') if isinstance(command,dict) else None
+        switch=getattr(self,'connection_switch',None)
+        if switch is not None:
+            if name=='connection_switch':return switch.start(command)
+            if name=='connection_switch_users':
+                if set(command)!={'name'}:raise ValueError('Invalid wearer directory request')
+                return switch.users()
+            if (not switch.internal and switch.catalog.get('busy') and workflow_action(command)):
+                raise ValueError('SDK wearer directory cleanup is still in progress')
+            if name in {'disconnect','glove_disconnect','glove_stop','hardware_stop','official_viz_stop','session_close','calibration_cancel'}:
+                switch.request_cancel()
+            if not switch.internal and workflow_action(command):
+                from studio_component import enforce_session_owner
+                enforce_session_owner(command)
+                from connection_switch import unsettled
+                if unsettled(self.snapshot()):raise ValueError('设备切换或退出尚未确认 / Device switch or cleanup is unconfirmed')
         continuation=getattr(self,'calibrated_teleoperation',None)
         if name in {'task_owner','task_context_action','pair_prepare','unpair'}:
             raise ValueError('Task owner operations require the private controller service')
@@ -674,7 +704,10 @@ class Controller:
         if isinstance(name,str) and name.startswith('glove_'):
             if name not in {'glove_stop','glove_disconnect','glove_keepalive'} and (self.state['connection']!='disconnected' or self.state['hardware'].get('active') is not False or self.doctor.snapshot()['running'] or self.parameters.sync_status['busy']):
                 raise ValueError('先结束其他设备会话或诊断 / Finish the other device session or diagnostics first')
+            switch=getattr(self,'connection_switch',None)
+            config=switch._config() if switch is not None and name in ('glove_scan','glove_connect') else None
             result=self.glove.action(command)
+            if config is not None:self.sdk_session_configs[self.glove.session]=config
             if name in {'glove_scan','glove_open','glove_follow','glove_prepare'}:
                 self.player.command(dict(name='demo_stop'));self.state['view_source']='glove'
             return result
@@ -867,7 +900,10 @@ class Controller:
                 self.state['hardware'] = dict(ready=False, active=False, actions=[], probe_ready=False, reason='正在识别新设备')
                 self.hardware_lease = None
                 self.log('用户请求连接所选设备，仅接收反馈')
-                threading.Thread(target=self.read_session, args=(command, generation), daemon=True).start()
+                thread=threading.Thread(target=self.read_session,args=(command,generation),daemon=True)
+                self.feedback_sessions[generation]=dict(serial=command.get('serial'),thread=thread,
+                    worker_closed=False,transport_closed=False,reader_finished=False)
+                thread.start()
             elif name == 'disconnect':
                 self.generation += 1
                 # Ask the worker to flush recordings; its reader may still save
@@ -928,6 +964,10 @@ class Controller:
             # Late close acknowledgements still belong to the old serial. They
             # may confirm that stop, but must never revive the new connection.
             if event.get('device_id'):self.session_devices[generation]=event['device_id']
+            feedback_record=getattr(self,'feedback_sessions',{}).get(generation)
+            if kind=='closed' and 'hardware' in event and feedback_record is not None:
+                feedback_record['worker_closed']=True
+                feedback_record['hardware']=copy.deepcopy(event['hardware'])
             if 'hardware' in event:
                 self.termination.observe('hand',event.get('device_id') or self.session_devices.get(generation),event['hardware'],self.session_epochs.get(generation,0))
                 if event['hardware'].get('active') is False and event['hardware'].get('stop_confirmed') is True:
@@ -1008,13 +1048,36 @@ class Controller:
             (DATA/'bridge_error.log').write_text(traceback.format_exc(), encoding='utf-8')
             self.event(dict(type='error', message='未建立稳定反馈连接，请检查电源、设备地址及控制端设置'), generation)
         finally:
-            if client:
-                client.close()
+            closed=False
+            try:
+                if client and client.close() is False:raise ValueError('Feedback transport exit is unconfirmed')
+                closed=True
+            finally:
+                record=getattr(self,'feedback_sessions',{}).get(generation)
+                if record is not None:record.update(transport_closed=closed,reader_finished=True)
             with self.lock:
                 if generation == self.generation:
                     self.client = self.stdin = None
                     self.state['recording']['active'] = False
                     self.clear_live()
+
+    def stop_feedback_confirmed(self,generation,serial,timeout=8.):
+        """Release exactly one inactive feedback reader, preserving uncertainty."""
+        with self.lock:
+            record=self.feedback_sessions.get(generation)
+            if (generation!=self.generation or self.state.get('device_id')!=serial or record is None
+                    or record.get('serial')!=serial or self.state['hardware'].get('active') is not False
+                    or self.hardware_lease):
+                raise ValueError('Hand feedback owner changed or stop is unconfirmed')
+            thread=record['thread']
+        self.action(dict(name='disconnect'))
+        thread.join(timeout)
+        with self.lock:
+            if (thread.is_alive() or not record.get('reader_finished') or not record.get('transport_closed')
+                    or not record.get('worker_closed') or (record.get('hardware') or {}).get('active') is not False
+                    or (record.get('hardware') or {}).get('stop_confirmed') is not True):
+                raise ValueError('Hand feedback release is unconfirmed; no new device was opened')
+        return dict(serial=serial,session=generation,cleanup_confirmed=True)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -1079,13 +1142,36 @@ class Handler(BaseHTTPRequestHandler):
         if not self.allowed_host():
             return self.reply(403, dict(error='Local host required'))
         url = urlsplit(self.path)
+        if url.path=='/api/connection-switch':
+            try:
+                query=parse_qs(url.query)
+                if (set(query)!={'request_id'} or len(query['request_id'])!=1
+                        or not re.fullmatch('[0-9a-f]{32}',query['request_id'][0])):raise ValueError('Invalid switch result query')
+                switch=self.server.controller.connection_switch
+                state=self.server.controller.snapshot();result=state['connection_switch']
+                if result.get('request_id')!=query['request_id'][0]:raise ValueError('Switch request is not current')
+                return self.reply(200,dict(connection_switch={key:result.get(key) for key in (
+                    'busy','phase','request_id','attempt_id','target','source','receipt','error','cleanup_error','source_released','unchanged')}))
+            except (ValueError,TypeError) as error:return self.reply(400,dict(error=str(error)))
+            except Exception:return self.reply(503,dict(error='Switch result unavailable'))
         if url.path=='/api/task-view':
             try:
                 from task_view import scope
                 query=parse_qs(url.query)
                 if set(query)!={'task_id'} or len(query['task_id'])!=1:raise ValueError('Invalid task view query')
                 options=self._task_view_options()
-                return self.reply(200,scope(self.server.controller,query['task_id'][0],read_groups=options.get('read_groups')))
+                result=scope(self.server.controller,query['task_id'][0],read_groups=options.get('read_groups'))
+                if not result['current'] and not os.environ.get('WUJI_FLEET_PARENT') and hasattr(self.server,'_fleet'):
+                    # Resolve solely through the registered task/fleet records;
+                    # a browser can never supply a controller URL or child ID.
+                    tasks=self.server.tasks.snapshot().get('tasks',[])
+                    matches=[r for r in tasks if r.get('task_id')==query['task_id'][0]
+                             and r.get('endpoint_id')!='main' and r.get('status') not in ('disconnected','conflict')]
+                    if len(matches)==1:
+                        with self.server.fleet.lock:child=self.server.fleet.children.get(matches[0]['endpoint_id'])
+                        if child is not None:
+                            result=self.server.fleet.get(child,'/api/task-view?task_id='+query['task_id'][0])
+                return self.reply(200,result)
             except (ValueError,TypeError) as error:return self.reply(400,dict(error=str(error)))
             except Exception:return self.reply(503,dict(error='Task owner state unavailable'))
         if url.path=='/api/task-sessions':
@@ -1289,6 +1375,28 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         origin = self.headers.get('Origin')
+        if self.path=='/api/connection-switch-owner-check':
+            if not self.allowed_host() or os.environ.get('WUJI_FLEET_PARENT') or origin or not hasattr(self.server,'_fleet'):
+                return self.reply(403,dict(ok=False,error='Registered child controller required'))
+            try:
+                size=int(self.headers.get('Content-Length','0'))
+                if not 0<size<=2048:raise ValueError('Invalid child switch check')
+                payload=json.loads(self.rfile.read(size))
+                if not isinstance(payload,dict) or set(payload)!={'workspace','request_id','attempt_id','expected_owner'}:
+                    raise ValueError('Invalid child switch fields')
+                if not re.fullmatch('[0-9a-f]{16}',str(payload['workspace'])):raise ValueError('Invalid child workspace')
+                with self.server.fleet.lock:child=self.server.fleet.children.get(payload['workspace'])
+                if child is None or not child.get('owner_token') or not secrets.compare_digest(self.headers.get('X-Workbench-Owner',''),child['owner_token']):
+                    return self.reply(403,dict(ok=False,error='Registered child controller required'))
+                state=self.server.fleet.get(child,'/api/state');transition=state.get('connection_switch') or {}
+                from task_sessions import context_digest
+                if (transition.get('busy') is not True or transition.get('request_id')!=payload['request_id']
+                        or transition.get('attempt_id')!=payload['attempt_id'] or context_digest(state)!=payload['expected_owner']):
+                    raise ValueError('Child switch owner changed')
+                self.server.switch_siblings_idle(payload['workspace'])
+                return self.reply(200,dict(ok=True))
+            except (ValueError,TypeError,OSError) as error:return self.reply(400,dict(ok=False,error=str(error)[:700]))
+            except Exception:return self.reply(503,dict(ok=False,error='Parent workspace ownership unavailable'))
         if self.path=='/api/task-owner':
             parent=os.environ.get('WUJI_FLEET_PARENT','')
             token=os.environ.get('WUJI_FLEET_OWNER_TOKEN','')
@@ -1552,12 +1660,21 @@ class ConsoleHTTPServer(ThreadingHTTPServer):
             return self._update_notifications
 
     def configure_official_cli(self,startup=True):
-        def check_workspaces(check,allow_local_viewer=None):
+        def check_workspaces(check,allow_local_viewer=None,allow_local_device=None,exclude_workspace=None):
             from managed_runtime import status as runtime_status
             if runtime_status().get('busy'):raise ValueError('Wait for control environment installation')
             if getattr(self.controller,'desktop_closing',False):raise ValueError('Workbench is closing')
             def one(state,doctor,local=False):
-                check(state,doctor)
+                checked=state
+                local_switch=getattr(self.controller,'connection_switch',None)
+                if local and local_switch is not None and local_switch.internal:
+                    checked=copy.deepcopy(state);checked['connection_switch']={}
+                    if allow_local_device is not None:
+                        from connection_switch import owner
+                        if owner(state)!=allow_local_device:raise ValueError('Device owner changed before preflight')
+                        checked.update(connection='disconnected',glove={'busy':False},hardware={'active':False},
+                            recording={'active':False},unconfirmed_devices=[],program={'active':False})
+                check(checked,doctor)
                 transition=state.get('calibration_connection') or {}
                 if transition.get('busy') and not (local and self.controller.calibration_handover.internal):
                     raise ValueError('另一个工作区正在切换设备任务 / Another workspace is switching device tasks')
@@ -1565,6 +1682,10 @@ class ConsoleHTTPServer(ThreadingHTTPServer):
                 local_teleop=getattr(self.controller,'teleoperation_handover',None)
                 if teleoperation.get('busy') and not (local and local_teleop is not None and local_teleop.internal):
                     raise ValueError('另一个工作区正在切换遥操作任务 / Another workspace is switching teleoperation tasks')
+                switch=state.get('connection_switch') or {}
+                local_switch=getattr(self.controller,'connection_switch',None)
+                if switch.get('busy') and not (local and local_switch is not None and local_switch.internal):
+                    raise ValueError('另一个工作区正在切换设备 / Another workspace is switching devices')
                 continuation=state.get('calibrated_teleoperation') or {}
                 local_continuation=getattr(self.controller,'calibrated_teleoperation',None)
                 if continuation.get('busy') and not (local and local_continuation is not None and local_continuation.internal):
@@ -1581,13 +1702,15 @@ class ConsoleHTTPServer(ThreadingHTTPServer):
             if hasattr(self,'_fleet'):
                 with self.fleet.lock:records=list(self.fleet.children.values())
                 for row in records:
+                    if exclude_workspace is not None and row.get('id')==exclude_workspace:continue
                     try:one(self.fleet.get(row,'/api/state'),self.fleet.get(row,'/api/doctor'))
                     except OSError:raise ValueError('无法确认另一个工作区状态 / Another workspace state is unavailable') from None
         def all_idle():
             from studio_component import require_idle
             handover=self.controller.calibration_handover
             teleoperation=getattr(self.controller,'teleoperation_handover',None)
-            token=handover.viewer_token if handover.internal else teleoperation.viewer_token if teleoperation is not None and teleoperation.internal else None
+            switch=getattr(self.controller,'connection_switch',None)
+            token=handover.viewer_token if handover.internal else teleoperation.viewer_token if teleoperation is not None and teleoperation.internal else switch.viewer_token if switch is not None and switch.internal else None
             check_workspaces(require_idle,token)
         def scan_idle():
             from bridge_config import load_config
@@ -1596,6 +1719,7 @@ class ConsoleHTTPServer(ThreadingHTTPServer):
             if use_native(load_config()):check_workspaces(require_discovery_idle)
             else:all_idle()
         self.controller.official_cli.idle_check=all_idle
+        self.switch_siblings_idle=lambda ident:check_workspaces(__import__('studio_component').require_idle,exclude_workspace=ident)
         self.controller.official_viz.idle_check=all_idle
         self.controller.official_viz.scan_check=scan_idle
         self.controller.calibration.device_provider=self.controller.calibration_devices
@@ -1611,6 +1735,13 @@ class ConsoleHTTPServer(ThreadingHTTPServer):
             check_workspaces(require_idle,token)
         self.firmware_preview_idle=firmware_preview_idle
         if hasattr(self.controller,'teleoperation_handover'):self.controller.teleoperation_handover.idle_check=all_idle
+        if hasattr(self.controller,'connection_switch'):self.controller.connection_switch.idle_check=all_idle
+        if hasattr(self.controller,'connection_switch'):
+            def switch_preflight(source):
+                from studio_component import require_idle
+                token=source['session'] if source and source['mode']=='official' else None
+                check_workspaces(require_idle,token,source)
+            self.controller.connection_switch.preflight_check=switch_preflight
         if hasattr(self.controller,'calibrated_teleoperation'):self.controller.calibrated_teleoperation.idle_check=all_idle
         def profile_read_idle():
             # Native user list/show reads local SDK files, not a device. A

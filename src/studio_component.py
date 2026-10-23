@@ -69,6 +69,8 @@ def enforce_session_owner(command,folder=None):
 
 
 def require_idle(state,doctor=None):
+    from connection_switch import unsettled
+    if unsettled(state):raise ValueError('Device switch or SDK cleanup is unconfirmed')
     from device_termination import unconfirmed
     if (state.get('connection')!='disconnected' or state.get('hardware',{}).get('active') is not False
         or state.get('glove',{}).get('busy') or state.get('calibration',{}).get('running')

@@ -105,13 +105,18 @@ def scope(controller,task_id,*,read_groups=None):
     if not isinstance(task_id,str) or not TASK.fullmatch(task_id):raise ValueError('Invalid task view identity')
     state=controller.snapshot()
     if not isinstance(state,dict):raise ValueError('Task owner state is unavailable')
-    return _scope(state,task_id,read_groups)[0]
+    result=_scope(state,task_id,read_groups)[0]
+    receipt=(state.get('connection_switch') or {}).get('receipt')
+    if (result['current'] and isinstance(receipt,dict) and receipt.get('version')==1
+            and receipt.get('target_task_id')==task_id and receipt.get('after_context')==result['owner_context']):
+        result['last_transition_receipt']=copy.deepcopy(receipt)
+    return result
 
 
 def _command(command,resource):
     if not isinstance(command,dict) or not isinstance(command.get('name'),str):raise ValueError('Invalid task command')
     name=command['name']
-    if resource.get('recovery') and name not in ('glove_stop','glove_disconnect','hardware_stop'):
+    if resource.get('recovery') and name not in ('glove_stop','glove_disconnect','hardware_stop','connection_switch','connection_switch_users'):
         raise ValueError('手套会话需要先结束，请在原任务中暂停或断开 / Pause or disconnect the failed glove session first')
     if resource['kind']=='ensemble':
         if name not in GROUP_ACTIONS or command.get('workspace')!=resource['group_id']:
@@ -127,6 +132,10 @@ def _command(command,resource):
         return
     if name.startswith(('workspace_','ensemble_','fleet_','task_')):
         raise ValueError('A device task cannot act as a workspace controller')
+    if name in ('connection_switch','connection_switch_users'):
+        # Cross-device selection is validated by the transaction, after this
+        # exact source task/context has been checked under workflow_lock.
+        return
     if name in ('connect','official_viz_start','calibration_start','calibration_handover','teleoperation_handover'):
         if command.get('serial')!=resource['serial']:raise ValueError('Task command selects another device')
     if name=='glove_open' and (resource['kind']!='glove' or command.get('serial')!=resource['serial']):
@@ -163,6 +172,7 @@ def execute(controller,task_id,expected_context,command,*,read_groups=None,group
         # read must match the after epoch; this is never a general stale bypass.
         if isinstance(result,dict):
             result=dict(result);result.pop('task_receipt',None)
+            result.pop('task_transition_receipt',None)
             # Controller methods return payloads; Handler adds the public ok
             # flag only after execute returns. Explicit failure is never a
             # receipt, including a payload supplied by a service adapter.
@@ -171,6 +181,14 @@ def execute(controller,task_id,expected_context,command,*,read_groups=None,group
                 if after['current']:
                     result['task_receipt']=dict(task_id=task_id,before_context=expected_context,
                         after_context=after['owner_context'])
+                if command.get('name')=='connection_switch':
+                    transition=result.get('connection_switch_receipt')
+                    if (isinstance(transition,dict) and transition.get('version')==1
+                            and transition.get('source_task_id')==task_id
+                            and transition.get('expected_owner')==command.get('expected_owner')):
+                        target,_=_scope(controller.snapshot(),transition.get('target_task_id'),groups)
+                        if target['current'] and target['owner_context']==transition.get('after_context'):
+                            result['task_transition_receipt']=copy.deepcopy(transition)
         return result
     # The continuation worker itself holds workflow_lock. Its cancel is the
     # sole fast path: a complete run/attempt pair is rechecked atomically by

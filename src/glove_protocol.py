@@ -7,6 +7,38 @@ class CancellationNotDispatched(ValueError):
 COMMANDS = {'glove_session','glove_scan','glove_hand_scan','glove_open','glove_prepare',
             'glove_follow','glove_keepalive','glove_stop','glove_disconnect','glove_unpair','glove_retarget','glove_solver'}
 
+def validate_cleanup(value):
+    """A worker release acknowledgement, never a new device-control command."""
+    fields={'version','glove_serial','sdk_user_id','profile','glove_was_open',
+            'subscription_closed','glove_disconnected','solver_cleanup',
+            'user_restored','ownership_released','profile_lease_released','selection_lease_released','hand_released','retryable'}
+    if not isinstance(value,dict) or set(value)!=fields or type(value.get('version')) is not int or value['version']!=1:
+        raise ValueError('Controller glove cleanup acknowledgement is unavailable')
+    for key in ('glove_serial','sdk_user_id'):
+        if not isinstance(value[key],str) or not re.fullmatch(r'[A-Za-z0-9_.-]{0,100}',value[key]):
+            raise ValueError('Invalid glove cleanup identity')
+    if not isinstance(value['profile'],str) or not re.fullmatch(r'hand[12]_(left|right)',value['profile']):
+        raise ValueError('Invalid glove cleanup target profile')
+    if value['solver_cleanup'] not in ('not_open','closed','sdk_no_close_api','unconfirmed'):
+        raise ValueError('Invalid glove solver cleanup acknowledgement')
+    if any(type(value[k]) is not bool for k in fields-{'version','glove_serial','sdk_user_id','profile','solver_cleanup'}):
+        raise ValueError('Invalid glove cleanup confirmation')
+    if value['glove_was_open'] and not value['glove_serial']:
+        raise ValueError('Missing released glove identity')
+    if value['retryable'] and value['solver_cleanup']!='unconfirmed' and all(value[k] for k in (
+            'subscription_closed','glove_disconnected','user_restored','ownership_released',
+            'profile_lease_released','selection_lease_released','hand_released')):
+        raise ValueError('Glove cleanup acknowledgement has contradictory retry state')
+    return dict(value)
+
+
+def cleanup_confirmed(value):
+    value=validate_cleanup(value)
+    return value['solver_cleanup']!='unconfirmed' and all(value[k] for k in (
+        'subscription_closed','glove_disconnected','user_restored',
+        'ownership_released','profile_lease_released','selection_lease_released','hand_released'))
+
+
 def validate(c):
     if not isinstance(c,dict) or c.get('name') not in COMMANDS:
         raise ValueError('Unknown glove operation')

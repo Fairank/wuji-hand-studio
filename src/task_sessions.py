@@ -38,6 +38,13 @@ def sdk_recovery(state):
         return None
     number=serial(glove.get('glove_serial'));worker_profile=glove.get('profile')
     if worker_profile is not None and worker_profile!=profile['id']:return None
+    cleanup=object_value(glove.get('session_cleanup'));identity=object_value(cleanup.get('identity'))
+    if (cleanup.get('retryable') is True and cleanup.get('session_id')==glove['session_id']
+            and set(identity)=={'glove_serial','sdk_user_id','profile'}
+            and serial(identity.get('glove_serial')) and identity.get('profile')==profile['id']
+            and isinstance(identity.get('sdk_user_id'),str)
+            and number in (None,identity['glove_serial'])):
+        return identity['glove_serial']
     if number and worker_profile==profile['id'] and isinstance(object_value(glove.get('user')).get('user_id'),str):
         return number
     proofs=[]
@@ -96,6 +103,8 @@ def context_digest(state):
     value = dict(hand=state.get('device_id'), identity=state.get('identified_device'),
                  generation=state.get('session_generation'), profile=profile.get('id'),
                  glove=glove.get('glove_serial'), session=glove.get('session_id'),glove_profile=glove.get('profile'),
+                 cleanup_identity=object_value(glove.get('session_cleanup')).get('identity')
+                    if object_value(glove.get('session_cleanup')).get('retryable') is True else None,
                  user=object_value(glove.get('user')).get('user_id'),
                  model={key:provenance.get(key) for key in ('source_run_id','model_sha256','owner_user_id')},
                  target=feedback.get('device_id'), target_identity=feedback.get('identified_device'),
@@ -278,7 +287,9 @@ class TaskSessions:
                               label_zh=label_zh,label_en=label,
                               status=observed['status'], devices=dict(hand=observed['hand'], glove=observed['glove']),
                               intent=dict(profile_id=observed['profile'], side=side,
-                                          sdk_user=object_value(object_value(state.get('glove')).get('user')).get('user_id')),
+                                          sdk_user=object_value(object_value(object_value(state.get('glove')).get('session_cleanup')).get('identity')).get('sdk_user_id')
+                                            if observed.get('recovery') and object_value(object_value(state.get('glove')).get('session_cleanup')).get('retryable') is True
+                                            else object_value(object_value(state.get('glove')).get('user')).get('user_id')),
                               observed=dict(stale=observed['stale'], hardware_active=observed['active'],
                                             source=observed['source'], session=observed['session'],
                                             continuation_verified=continuation_verified,

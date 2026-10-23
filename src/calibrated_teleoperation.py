@@ -114,7 +114,7 @@ class CalibratedTeleoperation:
                 state.update(phase='idle',error=None,cleanup_error=None,sdk_session=None,attempt_id=None,connected=False)
         return {**state,**offered}
 
-    def execute(self,command):
+    def execute(self,command,*,synchronous=False):
         if (not isinstance(command,dict) or set(command)!={'run_id','expected_revision'}
                 or not isinstance(command['run_id'],str) or not re.fullmatch('[0-9a-f]{32}',command['run_id'])
                 or not isinstance(command['expected_revision'],str) or not re.fullmatch('[0-9a-f]{64}',command['expected_revision'])):
@@ -131,8 +131,10 @@ class CalibratedTeleoperation:
             self.state.update(busy=True,phase='validating',error=None,cleanup_error=None,sdk_session=None,connected=False,
                 run_id=proof['source_run_id'],serial=proof['serial'],side=proof['side'],profile=proof['source_profile'],
                 model_sha256=proof['model_sha256'],expected_revision=proof['expected_revision'],attempt_id=secrets.token_hex(16))
-            self.thread=threading.Thread(target=self._work,args=(proof,),name='Calibrated glove continuation',daemon=True)
-            self.thread.start()
+            if not synchronous:
+                self.thread=threading.Thread(target=self._work,args=(proof,),name='Calibrated glove continuation',daemon=True)
+                self.thread.start()
+        if synchronous:self._work(proof)
         return self.snapshot()
 
     def _work(self,proof):

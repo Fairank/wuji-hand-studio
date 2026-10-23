@@ -169,13 +169,15 @@ class SDKOnlyWorkerTests(unittest.TestCase):
         binding=dict(generation='hand2',side='right',glove_serial='SYNTHETIC-GLOVE',hand_serial='',sdk_user='owner')
         commands.put(dict(name='glove_open',serial='SYNTHETIC-GLOVE',user_id='owner',timeout_ms=250,
                           solver=dict(engine='official_open',values=defaults(binding))))
+        solver=N(step=lambda _:[0.]*20,info={},close=Mock())
         with patch.dict(sys.modules,wuji_sdk=sdk),patch.dict(os.environ,WUJI_HAND_PROFILE='hand2_right'), \
                 patch('glove_agent.sys.platform','win32'),patch('glove_agent.GloveSource',Source), \
                 patch('glove_agent.queue.Queue',Requests),patch('glove_agent.paired_hand_worker') as hand, \
-                patch('solver_session.SolverSession',return_value=N(step=lambda _:[0.]*20,info={})) as open_solver:
+                patch('solver_session.SolverSession',return_value=solver) as open_solver:
             worker_glove(commands,events)
         self.assertEqual(phase[0],3,list(events.queue));self.assertEqual(hardware,[])
         hand.assert_not_called();sdk.RetargetSession.for_hand.assert_not_called();open_solver.assert_called_once()
+        solver.close.assert_called_once()
 
 
 class SDKConnectionDefaultsTests(unittest.TestCase):

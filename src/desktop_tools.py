@@ -12,6 +12,8 @@ OPERATIONS = ('inspect', 'capture', 'page', 'resize', 'appearance', 'menu',
 
 
 def idle(state, doctor):
+    from connection_switch import unsettled
+    if unsettled(state):return False
     if state.get('maintenance',{}).get('busy') is True:return False
     return (state.get('connection') == 'disconnected'
             and not state.get('glove', {}).get('busy')

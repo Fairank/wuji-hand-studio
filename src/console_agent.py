@@ -39,6 +39,9 @@ def validate_command(command):
     if not isinstance(command, dict):
         raise ValueError('Invalid request')
     name = command.get('name')
+    if name=='sdk_user_catalog':
+        if set(command)!={'name'}:raise ValueError('Invalid SDK wearer read')
+        return command
     if isinstance(name,str) and name.startswith('glove_'):
         from glove_protocol import validate
         return validate(command)
@@ -393,6 +396,12 @@ def main():
                 try:
                     command = validate_command(json.loads(line))
                     name = command['name']
+                    if name=='sdk_user_catalog':
+                        if process:raise ValueError('Wearer metadata requires a separate read-only session')
+                        from sdk_user_catalog import main as read_catalog
+                        try:emit(dict(type='sdk_user_catalog',catalog=read_catalog()))
+                        except Exception as error:emit(dict(type='sdk_user_catalog',error=str(error)[:700]))
+                        break
                     if name=='discover':
                         if process:raise ValueError('Discovery requires a separate session')
                         from device_discovery import scan_only

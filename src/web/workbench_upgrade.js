@@ -13,6 +13,23 @@
  let taskScope=null;
  if(taskView){
   const rawFetch=window.fetch.bind(window),app=document.querySelector('.app');
+  const switchRequests=new Map();
+  const stable=value=>JSON.stringify(value,(_,item)=>item&&typeof item==='object'&&!Array.isArray(item)?Object.fromEntries(Object.keys(item).sort().map(key=>[key,item[key]])):item);
+  async function verifySwitch(requestId,receipt){
+   const command=switchRequests.get(requestId),target=command?.target;
+   if(!command||receipt?.version!==1||receipt.request_id!==requestId||!/^[a-f0-9]{32}$/.test(receipt.attempt_id||'')||receipt.source_task_id!==taskViewId||receipt.expected_owner!==command.expected_owner||!/^[a-f0-9]{64}$/.test(receipt.after_context||'')||!/^[A-Za-z0-9_-]{1,80}$/.test(receipt.target_task_id||'')||receipt.target?.mode!==target.mode||receipt.target?.serial!==target.serial||Object.hasOwn(target,'user_id')&&receipt.target.user_id!==target.user_id||target.profile&&receipt.target.profile!==target.profile)throw Error(t('切换回执与本次任务不符，请核对当前设备。','The switch receipt does not match this task. Review the current device.'));
+   const r=await rawFetch('/api/task-view?task_id='+encodeURIComponent(receipt.target_task_id),{cache:'no-store',signal:AbortSignal.timeout(6000)}),proof=r.ok?await r.json():null;
+   if(proof?.current!==true||proof.owner_context!==receipt.after_context||stable(proof.last_transition_receipt)!==stable(receipt))throw Error(t('新任务归属尚未核对，未采用切换回执。','The new task owner is unverified. The switch receipt was not accepted.'));
+   if(receipt.target_task_id!==taskViewId){
+    invalidate(t('连接已切换，正在打开新的设备任务。','The connection switched. Opening its new device task.'));
+    if(parentOrigin&&window.parent!==window)window.parent.postMessage({type:'wb-task-switch',task_id:taskViewId,receipt},parentOrigin);
+    return {verified:true,routed:true};
+   }
+   await refreshScope(true);const deadline=performance.now()+6000;
+   while(!current||!parentCurrent||!stateReady||context!==receipt.after_context){if(performance.now()>deadline)throw Error(t('新连接正在核对，请查看当前任务。','The new connection is being verified. Review the current task.'));await new Promise(resolve=>setTimeout(resolve,25));}
+   return {verified:true,routed:false};
+  }
+  window.WujiTaskConnectionSwitch={accept:(requestId,receipt)=>verifySwitch(requestId,receipt)};
   const notice=document.createElement('p');notice.id='task-scope-notice';notice.setAttribute('role','status');
   Object.assign(notice.style,{position:'fixed',inset:'16px 16px auto',zIndex:'1000',margin:'0',padding:'14px 16px',borderRadius:'12px',background:'var(--wb-card,#f5f5f7)',color:'var(--wb-ink,#1d1d1f)',border:'1px solid var(--wb-line,#ddd)'});document.body.append(notice);
   let current=false,parentCurrent=false,parentRevision=null,context=null,epoch=0,reading=null,checkedAt=0,reason='',lastPublished='',stateReady=false,clearing=false;
@@ -41,12 +58,15 @@
    const write=!['GET','HEAD'].includes(request.method),owned=write||ownedReads.has(url.pathname);
    if(!owned)return rawFetch(request);
    await refreshScope(write);if(!current||!parentCurrent||(write&&!stateReady))throw Error(t('此任务归属未确认，操作未发送。','This task owner is unverified. No operation was sent.'));
+   let switchCommand=null;if(write&&url.pathname==='/api/action')try{const command=await request.clone().json();if(command?.name==='connection_switch'&&/^[a-f0-9]{32}$/.test(command.request_id||'')){switchCommand=command;switchRequests.set(command.request_id,command);if(switchRequests.size>32)switchRequests.delete(switchRequests.keys().next().value);}}catch{}
    const sentContext=context,sentEpoch=epoch,headers=new Headers(request.headers);headers.set('X-Task-Id',taskViewId);headers.set('X-Task-Context',sentContext);
    const response=await rawFetch(new Request(request,{headers}));
    if(!write||response.ok)await refreshScope(true);
+   let switchVerified=false;
+   if(switchCommand&&response.ok){const value=await response.clone().json();if(value?.ok===true&&value.connection_switch?.unchanged!==true){if(stable(value.task_transition_receipt)!==stable(value.connection_switch_receipt))throw Error(t('切换回执尚未核对，请查看当前设备任务。','The switch receipt is unverified. Review the current device task.'));const checked=await verifySwitch(switchCommand.request_id,value.task_transition_receipt);switchVerified=checked.verified;Object.defineProperties(response,{connectionSwitchVerified:{value:true},connectionSwitchRouted:{value:checked.routed}});if(checked.routed)return response;}}
    if(!current||!parentCurrent||sentContext!==context||sentEpoch!==epoch){
-    let acceptedTransition=false;
-    if(write&&response.ok)try{
+    let acceptedTransition=switchVerified;
+    if(!acceptedTransition&&write&&response.ok)try{
      const value=await response.clone().json(),receipt=value?.task_receipt;
      if(value?.ok===true&&receipt&&typeof receipt==='object'&&!Array.isArray(receipt)&&Object.keys(receipt).length===3&&receipt.task_id===taskViewId&&receipt.before_context===sentContext&&typeof receipt.after_context==='string'&&/^[a-f0-9]{64}$/.test(receipt.after_context)){
       // Only the server's receipt for this exact accepted command can bridge
@@ -255,6 +275,24 @@
  function taskRoute(id,page){const item=taskFrames.get(id);if(!item||!item.allowed||!taskPages.has(page)||['official-viz','calibration'].includes(page)&&!item.allowNative)return false;item.page=page;if(item.ready)item.frame.contentWindow?.postMessage({type:'wb-task-route',task_id:id,page},item.origin);return true;}
  window.addEventListener('message',event=>{if(embedded||event.data?.type!=='wb-task-scope')return;const id=event.data.task_id,item=taskFrames.get(id);if(!item||event.source!==item.frame.contentWindow||event.origin!==item.origin||event.data.owner_revision!==item.revision)return;const value=event.data;item.scopeVerified=item.allowed&&value.current===true&&typeof value.owner_context==='string'&&/^[a-f0-9]{64}$/.test(value.owner_context);item.ownerContext=item.scopeVerified?value.owner_context:null;if(item.allowed)item.reason=item.scopeVerified?'':typeof value.reason==='string'?value.reason.slice(0,500):taskScopeReason();taskApplyVisibility(item);window.dispatchEvent(new CustomEvent('task-view-scope',{detail:{task_id:id}}));});
  window.HandSessions={show(id){if(window.TaskWorkspace?.openEndpoint?.(id))return;switchTo(id);},refresh:()=>fleetRefresh(),taskFrames:{mount:mountTaskFrame,update:taskUpdate,current:taskCurrent,suspend:taskSuspend,setVisible:taskVisibility,route:taskRoute,inspect:id=>{const item=taskFrames.get(id);return item?{endpoint:item.endpoint,origin:item.origin,loads:item.loads,visible:item.visible,allowNative:item.allowNative,verified:item.scopeVerified,blockedReason:item.reason,primary:item.primary,revision:item.revision}:null;}}};
+ const routedSwitches=new Set();
+ const stableSwitch=value=>JSON.stringify(value,(_,item)=>item&&typeof item==='object'&&!Array.isArray(item)?Object.fromEntries(Object.keys(item).sort().map(key=>[key,item[key]])):item);
+ window.addEventListener('message',async event=>{
+  if(embedded||event.data?.type!=='wb-task-switch')return;
+  const sourceId=event.data.task_id,item=taskFrames.get(sourceId),receipt=event.data.receipt;
+  if(!item||event.source!==item.frame.contentWindow||event.origin!==item.origin||receipt?.version!==1||receipt.source_task_id!==sourceId||!/^[a-f0-9]{32}$/.test(receipt.request_id||'')||!/^[a-f0-9]{32}$/.test(receipt.attempt_id||'')||!/^[a-f0-9]{64}$/.test(receipt.expected_owner||'')||!/^[a-f0-9]{64}$/.test(receipt.after_context||'')||routedSwitches.has(receipt.request_id))return;
+  try{
+   await window.TaskWorkspace?.refresh();const snapshot=window.TaskWorkspace?.snapshot(),target=snapshot?.tasks.find(task=>task.task_id===receipt.target_task_id),serial=receipt.target?.serial;
+   if(!target||target.endpoint_id!==item.endpoint||target.view?.origin!==item.origin||!taskCurrent(target)||!serial||![taskDeviceSN(target.devices?.glove),taskDeviceSN(target.devices?.hand)].includes(serial))return;
+   const r=await fetch('/api/task-view?task_id='+encodeURIComponent(target.task_id),{cache:'no-store',signal:AbortSignal.timeout(6000)}),proof=r.ok?await r.json():null;
+   if(proof?.current!==true||proof.owner_context!==receipt.after_context||stableSwitch(proof.last_transition_receipt)!==stableSwitch(receipt))return;
+   routedSwitches.add(receipt.request_id);
+   // A later close or navigation is newer human intent. Keep its task tab,
+   // without reopening a view the user just dismissed or replacing another task.
+   if(snapshot.closed.includes(sourceId)||snapshot.selected!==sourceId||location.hash!=='#tasks')return;
+   window.TaskWorkspace.reopen(target.task_id);
+  }catch{/* Leave the source frozen; a later explicit task open rechecks its owner. */}
+ });
  window.addEventListener('wuji-language',()=>{for(const [id,item]of taskFrames)if(item.ready)item.frame.contentWindow?.postMessage({type:'wb-task-language',task_id:id,language:L.lang},item.origin);});
  let fleetBusy=false,fleetViewKey='',fleetChoicesKey='';
  const fleetStop=document.createElement('button');fleetStop.type='button';fleetStop.className='danger';

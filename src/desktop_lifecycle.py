@@ -11,6 +11,8 @@ def calibration_cleanup_required(state):
                 and run.get('cleanup_confirmed') is not True))
 
 def needs_confirmation(state):
+    from connection_switch import unsettled
+    if unsettled(state):return True
     return (state.get('maintenance',{}).get('busy') is True
             or state.get('connection')!='disconnected' or state.get('glove',{}).get('busy',False)
             or state.get('official_studio',{}).get('reserved',False) or state.get('official_studio',{}).get('busy',False)
@@ -22,11 +24,14 @@ def needs_confirmation(state):
             or calibration_cleanup_required(state)
             or state.get('calibration_connection',{}).get('busy',False)
             or state.get('teleoperation_connection',{}).get('busy',False)
+            or state.get('connection_switch',{}).get('busy',False)
             or state.get('calibrated_teleoperation',{}).get('busy',False)
             or state.get('hardware',{}).get('active') is not False or bool(unconfirmed(state)))
 
 def close_sessions(controller, timeout=6., clock=time.monotonic, sleep=time.sleep):
     state=controller.snapshot()
+    from connection_switch import unsettled
+    if unsettled(state):return dict(ok=False,error='设备切换或退出尚未确认 / Device switch or cleanup is unconfirmed')
     if state.get('maintenance',{}).get('busy') is True:
         return dict(ok=False,error='设备维护仍在进行，请等待官方流程结束后关闭软件 / Device maintenance is still in progress; wait for the official workflow to finish before closing')
     # A handover can be between releasing its Viewer and publishing its new
@@ -36,6 +41,8 @@ def close_sessions(controller, timeout=6., clock=time.monotonic, sleep=time.slee
         return dict(ok=False,error='标定任务正在切换，请等待完成或在原任务中取消后重试 / Calibration handover is still in progress; wait or cancel it in its owning task before retrying')
     if state.get('teleoperation_connection',{}).get('busy'):
         return dict(ok=False,error='遥操作任务正在切换，请等待完成或在原任务中取消后重试 / Teleoperation handover is still in progress; wait or cancel it in its owning task before retrying')
+    if state.get('connection_switch',{}).get('busy'):
+        return dict(ok=False,error='设备正在切换，请等待退出确认 / Device switch is waiting for confirmed cleanup')
     continuation=getattr(controller,'calibrated_teleoperation',None)
     if state.get('calibrated_teleoperation',{}).get('busy'):
         if continuation is None or not continuation.cancel_and_wait(timeout):

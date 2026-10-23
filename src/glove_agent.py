@@ -141,7 +141,7 @@ def worker_glove(requests,events,continuation=None,sdk_requirement=None):
     from retarget_settings import OutputMapping, defaults
     mapping=OutputMapping(defaults())
     sdk_q=None;latest_kp=None;glove_ownership=None;profile_lease=None;solver_engine='sdk';selected_user_active=False
-    model_receipt=None;model_provenance=None
+    model_receipt=None;model_provenance=None;opened_user_id='';selection_lease_released=True;selection_lease=None
     hand_unpairing=False;hand_unpaired=False;hand_scan_error=''
     bootstrap_commands=collections.deque()
     class BootstrapCancelled(Exception):pass
@@ -227,6 +227,7 @@ def worker_glove(requests,events,continuation=None,sdk_requirement=None):
                                 from sdk_session import ProfileLease
                                 from device_ownership import DeviceOwnership
                                 profile_lease=ProfileLease()
+                                selection_lease_released=False
                                 selection_lease=ProfileLease(selection=True)
                                 glove_ownership=DeviceOwnership(c['serial'])
                             previous_user=manager.current_user()
@@ -249,33 +250,25 @@ def worker_glove(requests,events,continuation=None,sdk_requirement=None):
                             session=new_solver(c.get('solver',{}));solver_engine=c.get('solver',{}).get('engine','sdk')
                             sub=candidate.hand_skeleton().subscribe()
                         except Exception:
-                            if sub:
-                                try:sub.close()
-                                except Exception:pass
-                                sub=None
-                            if hasattr(session,'close'):
-                                try:session.close()
-                                except Exception:pass
-                            session=None
-                            disconnected=candidate is None
-                            try:
-                                if candidate:candidate.disconnect();disconnected=True
-                            except Exception:
-                                # Retain the candidate and its leases for outer
-                                # cleanup; never switch a still-connected device.
-                                glove=candidate
-                            finally:
-                                if disconnected:
-                                    try:
-                                        if switched and previous_user is not None:
-                                            manager.switch_user(previous_user['user_id']);current=manager.current_user();selected_user_active=False
-                                    finally:
-                                        if glove_ownership:glove_ownership.close();glove_ownership=None
-                                        if profile_lease:profile_lease.close();profile_lease=None
+                            # Every acquired resource reaches the same confirmed
+                            # cleanup loop. An early open failure must not drop
+                            # a failed subscription/solver close or its candidate.
+                            if candidate is not None:
+                                glove=candidate;glove_sn=c['serial'];opened_user_id=user_id
                             raise
                         finally:
-                            if selection_lease:selection_lease.close()
-                        glove=candidate;glove_sn=c['serial'];source=GloveSource(c['timeout_ms'])
+                            if selection_lease:
+                                try:
+                                    if selection_lease.close() is False:raise ValueError('SDK user selection release was not acknowledged')
+                                    selection_lease_released=True;selection_lease=None
+                                except Exception:
+                                    # The open succeeded before the lease's
+                                    # finalizer failed. Retain its actual handle
+                                    # for outer cleanup rather than losing it.
+                                    if candidate is not None:
+                                        glove=candidate;glove_sn=c['serial'];opened_user_id=user_id
+                                    raise
+                        glove=candidate;glove_sn=c['serial'];opened_user_id=user_id;source=GloveSource(c['timeout_ms'])
                         from device_versions import read_handle_version
                         device_version=read_handle_version(glove,glove_sn)
                         mapping=OutputMapping(c.get('retarget',defaults()));last_source_seq=None
@@ -337,6 +330,9 @@ def worker_glove(requests,events,continuation=None,sdk_requirement=None):
                             events.put(dict(type='glove_follow_rejected',device_id=serial,
                                 lease=nonce,message=str(e)[:400]))
                     message=str(e);events.put(dict(type='glove_notice',message=message))
+                    if c.get('name')=='glove_open' and any((glove is not None,sub is not None,session is not None,
+                            selected_user_active,glove_ownership is not None,profile_lease is not None,selection_lease is not None)):
+                        raise
                     if continuation is not None and c.get('name')=='glove_open':raise
             if glove is not None and now>=next_map:
                 next_map=now+1/120
@@ -410,45 +406,106 @@ def worker_glove(requests,events,continuation=None,sdk_requirement=None):
     except Exception as e:events.put(dict(type='glove_error',message=str(e)))
     finally:
         source.invalidate('连接已结束 / Session closed')
-        if hand_thread:
-            hand_requests.put(dict(name='disconnect'));hand_thread.join(timeout=4)
-        if sub:
-            try:sub.close()
-            except Exception:pass
+        subscription_closed=sub is None
+        solver_cleanup='not_open'
+        ownership_released=glove_ownership is None
+        profile_lease_released=profile_lease is None
+        user_restored=not selected_user_active
         glove_disconnected=glove is None
-        if glove:
-            try:glove.disconnect();glove_disconnected=True
-            except Exception:
-                events.put(dict(type='glove_notice',message='手套断开未确认，保留当前用户选择 / Glove disconnect unconfirmed; current SDK user selection retained'))
-        if session is not None and hasattr(session,'close'):
-            try:session.close()
-            except Exception:pass
-        if glove_ownership:glove_ownership.close()
-        # Keep the chosen SDK user for the entire connected glove lifetime.
-        # Profile data remains leased while restoring the previous selection.
-        try:
-            if (manager is not None and selected_user_active and previous_user is not None and
-                    glove_disconnected and not (hand_thread and hand_thread.is_alive())):
-                from contextlib import nullcontext
-                from sdk_session import ProfileLease
-                with ProfileLease(selection=True) if sys.platform.startswith('linux') else nullcontext():
-                    manager.switch_user(previous_user['user_id'])
-        except Exception:
-            events.put(dict(type='glove_notice',message='手套已断开，旧用户选择未恢复 / Glove disconnected; previous SDK user selection was not restored'))
-        finally:
-            if profile_lease:profile_lease.close()
+        restore_selection_lease=None
         final_hardware=copy.deepcopy(hand_state.get('hardware',{}))
         final_device=hand_state.get('device_id') or hand_identity.get('serial')
         final_cleanup=hand_state.get('cleanup_confirmed') is True
+        # An unsuccessful SDK close retains its original handle and leases.
+        # No timed/background retry: another explicit disconnect is required.
         while True:
-            try:e=hand_events.get_nowait()
-            except queue.Empty:break
-            if e['type']=='closed':final_hardware=e.get('hardware',{})
-            elif e['type']=='identity':final_device=e.get('device_id')
-            elif e['type']=='state':final_device=e.get('device_id') or final_device
-            elif e['type']=='hand_session_closed':final_cleanup=e.get('cleanup_confirmed') is True
-        if hand_thread and (hand_thread.is_alive() or not final_hardware):
-            final_hardware=dict(active=None,stop_confirmed=False,reason='停用结果未确认 / Disable not confirmed')
-            final_cleanup=False
-        events.put(dict(type='glove_closed',hardware=final_hardware,device_id=final_device,
-            hand_cleanup_confirmed=final_cleanup))
+            if hand_thread and hand_thread.is_alive():
+                hand_requests.put(dict(name='disconnect'));hand_thread.join(timeout=4)
+            if not subscription_closed:
+                try:
+                    if sub.close() is False:raise ValueError('Subscription close was not acknowledged')
+                    subscription_closed=True
+                except Exception:pass
+            if not glove_disconnected:
+                try:
+                    if glove.disconnect() is False:raise ValueError('Glove disconnect was not acknowledged')
+                    glove_disconnected=True
+                except Exception:pass
+            if session is not None:
+                if callable(getattr(session,'close',None)):
+                    try:
+                        if session.close() is False:raise ValueError('Solver close was not acknowledged')
+                        solver_cleanup='closed';session=None
+                    except Exception:solver_cleanup='unconfirmed'
+                else:
+                    # Pinned SDK RetargetSession has step/reset but no close.
+                    solver_cleanup='sdk_no_close_api' if solver_engine=='sdk' else 'unconfirmed'
+                    if solver_cleanup!='unconfirmed':session=None
+            if selection_lease is not None and not selection_lease_released:
+                try:
+                    if selection_lease.close() is False:raise ValueError('Selection lease release was not acknowledged')
+                    selection_lease_released=True;selection_lease=None
+                except Exception:pass
+            if restore_selection_lease is not None and not selection_lease_released:
+                try:
+                    if restore_selection_lease.close() is False:raise ValueError('Selection lease release was not acknowledged')
+                    selection_lease_released=True;restore_selection_lease=None
+                except Exception:pass
+            handles_closed=subscription_closed and glove_disconnected and solver_cleanup!='unconfirmed'
+            hand_finished=hand_thread is None or not hand_thread.is_alive()
+            if handles_closed and hand_finished and selection_lease_released:
+                if not user_restored and manager is not None and previous_user is not None:
+                    try:
+                        if sys.platform.startswith('linux'):
+                            from sdk_session import ProfileLease
+                            restore_selection_lease=ProfileLease(selection=True);selection_lease_released=False
+                        manager.switch_user(previous_user['user_id'])
+                        user_restored=manager.current_user().get('user_id')==previous_user['user_id']
+                    except Exception:pass
+                    finally:
+                        if restore_selection_lease is not None and not selection_lease_released:
+                            try:
+                                if restore_selection_lease.close() is False:raise ValueError('Selection lease release was not acknowledged')
+                                selection_lease_released=True;restore_selection_lease=None
+                            except Exception:pass
+                if user_restored and selection_lease_released:
+                    if not ownership_released:
+                        try:
+                            if glove_ownership.close() is False:raise ValueError('Ownership release was not acknowledged')
+                            ownership_released=True
+                        except Exception:pass
+                    if ownership_released and not profile_lease_released:
+                        try:
+                            if profile_lease.close() is False:raise ValueError('Profile lease release was not acknowledged')
+                            profile_lease_released=True
+                        except Exception:pass
+            while True:
+                try:e=hand_events.get_nowait()
+                except queue.Empty:break
+                if e['type']=='closed':final_hardware=e.get('hardware',{})
+                elif e['type']=='identity':final_device=e.get('device_id')
+                elif e['type']=='state':final_device=e.get('device_id') or final_device
+                elif e['type']=='hand_session_closed':final_cleanup=e.get('cleanup_confirmed') is True
+            if hand_thread and (hand_thread.is_alive() or not final_hardware):
+                final_hardware=dict(active=None,stop_confirmed=False,reason='停用结果未确认 / Disable not confirmed')
+                final_cleanup=False
+            retryable=not hand_finished or not all((handles_closed,user_restored,ownership_released,profile_lease_released,selection_lease_released))
+            cleanup=dict(version=1,glove_serial=glove_sn,sdk_user_id=opened_user_id,profile=selected['id'],
+                glove_was_open=glove is not None,subscription_closed=subscription_closed,
+                glove_disconnected=glove_disconnected,solver_cleanup=solver_cleanup,
+                user_restored=user_restored,ownership_released=ownership_released,
+                profile_lease_released=profile_lease_released,selection_lease_released=selection_lease_released,
+                hand_released=hand_finished and (hand_thread is None or final_cleanup
+                    and final_hardware.get('active') is False and final_hardware.get('stop_confirmed') is True),
+                retryable=retryable)
+            events.put(dict(type='glove_closed',hardware=final_hardware,device_id=final_device,
+                hand_cleanup_confirmed=final_cleanup,session_cleanup=cleanup))
+            if not retryable:break
+            # Retain the failed objects. Other queued commands cannot reopen a
+            # glove, change users, map, or enable a hand in this cleanup phase.
+            while True:
+                command=requests.get()
+                if command.get('name') in ('disconnect','glove_disconnect'):break
+                if command.get('name')=='glove_stop' and hand_thread is not None and hand_thread.is_alive():
+                    hand_requests.put(command);continue
+                events.put(dict(type='glove_notice',message='原手套资源仍在退出，请重试结束原会话 / Original glove cleanup is pending; retry ending its owning session'))
