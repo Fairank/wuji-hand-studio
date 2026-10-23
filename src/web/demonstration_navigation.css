@@ -1,4 +1,29 @@
 /* A quiet native-style choice; the shared motion layer supplies one moving fill. */
+/* The shared moving fill owns the selected outline. Older material rules added
+   a 1px border and a heavier font only on selection, stealing two label pixels
+   and changing the row height. Keep the actual navigation boxes identical. */
+html body .directory a[data-page],
+html body .directory a[data-page]:is([aria-current="page"], [data-nm-visual-selected="true"]) {
+  box-sizing: border-box;
+  border: 0;
+  font-weight: 500;
+}
+html body .directory .nav-advanced > summary,
+html body .directory .nav-advanced > summary[data-nm-proxy="true"] {
+  font-weight: 500;
+}
+@media (min-width: 901px) {
+  html body .directory a[data-page] {
+    display: grid;
+    grid-template-columns: 20px minmax(0, 1fr);
+    gap: 10px;
+    padding-inline: 10px;
+    flex: 0 0 auto;
+  }
+  html body .directory a[data-page] > span {
+    min-width: 0;
+  }
+}
 html body .directory a[data-page="devices"][data-demonstration-hidden="true"] {
   display: none !important;
 }

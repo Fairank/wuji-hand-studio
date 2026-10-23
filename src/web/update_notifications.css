@@ -1,0 +1,16 @@
+/* An absolute badge keeps the existing toolbar and navigation geometry stable. */
+html #desktop-menu button.un-trigger{display:flex;align-items:center;justify-content:space-between;gap:12px;min-width:0;width:100%;min-height:36px;padding:8px 10px;border:0;border-radius:8px;background:transparent;color:var(--wb-ink);font-size:12px;line-height:1.35;box-shadow:none;text-align:left;white-space:nowrap}
+html #desktop-menu button.un-trigger[hidden],.un-menu-badge[hidden]{display:none}
+html #desktop-menu button.un-trigger:hover{background:var(--wb-group)}
+.un-menu-anchor{position:relative!important}.un-menu-badge{position:absolute;top:-4px;right:-4px;display:grid;place-items:center;min-width:16px;height:16px;padding:0 3px;border:2px solid var(--wb-card,#fff);border-radius:10px;background:#007aff;color:#fff;font:600 9px/1 system-ui,sans-serif;box-sizing:content-box;font-variant-numeric:tabular-nums;pointer-events:none}
+.un-count{display:grid;place-items:center;min-width:16px;height:16px;padding:0 3px;border-radius:8px;background:#007aff;color:white;font-size:10px;font-variant-numeric:tabular-nums}
+.un-sheet{width:min(440px,calc(100vw - 28px))}.un-sheet .hws-body{padding-top:8px}
+.un-list{display:grid;gap:0}.un-list:empty{display:none}
+html .un-sheet button.un-item{display:flex;align-items:center;justify-content:space-between;gap:16px;min-width:0;width:100%;padding:17px 4px;border:0;border-bottom:1px solid var(--wb-line);border-radius:0;background:transparent;color:var(--wb-ink);font-size:13px;text-align:left;box-shadow:none}
+html .un-sheet button.un-item:last-child{border-bottom:0}
+html .un-sheet button.un-item:hover{background:var(--wb-group)}
+.un-copy{display:grid;gap:5px;min-width:0}.un-copy strong{font-weight:550;overflow-wrap:anywhere}.un-identity{font-size:11px;color:var(--wb-sub);overflow-wrap:anywhere}
+.un-item-action{flex:none;max-width:45%;font-size:11px;color:#007aff;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.un-live{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+@media(max-width:420px){.un-sheet .hws-body{padding-inline:18px}.un-item-action{max-width:37%}}
+@media(forced-colors:active){html #desktop-menu button.un-trigger,.un-count,.un-menu-badge{background:Canvas;color:CanvasText;border:1px solid CanvasText}.un-item-action{color:LinkText}}

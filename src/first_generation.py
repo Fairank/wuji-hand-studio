@@ -81,7 +81,10 @@ def worker_first(address,requests,events,prepared_hand=None,source=None):
             if len(devices)>1 and not address:raise ValueError('检测到多个一代手，请填写设备地址')
             hand=manager.connect(sn=devices[0].sn,device_name='wuji_hand')
         require_identity(hand,selected)
-        device_id=str(hand.serial_number);sub=hand.joint_states().subscribe()
+        device_id=str(hand.serial_number)
+        from device_versions import read_handle_version
+        device_version=read_handle_version(hand,device_id)
+        sub=hand.joint_states().subscribe()
         while True:
             now=time.monotonic()
             for _ in range(256):
@@ -150,7 +153,7 @@ def worker_first(address,requests,events,prepared_hand=None,source=None):
                               action_source='Wuji Glove → RetargetSession → Hand 1 LowPass',hardware_validated=False,
                               current_limit_A=CURRENT_LIMIT_A,lowpass_cutoff_hz=CUTOFF_HZ,max_velocity_rad_s=min(COMMAND_SPEED_RAD_S,PATH_SPEED_RAD_S))
                     hw['command_timing']['host_publish_hz']=sent/(now-run_started) if active and now-run_started>.2 else None
-                events.put(dict(type='state',connection='connected' if latest else 'connecting',message='一代手反馈 · 设备频率/电流未由此接口提供，显示—',latest=latest,device_id=device_id,joint_rates=rates,metrics=dict(host_hz=hz,device_hz=None,age_ms=(now-last)*1000),recording=recorder.state(),hardware=hw));last_emit=now
+                events.put(dict(type='state',connection='connected' if latest else 'connecting',message='一代手反馈 · 设备频率/电流未由此接口提供，显示—',latest=latest,device_id=device_id,device_version=device_version,joint_rates=rates,metrics=dict(host_hz=hz,device_hz=None,age_ms=(now-last)*1000),recording=recorder.state(),hardware=hw));last_emit=now
             time.sleep(.0005)
     except Exception as error:events.put(dict(type='error',message=str(error)))
     finally:

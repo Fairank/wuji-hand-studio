@@ -30,11 +30,12 @@
   const installed=!!r.installed,mismatch=check.status==='ready'&&!check.compatible,selected=['wsl','macvm'].includes(window.WujiInstallation?.snapshot()?.bridge?.mode);
   const labels={'ot-title':['官方 CLI / SDK','Official CLI / SDK'],'ot-subtitle':['内置控制组件','Built-in control components'],
    'ot-description':['用于工作台的设备连接、手套标定与遥操作。Windows 的内置 Linux 控制组件由工作台管理。','Used for device connections, glove calibration and teleoperation. Workbench manages the built-in Linux control components on Windows.'],
-   'ot-component-label':['组件','Component'],'ot-checked-label':['实际检查版本','Checked version'],'ot-target-label':['配套目标版本','Bundled target'],
+   'ot-component-label':['组件','Component'],'ot-checked-label':['实际检查版本','Checked version'],'ot-target-label':['内置基线','Bundled baseline'],
    'ot-runtime-label':['内置控制组件','Built-in control components'],'ot-system-title':['Windows 系统支持','Windows system support'],
    'ot-system-note':['首次使用可能需要安装 Windows 系统组件。若系统要求重启，请重启后返回这里继续安装。','First use may require Windows components. If Windows requests a restart, return here afterwards to continue setup.'],
    'ot-system-install':['安装 Windows 系统组件','Install Windows components']};
   for(const [id,text] of Object.entries(labels))$(id).textContent=t(...text);
+  $('ot-sdk').parentElement.hidden=true;
   $('ot-cli').textContent=version(check.cli_version);$('ot-sdk').textContent=version(check.sdk_version);
   $('ot-cli-target').textContent=target.cli_version||'—';$('ot-sdk-target').textContent=target.sdk_version||'—';
   $('ot-checked-at').textContent=t('检查时间：','Checked: ')+timestamp(check.checked_at);
@@ -45,7 +46,7 @@
   $('ot-state').textContent=status;card.dataset.status=!fresh?'unknown':check.busy?'checking':check.status||'unchecked';
   $('ot-status').textContent=!fresh?(data?t('当前状态读取失败，保留上次检查结果。重新读取后可重试。','Current status is unavailable. Previous check results remain visible; reload to retry.'):t('正在读取组件状态。','Loading component status.')):check.busy?t('只检查软件版本与导入，不连接设备。','Checking software versions and imports only; no devices are connected.'):check.status==='ready'&&!check.compatible?t('实际版本与配套目标不同。更新至配套版本后可重新检查。','Checked versions differ from the bundled target. Update to the bundled version, then check again.'):t('安装、检查和选用控制组件均不会启动灵巧手。','Installing, checking and selecting control components do not start hand motion.');
   $('ot-error').textContent=transportError||actionError||check.error||r.error||'';
-  $('ot-check').textContent=!fresh?t('重新读取状态','Reload status'):check.busy||pending==='control_tools_check'?t('正在检查…','Checking…'):check.status==='failed'?t('重新检查 CLI / SDK','Retry CLI / SDK check'):t('检查 CLI / SDK','Check CLI / SDK');
+  $('ot-check').textContent=!fresh?t('重新读取状态','Reload status'):check.busy||pending==='control_tools_check'?t('正在检查…','Checking…'):check.status==='failed'?t('重新检查内置组件','Retry component check'):t('检查内置组件','Check built-in components');
   $('ot-check').disabled=busy;
   $('ot-install').hidden=!r.supported;$('ot-install').textContent=r.busy?t('正在准备…','Preparing…'):r.ready&&!mismatch?t('配套组件已安装','Bundled components installed'):installed?t('更新至配套版本','Update to bundled version'):t('安装内置控制组件','Install built-in components');
   $('ot-install').disabled=!fresh||busy||!!r.ready&&!mismatch;
@@ -54,11 +55,13 @@
  }
  function renderCli(){
   const u=cliData?.update||{},current=cliData?.current||{},previous=cliData?.previous||{},busy=!!cliPending||!!cliData?.busy||!!u.checking||!!u.preparing;
+  const bundledUpdate=cliFresh&&u.update_method==='workbench'&&u.newer_cli_available===true;
   let label=!cliFresh?t('版本状态未核对','Version status unverified'):u.checking?t('正在检查更新','Checking for updates'):u.preparing?t('正在准备更新','Preparing update'):u.error?t('版本维护未完成','Version maintenance incomplete'):u.available?t('可更新至 ','Update available: ')+(u.latest_version||'—'):u.checked_at!=null?t('检查已完成','Check completed'):t('尚未检查更新','Updates not checked');
   if(cliFresh&&u.checked_at!=null&&!busy&&!u.error&&!u.available&&u.latest_version&&u.latest_version===current.version)label=t('已是最新版本','Up to date');
+  if(bundledUpdate&&!busy&&!u.error)label=t('随工作台更新 · ','Updates with workbench · ')+(u.latest_version||'—');
   $('ot-cli-release-state').textContent='CLI '+version(current.version)+' · '+label;
-  $('ot-cli-check').textContent=cliPending==='official_cli_check'||u.checking?t('正在检查…','Checking…'):t('检查更新','Check updates');$('ot-cli-update').textContent=cliPending==='official_cli_update'||u.preparing?t('正在准备…','Preparing…'):t('更新 CLI','Update CLI');$('ot-cli-rollback').textContent=t('回退上一版','Previous CLI');
-  $('ot-cli-check').disabled=busy;$('ot-cli-update').hidden=!u.available&&!u.preparing&&cliPending!=='official_cli_update';$('ot-cli-update').disabled=!cliFresh||busy||u.available!==true;$('ot-cli-rollback').hidden=!previous.version;$('ot-cli-rollback').disabled=!cliFresh||busy||!previous.version;
+  $('ot-cli-check').textContent=cliPending==='official_cli_check'||u.checking?t('正在检查…','Checking…'):t('检查更新','Check updates');$('ot-cli-update').textContent=cliPending==='official_cli_update'||u.preparing?t('正在准备…','Preparing…'):bundledUpdate?t('软件更新','Software update'):t('更新 CLI','Update CLI');$('ot-cli-rollback').textContent=t('回退上一版','Previous CLI');
+  $('ot-cli-check').disabled=busy;$('ot-cli-update').hidden=!bundledUpdate&&!u.available&&!u.preparing&&cliPending!=='official_cli_update';$('ot-cli-update').disabled=!cliFresh||busy||!bundledUpdate&&u.available!==true;$('ot-cli-rollback').hidden=!previous.version;$('ot-cli-rollback').disabled=!cliFresh||busy||!previous.version;
   $('ot-cli-release-error').textContent=cliTransportError||cliActionError||u.error||'';
   $('ot-cli-release-details-label').textContent=t('版本详情','Version details');
   $('ot-cli-release-details').textContent=[t('当前：','Current: ')+version(current.version)+(current.commit?' · '+String(current.commit).slice(0,12):''),t('最新：','Latest: ')+version(u.latest_version),t('上次检查：','Last checked: ')+timestamp(u.checked_at),t('上一版：','Previous: ')+version(previous.version),u.update_method==='workbench'?t('原版 CLI 随工作台软件更新，设备与标定共用同一版本。','The original CLI updates with the workbench. Discovery and calibration use the same version.'):u.auto_update===true?t('自动更新已开启','Automatic updates enabled'):t('自动更新未开启','Automatic updates not enabled')].join('\n');
@@ -102,7 +105,7 @@
  function open(){location.hash='#settings';ws.showPage();$('settings-tab-devices')?.click();$('ot-title').focus({preventScroll:true});card.scrollIntoView({block:'start'});load();}
  window.WujiOfficialTools={open};
  $('ot-check').onclick=()=>fresh?act('control_tools_check'):load();
- $('ot-cli-check').onclick=()=>cliFresh?cliAction('official_cli_check'):loadCli();$('ot-cli-update').onclick=()=>cliAction('official_cli_update');$('ot-cli-rollback').onclick=()=>cliAction('official_cli_rollback');
+ $('ot-cli-check').onclick=()=>cliFresh?cliAction('official_cli_check'):loadCli();$('ot-cli-update').onclick=()=>{if(cliFresh&&cliData?.update?.update_method==='workbench'&&cliData.update.newer_cli_available===true){window.WujiWorkbenchUpdate?.open();return;}cliAction('official_cli_update');};$('ot-cli-rollback').onclick=()=>cliAction('official_cli_rollback');
  $('ot-install').onclick=()=>act('runtime_install');$('ot-select').onclick=()=>act('runtime_select');
  $('ot-system-install').onclick=async()=>{
   if(pending)return;pending='system';render();

@@ -22,6 +22,14 @@ python scripts/workbenchctl.py --port 8792 menu open
 
 ## 官方 CLI / SDK 软件状态
 
+`GET /api/update-notifications` 仅返回主窗口已确认的可用更新与已读取设备版本，不触发查询、连接或安装。启动后的后台调度与前端读取分离；条目 ID/修订稳定，缓存到期、类型/身份不符或实际版本改变即失效。每个更新动作仍走原有手动入口。`WUJI_UPDATE_AUTO_CHECK=0` 停止统一后台，原 `WUJI_APP_AUTO_CHECK` 与 `WUJI_CLI_AUTO_CHECK` 分别生效；子工作区不运行重复调度。
+
+0.2.38 增加主窗口维护接口：`GET /api/device-maintenance`、`GET /api/firmware-terminal?run=<id>&after=<sequence>`、`GET /api/sdk-maintenance` 只读取状态。受原有 Origin/CSRF 校验的 `/api/action` 支持 `firmware_check`（仅 `serial`）、`firmware_upgrade`（仅 `preview_token` 与 `confirmed:true`，只打开官方确认）、`firmware_terminal_input`（准确 `run_id` 的有限确认/尺寸输入）、`firmware_recovery_check`（无客户端解锁断言），以及 `sdk_release_check`、`sdk_update_prepare`、`sdk_update_recover`（均无附加参数）。任务 iframe 与子工作区不得发起维护。
+
+固件使用 Windows 已校验的原版 CLI，保留官方确认，不自行解析未公开的目录 JSON 来自动传 `--yes`。终端退出 0 不代表设备升级成功（可能跳过或拒绝）；原版报告和后续版本核验分开。运行或退出不明时不能关闭/更新软件或开始其他设备任务。
+
+SDK 检查使用选定控制端的实际解释器，且每次遥操作仍需实际 worker 的二次证明。稳定目录缓存最长 15 分钟；离线不会延长时效。内置 WSL/macVM 仅更新本软件拥有的环境，完整校验暂存包再切换，保留原环境和个人标定资料；外部环境保持原配置。恢复须匹配原维护 token、目录记录、真实进程退出和导入证据，普通重试不能解除未知占用。
+
 `GET /api/control-tools` 返回 `target`（随包配套 CLI/SDK 版本）、`runtime`（内置环境安装记录）和 `check`（实际软件检查结果）。只读取快照不会自动完成一次新检查。配套版本是 CLI / SDK 2026.10.12、控制环境 1.1.0；旧安装标记或目标清单不能填充为实际版本。
 
 受本机 `/api/action` 校验的 `control_tools_check` 发起独立软件检查：在已有控制环境中导入 `wuji_sdk` 并读取包版本，执行官方 CLI `--version`，记录实际版本、错误和检查时间。它不扫描、连接、订阅设备或发送电机数据，不执行标定。软件可导入或版本相符不等于具体设备通过验收。

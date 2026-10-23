@@ -27,6 +27,38 @@ class OfficialToolsTests(unittest.TestCase):
         self.assertTrue(tools.check['available']);self.assertFalse(tools.check['compatible'])
         self.assertEqual(tools.check['sdk_version'],'2026.9.22')
 
+    def test_newer_actual_sdk_does_not_offer_a_bundled_downgrade(self):
+        # The legacy card verifies the baseline. Exact official-stable selection
+        # belongs to SDKMaintenance and the real worker launch proof.
+        for sdk in ('2026.10.23','2026.11.1','2027.1.2'):
+            with self.subTest(sdk=sdk):
+                tools=OfficialTools()
+                with patch('managed_runtime.args',side_effect=lambda args:args),patch('managed_runtime.image_manifest',return_value=self.target),patch('official_cli.selected',return_value={}),patch('official_cli.cli_path',return_value='/synthetic/wuji'),patch('official_tools.subprocess.run',side_effect=self.results(sdk=sdk)) as run,patch('managed_runtime.start_install') as installer:
+                    tools.run()
+                self.assertEqual(tools.check['status'],'ready')
+                self.assertEqual(tools.check['sdk_version'],sdk)
+                self.assertTrue(tools.check['available'])
+                self.assertTrue(tools.check['compatible'])
+                self.assertEqual(run.call_count,2)
+                installer.assert_not_called()
+
+    def test_newer_sdk_does_not_hide_a_cli_baseline_mismatch(self):
+        tools=OfficialTools()
+        with patch('managed_runtime.args',side_effect=lambda args:args),patch('managed_runtime.image_manifest',return_value=self.target),patch('official_cli.selected',return_value={}),patch('official_cli.cli_path',return_value='/synthetic/wuji'),patch('official_tools.subprocess.run',side_effect=self.results(sdk='2026.10.23',cli='2026.10.11')):
+            tools.run()
+        self.assertTrue(tools.check['available'])
+        self.assertFalse(tools.check['compatible'])
+
+    def test_sdk_older_than_baseline_remains_incompatible(self):
+        for sdk in ('2026.10.11','2026.9.30','2025.12.31'):
+            with self.subTest(sdk=sdk):
+                tools=OfficialTools()
+                with patch('managed_runtime.args',side_effect=lambda args:args),patch('managed_runtime.image_manifest',return_value=self.target),patch('official_cli.selected',return_value={}),patch('official_cli.cli_path',return_value='/synthetic/wuji'),patch('official_tools.subprocess.run',side_effect=self.results(sdk=sdk)):
+                    tools.run()
+                self.assertEqual(tools.check['status'],'ready')
+                self.assertTrue(tools.check['available'])
+                self.assertFalse(tools.check['compatible'])
+
     def test_install_record_cannot_turn_failed_check_into_ready(self):
         tools=OfficialTools()
         with patch('managed_runtime.status',return_value=dict(ready=True,installed=True)),patch('managed_runtime.args',side_effect=lambda args:args),patch('official_tools.subprocess.run',return_value=SimpleNamespace(returncode=1,stdout=b'')):

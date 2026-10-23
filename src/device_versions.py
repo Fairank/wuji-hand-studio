@@ -1,0 +1,102 @@
+"""Read existing SDK metadata and recognize documented update notifications.
+
+These observations are display-only. They never authorize an upgrade, select a
+firmware package, or open a device. Unknown metadata/report formats stay unknown.
+"""
+import re
+
+
+CHECK_DOCUMENTATION = 'https://docs.wuji.tech/docs/en/wuji-cli/latest/firmware-upgrade/'
+_HEADINGS = ['SN', 'Device Type', 'Current', 'Latest', 'Status']
+_DEVICE_TYPES = frozenset(('wuji_glove', 'wuji_hand', 'wuji_hand_2'))
+_VERSION = re.compile(r'(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})\Z')
+_SGR = re.compile(r'\x1b\[[0-9;]*m')
+
+
+def _plain(value, limit):
+    return (type(value) is str and 0 < len(value) <= limit
+            and value == value.strip() and all(32 <= ord(c) <= 126 for c in value))
+
+
+def read_handle_version(handle, expected_sn):
+    """Sample ``handle.info`` once on its owner thread; issue no SDK RPC.
+
+    Official DeviceInfo exposes string serial_number and firmware_version. Do
+    not replace this with version().get(), re-connect, or decode Hand 1's packed
+    integer version. A metadata problem must not turn a good connection into a
+    failure or attribute another device's firmware to the selected serial.
+    """
+    if not _plain(expected_sn, 128):
+        return None
+    try:
+        info = handle.info
+        if info is None:
+            return None
+        serial = info.serial_number
+        version = info.firmware_version
+        if serial != expected_sn or not _plain(serial, 128) or not _plain(version, 128):
+            return None
+        return dict(serial=serial, firmware_version=version, source='sdk_handle_info')
+    except Exception:
+        return None
+
+
+def parse_official_check_table(text, expected_sn, expected_type=None):
+    """Recognize only the public CLI ``upgrade --check`` table, for reminders.
+
+    The input must come from a successful, exact-serial, read-only official CLI
+    check. JSON envelopes/keys are deliberately not guessed. The caller keeps
+    CLI identity, observation time, device revision and ownership provenance;
+    this parser's result is never a write plan or an upgrade completion verdict.
+    """
+    if (not _plain(expected_sn, 128) or type(text) is not str or len(text) > 262144
+            or (expected_type is not None and (type(expected_type) is not str or expected_type not in _DEVICE_TYPES))):
+        return None
+    text = _SGR.sub('', text).replace('\r\n', '\n')
+    if any(ord(c) < 32 and c not in '\n\t' or ord(c) == 127 for c in text):
+        return None
+    lines = text.splitlines()
+    if len(lines) > 2048 or any(len(line) > 4096 for line in lines):
+        return None
+
+    def cells(line):
+        line = line.strip()
+        if not (line.startswith('│') and line.endswith('│')):
+            return None
+        result = [part.strip() for part in line[1:-1].split('┆')]
+        return result if len(result) == 5 else None
+
+    headers = [i for i, line in enumerate(lines) if cells(line) == _HEADINGS]
+    if len(headers) != 1:
+        return None
+    observations = {}
+    closed = False
+    for line in lines[headers[0]+1:]:
+        line = line.strip()
+        if line.startswith('└') and line.endswith('┘'):
+            closed = True
+            break
+        if ((line.startswith('╞') and line.endswith('╡'))
+                or (line.startswith('├') and line.endswith('┤'))):
+            continue
+        row = cells(line)
+        if row is None:
+            return None
+        serial, kind, current, latest, status = row
+        if (not _plain(serial, 128) or serial in observations or kind not in _DEVICE_TYPES
+                or _VERSION.fullmatch(current) is None or _VERSION.fullmatch(latest) is None
+                or status not in ('update available', 'up to date')):
+            return None
+        before = tuple(int(p) for p in current.split('.'))
+        after = tuple(int(p) for p in latest.split('.'))
+        available = status == 'update available'
+        if (available and after <= before) or (not available and after > before):
+            return None
+        observations[serial] = dict(serial=serial, device_type=kind, current=current,
+                                    latest=latest, update_available=available)
+    if not closed:
+        return None
+    observation = observations.get(expected_sn)
+    if observation is None or (expected_type is not None and observation['device_type'] != expected_type):
+        return None
+    return observation

@@ -85,7 +85,7 @@ class OfficialCLI:
         with self.lock:
             if self.started:return
             self.started=True
-        self.start(check_only=False,automatic=True)
+        self.start(check_only=True,automatic=True)
 
     def start(self,check_only=False,automatic=False):
         with self.lock:

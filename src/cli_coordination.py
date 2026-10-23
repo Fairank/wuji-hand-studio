@@ -71,17 +71,22 @@ def reservation(folder=None):
         if not isinstance(row,dict):raise ValueError()
         # A dead visualization owner can leave a live Linux child. Only an
         # explicit runner probe/stop may clear this marker.
-        if row.get('kind') not in {'viz','calibration'} and identity(row.get('pid'))!=row.get('start'):
+        if row.get('kind') not in {'viz','calibration','firmware','sdk_update'} and identity(row.get('pid'))!=row.get('start'):
             return {}
         return row
     except FileNotFoundError:return {}
     except (OSError,ValueError,TypeError):return dict(kind='unknown')
 
 
-def reserve(kind, folder=None):
+def reserve(kind, folder=None, *, metadata=None):
     root=Path(folder or root_folder());root.mkdir(parents=True,exist_ok=True)
     if reservation(root):raise ValueError('请先结束官方可视化或组件切换 / Finish the official CLI session first')
     row=dict(kind=kind,pid=os.getpid(),start=identity(os.getpid()),token=secrets.token_hex(16),created=time.time())
+    if metadata is not None:
+        if (not isinstance(metadata,dict) or set(metadata)-{'serial','stage'}
+                or any(not isinstance(value,str) or not value or len(value)>100 or any(ord(c)<32 for c in value) for value in metadata.values())):
+            raise ValueError('Invalid reservation metadata')
+        row.update(metadata)
     atomic(root/'session.json',row)
     return row['token']
 
@@ -97,7 +102,17 @@ def atomic(path,value):
 
 def release(token,folder=None):
     root=Path(folder or root_folder())
-    if reservation(root).get('token')==token:(root/'session.json').unlink(missing_ok=True)
+    with gate(root):
+        for attempt in range(10):
+            if reservation(root).get('token')!=token:return
+            try:
+                (root/'session.json').unlink(missing_ok=True)
+                return
+            except PermissionError:
+                # Concurrent read-only snapshots may briefly deny deletion on
+                # Windows. Recheck the exact owner before every bounded retry.
+                if attempt==9:raise
+                time.sleep(.01)
 
 
 def enforce(command,folder=None):

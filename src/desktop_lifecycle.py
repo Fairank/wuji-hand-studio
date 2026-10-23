@@ -11,7 +11,8 @@ def calibration_cleanup_required(state):
                 and run.get('cleanup_confirmed') is not True))
 
 def needs_confirmation(state):
-    return (state.get('connection')!='disconnected' or state.get('glove',{}).get('busy',False)
+    return (state.get('maintenance',{}).get('busy') is True
+            or state.get('connection')!='disconnected' or state.get('glove',{}).get('busy',False)
             or state.get('official_studio',{}).get('reserved',False) or state.get('official_studio',{}).get('busy',False)
             or state.get('official_studio',{}).get('active',False)
             or state.get('official_viz',{}).get('active',False) or state.get('official_viz',{}).get('busy',False)
@@ -26,6 +27,8 @@ def needs_confirmation(state):
 
 def close_sessions(controller, timeout=6., clock=time.monotonic, sleep=time.sleep):
     state=controller.snapshot()
+    if state.get('maintenance',{}).get('busy') is True:
+        return dict(ok=False,error='设备维护仍在进行，请等待官方流程结束后关闭软件 / Device maintenance is still in progress; wait for the official workflow to finish before closing')
     # A handover can be between releasing its Viewer and publishing its new
     # run/bridge. Ordinary disconnect is not an acknowledgement of that pending
     # transition. Keep the window open; retry works once its owner has finished.

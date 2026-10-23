@@ -1,16 +1,17 @@
 /* Existing xterm renders the official CLI byte stream; no pose/ANSI reimplementation. */
 (()=>{'use strict';
- function mount(host,{language=()=>window.WujiLocale?.lang||'zh'}={}){
+ function mount(host,{language=()=>window.WujiLocale?.lang||'zh',endpoint='/api/calibration-terminal',actionName='calibration_terminal_input',title=null}={}){
+  if(!['/api/calibration-terminal','/api/firmware-terminal'].includes(endpoint)||!['calibration_terminal_input','firmware_terminal_input'].includes(actionName)||(endpoint==='/api/firmware-terminal')!==(actionName==='firmware_terminal_input'))throw Error('Unsupported official terminal');
   host.className='official-terminal';host.hidden=true;
   host.innerHTML='<div class="official-terminal-heading"><strong></strong><span class="official-terminal-note"></span></div><div class="official-terminal-actions"><button type="button" data-key="up">↑</button><button type="button" data-key="down">↓</button><button type="button" data-key="enter"></button><button type="button" data-key="focus"></button></div><div class="official-terminal-scroll"><div class="official-terminal-screen"></div></div><p role="status" class="official-terminal-error"></p>';
   const screen=host.querySelector('.official-terminal-screen'),note=host.querySelector('.official-terminal-note'),error=host.querySelector('.official-terminal-error');
   let term=null,fit=null,run={},fresh=false,cursor=0,session='',polling=false,writing=false,queue=[],lastSize='',fault='',transportFault='',gapWarning='',generation=0;
   const t=(zh,en)=>language()==='en'?en:zh;
-  function message(){error.textContent=[fault,transportFault,gapWarning].filter(Boolean).join(' · ');host.querySelector('strong').textContent=t('CLI 原版视觉指导','Original CLI guidance');note.textContent=t('↑ ↓ 选择 · Enter 确认','↑ ↓ to select · Enter to confirm');host.querySelector('[data-key=enter]').textContent=t('确认','Confirm');host.querySelector('[data-key=focus]').textContent=t('使用键盘','Use keyboard');for(const button of host.querySelectorAll('button'))button.disabled=!fresh||run.running!==true||run.status==='cancelling';}
+  function message(){error.textContent=[fault,transportFault,gapWarning].filter(Boolean).join(' · ');host.querySelector('strong').textContent=typeof title==='function'?title():t('CLI 原版视觉指导','Original CLI guidance');note.textContent=t('↑ ↓ 选择 · Enter 确认','↑ ↓ to select · Enter to confirm');host.querySelector('[data-key=enter]').textContent=t('确认','Confirm');host.querySelector('[data-key=focus]').textContent=t('使用键盘','Use keyboard');for(const button of host.querySelectorAll('button'))button.disabled=!fresh||run.running!==true||run.status==='cancelling';}
   async function action(payload,id){
    const sr=await fetch('/api/state',{cache:'no-store',signal:AbortSignal.timeout(5000)});if(!sr.ok)throw Error(t('工作台状态不可用','Workbench status is unavailable'));
    const state=await sr.json();if(!state.csrf)throw Error(t('请刷新工作台状态','Refresh workbench status'));
-   const response=await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json','X-Console-Token':state.csrf},body:JSON.stringify({name:'calibration_terminal_input',run_id:id,...payload}),signal:AbortSignal.timeout(6000)}),body=await response.json();
+   const response=await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json','X-Console-Token':state.csrf},body:JSON.stringify({name:actionName,run_id:id,...payload}),signal:AbortSignal.timeout(6000)}),body=await response.json();
    if(!response.ok||body.ok===false)throw Error(body.error||t('终端输入未完成','Terminal input was not accepted'));
   }
   async function flush(){
@@ -42,7 +43,7 @@
    if(polling||host.hidden||document.hidden||!session||!host.getClientRects().length)return;
    polling=true;const id=session,version=generation;
    try{
-    const response=await fetch('/api/calibration-terminal?run='+encodeURIComponent(id)+'&after='+cursor,{cache:'no-store',signal:AbortSignal.timeout(5000)}),data=await response.json();
+    const response=await fetch(endpoint+'?run='+encodeURIComponent(id)+'&after='+cursor,{cache:'no-store',signal:AbortSignal.timeout(5000)}),data=await response.json();
     if(!response.ok)throw Error(data.error||t('无法读取官方终端','Official terminal is unavailable'));
     if(session!==id||generation!==version)return;
     if(data.id!==id||!Array.isArray(data.chunks)||data.chunks.length>128)throw Error(t('终端会话已变化，请刷新。','Terminal session changed. Refresh its status.'));

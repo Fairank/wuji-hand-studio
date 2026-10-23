@@ -12,12 +12,13 @@ import numpy as np  # Cache the extension before temporary synthetic SDK modules
 
 from glove_bridge import GloveBridge
 from glove_agent import worker_glove
+from test_sdk_lifecycle import proof_fixture,release_fixture
 
 
 def receiving(active=False,confirmed=True,device='SYNTHETIC-HAND'):
     return dict(connection='receiving',hardware=dict(active=active,stop_confirmed=confirmed,probe_ready=True),
         feedback=dict(device_id=device,metrics=dict(age_ms=0)),
-        stream=dict(fresh=True,age_ms=0,timeout_ms=250))
+        stream=dict(fresh=True,age_ms=0,timeout_ms=250,solver=dict(engine='sdk',applied=True)))
 
 
 class GloveTransportLifecycleTests(unittest.TestCase):
@@ -26,6 +27,7 @@ class GloveTransportLifecycleTests(unittest.TestCase):
         bridge=GloveBridge(Mock(),journal);bridge.thread=N(is_alive=lambda:True)
         bridge.stdin=stream if stream is not None else io.StringIO()
         bridge.state.update(receiving());bridge.last_update=time.monotonic()
+        bridge._sdk_proof=proof_fixture();bridge.release_resolver=release_fixture;bridge.verify_follow_sdk()
         return bridge,journal
 
     def failed_follow(self,stage='flush'):
@@ -59,14 +61,15 @@ class GloveTransportLifecycleTests(unittest.TestCase):
     def run_transport(self,follow=False,observed_stop=False):
         bridge,journal=self.bridge();sent=io.StringIO()
         def lines():
-            yield 'WUJI_JSON:'+json.dumps(dict(type='ready',teleop_version=1))
+            yield 'WUJI_JSON:'+json.dumps(dict(type='ready',teleop_version=1,sdk_proof=proof_fixture()))
+            yield 'WUJI_JSON:'+json.dumps(dict(type='sdk_ready',sdk_proof=proof_fixture()))
             yield 'WUJI_JSON:'+json.dumps(dict(type='glove_state',state=receiving()))
-            if follow:bridge.action(dict(name='glove_follow',workspace_clear=True))
+            if follow:bridge.verify_follow_sdk();bridge.action(dict(name='glove_follow',workspace_clear=True))
             if observed_stop:
                 yield 'WUJI_JSON:'+json.dumps(dict(type='glove_state',state=receiving(True,False)))
                 yield 'WUJI_JSON:'+json.dumps(dict(type='glove_state',state=receiving(False,True)))
         client=N(agent_command='synthetic only',exec_command=lambda *args,**kwargs:(sent,lines(),io.StringIO()),close=Mock())
-        bridge.factory=Mock(return_value=client);bridge.run()
+        bridge.factory=Mock(return_value=client);bridge.release_resolver=release_fixture;bridge.run()
         return bridge,journal
 
     def test_transport_ending_before_active_ack_keeps_exact_pending_follow_unconfirmed(self):
@@ -176,6 +179,7 @@ class GloveTransportLifecycleTests(unittest.TestCase):
     def test_delayed_rejection_for_previous_request_cannot_release_a_new_request(self):
         bridge,_=self.bridge();bridge.action(dict(name='glove_follow',workspace_clear=True))
         old=self.rejection(bridge);bridge.receive(old,session=17)
+        bridge.verify_follow_sdk()
         bridge.action(dict(name='glove_follow',workspace_clear=True));new=bridge.lease
         self.assertNotEqual(new,old['lease']);bridge.receive(old,session=17)
         self.assertEqual(bridge.lease,new)

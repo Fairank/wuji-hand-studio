@@ -114,14 +114,14 @@ def paired_hand_worker(address, serial, selected, requests, events, factory, sou
             cleanup=cleanup and closed is not None and hardware.get('active') is False
         events.put(dict(type='hand_session_closed',cleanup_confirmed=cleanup))
 
-def worker_glove(requests,events,continuation=None):
+def worker_glove(requests,events,continuation=None,sdk_requirement=None):
     import collections
     from device_profiles import controller_profile
     selected=controller_profile();source=GloveSource();glove=sub=session=None
     hand_thread=None;hand_requests=queue.Queue();hand_events=queue.Queue()
     hand_state={};hand_identity={};hand_error='';manager=None;previous_user=None
     devices=[];hands=[];users=[];current=None;state='starting';message='正在加载官方SDK'
-    glove_sn='';last_emit=0.;next_map=0.;last_source_seq=None
+    glove_sn='';device_version=None;last_emit=0.;next_map=0.;last_source_seq=None
     from retarget_settings import OutputMapping, defaults
     mapping=OutputMapping(defaults())
     sdk_q=None;latest_kp=None;glove_ownership=None;profile_lease=None;solver_engine='sdk';selected_user_active=False
@@ -137,6 +137,12 @@ def worker_glove(requests,events,continuation=None):
             bootstrap_commands.append(command)
         raise ValueError('Continuation startup command queue exceeds its limit')
     try:
+        # console_agent always supplies a verified requirement. Repeat in this
+        # spawned interpreter before scanning, changing user, or opening devices.
+        if sdk_requirement is not None:
+            from sdk_runtime import probe_runtime,verify_proof
+            proof=verify_proof(probe_runtime(),sdk_requirement)
+            events.put(dict(type='sdk_ready',sdk_proof=proof))
         import numpy as np
         import wuji_sdk as sdk
         manager=sdk.SdkManager.instance();previous_user=manager.current_user();current=previous_user
@@ -249,6 +255,8 @@ def worker_glove(requests,events,continuation=None):
                         finally:
                             if selection_lease:selection_lease.close()
                         glove=candidate;glove_sn=c['serial'];source=GloveSource(c['timeout_ms'])
+                        from device_versions import read_handle_version
+                        device_version=read_handle_version(glove,glove_sn)
                         mapping=OutputMapping(c.get('retarget',defaults()));last_source_seq=None
                         state='receiving';message='已连接手套，灵巧手未启用 / Glove connected; hand not enabled'
                     elif name=='glove_solver':
@@ -262,6 +270,8 @@ def worker_glove(requests,events,continuation=None):
                         message='求解器已切换，等待新骨架 / Solver switched; waiting for fresh skeleton'
                     elif name=='glove_prepare':
                         if glove is None:raise ValueError('先连接手套 / Connect glove first')
+                        if solver_engine!='sdk':
+                            raise ValueError('开源映射仅用于调参预览，请切回官方 SDK 后再接入灵巧手 / Open mapping is preview only; switch to the official SDK before preparing a hand')
                         source.target(now)
                         allowed,reason=prepare_permission(hand_thread,hand_state)
                         if not allowed:raise ValueError(reason)
@@ -279,6 +289,8 @@ def worker_glove(requests,events,continuation=None):
                         message='映射已应用，等待下一帧 / Mapping applied; awaiting new frame'
                     elif name=='glove_follow':
                         if hand_unpairing:raise ValueError('Hand cleanup is still in progress')
+                        if solver_engine!='sdk':
+                            raise ValueError('开源映射仅用于调参预览，请切回官方 SDK 后再启动灵巧手 / Open mapping is preview only; switch to the official SDK before following')
                         if not hand_thread or not hand_thread.is_alive():raise ValueError('先连接灵巧手反馈 / Prepare hand feedback first')
                         source.target(now)
                         follow_dispatch_attempted=True
@@ -354,13 +366,14 @@ def worker_glove(requests,events,continuation=None):
                 hw=copy.deepcopy(hand_state.get('hardware',{}))
                 can_prepare,prepare_reason=prepare_permission(hand_thread,hand_state)
                 if glove is None:can_prepare=False;prepare_reason='请先打开手套预览 / Open glove preview first'
+                elif solver_engine!='sdk':can_prepare=False;prepare_reason='请切回官方 SDK 映射后再接入灵巧手 / Switch to official SDK mapping before preparing a hand'
                 elif not snapshot['fresh']:can_prepare=False;prepare_reason='等待新鲜手套数据 / Wait for fresh glove data'
-                feedback=copy.deepcopy({k:hand_state.get(k) for k in ('latest','device_id','joint_rates','metrics','connection')})
+                feedback=copy.deepcopy({k:hand_state.get(k) for k in ('latest','device_id','device_version','joint_rates','metrics','connection')})
                 feedback['identified_device']=copy.deepcopy(hand_identity)
                 if feedback.get('latest'):
                     feedback['metrics']['age_ms']=max(0,now-feedback['latest']['host_s'])*1000
                 events.put(dict(type='glove_state',state=dict(version=1,connection=state,message=message,
-                    devices=devices,devices_at=devices_at,hands=hands,users=users,user=current,profile=selected['id'],glove_serial=glove_sn,
+                    devices=devices,devices_at=devices_at,hands=hands,users=users,user=current,profile=selected['id'],glove_serial=glove_sn,device_version=device_version,
                     stream=snapshot,hardware=hw,feedback=feedback,hand_error=hand_error,
                     can_prepare=can_prepare,prepare_blocked_reason=prepare_reason,
                     hand_cleanup_confirmed=hand_state.get('cleanup_confirmed'),

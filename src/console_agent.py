@@ -196,6 +196,8 @@ def worker(address, requests, events, motion_factory=HardwareShowcase, prepared=
         if prepared is None and sys.platform.startswith('linux'):
             from device_ownership import DeviceOwnership
             ownership=DeviceOwnership(device_id)
+        from device_versions import read_handle_version
+        device_version=read_handle_version(hand,device_id)
         command_type=None
         def make_command(**kwargs):
             nonlocal command_type
@@ -323,7 +325,7 @@ def worker(address, requests, events, motion_factory=HardwareShowcase, prepared=
                 events.put(dict(type='state', connection='connected' if recent else 'connecting',
                     message=('正在执行实机动作，画面跟随反馈' if motion.active else '已核对设备身份，正在接收反馈') if recent else '已连接，等待反馈',
                     latest=recent[-1] if recent else None,
-                    device_id=device_id, joint_rates=joint_rates.snapshot(now),
+                    device_id=device_id, device_version=device_version, joint_rates=joint_rates.snapshot(now),
                     metrics=dict(host_hz=rate(recent, 'host_s'), device_hz=rate(recent, 'device_timestamp_us'), age_ms=(now-last)*1000 if recent else None),
                     recording=recorder.state(),hardware=motion.status()))
                 last_emit = now
@@ -379,7 +381,9 @@ def main():
             from calibration_portability import prepare_transfer_directory
             prepare_transfer_directory();continuation_version=1
         except (ValueError,OSError):pass  # Ordinary SDK sessions remain available.
-    emit(dict(type='ready',teleop_version=1,calibration_continuation_version=continuation_version))
+    from sdk_runtime import probe_runtime
+    emit(dict(type='ready',teleop_version=1,calibration_continuation_version=continuation_version,
+              sdk_proof=probe_runtime()))
     try:
         while True:
             if select.select([sys.stdin], [], [], .04)[0]:
@@ -397,8 +401,12 @@ def main():
                         break
                     if name == 'glove_session':
                         if process:raise ValueError('Already connected')
+                        from sdk_runtime import verify_proof
+                        from sdk_release import validate_requirement
+                        sdk_requirement=validate_requirement(command.get('sdk_requirement'))
+                        verify_proof(probe_runtime(),sdk_requirement)
                         from glove_agent import worker_glove
-                        process=ctx.Process(target=worker_glove,args=(requests,events,command.get('continuation')))
+                        process=ctx.Process(target=worker_glove,args=(requests,events,command.get('continuation'),sdk_requirement))
                         process.start();received_feedback=True;started=time.monotonic();glove_mode=True
                     elif name == 'connect':
                         if process:

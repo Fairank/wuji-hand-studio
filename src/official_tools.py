@@ -71,7 +71,14 @@ class OfficialTools:
             versions['cli_version']=match[1]
             manifest=image_manifest() or {}
             target=target_versions()
-            compatible=all(versions.get(key)==target.get(key) for key in ('cli_version','sdk_version'))
+            # This legacy control-image check is a baseline/repair check, not
+            # the public stable SDK selector. Never offer a bundled downgrade
+            # merely because the verified SDK maintenance installed a newer
+            # stable release. Session startup still checks the exact selected
+            # stable SDK and actual worker API through sdk_runtime.
+            from official_cli import version_order
+            compatible=(versions.get('cli_version')==target.get('cli_version')
+                and version_order(versions.get('sdk_version'))>=version_order(target.get('sdk_version')))
             with self.lock:self.check.update(**versions,status='ready',available=True,compatible=compatible,error=None)
         except Exception as error:
             detail=str(error) if isinstance(error,ValueError) else '软件检查未完成，请重试 / Software check did not complete; retry'

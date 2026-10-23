@@ -11,7 +11,7 @@ def validate(c):
     if not isinstance(c,dict) or c.get('name') not in COMMANDS:
         raise ValueError('Unknown glove operation')
     allowed={'name'}
-    if c['name']=='glove_session':allowed|={'continuation'}
+    if c['name']=='glove_session':allowed|={'continuation','sdk_requirement'}
     if c['name']=='glove_open':allowed|={'serial','user_id','timeout_ms','retarget','solver'}
     if c['name']=='glove_solver':allowed|={'solver'}
     if c['name']=='glove_prepare':allowed|={'address','serial'}
@@ -22,6 +22,9 @@ def validate(c):
     if 'continuation' in c:
         from calibration_portability import validate_continuation
         validate_continuation(c['continuation'],path=True)
+    if 'sdk_requirement' in c:
+        from sdk_release import validate_requirement
+        validate_requirement(c['sdk_requirement'])
     if 'solver' in c or c['name']=='glove_solver':
         solver=c.get('solver')
         if not isinstance(solver,dict) or set(solver)-{'engine','values'} or solver.get('engine') not in ('sdk','official_open'):

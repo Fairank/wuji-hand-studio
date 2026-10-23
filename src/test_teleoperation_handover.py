@@ -203,7 +203,8 @@ class TeleoperationTests(unittest.TestCase):
 
     def test_bridge_prepare_uses_authoritative_permission_and_session_epoch(self):
         glove=GloveBridge(Mock());glove.thread=N(is_alive=lambda:True);glove.stdin=io.StringIO()
-        glove.state.update(can_prepare=True,stream={'fresh':True,'age_ms':0,'timeout_ms':250})
+        glove.state.update(can_prepare=True,stream={'fresh':True,'age_ms':0,'timeout_ms':250,
+            'solver':{'engine':'sdk','applied':True}})
         glove.last_update=__import__('time').monotonic()
         self.assertEqual(glove.snapshot()['session_id'],glove.session)
         glove.action({'name':'glove_prepare','serial':'HAND','address':''})
@@ -336,7 +337,8 @@ class TeleoperationTests(unittest.TestCase):
                     {'feedback':{'device_id':'HAND','identified_device':{'source':'sdk_identity','serial':'HAND','profile':'hand1_left'}}},
                     {'feedback':{'device_id':'HAND'}},{'profile':'hand1_left'},{'glove_serial':'WG_OTHER'},
                     {'user':{'user_id':'WindowsName'}},{'user':{}},{'connection':'ready'})
-                with patch.object(controller.glove,'snapshot',return_value=actual),patch.object(controller.glove,'action') as action:
+                with patch.object(controller.glove,'snapshot',return_value=actual),patch.object(controller.glove,'action') as action, \
+                        patch.object(controller.glove,'verify_follow_sdk'):
                     controller.action({'name':'glove_follow','workspace_clear':True})
                     action.assert_called_once_with({'name':'glove_follow','workspace_clear':True})
                     for change in changes:

@@ -184,11 +184,12 @@ class Controller:
             binding=dict(binding,glove_serial=proof['serial'],sdk_user=receipt['owner_user_id'])
             context=self.retarget.select(binding,profile)
             tuning=self.tuning.context(context['binding'])
+            if tuning['engine']!='sdk':self.tuning.select_engine(context['binding'],'sdk')
             # The human URDF stays in the official SDK user store. It is never
             # assigned to the robot model or a custom hand_model_path override.
             self.state['view_source']='glove'
             return dict(timeout_ms=250,retarget=context['settings'],
-                solver=dict(engine=tuning['engine'],values=tuning['values']))
+                solver=dict(engine='sdk',values=tuning['values']))
 
     def task_context_action(self,expected_context,action,payload=None):
         from task_control import execute
@@ -269,6 +270,10 @@ class Controller:
             result['official_studio']=self.studio.snapshot()
             result['official_viz']=self.official_viz.snapshot()
             result['official_cli']=self.official_cli.snapshot()
+            from cli_coordination import reservation
+            marker=reservation()
+            result['maintenance']=dict(busy=marker.get('kind') in {'firmware_check','firmware','sdk_check','sdk_update','unknown'},
+                kind=marker.get('kind'),serial=marker.get('serial'))
             # The user explicitly requested a live visual preview before full
             # calibration. This observed node-group profile is provisional and
             # display-only; it must never authorize hardware command mapping.
@@ -307,6 +312,8 @@ class Controller:
             result['teleoperation_connection']=self.teleoperation_handover.snapshot()
             continuation=getattr(self,'calibrated_teleoperation',None)
             result['calibrated_teleoperation']=continuation.snapshot() if continuation is not None else dict(busy=False,can_continue=False)
+            observer=getattr(self,'version_observer',None)
+            if observer:observer([result])
             return result
 
     def parameter_snapshot(self):
@@ -382,6 +389,7 @@ class Controller:
 
     def clear_live(self):
         self.state['identified_device']=None
+        self.state['device_version']=None
         self.state['hardware']['probe_ready']=False
         self.state['hardware']['trial_ready']=False
         self.state['latest'] = None
@@ -401,6 +409,12 @@ class Controller:
         self.stdin.flush()
 
     def action(self, command):
+        from firmware_host import enforce_maintenance
+        enforce_maintenance(command)
+        # A long-lived preview may outlast the official stable catalog. Do the
+        # finite version lookup before controller/file locks; the bridge checks
+        # this exact worker/session again at the actual follow dispatch.
+        if isinstance(command,dict) and command.get('name')=='glove_follow':self.glove.verify_follow_sdk()
         from calibration_handover import workflow_action
         name=command.get('name') if isinstance(command,dict) else None
         continuation=getattr(self,'calibrated_teleoperation',None)
@@ -452,6 +466,8 @@ class Controller:
         if isinstance(command,dict) and command.get('name') in {'session_close','disconnect','hardware_stop','glove_stop','glove_disconnect','calibration_cancel','calibration_terminal_input','program_stop','group_stop'}:
             return self._coordinated_action(command)
         with gate():
+            from firmware_host import enforce_maintenance
+            enforce_maintenance(command)
             enforce(command)
             return self._coordinated_action(command)
 
@@ -624,7 +640,8 @@ class Controller:
             validate(command)
             context=self.retarget.open_glove(command,self.state['device_profile'],self.glove.snapshot().get('user') or {})
             tuning=self.tuning.context(context['binding'])
-            command=dict(command,retarget=context['settings'],solver=dict(engine=tuning['engine'],values=tuning['values']))
+            if tuning['engine']!='sdk':self.tuning.select_engine(context['binding'],'sdk')
+            command=dict(command,retarget=context['settings'],solver=dict(engine='sdk',values=tuning['values']))
         if name=='glove_prepare':
             serial=self.retarget.context(self.state['device_profile'])['binding']['hand_serial']
             if serial and command.get('serial') and command['serial']!=serial:raise ValueError('Hand differs from saved pairing / 灵巧手与保存配对不符')
@@ -932,6 +949,7 @@ class Controller:
                 self.clear_live()
             elif kind == 'state':
                 self.last_update = time.monotonic()
+                self.state['device_version']=copy.deepcopy(event.get('device_version'))
                 for key in ('connection', 'message', 'latest', 'metrics', 'recording', 'device_id', 'joint_rates'):
                     self.state[key] = event[key]
                 if 'hardware' in event:
@@ -1070,6 +1088,22 @@ class Handler(BaseHTTPRequestHandler):
         if url.path=='/api/official-studio':return self.reply(200,self.server.studio.snapshot())
         if url.path=='/api/control-tools':return self.reply(200,self.server.controller.official_tools.snapshot())
         if url.path=='/api/official-cli':return self.reply(200,self.server.controller.official_cli.snapshot())
+        if url.path=='/api/device-maintenance':
+            if os.environ.get('WUJI_FLEET_PARENT'):return self.reply(403,dict(error='Use device maintenance in the main window'))
+            return self.reply(200,self.server.maintenance_snapshot())
+        if url.path=='/api/sdk-maintenance':
+            if os.environ.get('WUJI_FLEET_PARENT'):return self.reply(403,dict(error='Use component maintenance in the main window'))
+            return self.reply(200,self.server.sdk_maintenance.snapshot())
+        if url.path=='/api/update-notifications':
+            if os.environ.get('WUJI_FLEET_PARENT'):return self.reply(403,dict(error='Use update notifications in the main window'))
+            return self.reply(200,self.server.update_notifications.snapshot())
+        if url.path=='/api/firmware-terminal':
+            if os.environ.get('WUJI_FLEET_PARENT'):return self.reply(403,dict(error='Use device maintenance in the main window'))
+            try:
+                query=parse_qs(url.query)
+                if set(query)!={'run','after'} or any(len(v)!=1 for v in query.values()):raise ValueError('Invalid firmware terminal query')
+                return self.reply(200,self.server.firmware_transport.terminal_read(query['run'][0],int(query['after'][0])))
+            except (ValueError,TypeError) as error:return self.reply(400,dict(error=str(error)))
         if url.path=='/api/official-viz':return self.reply(200,self.server.controller.visualization_status(parse_qs(url.query).get('theme',[None])[0]))
         if url.path=='/api/device-inventory':return self.reply(200,self.server.controller.device_inventory())
         if url.path=='/api/calibration-connection':return self.reply(200,self.server.controller.calibration_handover.snapshot())
@@ -1225,6 +1259,12 @@ class Handler(BaseHTTPRequestHandler):
         assets['/viewer']=('viewer.html','text/html; charset=utf-8')
         for name in ('official_tools.js','official_studio.js','official_studio_viewer.js','official_viz.js'):assets['/'+name]=(name,'text/javascript; charset=utf-8')
         for name in ('official_tools.css','official_studio.css','official_studio_viewer.css','official_viz.css'):assets['/'+name]=(name,'text/css; charset=utf-8')
+        assets['/device_maintenance.js']=('device_maintenance.js','text/javascript; charset=utf-8')
+        assets['/device_maintenance.css']=('device_maintenance.css','text/css; charset=utf-8')
+        assets['/sdk_maintenance.js']=('sdk_maintenance.js','text/javascript; charset=utf-8')
+        assets['/sdk_maintenance.css']=('sdk_maintenance.css','text/css; charset=utf-8')
+        assets['/update_notifications.js']=('update_notifications.js','text/javascript; charset=utf-8')
+        assets['/update_notifications.css']=('update_notifications.css','text/css; charset=utf-8')
         for name in ('device_inventory.js','device_workflows.js','device_history.js','simple_mode.js','demonstration_navigation.js'):assets['/'+name]=(name,'text/javascript; charset=utf-8')
         assets['/device_inventory.css']=('device_inventory.css','text/css; charset=utf-8')
         for name in ('simple_mode.css','toolbar_refinement.css','demonstration_navigation.css'):assets['/'+name]=(name,'text/css; charset=utf-8')
@@ -1274,6 +1314,11 @@ class Handler(BaseHTTPRequestHandler):
             payload=json.loads(self.rfile.read(length))
             if not isinstance(payload,dict):raise ValueError('JSON object required')
             task_scope=self._task_view_headers()
+            if str(payload.get('name','')).startswith(('firmware_','sdk_update','sdk_release_')):
+                if self.path!='/api/action' or task_scope is not None or os.environ.get('WUJI_FLEET_PARENT'):
+                    raise ValueError('设备维护请在主窗口操作 / Use device maintenance in the main window')
+                result=self.server.maintenance_action(payload)
+                return self.reply(200,dict(ok=True,**(result or {})))
             if task_scope is not None:
                 from task_view import execute
                 if self.path!='/api/action':raise ValueError('Task pages cannot manage the desktop')
@@ -1344,6 +1389,84 @@ class ConsoleHTTPServer(ThreadingHTTPServer):
     allow_reuse_address = False
     allow_reuse_port = False
 
+    @property
+    def firmware_transport(self):
+        with self.controller.lock:
+            if not hasattr(self,'_firmware_transport'):
+                from firmware_host import FirmwareHost
+                self._firmware_transport=FirmwareHost(self.controller)
+            return self._firmware_transport
+
+    @property
+    def firmware(self):
+        with self.controller.lock:
+            if not hasattr(self,'_firmware'):
+                from firmware_service import FirmwareService
+                host=self.firmware_transport
+                service=FirmwareService(host,host.cli_identity,self.controller.official_cli.idle_check,
+                    host.acquire,host.release,host.device,recovery_check=host.recovery_check)
+                from cli_coordination import reservation
+                marker=reservation(host.folder)
+                if marker.get('kind')=='firmware':service.restore_unknown(marker)
+                self._firmware=service
+            return self._firmware
+
+    def maintenance_snapshot(self):
+        from bridge_config import load_config
+        from official_device_discovery import use_native
+        result=self.firmware.snapshot()
+        result['run']=self.firmware_transport.run_snapshot()
+        result['supported']=use_native(load_config())
+        return result
+
+    def maintenance_action(self,command):
+        name=command.get('name')
+        if name in {'sdk_release_check','sdk_update_prepare'} and set(command)=={'name'}:
+            return dict(sdk_maintenance=self.sdk_maintenance.start('check' if name=='sdk_release_check' else 'update'))
+        if name=='sdk_update_recover' and set(command)=={'name'}:
+            return dict(sdk_maintenance=self.sdk_maintenance.recover())
+        if name=='firmware_check' and set(command)=={'name','serial'}:
+            self.firmware.start_check(command['serial'])
+        elif name=='firmware_upgrade' and set(command)=={'name','preview_token','confirmed'}:
+            self.firmware.start_upgrade(command['preview_token'],confirmed=command['confirmed'])
+        elif name=='firmware_terminal_input':
+            return self.firmware_transport.terminal_input(command)
+        elif name=='firmware_recovery_check' and set(command)=={'name'}:
+            self.firmware.verify_recovery()
+        else:raise ValueError('Unsupported device maintenance request')
+        return dict(device_maintenance=self.maintenance_snapshot())
+
+    @property
+    def sdk_maintenance(self):
+        with self.controller.lock:
+            if not hasattr(self,'_sdk_maintenance'):
+                from sdk_maintenance import SDKMaintenance
+                from bridge_config import load_config
+                host=self.firmware_transport
+                self._sdk_maintenance=SDKMaintenance(acquire=host.acquire,release=host.release,
+                    idle=self.controller.official_cli.idle_check,config=load_config,folder=host.folder)
+                from cli_coordination import reservation
+                marker=reservation(host.folder)
+                if marker.get('kind')=='sdk_update':self._sdk_maintenance.restore_unknown(marker)
+            return self._sdk_maintenance
+
+    @property
+    def update_notifications(self):
+        with self.controller.lock:
+            if not hasattr(self,'_update_notifications'):
+                from update_notifications import UpdateNotifications
+                def states():
+                    rows=[self.controller.snapshot()]
+                    if hasattr(self,'_fleet'):
+                        rows.extend(row['state'] for row in self._fleet.inventory_snapshots() if row.get('state'))
+                    return rows
+                self._update_notifications=UpdateNotifications(states=states,
+                    app=lambda:self.updates,cli=lambda:self.controller.official_cli,
+                    sdk=lambda:self.sdk_maintenance,firmware=lambda:self.firmware,
+                    devices=self.controller.calibration_devices,idle=lambda:self.controller.official_cli.idle_check())
+                self.controller.version_observer=self._update_notifications.observe
+            return self._update_notifications
+
     def configure_official_cli(self,startup=True):
         def check_workspaces(check,allow_local_viewer=None):
             from managed_runtime import status as runtime_status
@@ -1412,7 +1535,9 @@ class ConsoleHTTPServer(ThreadingHTTPServer):
             if self.controller.official_tools.snapshot()['check']['busy']:raise ValueError('Wait for official software checks')
         self.controller.calibration.profile_read_check=profile_read_idle
         self.controller.inventory_observer=lambda:self.fleet.inventory_snapshots() if hasattr(self,'_fleet') else []
-        if startup:self.controller.official_cli.startup()
+        if startup:
+            self.controller.official_cli.startup()
+            self.update_notifications.startup()
 
     @property
     def updates(self):
@@ -1466,6 +1591,11 @@ class ConsoleHTTPServer(ThreadingHTTPServer):
         if sys.platform == 'win32':
             self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
         super().server_bind()
+
+    def server_close(self):
+        monitor=getattr(self,'_update_notifications',None)
+        if monitor:monitor.close()
+        super().server_close()
 
 
 def main():

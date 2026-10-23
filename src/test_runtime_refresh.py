@@ -81,5 +81,16 @@ class RuntimeRefreshTests(unittest.TestCase):
             image,digest=self.image(tmp)
             self.assertNotIn('home/workbench/.wuji/private',image_members(image,digest))
 
+    def test_legacy_cli_repair_cannot_downgrade_a_newer_actual_sdk(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            image,digest=self.image(tmp);root=self.runtime(tmp)
+            metadata=root/ENV/'lib/python3.12/site-packages/wuji_sdk-2026.10.23.dist-info/METADATA'
+            metadata.parent.mkdir(parents=True);metadata.write_text('Name: wuji-sdk\nVersion: 2026.10.23\n')
+            with patch('runtime_refresh.venv.EnvBuilder') as builder,patch('runtime_refresh.subprocess.run') as runner:
+                with self.assertRaisesRegex(ValueError,'newer SDK'):apply(image,digest,root)
+            builder.assert_not_called();runner.assert_not_called()
+            self.assertEqual(metadata.read_text(),'Name: wuji-sdk\nVersion: 2026.10.23\n')
+            self.assertEqual((root/CLI).read_bytes(),b'old CLI')
+
 
 if __name__=='__main__':unittest.main()

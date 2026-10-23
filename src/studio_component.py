@@ -111,6 +111,7 @@ class StudioComponent:
         with self.lock:self.state.update(**values)
 
     def _reserve(self,phase):
+        if self.token:raise ValueError('Studio 清理尚未确认，请先核对原会话 / Studio cleanup is unconfirmed; review the original session')
         if self.folder.is_symlink() or self.folder.is_junction():raise ValueError('Studio component directory is redirected')
         self.folder.mkdir(parents=True,exist_ok=True)
         self.token=secrets.token_hex(16)
@@ -120,10 +121,28 @@ class StudioComponent:
         except FileExistsError:self.token=None;raise ValueError('Studio 会话尚未结束；请检查组件状态 / Check the existing Studio session') from None
 
     def _release(self):
-        if not self.token:return
-        row=lease_state(self.folder)
-        if row.get('token')==self.token:(self.folder/'lease.json').unlink(missing_ok=True)
-        self.token=None
+        # snapshot reads the same file under this lock. Windows read handles
+        # can deny unlink; another process may also briefly hold a read handle.
+        with self.lock:
+            if not self.token:return True
+            token=self.token
+            for attempt in range(10):
+                row=lease_state(self.folder)
+                if row.get('reserved') is False:
+                    self.token=None;self.state['cleanup_required']=False;return True
+                if row.get('token')==token:
+                    try:(self.folder/'lease.json').unlink(missing_ok=True)
+                    except PermissionError:pass
+                    except OSError:break
+                    else:
+                        self.token=None;self.state['cleanup_required']=False;return True
+                elif row.get('token'):
+                    # A replacement owns this path. Never retry its deletion.
+                    break
+                if attempt<9:time.sleep(.01)
+            self.state.update(busy=False,phase='cleanup_required',cleanup_required=True,
+                error='Studio 会话记录清理未确认，请稍后核对原会话 / Studio session cleanup is unconfirmed; review the original session')
+            return False
 
     def _agent(self):
         from managed_runtime import check_ready,Files
@@ -164,8 +183,12 @@ class StudioComponent:
                 work()
             except Exception as error:self._update(phase='error',error=str(error)[:1000])
             finally:
-                if reserve:self._release()
-                self._update(busy=False)
+                try:
+                    if reserve:self._release()
+                except Exception:
+                    self._update(phase='cleanup_required',cleanup_required=True,
+                        error='Studio 会话记录清理未确认，请稍后核对原会话 / Studio session cleanup is unconfirmed; review the original session')
+                finally:self._update(busy=False)
         self.worker=threading.Thread(target=run,name='Official Studio component',daemon=True);self.worker.start()
         return self.snapshot()
 

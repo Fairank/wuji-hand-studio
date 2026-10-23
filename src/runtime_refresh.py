@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 from pathlib import Path, PurePosixPath
+import re
 import shutil
 import subprocess
 import sys
@@ -70,6 +71,16 @@ def apply(image,digest,root=Path('/')):
         if path.is_symlink() or not path.parent.resolve().is_relative_to(root):
             raise ValueError('Runtime destination is redirected')
     if (current.exists() and not current.is_dir()) or (cli.exists() and not cli.is_file()):raise ValueError('Invalid controller component path')
+    # A legacy image repair must not undo a newer official SDK installed by
+    # SDK maintenance, including when a CLI mismatch triggered that repair.
+    baseline=tuple(map(int,SDK_VERSION.split('.')))
+    for metadata in current.glob('lib/python*/site-packages/wuji_sdk-*.dist-info/METADATA'):
+        if metadata.is_symlink() or metadata.stat().st_size>256*1024:raise ValueError('SDK metadata is unverified; use SDK component maintenance')
+        versions=re.findall(r'^Version:\s*(20\d{2}\.\d{1,2}\.\d{1,2})\s*$',metadata.read_text(encoding='utf-8'),re.M)
+        hint=re.fullmatch(r'wuji_sdk-(20\d{2}\.\d{1,2}\.\d{1,2})\.dist-info',metadata.parent.name)
+        if hint:versions.append(hint[1])
+        if any(tuple(map(int,value.split('.')))>baseline for value in versions):
+            raise ValueError('已安装较新 SDK，请使用遥操作组件维护，不能回退内置基线 / A newer SDK is installed; use teleoperation component maintenance instead of a bundled downgrade')
     current.parent.mkdir(parents=True,exist_ok=True);cli.parent.mkdir(parents=True,exist_ok=True)
     env_swapped=cli_swapped=False
     try:

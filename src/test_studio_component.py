@@ -78,6 +78,86 @@ class StudioComponentTests(unittest.TestCase):
             self.assertEqual(c.state['current'],'2026.9.22');self.assertEqual(c.state['phase'],'error')
             self.assertEqual(linux.call_args.args,('probe',));self.assertFalse(lease_state(tmp)['reserved'])
 
+    def test_release_waits_for_own_snapshot_file_reader(self):
+        import studio_component
+        with tempfile.TemporaryDirectory() as tmp:
+            c=StudioComponent(tmp);c._reserve('switching')
+            opened=threading.Event();close_reader=threading.Event();deleted=threading.Event();errors=[]
+            original=lease_state;unlink=Path.unlink
+            def read(folder=None):
+                if threading.current_thread().name=='synthetic-snapshot':
+                    with (Path(tmp)/'lease.json').open('r',encoding='utf-8') as stream:
+                        opened.set()
+                        if not close_reader.wait(2):raise RuntimeError('snapshot fixture deadline')
+                        return dict(json.load(stream),reserved=True)
+                return original(folder)
+            def remove(path,*args,**kwargs):
+                if path==Path(tmp)/'lease.json':deleted.set()
+                return unlink(path,*args,**kwargs)
+            def capture(operation):
+                try:operation()
+                except Exception as error:errors.append(error)
+            with patch('studio_component.lease_state',side_effect=read),patch.object(Path,'unlink',remove):
+                reader=threading.Thread(target=lambda:capture(c.snapshot),name='synthetic-snapshot')
+                releaser=threading.Thread(target=lambda:capture(c._release))
+                reader.start();self.assertTrue(opened.wait(2));releaser.start()
+                try:self.assertFalse(deleted.wait(.05))
+                finally:close_reader.set();reader.join(2);releaser.join(2)
+            self.assertFalse(reader.is_alive());self.assertFalse(releaser.is_alive());self.assertEqual(errors,[])
+            self.assertTrue(deleted.is_set());self.assertFalse(lease_state(tmp)['reserved']);self.assertIsNone(c.token)
+
+    def test_release_retries_transient_sharing_violation_and_rechecks_exact_owner(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            c=StudioComponent(tmp);c._reserve('switching');attempts=[];unlink=Path.unlink
+            def remove(path,*args,**kwargs):
+                if path==Path(tmp)/'lease.json':
+                    attempts.append(lease_state(tmp)['token'])
+                    if len(attempts)<3:raise PermissionError('synthetic Windows sharing violation')
+                return unlink(path,*args,**kwargs)
+            owner=c.token
+            with patch.object(Path,'unlink',remove):self.assertTrue(c._release())
+            self.assertEqual(attempts,[owner]*3);self.assertIsNone(c.token);self.assertFalse(lease_state(tmp)['reserved'])
+
+    def test_persistent_release_failure_finishes_background_and_keeps_owner_marker(self):
+        with tempfile.TemporaryDirectory() as tmp,patch('studio_component.sys.platform','win32'):
+            c=StudioComponent(tmp);c.state.update(current='2026.9.22');attempts=[];unlink=Path.unlink
+            def remove(path,*args,**kwargs):
+                if path==Path(tmp)/'lease.json':
+                    attempts.append(path);raise PermissionError('synthetic persistent sharing violation')
+                return unlink(path,*args,**kwargs)
+            with patch.object(c,'_linux',return_value=dict(active=True)),patch.object(Path,'unlink',remove), \
+                    patch('threading.excepthook') as escaped:
+                c.select('2026.8.17');self.wait(c)
+            self.assertEqual(len(attempts),10);escaped.assert_not_called()
+            self.assertEqual(c.state['current'],'2026.9.22');self.assertFalse(c.state['busy'])
+            self.assertTrue(c.state['cleanup_required']);self.assertEqual(c.state['phase'],'cleanup_required')
+            self.assertEqual(lease_state(tmp)['token'],c.token);self.assertIsNotNone(c.token)
+            with self.assertRaisesRegex(ValueError,'cleanup is unconfirmed'):c._reserve('switching')
+            self.assertTrue(c._release());self.assertFalse(lease_state(tmp)['reserved'])
+
+    def test_release_never_deletes_replacement_owner_after_retry(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            c=StudioComponent(tmp);c._reserve('switching');owner=c.token;replacement='b'*32;attempts=[];unlink=Path.unlink
+            def remove(path,*args,**kwargs):
+                if path==Path(tmp)/'lease.json':
+                    attempts.append(path);row=lease_state(tmp);row.pop('reserved');row['token']=replacement
+                    path.write_text(json.dumps(row),encoding='utf-8')
+                    raise PermissionError('synthetic owner replaced during sharing violation')
+                return unlink(path,*args,**kwargs)
+            with patch.object(Path,'unlink',remove):self.assertFalse(c._release())
+            self.assertEqual(len(attempts),1);self.assertEqual(lease_state(tmp)['token'],replacement)
+            self.assertEqual(c.token,owner);self.assertTrue(c.state['cleanup_required']);self.assertFalse(c.state['busy'])
+
+    def test_unexpected_release_error_cannot_escape_background_or_leave_busy(self):
+        with tempfile.TemporaryDirectory() as tmp,patch('studio_component.sys.platform','win32'):
+            c=StudioComponent(tmp);c.state.update(current='2026.9.22')
+            with patch.object(c,'_linux',return_value=dict(active=True)), \
+                    patch.object(c,'_release',side_effect=RuntimeError('synthetic cleanup error')),patch('threading.excepthook') as escaped:
+                c.select('2026.8.17');self.wait(c)
+            escaped.assert_not_called();self.assertFalse(c.state['busy']);self.assertTrue(c.state['cleanup_required'])
+            self.assertEqual(lease_state(tmp)['token'],c.token);self.assertEqual(c.state['phase'],'cleanup_required')
+            c._release()
+
     def test_viewer_secret_is_not_in_snapshot_or_install_receipt(self):
         with tempfile.TemporaryDirectory() as tmp:
             c=StudioComponent(tmp);c.state.update(active=True,phase='running');c.secret=dict(port=18901,password='private_nonce',session='s')

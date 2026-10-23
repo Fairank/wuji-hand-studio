@@ -7,8 +7,15 @@ import threading
 import time
 from glove_protocol import validate, CancellationNotDispatched
 
+SDK_SOLVER_REQUIRED='请切回官方 SDK 映射预览后再接入或启动灵巧手 / Switch preview to the official SDK before preparing or following a real hand'
+
+
+def _actual_sdk_solver(state):
+    solver=(state.get('stream') or {}).get('solver') or {}
+    return solver.get('engine')=='sdk' and solver.get('applied') is True
+
 class GloveBridge:
-    def __init__(self,factory,termination=None):
+    def __init__(self,factory,termination=None,release_resolver=None):
         self.factory=factory;self.lock=threading.RLock();self.thread=None;self.termination=termination;self.session=termination.new_session() if termination else 0
         self.client=self.stdin=None;self.stopping=False;self.last_update=0.;self.lease=None
         self.state=dict(connection='disconnected',message='',devices=[],users=[],stream={},hardware={},feedback={})
@@ -16,6 +23,10 @@ class GloveBridge:
         self._unpair_pending=False
         self.seen_active=False;self._follow_unconfirmed=False
         self._follow_device=None;self._follow_session=None;self._follow_reason=''
+        self.release_resolver=release_resolver
+        self._sdk_release=None;self._sdk_proof=None
+        self._follow_sdk_requirement=None;self._follow_sdk_proof=None
+        self._follow_sdk_session=None
 
     @property
     def busy(self):return bool(self.thread and self.thread.is_alive())
@@ -45,6 +56,8 @@ class GloveBridge:
             s=copy.deepcopy(self.state);age=max(0,time.monotonic()-self.last_update)*1000
             s['busy']=self.busy;s['transport_age_ms']=age if self.last_update else None
             s['session_id']=self.session
+            s['sdk_release']=copy.deepcopy(self._sdk_release)
+            s['sdk_proof']=copy.deepcopy(self._sdk_proof)
             s['follow_unconfirmed']=self._follow_unconfirmed
             s['follow_pending']=bool(self.lease and not self.seen_active)
             s['hand_unpairing']=bool(s.get('hand_unpairing') or self._unpair_pending)
@@ -58,6 +71,8 @@ class GloveBridge:
             s['feedback']=feedback
             if self._follow_unconfirmed:
                 s['can_prepare']=False;s['prepare_blocked_reason']=self._follow_reason
+            elif not _actual_sdk_solver(s):
+                s['can_prepare']=False;s['prepare_blocked_reason']=SDK_SOLVER_REQUIRED
             elif not s['stream']['fresh'] or not self.busy or self.stopping or self.lease or s['hand_unpairing']:
                 s['can_prepare']=False
                 s['prepare_blocked_reason']=('等待新鲜手套数据 / Wait for fresh glove data' if not s['stream']['fresh']
@@ -116,6 +131,9 @@ class GloveBridge:
         self._unpair_pending=False
         self.seen_active=False;self._follow_unconfirmed=False
         self._follow_device=None;self._follow_session=None;self._follow_reason=''
+        self._sdk_release=None;self._sdk_proof=None
+        self._follow_sdk_requirement=None;self._follow_sdk_proof=None
+        self._follow_sdk_session=None
         self.state=dict(connection='connecting',message='正在连接控制端 / Connecting controller',devices=[],users=[],stream={},hardware={},feedback={})
         self.thread=threading.Thread(target=self.run,daemon=True);self.thread.start()
 
@@ -188,6 +206,47 @@ class GloveBridge:
         with self.lock:
             if not self.stopping:self.send(command)
 
+    def verify_follow_sdk(self):
+        """Check a new follow outside transport/controller locks, never keepalive.
+
+        A preview can outlive the stable catalog. Approval belongs only to this
+        worker/session and is consumed by the final locked dispatch preflight.
+        """
+        with self.lock:
+            if self.lease or self.state.get('hardware',{}).get('active') is True:
+                raise ValueError('已有启动请求 / Start already requested')
+            if self._follow_unconfirmed:raise ValueError(self._follow_reason)
+            if (not self.busy or self.stopping or self.state.get('hardware',{}).get('active') is not False):
+                raise ValueError('等待灵巧手停用确认后再开始 / Wait for confirmed hand disable before following')
+            session=self.session;proof=copy.deepcopy(self._sdk_proof)
+            self._follow_sdk_requirement=None;self._follow_sdk_proof=None;self._follow_sdk_session=None
+            if not isinstance(proof,dict) or proof.get('available') is not True or proof.get('api_compatible') is not True:
+                raise ValueError('实际手套 SDK 尚未确认，请重新接入 / Actual glove SDK is not confirmed; reconnect')
+            if not _actual_sdk_solver(self.state):raise ValueError(SDK_SOLVER_REQUIRED)
+        from sdk_release import resolve_release,requirement,select_wheel
+        from sdk_runtime import verify_proof
+        release=(self.release_resolver or resolve_release)()
+        expected=requirement(release)
+        verify_proof(proof,expected);select_wheel(release,proof)
+        with self.lock:
+            if (session!=self.session or self._sdk_proof!=proof or not self.busy or self.stopping
+                    or self.lease or self.state.get('hardware',{}).get('active') is not False
+                    or self._follow_unconfirmed or not _actual_sdk_solver(self.state)):
+                raise ValueError('遥操作会话已改变，请重新开始 / Teleoperation session changed; start again')
+            self._follow_sdk_requirement=copy.deepcopy(expected);self._follow_sdk_proof=proof;self._follow_sdk_session=session
+            return dict(version=expected['version'],checked_at=expected['checked_at'],session_id=session)
+
+    def _require_follow_sdk(self):
+        from sdk_release import validate_requirement,MAX_AGE
+        from sdk_runtime import verify_proof
+        if not _actual_sdk_solver(self.state):raise ValueError(SDK_SOLVER_REQUIRED)
+        expected=validate_requirement(self._follow_sdk_requirement)
+        stamp=expected['checked_at'];now=time.time()
+        if (now-stamp>MAX_AGE or stamp>now+30 or self._sdk_proof!=self._follow_sdk_proof
+                or self.session!=self._follow_sdk_session):
+            raise ValueError('SDK 启动检查已过期，请重新开始 / SDK follow check expired; start again')
+        verify_proof(self._sdk_proof,expected)
+
     def action(self,c):
         validate(c)
         with self.lock:
@@ -223,6 +282,9 @@ class GloveBridge:
                 if not s['stream'].get('fresh'):raise ValueError('等待新鲜手套数据 / Wait for fresh glove data')
                 if s['feedback']['stale'] or not s['hardware'].get('probe_ready') or s['hardware'].get('active') is not False:
                     raise ValueError('等待完整灵巧手反馈 / Wait for ready hand feedback')
+                self._require_follow_sdk()
+                self._follow_sdk_requirement=None;self._follow_sdk_proof=None
+                self._follow_sdk_session=None
                 self.lease=secrets.token_hex(16);c=dict(c,lease=self.lease)
                 self.requested=time.monotonic();self.seen_active=False
                 self._follow_device=s['feedback'].get('device_id');self._follow_session=self.session
@@ -279,9 +341,14 @@ class GloveBridge:
             self.remember_termination()
 
     def run(self):
-        client=None;ready=False;model_ready=False
+        client=None;ready=False;model_ready=False;sdk_ready=False
         with self.lock:continuation=copy.deepcopy(self._continuation);session=self.session
         try:
+            from sdk_release import resolve_release,requirement,select_wheel
+            from sdk_runtime import verify_proof
+            release=(self.release_resolver or resolve_release)()
+            expected=requirement(release)
+            with self.lock:self._sdk_release={k:release[k] for k in ('version','checked_at','catalog_sha256','offline') if k in release}
             client=self.factory();stdin,stdout,stderr=client.exec_command(client.agent_command,timeout=25)
             def drain():
                 try:
@@ -297,21 +364,32 @@ class GloveBridge:
                 if not line.startswith('WUJI_JSON:'):continue
                 event=json.loads(line[len('WUJI_JSON:'):])
                 if event.get('type')=='ready':
-                    if continuation is not None and ready:raise ValueError('Controller repeated continuation startup')
+                    if ready:raise ValueError('Controller repeated startup')
                     if event.get('teleop_version')!=1:raise ValueError('控制端需更新到支持手套遥操作的版本 / Update controller for glove teleoperation')
+                    verify_proof(event.get('sdk_proof'),expected)
+                    select_wheel(release,event['sdk_proof'])
                     staged=None
                     if continuation is not None:
                         if event.get('calibration_continuation_version')!=1:
                             raise ValueError('控制端尚不支持沿用本次标定，请先更新控制端 / Update the controller to continue this calibration')
                         staged=self._stage_calibration(client,continuation)
                     with self.lock:
-                        self.send(dict(name='disconnect') if self.stopping else dict(name='glove_session',**({'continuation':staged} if staged else {})))
+                        self.send(dict(name='disconnect') if self.stopping else dict(name='glove_session',sdk_requirement=expected,**({'continuation':staged} if staged else {})))
                     ready=True
+                elif event.get('type')=='sdk_ready':
+                    if not ready or sdk_ready:raise ValueError('Controller SDK proof is out of order')
+                    proof=verify_proof(event.get('sdk_proof'),expected)
+                    select_wheel(release,proof)
+                    with self.lock:self._sdk_proof=proof
+                    sdk_ready=True
                 elif event.get('type')=='calibrated_ready' and continuation is not None:
-                    if not ready or model_ready:raise ValueError('Controller calibration readiness is out of order')
+                    if not ready or not sdk_ready or model_ready:raise ValueError('Controller calibration readiness is out of order')
                     model_ready=True
                     self._calibrated_ready(event,continuation)
-                else:self.receive(event,session=session)
+                else:
+                    if event.get('type')=='glove_state' and not sdk_ready:
+                        raise ValueError('控制端尚未确认实际运行的 SDK，请修复组件 / Actual worker SDK was not confirmed; repair components')
+                    self.receive(event,session=session)
             if not ready:raise ValueError('控制端未返回手套接口 / Controller did not expose glove interface')
         except Exception as e:
             # Credential/transport details are never copied to the public UI.

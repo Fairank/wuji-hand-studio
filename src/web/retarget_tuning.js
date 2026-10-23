@@ -60,7 +60,7 @@
  async function save(exporting){if(busy||!context||stale)return;busy=true;controls();try{
   const v=values(),result=await request(exporting?'retarget_tuning_export':'retarget_tuning_save',{binding:context.binding,values:v,revision:context.revision});
   if(exporting){$('rt-yaml').value=result.tuning_export.yaml;$('rt-export-result').hidden=false;$('rt-export-result').open=true;$('rt-status').textContent=t('已生成 YAML；尚未应用到当前手套或灵巧手。','YAML generated; not applied to the current glove or hand.');}
-  else{context=result.tuning;dirty=false;binding();$('rt-status').textContent=t('参数已保存。点击“应用开源映射”才会请求切换预览。','Saved. Apply open mapper to request the preview switch.');}
+  else{context=result.tuning;dirty=false;binding();$('rt-status').textContent=t('参数已保存，可在手套预览中试用。','Saved. Try the parameters in glove preview.');}
  }catch(e){$('rt-status').textContent=e.message}finally{busy=false;controls()}}
  $('rt-reload').onclick=()=>{if(!dirty||confirm(t('放弃未保存修改并重新载入？','Discard unsaved edits and reload?')))load()};
  $('rt-default').onclick=()=>{if(context){fill(context.defaults);changed()}};$('rt-save').onclick=()=>save(false);$('rt-export').onclick=()=>save(true);
@@ -71,7 +71,7 @@
   const online=!!state?.csrf,r=state?.solver_runtime||{},g=state?.glove||{},live=g.stream?.solver;
   const attached=!!g.feedback?.device_id||!!g.hardware?.active||state?.connection==='connected';
   $('rt-install').textContent=t('准备求解环境','Prepare solver');
-  $('rt-apply').textContent=t('应用开源映射','Apply open mapper');$('rt-sdk').textContent=t('切换为 SDK 映射','Switch to SDK mapper');
+  $('rt-apply').textContent=t('预览开源映射','Preview open mapper');$('rt-sdk').textContent=t('切换为 SDK 映射','Switch to SDK mapper');
   $('rt-install').disabled=!online||!!r.busy||!!g.busy||attached||r.ready===true;
   $('rt-apply').disabled=!online||busy||stale||!context||!r.ready||attached;
   $('rt-sdk').disabled=!online||busy||stale||!context||attached;
@@ -80,7 +80,7 @@
   if(!online)current=t('当前生效状态未知；本地修改仍然保留。','Applied state unknown. Local edits are preserved.');
   else if(live?.applied&&g.stream?.fresh){current=(live.engine==='official_open'?t('已确认：官方开源映射','Confirmed: official open mapper'):t('已确认：SDK 映射','Confirmed: SDK mapper'));
     if(live.engine==='official_open'){current+=' · '+(live.values_sha256===context?.values_sha256&&!dirty?t('当前参数已生效','Current parameters applied'):t('当前帧仍使用其他参数','Current frame uses other parameters'));if(Number.isFinite(live.solve_ms))current+=' · '+live.solve_ms.toFixed(1)+' ms';}}
-  else if(context)current=t('下次连接使用：','For the next connection: ')+(context.engine==='official_open'?t('官方开源映射','Official open mapper'):'SDK')+' · '+t('暂无新帧确认','Not yet confirmed by a fresh frame');
+  else if(context)current=t('下次接入使用官方 SDK','New connections use the official SDK');
   else current=t('载入当前配对后显示配置','Load the current pairing to inspect its configuration');
   $('rt-runtime-selection').textContent=current;
   $('rt-runtime-reason').textContent=attached?t('切换求解器前，请先断开灵巧手反馈。','Disconnect hand feedback before switching the solver.'):'';
@@ -98,10 +98,12 @@
  function labels(){
   a.textContent=t('输出微调','Output adjustment');b.textContent=t('官方求解器','Official solver');switches.setAttribute('aria-label',t('映射调整方式','Mapping adjustment method'));
   const texts={title:['官方映射参数表','Official retargeting parameters'],mode:['配置草稿 · 不影响当前连接','Configuration draft · does not affect this connection'],doc:['参数说明 ↗','Field reference ↗'],scope:['使用随软件固定的官方开源算法。二代使用与画面一致的 Beta 2 模型；映射在内置 Linux 独立环境运行。参数更改只在手套预览中应用，实机跟随仍由你单独启动。','Uses the pinned official open-source solver in an isolated built-in Linux environment. Hand 2 uses the same Beta 2 model as the viewer. Apply during glove-only preview; hand follow is started separately.'],'scale-title':['五指比例','Finger target scales'],'scale-note':['每格缩放“手腕到该关键点”的向量，不是电机力度或逐节骨长。1 表示保持原比例；支持从表格粘贴多行数值。','Each cell scales a wrist-to-landmark vector, not motor force or individual bone length. 1 preserves the scale. Paste rows from a spreadsheet.'],'advanced-label':['对指距离与平滑','Pinch distances and smoothing'],'pinch-title':['拇指配对阈值 · d1 < d2','Thumb pairing thresholds · d1 < d2'],'alpha-label':['输出低通 lp_alpha · 越小越平滑、延迟越大','Output low-pass lp_alpha · smaller adds smoothing and lag'],'delta-label':['逐帧变化权重 norm_delta','Frame-change regularization norm_delta'],reload:['重新载入','Reload'],default:['填入官方默认值','Fill official defaults'],save:['保存草稿','Save draft'],export:['导出 YAML','Export YAML'],'export-label':['导出配置内容','Export configuration'],'export-help':['复制以下完整 YAML，在官方仓库 example/config 下保存为对应配置文件，再用 tuning_tool.py 加载。模型路径沿用官方模板；软件内运行与导出是两个独立入口。','Copy the full YAML into the matching config file under the official repository’s example/config and load it with tuning_tool.py. Model paths follow the official template. In-app execution and export are separate actions.']};
+  texts.scope=['开源参数仅用于调参预览；实机遥操作使用官方稳定版 SDK。','Open parameters are preview-only. Real teleoperation uses the official stable SDK.'];
   for(const [id,pair] of Object.entries(texts))$('rt-'+id).textContent=t(...pair);
   $('rt-help-label').textContent=t('参数含义与使用方法','Parameter meanings and usage');
   $('rt-mode').textContent=t('先调整比例，再保存；需要预览时单独应用。','Adjust scales, then save. Apply separately when you want a preview.');
   const extra={'scale-quick':['1 保持比例；每格调整手腕到对应关键点的距离。','1 preserves scale. Each cell adjusts the wrist-to-landmark distance.'],'binding-title':['当前设备配对','Current pairing'],'runtime-title':['预览中的求解器','Preview solver'],'save-title':['保存配置','Save configuration'],'save-note':['保存只更新这组配对的草稿，不切换当前预览。','Saving updates this pairing’s configuration without switching the current preview.'],'apply-note':['应用会保存本表参数并选择求解器；以控制端新帧确认为准。真实手跟随仍需单独开启。','Apply saves this table and selects the solver. Wait for a fresh controller frame to confirm. Real-hand follow is started separately.']};
+  extra['apply-note']=['应用仅切换调参预览。实机跟随请使用 SDK 映射。','Apply changes the tuning preview only. Use the SDK mapper for real-hand follow.'];
   for(const [id,pair] of Object.entries(extra))$('rt-'+id).textContent=t(...pair);runtime();outputLabels();
   if(grid){grid.setLabels(rows(),cols());pinch.setLabels(rows().slice(1),pinCols());grid.setLanguage(window.WujiLocale?.lang||'zh');pinch.setLanguage(window.WujiLocale?.lang||'zh')}binding();
  }
