@@ -68,7 +68,8 @@ class TaskViewTests(unittest.TestCase):
         s=idle();s['calibration_connection']=dict(busy=True,serial='WG-A')
         self.assertTrue(scope(Controller(s),task('glove','WG-A'))['current'])
         s=idle();s['glove'].update(busy=True,connection='ready',session_id=8)
-        s['teleoperation_connection']=dict(busy=False,phase='select_user',serial='WG-A',viewer_token='a'*32,sdk_session=8)
+        s['teleoperation_connection']=dict(busy=False,phase='select_user',serial='WG-A',side='right',
+            viewer_token='a'*32,attempt_id='b'*32,sdk_session=8)
         c=Controller(s);self.assertTrue(scope(c,task('glove','WG-A'))['current'])
         c.state['glove']['session_id']=9;self.assertFalse(scope(c,task('glove','WG-A'))['current'])
 
@@ -115,7 +116,8 @@ class TaskViewTests(unittest.TestCase):
         def action(command):
             self.assertTrue(c.calibration_handover.workflow_lock._is_owned());return copy.deepcopy(command)
         c.action=action;command={'name':'hardware_keepalive','lease':'synthetic'}
-        self.assertEqual(execute(c,ident,context,command),command)
+        result=execute(c,ident,context,command)
+        self.assertEqual({k:v for k,v in result.items() if k!='task_receipt'},command)
 
     def test_task_cannot_select_another_device_or_use_group_root_routes(self):
         c=Controller(self.glove());ident=task('glove','WG-A');context=scope(c,ident)['owner_context']
@@ -124,6 +126,37 @@ class TaskViewTests(unittest.TestCase):
             {'name':'fleet_stop'}, {'name':'ensemble_stop','workspace':'main'}]
         for command in commands:
             with self.subTest(command=command),self.assertRaises(ValueError):execute(c,ident,context,command)
+        self.assertEqual(c.calls,[])
+
+    def test_receipt_binds_only_a_successful_same_task_owner_transition(self):
+        c=Controller(self.glove());ident=task('glove','WG-A');before=scope(c,ident)['owner_context']
+        def action(command):
+            c.state['glove']['session_id']=8
+            return dict(calibration_connection={'busy':False},task_receipt={'forged':True})
+        c.action=action
+        result=execute(c,ident,before,{'name':'glove_open','serial':'WG-A'})
+        after=scope(c,ident)['owner_context']
+        self.assertNotEqual(before,after)
+        self.assertEqual(result['task_receipt'],dict(task_id=ident,before_context=before,after_context=after))
+        c.state['glove']['session_id']=9
+        self.assertNotEqual(result['task_receipt']['after_context'],scope(c,ident)['owner_context'])
+
+    def test_failed_action_or_different_resource_has_no_transition_receipt(self):
+        for failed,replace in ((True,False),(False,True)):
+            with self.subTest(failed=failed,replace=replace):
+                c=Controller(self.glove());ident=task('glove','WG-A');before=scope(c,ident)['owner_context']
+                def action(command):
+                    if replace:c.state=self.glove('WG-B')
+                    return dict(ok=not failed,task_receipt={'forged':True})
+                c.action=action
+                self.assertNotIn('task_receipt',execute(c,ident,before,{'name':'glove_disconnect'}))
+
+    def test_same_viewer_new_teleoperation_attempt_invalidates_old_context(self):
+        s=self.glove();s['teleoperation_connection']=dict(serial='WG-A',viewer_token='a'*32,attempt_id='b'*32,sdk_session=7)
+        c=Controller(s);ident=task('glove','WG-A');before=scope(c,ident)['owner_context']
+        c.state['teleoperation_connection']['attempt_id']='c'*32
+        with self.assertRaisesRegex(ValueError,'changed'):
+            execute(c,ident,before,{'name':'teleoperation_handover_cancel','viewer_token':'a'*32,'attempt_id':'b'*32})
         self.assertEqual(c.calls,[])
 
     def test_exact_attempt_cancel_fast_path_does_not_wait_for_worker_workflow_lock(self):
@@ -136,7 +169,8 @@ class TaskViewTests(unittest.TestCase):
         try:
             with self.assertRaisesRegex(ValueError,'switching'):execute(c,ident,context,{'name':'glove_stop'})
             command=dict(name='calibrated_teleoperation_cancel',run_id='a'*32,attempt_id='b'*32)
-            self.assertTrue(execute(c,ident,context,command)['ok'])
+            result=execute(c,ident,context,command)
+            self.assertTrue(result['ok']);self.assertNotIn('task_receipt',result)
             c.after_snapshot=lambda:c.state['calibrated_teleoperation'].update(attempt_id='c'*32)
             with self.assertRaisesRegex(ValueError,'attempt changed'):execute(c,ident,context,command)
             self.assertEqual(c.calls,[command])

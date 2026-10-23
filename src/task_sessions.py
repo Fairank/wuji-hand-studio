@@ -22,6 +22,64 @@ def serial(value):
     return value if isinstance(value, str) and 0 < len(value) <= 128 and not any(ord(c) < 32 for c in value) else None
 
 
+def sdk_recovery(state):
+    """Retain only the exact still-running failed SDK owner's cleanup route.
+
+    A scan/draft/history cannot establish ownership. Prefer the identity already
+    published by this worker, or an exact-session server handover receipt if the
+    worker failed before opening the glove. Never call this a live data stream.
+    """
+    state=object_value(state);glove=object_value(state.get('glove'))
+    profile=object_value(state.get('device_profile'));side=profile.get('side')
+    if (glove.get('busy') is not True or glove.get('connection')!='error'
+            or type(glove.get('session_id')) is not int or glove['session_id']<0
+            or profile.get('id') not in PROFILES or side not in ('left','right')
+            or not profile['id'].endswith('_'+side)):
+        return None
+    number=serial(glove.get('glove_serial'));worker_profile=glove.get('profile')
+    if worker_profile is not None and worker_profile!=profile['id']:return None
+    if number and worker_profile==profile['id'] and isinstance(object_value(glove.get('user')).get('user_id'),str):
+        return number
+    proofs=[]
+    for name in ('calibrated_teleoperation','teleoperation_connection'):
+        row=object_value(state.get(name))
+        keys=('attempt_id','run_id') if name=='calibrated_teleoperation' else ('attempt_id','viewer_token')
+        if (type(row.get('sdk_session')) is not int or row['sdk_session']!=glove['session_id']
+                or not all(isinstance(row.get(key),str) and re.fullmatch('[0-9a-f]{32}',row[key]) for key in keys)
+                or not serial(row.get('serial')) or row.get('side')!=side):
+            continue
+        if number and number!=row['serial']:return None
+        proofs.append(row['serial'])
+    return proofs[0] if proofs and len(set(proofs))==1 else None
+
+
+def pending_teleoperation(state):
+    """One exact handover, before a glove is opened; never a history claim."""
+    state=object_value(state);row=object_value(state.get('teleoperation_connection'))
+    profile=object_value(state.get('device_profile'));glove=object_value(state.get('glove'))
+    side=profile.get('side')
+    if (profile.get('id') not in PROFILES or side not in ('left','right')
+            or not profile['id'].endswith('_'+side) or row.get('side')!=side
+            or not isinstance(row.get('serial'),str) or not re.fullmatch('[A-Za-z0-9][A-Za-z0-9_-]{0,79}',row['serial'])
+            or any(not isinstance(row.get(key),str) or not re.fullmatch('[0-9a-f]{32}',row[key])
+                   for key in ('viewer_token','attempt_id'))):
+        return None
+    session=row.get('sdk_session')
+    if session is None:
+        if (row.get('busy') is not True or row.get('phase') not in ('validating','stopping','starting','cancelling')
+                or glove.get('busy') is not False):return None
+    elif (type(session) is not int or session<0 or type(glove.get('session_id')) is not int
+            or glove['session_id']!=session or glove.get('busy') is not True
+            or glove.get('connection') not in ('connecting','ready')
+            or row.get('phase') not in ('starting','select_user','ready','cancelling')
+            or glove.get('glove_serial') not in (None,'',row['serial'])
+            or glove.get('profile') not in (None,profile['id'])
+            or object_value(glove.get('hardware')).get('active',False) is not False
+            or object_value(glove.get('feedback')).get('device_id')):
+        return None
+    return {key:row.get(key) for key in ('serial','side','viewer_token','attempt_id','sdk_session')}
+
+
 def context_digest(state):
     """Identity/session scope, never rates, selected labels or connection age."""
     state = object_value(state)
@@ -42,6 +100,8 @@ def context_digest(state):
                  model={key:provenance.get(key) for key in ('source_run_id','model_sha256','owner_user_id')},
                  target=feedback.get('device_id'), target_identity=feedback.get('identified_device'),
                  continuation={key:continuation.get(key) for key in ('attempt_id','run_id','expected_revision','serial','side','profile','model_sha256','sdk_session')},
+                 handover={key:object_value(state.get('teleoperation_connection')).get(key) for key in ('serial','viewer_token','attempt_id','sdk_session')},
+                 binding=state.get('retarget_binding'),
                  viewer=viewer.get('session_id'), run=run.get('id'))
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
 
@@ -116,6 +176,22 @@ class TaskSessions:
                               active=False, stale=False, status='viewing', page='official-viz',
                               source='native', session=viewer.get('session_id')))
         continuation=object_value(state.get('calibrated_teleoperation'))
+        recovery=sdk_recovery(state)
+        if recovery:
+            found.append(dict(kind='glove',hand=None,glove=recovery,profile=profile['id'],side=profile['side'],
+                active=ghardware.get('active'),stale=True,status='error',page='glove',
+                source='sdk',session=glove['session_id'],recovery=True))
+        pending=pending_teleoperation(state)
+        if pending:
+            original=next((row for row in found if row['source']=='native'
+                and row.get('glove')==pending['serial'] and row['session']==pending['viewer_token']),None)
+            if original is not None:
+                original.update(status='connecting',active=None,stale=True,handover=True,page='glove')
+            else:
+                found.append(dict(kind='glove',hand=None,glove=pending['serial'],profile=profile['id'],side=pending['side'],
+                    active=None,stale=True,status='connecting',page='glove',
+                    source='native' if pending['sdk_session'] is None else 'sdk',
+                    session=pending['attempt_id'] if pending['sdk_session'] is None else pending['sdk_session'],handover=True))
         if (not found and continuation.get('busy') is True and serial(continuation.get('serial'))
                 and continuation.get('side') in ('left','right')
                 and isinstance(continuation.get('attempt_id'),str)
@@ -182,6 +258,8 @@ class TaskSessions:
                 continuation_verified = (not unknown and observed['status']=='calibrated' and continuation.get('can_continue') is True and bool(observed['glove'])
                     and continuation.get('serial') == observed['glove'] and continuation.get('side') == side)
                 reason = ('停止结果尚未确认 / Stop confirmation required' if unknown else
+                          '手套会话出错，请断开原会话后重试 / Glove session failed; disconnect its owning session before retrying' if observed.get('recovery') else
+                          '正在切换到遥操作 / Switching to teleoperation' if observed.get('handover') else
                           '标定资料正在接续 / Continuing calibration data' if observed['status']=='connecting' else
                           '' if continuation_verified and observed['status']=='calibrated' else
                           '等待新鲜数据 / Waiting for fresh data' if observed['stale'] else

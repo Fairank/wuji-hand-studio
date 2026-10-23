@@ -72,6 +72,27 @@ class DesktopToolsTests(unittest.TestCase):
             dispatch(host,dict(operation='preview',action='open',speed=1))
             host.preview.assert_called_once_with('open',1)
 
+    def test_ended_calibration_with_unconfirmed_cleanup_cannot_close_reload_or_update(self):
+        state=dict(connection='disconnected',hardware=dict(active=False),
+                   calibration=dict(running=False,cleanup_required=True))
+        self.assertFalse(idle(state,{}))
+        host=Mock();host.server.controller.snapshot.return_value=state
+        host.server.controller.doctor.snapshot.return_value={}
+        for operation in ('close_idle','prepare_update','reload_ui','preview'):
+            payload=dict(operation=operation)
+            if operation=='preview':payload.update(action='open',speed=1)
+            with self.subTest(operation=operation),self.assertRaises(ValueError):dispatch(host,payload)
+        host.stop_and_close.assert_not_called();host.reload_ui.assert_not_called();host.preview.assert_not_called()
+        state['calibration']['cleanup_required']=False
+        self.assertTrue(idle(state,{}))
+        for nested in (False,True):
+            run=dict(id='a'*32,source='official_jsonl_native',running=False,cleanup_confirmed=False)
+            state['calibration']={'run':run} if nested else run
+            with self.subTest(nested=nested):
+                self.assertFalse(idle(state,{}))
+                run['cleanup_confirmed']=True
+                self.assertTrue(idle(state,{}))
+
     def test_update_requires_edition_hash_version_and_local_path(self):
         with TemporaryDirectory() as tmp:
             root=Path(tmp);(root/'updates').mkdir();data=b'MZ'+b'test installer';digest=hashlib.sha256(data).hexdigest()

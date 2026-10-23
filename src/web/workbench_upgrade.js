@@ -15,20 +15,21 @@
   const rawFetch=window.fetch.bind(window),app=document.querySelector('.app');
   const notice=document.createElement('p');notice.id='task-scope-notice';notice.setAttribute('role','status');
   Object.assign(notice.style,{position:'fixed',inset:'16px 16px auto',zIndex:'1000',margin:'0',padding:'14px 16px',borderRadius:'12px',background:'var(--wb-card,#f5f5f7)',color:'var(--wb-ink,#1d1d1f)',border:'1px solid var(--wb-line,#ddd)'});document.body.append(notice);
-  let current=false,parentCurrent=false,parentRevision=null,context=null,epoch=0,reading=null,checkedAt=0,reason='',lastPublished='';
+  let current=false,parentCurrent=false,parentRevision=null,context=null,epoch=0,reading=null,checkedAt=0,reason='',lastPublished='',stateReady=false,clearing=false;
+  const stateProof=Symbol('task-state-owner');
   const ownedReads=new Set(['/api/state','/api/view','/api/workspace-view','/api/official-viz','/api/calibration','/api/workspaces','/api/retarget/context']);
   const parentOrigin=(()=>{try{return document.referrer?new URL(document.referrer).origin:null;}catch{return null;}})();
-  function publish(){const allowed=current&&parentCurrent,key=allowed?'current':'blocked';if(document.documentElement.dataset.taskScope!==key)document.documentElement.dataset.taskScope=key;if(app&&app.inert===allowed)app.inert=!allowed;if(notice.hidden!==allowed)notice.hidden=allowed;const message=reason||t('任务归属正在核对，此视图暂不可操作。','Verifying this task owner. This view is temporarily read-only.');if(notice.textContent!==message)notice.textContent=message;
+  function publish(){const allowed=current&&parentCurrent&&stateReady,key=allowed?'current':'blocked';if(document.documentElement.dataset.taskScope!==key)document.documentElement.dataset.taskScope=key;if(app&&app.inert===allowed)app.inert=!allowed;if(notice.hidden!==allowed)notice.hidden=allowed;const message=reason||t('任务归属正在核对，此视图暂不可操作。','Verifying this task owner. This view is temporarily read-only.');if(notice.textContent!==message)notice.textContent=message;
    const payload={type:'wb-task-scope',task_id:taskViewId,owner_revision:parentRevision,current:allowed,owner_context:allowed?context:null,reason:allowed?'':message},signature=JSON.stringify(payload);
    if(parentOrigin&&window.parent!==window&&signature!==lastPublished){lastPublished=signature;window.parent.postMessage(payload,parentOrigin);}
   }
-  function invalidate(message){current=false;reason=message;publish();}
-  function clearConsent(){for(const box of document.querySelectorAll('#glove-clear,#trial-clear,#probe-clear,#pe-clear,#hub-replace,.hg-clearbox'))box.checked=false;window.dispatchEvent(new Event('console-offline'));}
+  function invalidate(message){if(current||stateReady){epoch++;stateReady=false;clearConsent();}current=false;reason=message;publish();}
+  function clearConsent(){for(const box of document.querySelectorAll('#glove-clear,#trial-clear,#probe-clear,#pe-clear,#hub-replace,.hg-clearbox'))box.checked=false;clearing=true;try{window.dispatchEvent(new Event('console-offline'));}finally{clearing=false;}}
   async function refreshScope(force=false){
    if(reading)return reading;if(!force&&Date.now()-checkedAt<750)return;
    const requestedRevision=parentRevision;reading=(async()=>{try{const r=await rawFetch('/api/task-view?task_id='+encodeURIComponent(taskViewId||''),{cache:'no-store',signal:AbortSignal.timeout(3000)});if(!r.ok)throw Error(t('无法核对任务归属。','Task ownership is unavailable.'));const value=await r.json();if(requestedRevision!==parentRevision)return;
      if(value?.task_id!==taskViewId||value.current!==true||typeof value.owner_context!=='string'||!/^[a-f0-9]{64}$/.test(value.owner_context)){invalidate(t('此任务已断开或归属已变化，请打开当前设备任务。','This task is disconnected or its owner changed. Open the current device task.'));return;}
-     if(context!==value.owner_context){epoch++;clearConsent();context=value.owner_context;}
+     if(context!==value.owner_context){epoch++;stateReady=false;clearConsent();context=value.owner_context;}
      current=true;reason='';checkedAt=Date.now();publish();
     }catch{invalidate(t('任务归属尚未确认，此视图暂不可操作。','Task ownership is unverified. This view is temporarily read-only.'));}
     finally{reading=null;if(requestedRevision!==parentRevision)queueMicrotask(()=>refreshScope(true));}})();return reading;
@@ -39,15 +40,42 @@
    if(url.pathname==='/api/task-view')throw Error(t('任务归属查询由当前视图管理。','Task ownership is managed by this view.'));
    const write=!['GET','HEAD'].includes(request.method),owned=write||ownedReads.has(url.pathname);
    if(!owned)return rawFetch(request);
-   await refreshScope(write);if(!current||!parentCurrent)throw Error(t('此任务归属未确认，操作未发送。','This task owner is unverified. No operation was sent.'));
+   await refreshScope(write);if(!current||!parentCurrent||(write&&!stateReady))throw Error(t('此任务归属未确认，操作未发送。','This task owner is unverified. No operation was sent.'));
    const sentContext=context,sentEpoch=epoch,headers=new Headers(request.headers);headers.set('X-Task-Id',taskViewId);headers.set('X-Task-Context',sentContext);
    const response=await rawFetch(new Request(request,{headers}));
-   if(!write)await refreshScope(true);
-   if(!current||!parentCurrent||sentContext!==context||sentEpoch!==epoch)throw Error(t('任务会话已变化，旧响应未采用。','The task session changed. The old response was discarded.'));
+   if(!write||response.ok)await refreshScope(true);
+   if(!current||!parentCurrent||sentContext!==context||sentEpoch!==epoch){
+    let acceptedTransition=false;
+    if(write&&response.ok)try{
+     const value=await response.clone().json(),receipt=value?.task_receipt;
+     if(value?.ok===true&&receipt&&typeof receipt==='object'&&!Array.isArray(receipt)&&Object.keys(receipt).length===3&&receipt.task_id===taskViewId&&receipt.before_context===sentContext&&typeof receipt.after_context==='string'&&/^[a-f0-9]{64}$/.test(receipt.after_context)){
+      // Only the server's receipt for this exact accepted command can bridge
+      // an owner transition. A fresh read must still verify its destination.
+      await refreshScope(true);if(!current&&parentCurrent)await refreshScope(true);
+      acceptedTransition=current&&parentCurrent&&receipt.after_context===context;
+      if(acceptedTransition){
+       const destination=context,destinationEpoch=epoch,deadline=performance.now()+3500;
+       while(!stateReady||!current){
+        if(!parentCurrent||context!==destination||epoch!==destinationEpoch||performance.now()>deadline){acceptedTransition=false;break;}
+        await new Promise(resolve=>setTimeout(resolve,25));
+       }
+      }
+     }
+    }catch{}
+    if(!acceptedTransition)throw Error(t('任务会话已变化，旧响应未采用。','The task session changed. The old response was discarded.'));
+   }
+   // The normalized console event keeps enumerable symbols. Unlock only after
+   // this exact owner epoch's validated state has reached the existing renderer.
+   if(!write&&url.pathname==='/api/state'&&response.ok){
+    const read=response.json.bind(response);
+    response.json=async()=>{const value=await read();if(value&&typeof value==='object'&&!Array.isArray(value))Object.defineProperty(value,stateProof,{value:{context:sentContext,epoch:sentEpoch},enumerable:true});return value;};
+   }
    return response;
   };
-  for(const name of ['click','pointerdown','keydown','submit'])document.addEventListener(name,event=>{if((!current||!parentCurrent)&&!(name==='keydown'&&['Tab','Escape'].includes(event.key))){event.preventDefault();event.stopImmediatePropagation();}},true);
-  taskScope={setParent(value,revision){if(!Number.isSafeInteger(revision)||revision<1)return;if(parentRevision!==revision){parentRevision=revision;epoch++;current=false;context=null;checkedAt=0;clearConsent();}parentCurrent=value===true;publish();if(parentCurrent)refreshScope(true);},refresh:()=>refreshScope(true),snapshot:()=>({current:current&&parentCurrent,owner_context:context,epoch})};
+  window.addEventListener('console-state',event=>{const proof=event.detail?.[stateProof];if(!proof||proof.context!==context||proof.epoch!==epoch||!current||!parentCurrent){event.stopImmediatePropagation();return;}queueMicrotask(()=>{if(proof.context===context&&proof.epoch===epoch&&current&&parentCurrent){stateReady=true;reason='';publish();}});},true);
+  window.addEventListener('console-offline',()=>{if(clearing)return;const wasReady=stateReady;stateReady=false;if(wasReady)reason=t('本机服务暂不可用，恢复后继续。','The local service is unavailable. Continue after reconnection.');publish();},true);
+  for(const name of ['click','pointerdown','keydown','submit'])document.addEventListener(name,event=>{if((!current||!parentCurrent||!stateReady)&&!(name==='keydown'&&['Tab','Escape'].includes(event.key))){event.preventDefault();event.stopImmediatePropagation();}},true);
+  taskScope={setParent(value,revision){if(!Number.isSafeInteger(revision)||revision<1)return;if(parentRevision!==revision){parentRevision=revision;current=false;checkedAt=0;}if(parentCurrent&&value!==true){epoch++;stateReady=false;clearConsent();}parentCurrent=value===true;publish();if(parentCurrent)refreshScope(true);},refresh:()=>refreshScope(true),snapshot:()=>({current:current&&parentCurrent&&stateReady,owner_context:context,epoch})};
   publish();refreshScope(true);setInterval(()=>refreshScope(true),1000);
   window.addEventListener('wuji-language',publish);
  }

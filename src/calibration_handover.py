@@ -26,7 +26,7 @@ def workflow_action(command):
     name=command.get('name','')
     if name in _STOPS:return False
     return (name in {'connect','parameters_sync','doctor_run','doctor_version','doctor_support',
-                    'control_tools_check','runtime_install','runtime_select','bridge_config_save',
+                    'control_tools_check','runtime_install','runtime_select','bridge_config_save','retarget_binding_save',
                     'bridge_password_save','bridge_password_forget','device_profile_select',
                     'solver_install','solver_probe','hardware_start','hardware_trial','hardware_probe',
                     'program_start','program_resume','demo_start','official_cli_check',

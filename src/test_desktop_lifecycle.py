@@ -65,6 +65,38 @@ class ExitTests(unittest.TestCase):
         ticks=iter([0,1])
         self.assertFalse(close_sessions(c,timeout=.5,clock=lambda:next(ticks),sleep=lambda _:None)['ok'])
         self.assertEqual([x.args[0]['name'] for x in c.action.call_args_list],['calibration_cancel'])
+    def test_ended_but_unconfirmed_calibration_requires_confirmation_and_keeps_window_open(self):
+        for nested in (False,True):
+            with self.subTest(nested=nested):
+                s=state();run=dict(running=False,id='a'*32,source='official_jsonl_native',cleanup_confirmed=False)
+                s['calibration']={'run':run,'cleanup_required':True} if nested else dict(run,cleanup_required=True)
+                c=self.controller(s);c.calibration.run=run
+                self.assertTrue(needs_confirmation(s))
+                self.assertFalse(close_sessions(c,sleep=lambda _:None)['ok'])
+                self.assertEqual([x.args[0]['name'] for x in c.action.call_args_list],['calibration_cancel'])
+    def test_ended_calibration_can_close_only_after_explicit_cleanup_recovery(self):
+        s=state();s['calibration']=dict(running=False,id='a'*32,source='official_tty',cleanup_confirmed=False,cleanup_required=True)
+        c=self.controller(s);c.calibration.run=s['calibration']
+        def action(command):
+            if command['name']=='calibration_cancel':s['calibration'].update(cleanup_confirmed=True,cleanup_required=False)
+        c.action.side_effect=action
+        self.assertTrue(close_sessions(c,sleep=lambda _:None)['ok'])
+        self.assertEqual([x.args[0]['name'] for x in c.action.call_args_list],['calibration_cancel','disconnect'])
+    def test_failed_cleanup_recovery_never_disconnects_other_sessions(self):
+        for error in (ValueError('owned by another workspace'),OSError('cleanup report unavailable')):
+            with self.subTest(error=error):
+                s=state();s['calibration']=dict(running=False,cleanup_required=True)
+                c=self.controller(s);c.calibration.run={'running':False};c.action.side_effect=error
+                self.assertFalse(close_sessions(c,sleep=lambda _:None)['ok'])
+                self.assertEqual([x.args[0]['name'] for x in c.action.call_args_list],['calibration_cancel'])
+    def test_calibration_owner_changed_during_recovery_keeps_window_open(self):
+        s=state();s['calibration']=dict(running=False,id='a'*32,cleanup_required=True)
+        c=self.controller(s);c.calibration.run={'running':False}
+        def action(command):
+            if command['name']=='calibration_cancel':s['calibration']=dict(running=False,id='b'*32,cleanup_confirmed=True)
+        c.action.side_effect=action
+        self.assertFalse(close_sessions(c,sleep=lambda _:None)['ok'])
+        self.assertEqual([x.args[0]['name'] for x in c.action.call_args_list],['calibration_cancel'])
     def test_pending_handover_is_not_an_idle_closed_session_and_can_retry(self):
         for key in ('calibration_connection','teleoperation_connection'):
             with self.subTest(key=key):

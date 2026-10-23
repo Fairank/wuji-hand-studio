@@ -180,6 +180,7 @@ def worker_glove(requests,events,continuation=None):
             try:c=bootstrap_commands.popleft() if bootstrap_commands else requests.get_nowait()
             except queue.Empty:c=None
             if c:
+                follow_dispatch_attempted=False
                 try:
                     name=c['name']
                     if name in ('disconnect','glove_disconnect'):break
@@ -203,6 +204,8 @@ def worker_glove(requests,events,continuation=None):
                                 glove_ownership=DeviceOwnership(c['serial'])
                             previous_user=manager.current_user()
                             manager.switch_user(user_id);switched=True;selected_user_active=True;current=manager.current_user()
+                            if not isinstance(current,dict) or current.get('user_id')!=user_id:
+                                raise ValueError('所选用户尚未确认，未打开手套 / Selected SDK user was not confirmed; glove was not opened')
                             if continuation is not None and (current.get('user_id')!=user_id or current.get('is_default') is not False
                                     or current.get('display_name')!=continuation['source_profile']):
                                 raise ValueError('Controller did not confirm the calibrated SDK user')
@@ -278,6 +281,7 @@ def worker_glove(requests,events,continuation=None):
                         if hand_unpairing:raise ValueError('Hand cleanup is still in progress')
                         if not hand_thread or not hand_thread.is_alive():raise ValueError('先连接灵巧手反馈 / Prepare hand feedback first')
                         source.target(now)
+                        follow_dispatch_attempted=True
                         hand_requests.put(dict(name='hardware_start',lease=c['lease'],workspace_clear=c['workspace_clear']))
                     elif name=='glove_keepalive':hand_requests.put(dict(name='hardware_keepalive',lease=c.get('lease')))
                     elif name=='glove_stop':hand_requests.put(dict(name='hardware_stop'))
@@ -288,6 +292,15 @@ def worker_glove(requests,events,continuation=None):
                         hand_requests.put(dict(name='disconnect'));hand_unpairing=True
                         message='正在释放灵巧手，手套预览保持打开 / Releasing hand; glove preview remains open'
                 except Exception as e:
+                    if c.get('name')=='glove_follow' and not follow_dispatch_attempted:
+                        serial=hand_identity.get('serial');nonce=c.get('lease')
+                        if (serial and hand_identity.get('source')=='sdk_identity'
+                                and hand_state.get('device_id')==serial and isinstance(nonce,str)
+                                and len(nonce)==32 and all(ch in '0123456789abcdef' for ch in nonce)):
+                            # No hand-queue publication occurred. The bridge
+                            # additionally binds this event to its reader epoch.
+                            events.put(dict(type='glove_follow_rejected',device_id=serial,
+                                lease=nonce,message=str(e)[:400]))
                     message=str(e);events.put(dict(type='glove_notice',message=message))
                     if continuation is not None and c.get('name')=='glove_open':raise
             if glove is not None and now>=next_map:
@@ -389,10 +402,17 @@ def worker_glove(requests,events,continuation=None):
         finally:
             if profile_lease:profile_lease.close()
         final_hardware=copy.deepcopy(hand_state.get('hardware',{}))
+        final_device=hand_state.get('device_id') or hand_identity.get('serial')
+        final_cleanup=hand_state.get('cleanup_confirmed') is True
         while True:
             try:e=hand_events.get_nowait()
             except queue.Empty:break
             if e['type']=='closed':final_hardware=e.get('hardware',{})
+            elif e['type']=='identity':final_device=e.get('device_id')
+            elif e['type']=='state':final_device=e.get('device_id') or final_device
+            elif e['type']=='hand_session_closed':final_cleanup=e.get('cleanup_confirmed') is True
         if hand_thread and (hand_thread.is_alive() or not final_hardware):
             final_hardware=dict(active=None,stop_confirmed=False,reason='停用结果未确认 / Disable not confirmed')
-        events.put(dict(type='glove_closed',hardware=final_hardware))
+            final_cleanup=False
+        events.put(dict(type='glove_closed',hardware=final_hardware,device_id=final_device,
+            hand_cleanup_confirmed=final_cleanup))

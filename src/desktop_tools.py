@@ -3,6 +3,7 @@ import hashlib
 import re
 from pathlib import Path
 from device_termination import unconfirmed
+from desktop_lifecycle import calibration_cleanup_required
 
 PAGES = ('home', 'library', 'feedback', 'parameters', 'connection', 'glove', 'doctor',
          'interaction', 'capture', 'records', 'settings', 'devices', 'control-tools', 'official-viz','official-viz-device')
@@ -17,6 +18,7 @@ def idle(state, doctor):
             and not state.get('recording', {}).get('active')
             and not state.get('parameter_sync', {}).get('busy')
             and not state.get('calibration', {}).get('running')
+            and not calibration_cleanup_required(state)
             and not state.get('calibration_connection', {}).get('busy')
             and not state.get('teleoperation_connection', {}).get('busy')
             and not state.get('calibrated_teleoperation', {}).get('busy')

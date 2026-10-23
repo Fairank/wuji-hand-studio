@@ -5,10 +5,12 @@ never opens a glove, prepares a hand, enables motors, or starts following.
 """
 import copy
 import re
+import secrets
 import threading
 import time
 
 from cli_coordination import gate,reservation
+from glove_protocol import CancellationNotDispatched
 
 
 class TeleoperationHandover:
@@ -18,8 +20,8 @@ class TeleoperationHandover:
         self.workflow_lock=controller.calibration_handover.workflow_lock
         self.idle_check=idle_check or self._local_idle
         self._thread=None;self._cancel=False;self.viewer_token=None
-        self.state=dict(busy=False,phase='idle',serial=None,viewer_token=None,side=None,
-            viewer_released=False,sdk_session=None,runtime=None,error=None,
+        self.state=dict(busy=False,phase='idle',serial=None,viewer_token=None,attempt_id=None,side=None,
+            viewer_released=False,sdk_session=None,runtime=None,error=None,cleanup_error=None,
             automatically_opens_glove=False,automatically_prepares_hand=False,automatically_follows=False)
 
     @property
@@ -77,17 +79,58 @@ class TeleoperationHandover:
         elif connection=='error':phase='error'
         elif state.get('busy'):phase='cancelling' if glove.stopping else 'starting'
         else:phase='disconnected'
-        return {**result,'phase':phase,'error':state.get('message') if phase=='error' else result.get('error'),
+        return {**result,'phase':phase,'error':(state.get('message') if phase=='error' else None) or result.get('error'),
             'glove_connected':connection=='receiving','stream_fresh':(state.get('stream') or {}).get('fresh') is True}
 
-    def cancel(self):
-        self.request_cancel()
-        with self.lock:session=self.state.get('sdk_session');busy=self.state['busy']
+    def cancel(self,expected=None):
+        finished='遥操作切换已完成或会话已变化，请在原会话中暂停或断开 / Teleoperation handover finished or session changed; pause or disconnect its owning session'
+        with self.lock:
+            if expected is not None:
+                if (not isinstance(expected,dict) or set(expected)!={'viewer_token','attempt_id'}
+                        or any(not isinstance(expected[k],str) or not re.fullmatch('[0-9a-f]{32}',expected[k]) for k in expected)
+                        or any(expected[k]!=self.state.get(k) for k in expected)):
+                    raise ValueError('遥操作切换任务已改变，请核对当前任务 / Teleoperation handover attempt changed; review the current task')
+            elif self.state['busy'] and not self.internal:self._cancel=True
+            captured=(self.state.get('viewer_token'),self.state.get('attempt_id'),self.state.get('sdk_session'))
+        if expected is not None and captured[2] is not None:
+            # The bridge owns the final stage/session check. In particular, a
+            # late cancel cannot become a disconnect of a completed preview.
+            glove=self.controller.glove.snapshot()
+            if (glove.get('session_id')!=captured[2] or glove.get('busy') is not True
+                    or glove.get('connection') not in ('connecting','ready')
+                    or (glove.get('hardware') or {}).get('active',False) is not False
+                    or (glove.get('feedback') or {}).get('device_id')):
+                raise ValueError(finished)
+            with self.lock:
+                if captured!=(self.state.get('viewer_token'),self.state.get('attempt_id'),self.state.get('sdk_session')):
+                    raise ValueError('遥操作切换任务已改变 / Teleoperation handover attempt changed')
+            try:self.controller.glove.disconnect_session(captured[2],pending_only=True)
+            except CancellationNotDispatched:raise
+            except Exception as error:
+                with self.lock:
+                    if captured==(self.state.get('viewer_token'),self.state.get('attempt_id'),self.state.get('sdk_session')):
+                        self._cancel=True
+                        reason='遥操作切换退出尚未确认 / Teleoperation handover cleanup is unconfirmed: '+str(error)[:500]
+                        self.state.update(phase='error',error=reason,cleanup_error=reason)
+                raise
+            with self.lock:
+                if captured==(self.state.get('viewer_token'),self.state.get('attempt_id'),self.state.get('sdk_session')):
+                    self._cancel=True;self.state.update(phase='cancelling',error=None)
+            return dict(teleoperation_connection=self.snapshot(),glove=self.controller.glove.snapshot())
+        with self.lock:
+            if expected is not None:
+                if captured!=(self.state.get('viewer_token'),self.state.get('attempt_id'),self.state.get('sdk_session')):
+                    raise ValueError('遥操作切换任务已改变 / Teleoperation handover attempt changed')
+                if not self.state['busy']:raise ValueError(finished)
+                self._cancel=True;self.state.update(phase='cancelling',error=None)
+            session=captured[2]
         # A stop during Viewer teardown is sticky; the launch path checks it.
         # After publication only the exact newly started SDK session is closed.
         if session is not None:
             self.controller.glove.disconnect_session(session)
-            self._set(phase='cancelling')
+            with self.lock:
+                if captured==(self.state.get('viewer_token'),self.state.get('attempt_id'),self.state.get('sdk_session')):
+                    self.state['phase']='cancelling'
         return dict(teleoperation_connection=self.snapshot(),glove=self.controller.glove.snapshot())
 
     def start(self,command):
@@ -104,8 +147,8 @@ class TeleoperationHandover:
         try:
             with self.lock:
                 self._thread=threading.get_ident();self._cancel=False;self.viewer_token=token
-                self.state.update(busy=True,phase='validating',serial=serial,viewer_token=token,
-                    side=None,viewer_released=False,sdk_session=None,runtime=None,error=None)
+                self.state.update(busy=True,phase='validating',serial=serial,viewer_token=token,attempt_id=secrets.token_hex(16),
+                    side=None,viewer_released=False,sdk_session=None,runtime=None,error=None,cleanup_error=None)
             from studio_component import enforce_session_owner
             # Use the existing glove ownership gate as well as our exact Viewer.
             enforce_session_owner(dict(name='glove_scan'))

@@ -237,6 +237,11 @@ class Controller:
                 return self.action(dict(name='calibrated_teleoperation_cancel',
                     run_id=state['calibrated_teleoperation'].get('run_id'),
                     attempt_id=state['calibrated_teleoperation'].get('attempt_id')))
+            from task_sessions import pending_teleoperation
+            pending=pending_teleoperation(state)
+            if pending:
+                return self.action(dict(name='teleoperation_handover_cancel',
+                    viewer_token=pending['viewer_token'],attempt_id=pending['attempt_id']))
             if glove.get('busy'):
                 from device_termination import unconfirmed
                 if (glove.get('hardware') or {}).get('active',False) is not False or self.glove.lease or unconfirmed(state):
@@ -258,6 +263,8 @@ class Controller:
         with self.lock:
             result = copy.deepcopy(self.state)
             result['session_generation']=getattr(self,'generation',0)
+            try:result['retarget_binding']=self.retarget.selection(result['device_profile'])
+            except (ValueError,OSError):result['retarget_binding']=None
             result['solver_runtime']=self.solver_runtime.snapshot()
             result['official_studio']=self.studio.snapshot()
             result['official_viz']=self.official_viz.snapshot()
@@ -415,7 +422,9 @@ class Controller:
         handover=self.calibration_handover
         teleoperation=getattr(self,'teleoperation_handover',None)
         if name=='teleoperation_handover':return self.teleoperation_handover.start(command)
-        if name=='teleoperation_handover_cancel':return self.teleoperation_handover.cancel()
+        if name=='teleoperation_handover_cancel':
+            if set(command)!={'name','viewer_token','attempt_id'}:raise ValueError('Invalid teleoperation cancellation')
+            return self.teleoperation_handover.cancel({k:command[k] for k in ('viewer_token','attempt_id')})
         if teleoperation is not None and name in {'glove_disconnect','official_viz_stop','session_close'}:teleoperation.request_cancel()
         if name=='calibration_handover':return handover.start(command)
         if name in {'calibration_cancel','official_viz_stop','session_close'}:handover.request_cancel()

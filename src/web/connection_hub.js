@@ -178,7 +178,7 @@
   const ready=!reason&&!busy&&!running&&!cleanup,phaseLabels={starting:['正在准备标定','Preparing calibration'],collecting:['标定中','Calibrating'],solving:['正在生成手型','Creating hand model'],cancelling:['正在结束标定','Ending calibration'],terminal:['原版标定中','Official calibration running']},status=running?(phaseLabels[run.status]?t(...phaseLabels[run.status]):t('标定中','Calibrating')):cleanup?t('待结束确认','Awaiting session end'):connected?t('设备已接入','Device session connected'):t('尚未接入','Not connected');
   const runtime=typeof c.runtime==='string'?c.runtime:object(c.runtime)?[c.runtime.label,c.runtime.version].filter(Boolean).join(' · '):'';
   const continuation=consoleState?.calibrated_teleoperation;
-  const continuationCurrent=continuation?.run_id===run.id&&(continuation.can_continue===true||continuation.busy===true||continuation.connected===true||typeof continuation.error==='string'&&!!continuation.error);
+  const continuationCurrent=object(continuation)&&typeof run.id==='string'&&!!run.id&&continuation.run_id===run.id&&(continuation.can_continue===true||continuation.busy===true||continuation.connected===true||typeof continuation.error==='string'&&!!continuation.error);
   const ownResult=!running&&typeof run.id==='string'&&!!run.id&&(run.id===lastStartedRunId||continuationCurrent);
   calib.dataset.currentResult=String(ownResult);
   const message=cleanup||!consoleState||!calibrationFresh?reason:running?'':actionError||(ownResult?'':reason);

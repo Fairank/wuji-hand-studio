@@ -1,7 +1,7 @@
 """Workspace-level binding and mapping selection. No device or motor access."""
 import json
 from pathlib import Path
-from mapping_library import MappingLibrary
+from mapping_library import MappingLibrary,validate_binding
 from retarget_settings import load as legacy_load
 
 
@@ -11,12 +11,17 @@ class RetargetWorkspace:
         self.library=MappingLibrary(self.folder/'mapping_library.json')
         self.path=self.folder/'retarget_binding.json'
 
-    def context(self, profile):
+    def selection(self, profile):
+        """Read only the small binding, without loading all saved mappings."""
         binding=dict(generation=profile['generation'],side=profile['side'],glove_serial='',sdk_user='',hand_serial='')
         if self.path.exists():
-            saved=json.loads(self.path.read_text(encoding='utf-8'))
-            self.library.snapshot(saved) # reject malformed persisted bindings
+            if self.path.stat().st_size>4096:raise ValueError('Invalid mapping binding size')
+            saved=validate_binding(json.loads(self.path.read_text(encoding='utf-8')))
             if all(saved[k]==binding[k] for k in ('generation','side')):binding=saved
+        return binding
+
+    def context(self, profile):
+        binding=self.selection(profile)
         result=self.library.snapshot(binding)
         # Keep old mapping only for its original unbound workspace context.
         legacy=self.folder/'retargeting.json'

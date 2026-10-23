@@ -17,7 +17,9 @@
  const link=document.createElement('a');link.href='#glove';link.dataset.page='glove';link.innerHTML='<svg viewBox="0 0 26 24" aria-hidden="true"><path d="M4 8h4l3 4-3 4H4M22 8h-4l-3 4 3 4h4M11 4h4M11 20h4"/></svg><span></span>';document.querySelector('.directory').insertBefore(link,document.querySelector('[data-page="feedback"]'));
  const array=value=>Array.isArray(value)?value:[],serial=row=>row?.serial||row?.sn||'',userNone='__choose_user__';
  const f=(value,places=1)=>typeof value==='number'&&Number.isFinite(value)?value.toFixed(places):'—';
- let state=null,online=false,pending=false,pendingName='',requestEpoch=0,lease=null,leaseAt=0,seen=false,optionsKey='',lastMessage='',savedBinding=null,wantedGlove='',consentKey='',connectionEpoch=0,previousConnection='disconnected';
+ const attempt=value=>value&&/^[a-f0-9]{32}$/.test(value.viewer_token||'')&&/^[a-f0-9]{32}$/.test(value.attempt_id||'')?{viewer_token:value.viewer_token,attempt_id:value.attempt_id}:null;
+ const sameAttempt=(a,b)=>!!a&&!!b&&a.viewer_token===b.viewer_token&&a.attempt_id===b.attempt_id;
+ let state=null,online=false,pending=false,pendingName='',requestEpoch=0,operationVersion=0,selectionVersion=0,lease=null,leaseAt=0,seen=false,optionsKey='',lastMessage='',savedBinding=null,wantedGlove='',consentKey='',connectionEpoch=0,previousConnection='disconnected';
  let bindingRequest=null,bindingIdentity='';
  function refreshBinding(){if(bindingRequest)return bindingRequest;bindingRequest=fetch('/api/retarget/context',{cache:'no-store'}).then(r=>r.ok?r.json():Promise.reject(Error('context'))).then(c=>{savedBinding=c.binding;optionsKey='';render();}).catch(()=>{}).finally(()=>{bindingRequest=null;});return bindingRequest;}refreshBinding();
  const labels={
@@ -42,6 +44,8 @@
  function setOptions(element,items,value){element.replaceChildren(...items.map(([text,key,disabled])=>{const option=new Option(text,key);option.disabled=disabled===true;return option;}));element.value=items.some(item=>item[1]===value)?value:items[0]?.[1]||'';}
  function bindingFor(hand){const profile=state?.device_profile||{};return{generation:profile.generation,side:profile.side,glove_serial:$('glove-device').value,sdk_user:$('glove-user').value,hand_serial:hand};}
  function sameSource(left,right){return !!left&&!!right&&['generation','side','glove_serial','sdk_user'].every(key=>left[key]===right[key]);}
+ const sameBinding=(a,b)=>sameSource(a,b)&&a.hand_serial===b.hand_serial;
+ function sourceIdentity(){const g=state?.glove||{},h=state?.teleoperation_connection||{},model=g.model_provenance||{};return JSON.stringify([g.session_id,g.glove_serial,g.user?.user_id,g.profile,state?.device_profile?.id,model.source_run_id,model.model_sha256,model.owner_user_id,h.viewer_token,h.attempt_id,h.sdk_session]);}
  function render(){
   const g=state?.glove||{},hw=g.hardware||{},stream=g.stream||{},feedback=g.feedback||{},transition=state?.teleoperation_connection||{},viewer=viewerGlove(),receiving=g.connection==='receiving',connecting=g.connection==='connecting',profile=state?.device_profile||{};
   const devices=array(g.devices).filter(d=>typeof serial(d)==='string'&&serial(d)),users=array(g.users).filter(u=>u&&typeof u.user_id==='string'),hands=array(g.hands).filter(d=>d&&typeof serial(d)==='string'&&serial(d));
@@ -77,7 +81,7 @@
   $('glove-stop').disabled=!online||!controllerBusy||pendingName==='glove_stop'||(hw.active===false&&!lease&&hw.stop_confirmed===true&&!currentUnconfirmed);
   $('glove-disconnect').disabled=!online||pendingName==='glove_disconnect'||(!controllerBusy&&!transferBusy);
   $('glove-handover').disabled=!online||pending||!viewer||viewerMismatch||controllerBusy||transferBusy||otherOwner;
-  $('glove-handover-cancel').disabled=!online||pendingName==='teleoperation_handover_cancel';
+  $('glove-handover-cancel').disabled=!online||pendingName==='teleoperation_handover_cancel'||!attempt(transition);
   const phase=!online?'offline':transferBusy?'handover':viewer&&!controllerBusy?'viewer':viewerOwned&&!controllerBusy?'viewer_other':connecting?'connecting':hw.active===true?'following':lease?'starting':receiving&&feedback.device_id&&g.can_prepare!==true?'prepared':receiving?'preview':g.connection==='ready'&&controllerBusy?'ready':'idle';
   page.dataset.teleopPhase=phase;
   $('glove-open').hidden=!['idle','ready'].includes(phase);$('glove-open-viewer').hidden=phase!=='viewer_other'&&!viewerMismatch;$('glove-handover').hidden=phase!=='viewer'||viewerMismatch;$('glove-handover-cancel').hidden=phase!=='handover';$('glove-prepare').hidden=phase!=='preview';$('glove-follow').hidden=phase!=='prepared';$('glove-stop').hidden=(!['following','starting','prepared'].includes(phase)&&!disableUnconfirmed)||hw.active===false&&hw.stop_confirmed===true&&!lease&&!currentUnconfirmed;$('glove-disconnect').hidden=!controllerBusy&&!transferBusy;
@@ -113,24 +117,39 @@
  }
  async function post(command){if(!online||!state?.csrf)throw Error(t('服务未就绪','Service not ready'));const response=await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json','X-Console-Token':state.csrf},body:JSON.stringify(command),signal:AbortSignal.timeout(20000)}),data=await response.json();if(!response.ok||data.ok===false)throw Error(data.error||t('操作未完成','Operation did not complete'));return data;}
  function actionError(error){if(['TimeoutError','AbortError'].includes(error?.name))return t('请求超时，结果尚未确认，请核对状态后再操作。','The request timed out and its result is unconfirmed. Review the session state before trying again.');if(error?.name==='TypeError'&&/fetch|network|load failed/i.test(error.message||''))return t('连接中断，操作结果尚未确认，请核对会话状态。','The connection was interrupted and the action result is unconfirmed. Review the session state.');return error?.message||t('操作未完成','Operation did not complete');}
- async function act(command,interrupt=false){if(pending&&!interrupt)return;const epoch=++requestEpoch;pending=true;pendingName=command.name;lastMessage='';render();try{
-   if(command.name==='glove_open'){const binding=bindingFor($('glove-hand-device').value);await post({name:'retarget_binding_save',binding});if(epoch!==requestEpoch)return;savedBinding=binding;window.dispatchEvent(new Event('retarget-binding-changed'));}
-   if(command.name==='glove_prepare'){const binding=bindingFor(command.serial);if(!sameSource(savedBinding,binding))throw Error(t('当前配对尚未载入或与预览不一致，请重新检查连接详情。','Pairing is not loaded or differs from this preview. Review connection details.'));if(savedBinding.hand_serial!==command.serial){await post({name:'retarget_binding_save',binding});if(epoch!==requestEpoch)return;savedBinding=binding;window.dispatchEvent(new Event('retarget-binding-changed'));}}
-   const result=await post(command);if(epoch!==requestEpoch)return;
+ async function act(command,interrupt=false){if(pending&&!interrupt)return;let epoch=++requestEpoch;const operation=++operationVersion,choice=selectionVersion,source=sourceIdentity(),sdkSession=state?.glove?.session_id,cancelAttempt=command.name==='teleoperation_handover_cancel'?attempt(command):null,startAttempt=command.name==='teleoperation_handover'?attempt(state?.teleoperation_connection):null;const stillCurrent=result=>{if(epoch!==requestEpoch)return false;const transition=state?.teleoperation_connection,current=attempt(transition),currentSDK=state?.glove?.session_id;if(cancelAttempt)return sameAttempt(cancelAttempt,current)&&sdkSession===currentSDK&&transition?.phase!=='session_changed';if(command.name==='teleoperation_handover'){if(currentSDK!==sdkSession&&currentSDK!==result?.teleoperation_connection?.sdk_session)return false;if(current&&!sameAttempt(startAttempt,current))return sameAttempt(attempt(result?.teleoperation_connection),current);}return true;};
+  async function saveBinding(binding){const result=await post({name:'retarget_binding_save',binding});if(epoch!==requestEpoch){
+    // The task wrapper returns a transition receipt only after fresh state for
+    // its exact destination has rendered. Continue this one explicit two-step
+    // action only when neither the real SDK owner nor human intent changed.
+    const receipt=result.task_receipt,g=state?.glove||{},stage=command.name==='glove_open'?'ready':'receiving';
+    if(operation!==operationVersion||choice!==selectionVersion||!online||!Number.isSafeInteger(sdkSession)||source!==sourceIdentity()||
+       !receipt||receipt.task_id!==new URLSearchParams(location.search).get('task_id')||
+       !/^[a-f0-9]{64}$/.test(receipt.before_context||'')||!/^[a-f0-9]{64}$/.test(receipt.after_context||'')||
+       !sameBinding(state.retarget_binding,binding)||!sameBinding(result.mapping?.binding,binding)||
+       g.busy!==true||g.connection!==stage||g.feedback?.device_id||g.hardware?.active===true||g.hardware?.active===null||g.follow_unconfirmed===true||g.follow_pending===true)return false;
+    $('glove-device').value=binding.glove_serial;$('glove-user').value=binding.sdk_user;$('glove-hand-device').value=binding.hand_serial;
+    if(!sameBinding(bindingFor($('glove-hand-device').value),binding))return false;
+    epoch=++requestEpoch;pending=true;pendingName=command.name;render();
+   }savedBinding=binding;window.dispatchEvent(new Event('retarget-binding-changed'));return true;}
+  pending=true;pendingName=command.name;lastMessage='';render();try{
+   if(command.name==='glove_open'&&!await saveBinding(bindingFor($('glove-hand-device').value)))return;
+   if(command.name==='glove_prepare'){const binding=bindingFor(command.serial);if(!sameSource(savedBinding,binding))throw Error(t('当前配对尚未载入或与预览不一致，请重新检查连接详情。','Pairing is not loaded or differs from this preview. Review connection details.'));if(savedBinding.hand_serial!==command.serial&&!await saveBinding(binding))return;}
+   const result=await post(command);if(!stillCurrent(result))return;
    if(result.device_profile){state={...state,device_profile:result.device_profile};wantedGlove='';$('glove-device').value='';$('glove-hand-device').value='';$('glove-user').value=userNone;optionsKey='';}
    if(result.glove)state={...state,glove:result.glove};if(result.teleoperation_connection)state={...state,teleoperation_connection:result.teleoperation_connection};
    if(result.lease){lease=result.lease;leaseAt=Date.now();seen=false;}if(['glove_stop','glove_disconnect','teleoperation_handover_cancel'].includes(command.name)){lease=null;$('glove-clear').checked=false;}if(command.name==='teleoperation_handover'){wantedGlove=command.serial;optionsKey='';}
-  }catch(error){if(epoch===requestEpoch)lastMessage=actionError(error);}finally{if(epoch===requestEpoch){pending=false;pendingName='';render();}}}
+  }catch(error){if(stillCurrent())lastMessage=actionError(error);}finally{if(epoch===requestEpoch){pending=false;pendingName='';render();}}}
  $('glove-scan').onclick=()=>act({name:'glove_scan'});
  $('glove-open').onclick=()=>{if(!$('glove-open').disabled)act({name:'glove_open',serial:$('glove-device').value,user_id:$('glove-user').value,timeout_ms:Number($('glove-timeout').value)});};
  $('glove-prepare').onclick=()=>{if(!$('glove-prepare').disabled)act({name:'glove_prepare',address:$('glove-hand-address').value.trim(),serial:$('glove-hand-device').value});};
  $('glove-follow').onclick=()=>{if(!$('glove-follow').disabled)act({name:'glove_follow',workspace_clear:$('glove-clear').checked});};
  $('glove-stop').onclick=()=>act({name:'glove_stop'},true);$('glove-disconnect').onclick=()=>act({name:'glove_disconnect'},true);
- $('glove-handover').onclick=()=>{const viewer=viewerGlove();if(viewer&&!$('glove-handover').disabled)act({name:'teleoperation_handover',serial:viewer.serial,viewer_token:viewer.token});};$('glove-handover-cancel').onclick=()=>act({name:'teleoperation_handover_cancel'},true);
+ $('glove-handover').onclick=()=>{const viewer=viewerGlove();if(viewer&&!$('glove-handover').disabled)act({name:'teleoperation_handover',serial:viewer.serial,viewer_token:viewer.token});};$('glove-handover-cancel').onclick=()=>{const owner=attempt(state?.teleoperation_connection);if(owner&&!$('glove-handover-cancel').disabled)act({name:'teleoperation_handover_cancel',...owner},true);};
  $('glove-open-viewer').onclick=()=>window.WujiConnectionHub?.show('official');
  $('glove-model').onchange=()=>{const profile=$('glove-model').value;if(profile!==state?.device_profile?.id)act({name:'device_profile_select',profile});};
- $('glove-device').onchange=()=>{wantedGlove=$('glove-device').value;lastMessage='';window.WujiDeviceInventory?.select(wantedGlove);render();};$('glove-user').onchange=()=>{lastMessage='';render();};$('glove-hand-device').onchange=()=>{lastMessage='';render();};$('glove-clear').onchange=render;$('glove-details').ontoggle=render;
- window.addEventListener('device-inventory-selection',event=>{if(state?.glove?.connection==='receiving'||pending)return;if(event.detail?.device===null){wantedGlove='';$('glove-device').value='';$('glove-hand-device').value='';optionsKey='';render();return;}if(event.detail?.device?.kind!=='glove')return;wantedGlove=event.detail.serial;optionsKey='';render();});
+ $('glove-device').onchange=()=>{selectionVersion++;wantedGlove=$('glove-device').value;lastMessage='';window.WujiDeviceInventory?.select(wantedGlove);render();};$('glove-user').onchange=()=>{selectionVersion++;lastMessage='';render();};$('glove-hand-device').onchange=()=>{selectionVersion++;lastMessage='';render();};$('glove-timeout').oninput=$('glove-hand-address').oninput=()=>{selectionVersion++;};$('glove-clear').onchange=render;$('glove-details').ontoggle=render;
+ window.addEventListener('device-inventory-selection',event=>{if(state?.glove?.connection==='receiving'||pending)return;if(event.detail?.device===null){selectionVersion++;wantedGlove='';$('glove-device').value='';$('glove-hand-device').value='';optionsKey='';render();return;}if(event.detail?.device?.kind!=='glove')return;selectionVersion++;wantedGlove=event.detail.serial;optionsKey='';render();});
  window.addEventListener('console-state',event=>{state=event.detail;online=true;const g=state.glove||{},identity=JSON.stringify([g.session_id,g.glove_serial,g.user?.user_id,g.feedback?.device_id,state.device_profile?.id]);if(identity!==bindingIdentity){bindingIdentity=identity;if(g.connection==='receiving')refreshBinding();}const current=state.glove?.connection||'disconnected';if(current!==previousConnection&&['connecting','disconnected','error'].includes(current)){connectionEpoch++;$('glove-clear').checked=false;}previousConnection=current;render();});
  window.addEventListener('console-offline',()=>{requestEpoch++;state=null;online=false;pending=false;pendingName='';lease=null;lastMessage='';$('glove-clear').checked=false;consentKey='';render();});window.addEventListener('wuji-language',translate);
  setInterval(async()=>{if(!lease||!online)return;try{await post({name:'glove_keepalive',lease});}catch(error){lease=null;lastMessage=actionError(error);render();}},250);

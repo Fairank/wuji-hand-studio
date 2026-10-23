@@ -14,20 +14,39 @@ class GloveBridge:
         self.state=dict(connection='disconnected',message='',devices=[],users=[],stream={},hardware={},feedback={})
         self._continuation=None;self._on_model_ready=None
         self._unpair_pending=False
+        self.seen_active=False;self._follow_unconfirmed=False
+        self._follow_device=None;self._follow_session=None;self._follow_reason=''
 
     @property
     def busy(self):return bool(self.thread and self.thread.is_alive())
 
     def remember_termination(self):
         if self.termination:
-            self.termination.observe('glove', (self.state.get('feedback') or {}).get('device_id'),
-                                     self.state.get('hardware') or {}, self.session)
+            device=self._follow_device if self._follow_unconfirmed else (self.state.get('feedback') or {}).get('device_id')
+            self.termination.observe('glove',device,self.state.get('hardware') or {},self.session)
+
+    def _retain_follow_uncertainty(self):
+        if self._follow_unconfirmed:
+            hardware=dict(self.state.get('hardware') or {})
+            # A late actual active status remains active. An ordinary inactive
+            # status cannot acknowledge a possibly dispatched newer request.
+            same=(self._follow_session==self.session
+                and (self.state.get('feedback') or {}).get('device_id')==self._follow_device)
+            if hardware.get('active') is not True or not same:hardware['active']=None
+            hardware.update(stop_confirmed=False,probe_ready=False,reason=self._follow_reason)
+            self.state['hardware']=hardware
+
+    def _mark_follow_unconfirmed(self,reason):
+        self._follow_unconfirmed=True;self._follow_reason=reason
+        self._retain_follow_uncertainty()
 
     def snapshot(self):
         with self.lock:
             s=copy.deepcopy(self.state);age=max(0,time.monotonic()-self.last_update)*1000
             s['busy']=self.busy;s['transport_age_ms']=age if self.last_update else None
             s['session_id']=self.session
+            s['follow_unconfirmed']=self._follow_unconfirmed
+            s['follow_pending']=bool(self.lease and not self.seen_active)
             s['hand_unpairing']=bool(s.get('hand_unpairing') or self._unpair_pending)
             stream=s['stream'];remote=stream.get('age_ms')
             if remote is not None:stream['age_ms']=remote+age
@@ -37,7 +56,9 @@ class GloveBridge:
             if metrics.get('age_ms') is not None:metrics['age_ms']+=age
             feedback['stale']=metrics.get('age_ms') is None or metrics['age_ms']>100 or age>200
             s['feedback']=feedback
-            if not s['stream']['fresh'] or not self.busy or self.stopping or self.lease or s['hand_unpairing']:
+            if self._follow_unconfirmed:
+                s['can_prepare']=False;s['prepare_blocked_reason']=self._follow_reason
+            elif not s['stream']['fresh'] or not self.busy or self.stopping or self.lease or s['hand_unpairing']:
                 s['can_prepare']=False
                 s['prepare_blocked_reason']=('等待新鲜手套数据 / Wait for fresh glove data' if not s['stream']['fresh']
                     else '会话正在停止或跟随 / Session is closing or following')
@@ -50,10 +71,12 @@ class GloveBridge:
         # A later explicit stop of this serial can resolve an ended glove
         # session, without treating an unrelated/new connection as evidence.
         with self.lock:
+            current=self._follow_device if self._follow_unconfirmed else (self.state.get('feedback') or {}).get('device_id')
             if (device and not self.busy and self.session<=session and
-                    (self.state.get('feedback') or {}).get('device_id')==device):
+                    current==device):
                 self.state['hardware']=dict(active=False,stop_confirmed=True,ready=False,
                                             reason='对应设备已确认停用 / Matching device disable acknowledged')
+                self._follow_unconfirmed=False;self._follow_reason=''
 
     def send(self,c):
         if not self.stdin:raise ValueError('控制端尚未就绪 / Controller not ready')
@@ -91,6 +114,8 @@ class GloveBridge:
         self.remember_termination();self.session=self.termination.new_session() if self.termination else self.session+1
         self.stopping=False;self.lease=None;self.last_update=0.
         self._unpair_pending=False
+        self.seen_active=False;self._follow_unconfirmed=False
+        self._follow_device=None;self._follow_session=None;self._follow_reason=''
         self.state=dict(connection='connecting',message='正在连接控制端 / Connecting controller',devices=[],users=[],stream={},hardware={},feedback={})
         self.thread=threading.Thread(target=self.run,daemon=True);self.thread.start()
 
@@ -192,6 +217,7 @@ class GloveBridge:
                 return dict(unpairing=True,session_id=self.session)
             if name=='glove_follow':
                 s=self.snapshot()
+                if self._follow_unconfirmed:raise ValueError(self._follow_reason)
                 if s.get('hand_unpairing'):raise ValueError('Hand cleanup is still in progress')
                 if self.lease:raise ValueError('已有启动请求 / Start already requested')
                 if not s['stream'].get('fresh'):raise ValueError('等待新鲜手套数据 / Wait for fresh glove data')
@@ -199,34 +225,62 @@ class GloveBridge:
                     raise ValueError('等待完整灵巧手反馈 / Wait for ready hand feedback')
                 self.lease=secrets.token_hex(16);c=dict(c,lease=self.lease)
                 self.requested=time.monotonic();self.seen_active=False
+                self._follow_device=s['feedback'].get('device_id');self._follow_session=self.session
                 try:self.send(c)
-                except Exception:self.lease=None;raise
+                except Exception:
+                    self._mark_follow_unconfirmed('启动请求结果未确认，请先结束并核对会话 / Follow request is unconfirmed; end and review this session')
+                    self.lease=None;self.remember_termination();raise
                 return dict(lease=self.lease)
             if name=='glove_keepalive' and c.get('lease')!=self.lease:raise ValueError('Expired control lease')
             self.send(c)
 
-    def receive(self,event):
+    def receive(self,event,session=None):
         with self.lock:
+            if session is not None and (type(session) is not int or session!=self.session):return
             kind=event.get('type')
             if kind=='glove_state':
-                self.state=event['state'];self.last_update=time.monotonic()
+                self.state=copy.deepcopy(event['state']);self.last_update=time.monotonic()
                 if self.state.get('hand_unpaired') is True:self._unpair_pending=False
                 active=self.state['hardware'].get('active')
                 if self.lease:
-                    if active:self.seen_active=True
-                    elif active is False and (self.seen_active or time.monotonic()-self.requested>5):self.lease=None
+                    if (self.state.get('feedback') or {}).get('device_id')!=self._follow_device:
+                        self._mark_follow_unconfirmed('目标反馈身份已改变，原启动结果未确认 / Target feedback changed; original follow request is unconfirmed')
+                        self.lease=None
+                    elif active:self.seen_active=True
+                    elif active is False and self.seen_active:self.lease=None
+                    elif active is False and time.monotonic()-self.requested>5:
+                        self._mark_follow_unconfirmed('启动结果尚未确认，请先结束并核对会话 / Follow startup is unconfirmed; end and review this session')
+                        self.lease=None
+                self._retain_follow_uncertainty()
+            elif kind=='glove_follow_rejected':
+                hardware=self.state.get('hardware') or {}
+                if (type(session) is not int or session!=self.session or self._follow_session!=session
+                        or not self.lease or self._follow_unconfirmed or self.seen_active or self.stopping
+                        or hardware.get('active') is not False or self._follow_device is None
+                        or event.get('lease')!=self.lease or event.get('device_id')!=self._follow_device):return
+                # Only a current pre-forward refusal releases pending intent.
+                # It never changes hardware/disable confirmation, nor resolves
+                # write/flush/EOF uncertainty or a request that became active.
+                self.lease=None;self.state['message']=str(event.get('message',''))[:400]
             elif kind in ('glove_error','glove_notice','notice'):
                 self.state['message']=str(event.get('message',''))[:400]
                 if kind=='glove_error':self.state['connection']='error'
             elif kind=='glove_closed':
                 failed=self._continuation is not None and self.state.get('connection')=='error'
                 self.state['connection']='error' if failed else 'disconnected';self.state['hardware']=event.get('hardware',{})
+                if self._follow_unconfirmed or self.lease:
+                    hardware=self.state['hardware']
+                    exact=(self._follow_session==self.session and self._follow_device is not None
+                        and event.get('device_id')==self._follow_device and event.get('hand_cleanup_confirmed') is True
+                        and hardware.get('active') is False and hardware.get('stop_confirmed') is True)
+                    if exact:self._follow_unconfirmed=False;self._follow_reason=''
+                    else:self._mark_follow_unconfirmed('会话已结束，停用结果未确认 / Session ended; disable is unconfirmed')
                 self.state['stream']['fresh']=False;self.lease=None
             self.remember_termination()
 
     def run(self):
         client=None;ready=False;model_ready=False
-        with self.lock:continuation=copy.deepcopy(self._continuation)
+        with self.lock:continuation=copy.deepcopy(self._continuation);session=self.session
         try:
             client=self.factory();stdin,stdout,stderr=client.exec_command(client.agent_command,timeout=25)
             def drain():
@@ -234,8 +288,12 @@ class GloveBridge:
                     while stderr.read(4096):pass
                 except (OSError,EOFError,socket.timeout):pass
             threading.Thread(target=drain,daemon=True).start()
-            with self.lock:self.client=client;self.stdin=stdin
+            with self.lock:
+                if session!=self.session:raise ValueError('Teleoperation session changed')
+                self.client=client;self.stdin=stdin
             for line in stdout:
+                with self.lock:
+                    if session!=self.session:break
                 if not line.startswith('WUJI_JSON:'):continue
                 event=json.loads(line[len('WUJI_JSON:'):])
                 if event.get('type')=='ready':
@@ -253,17 +311,20 @@ class GloveBridge:
                     if not ready or model_ready:raise ValueError('Controller calibration readiness is out of order')
                     model_ready=True
                     self._calibrated_ready(event,continuation)
-                else:self.receive(event)
+                else:self.receive(event,session=session)
             if not ready:raise ValueError('控制端未返回手套接口 / Controller did not expose glove interface')
         except Exception as e:
             # Credential/transport details are never copied to the public UI.
             text=str(e) if isinstance(e,ValueError) else '无法连接控制端，请核对连接设置 / Controller connection failed; check settings'
-            self.receive(dict(type='glove_error',message=text))
+            self.receive(dict(type='glove_error',message=text),session=session)
         finally:
             if client:
                 try:client.close()
                 except Exception:pass
             with self.lock:
+                if session!=self.session:return
+                if self.lease or self._follow_unconfirmed:
+                    self._mark_follow_unconfirmed('连接中断，启动或停用结果未确认 / Connection lost; follow or disable is unconfirmed')
                 self.client=self.stdin=None;self.lease=None;self.state['stream']['fresh']=False
                 if self.state['hardware'].get('active'):
                     self.state['hardware'].update(active=None,stop_confirmed=False,reason='连接中断，停用结果未确认 / Disable not confirmed')

@@ -244,8 +244,21 @@ class NativeCalibration:
             if token and job is not None:
                 if not job.close(timeout=7):raise ValueError('Calibration process cleanup remains unconfirmed')
                 with gate(self.folder):
+                    with owner.lock:
+                        if (self.token!=token or self.job is not job or owner.run.get('id')!=run_id
+                                or owner.run.get('running') is not False):
+                            raise ValueError('Calibration cleanup owner changed')
+                    marker=reservation(self.folder)
+                    if marker and (marker.get('kind')!='calibration' or marker.get('token')!=token):
+                        raise ValueError('Calibration cleanup owner changed')
                     release(token,self.folder)
-                    if self.token==token:self.token=None
+                    if reservation(self.folder):raise ValueError('Calibration process cleanup remains unconfirmed')
+                    with owner.lock:
+                        if (self.token!=token or self.job is not job or owner.run.get('id')!=run_id
+                                or owner.run.get('running') is not False):
+                            raise ValueError('Calibration cleanup owner changed')
+                        self.token=None
+                        owner.run['cleanup_confirmed']=True
             return owner.snapshot(refresh=False)
         if schedule:
             def deadline():

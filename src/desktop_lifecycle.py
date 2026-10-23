@@ -2,6 +2,14 @@
 import time
 from device_termination import unconfirmed
 
+def calibration_cleanup_required(state):
+    calibration=state.get('calibration') or {}
+    run=calibration.get('run') or calibration
+    return (calibration.get('cleanup_required') is True
+            or (run.get('source') in ('official_tty','official_jsonl_native')
+                and run.get('id') is not None and run.get('running') is False
+                and run.get('cleanup_confirmed') is not True))
+
 def needs_confirmation(state):
     return (state.get('connection')!='disconnected' or state.get('glove',{}).get('busy',False)
             or state.get('official_studio',{}).get('reserved',False) or state.get('official_studio',{}).get('busy',False)
@@ -10,6 +18,7 @@ def needs_confirmation(state):
             or state.get('official_viz',{}).get('reserved',False)
             or state.get('recording',{}).get('active',False)
             or state.get('calibration',{}).get('running',False)
+            or calibration_cleanup_required(state)
             or state.get('calibration_connection',{}).get('busy',False)
             or state.get('teleoperation_connection',{}).get('busy',False)
             or state.get('calibrated_teleoperation',{}).get('busy',False)
@@ -41,12 +50,18 @@ def close_sessions(controller, timeout=6., clock=time.monotonic, sleep=time.slee
         except ValueError as error:return dict(ok=False,error=str(error))
     if state.get('parameter_sync',{}).get('busy') or controller.doctor.snapshot().get('running'):
         return dict(ok=False,error='请等待参数同步或诊断结束。 / Wait for parameter sync or diagnostics.')
-    if state.get('calibration',{}).get('running'):
-        controller.action(dict(name='calibration_cancel'))
+    if state.get('calibration',{}).get('running') or calibration_cleanup_required(state):
+        run_id=state.get('calibration',{}).get('id')
+        try:controller.action(dict(name='calibration_cancel'))
+        except (ValueError,OSError) as error:return dict(ok=False,error=str(error))
         deadline=clock()+timeout
         while controller.calibration.run.get('running') and clock()<deadline:sleep(.05)
         if controller.calibration.run.get('running'):
             return dict(ok=False,error='官方标定仍在退出，请稍后重试 / Official calibration is still releasing the device')
+        state=controller.snapshot()
+        calibration=state.get('calibration') or {}
+        if calibration.get('id')!=run_id or calibration.get('running') or calibration_cleanup_required(state):
+            return dict(ok=False,error='标定会话退出尚未核对，请在原任务中结束后重试 / Calibration cleanup is unconfirmed; finish its owning task before retrying')
     glove=state.get('glove',{})
     hardware=glove.get('hardware',{}) if glove.get('busy') else state.get('hardware',{})
     active=hardware.get('active',False)
