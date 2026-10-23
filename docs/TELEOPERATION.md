@@ -1,4 +1,4 @@
-## 0.2.43 当前流程
+## 0.2.44 当前流程
 
 标定结束后在结果区选择「继续使用这只手套」，沿用本次官方档案进入遥操作预览；资料按用户身份、侧别、模型内容核验，冲突保留原数据。实体灵巧手有独立的查找、选择和连接入口，连接后再明确开始实机跟随。扫描与单纯选择不连接，进入任务和切换画面不启动电机。任务标签可双分区、拖放、在软件内浮动和停靠；关闭标签只是关闭视图。解除配对先确认目标反馈已释放，保留当前手套和用户。
 
@@ -29,4 +29,4 @@ Windows使用已配置的内置Linux控制端或显式Linux控制电脑。当前
 
 型号、地址、失联时限、参数与数据率在详情中查看。实际停止、终止记录、精确设备归属、数据新鲜度及控制租约仍由原控制链核验。软件与合成界面验证不等于实机精度或物理停止已验收。
 
-官方依据：[SDK实时遥操作示例](https://github.com/wuji-technology/wuji-sdk/blob/main/examples/python/retargeting/1.teleop_real.py)、[SDK说明](https://github.com/wuji-technology/wuji-sdk/blob/main/README.md)。本版结果另见[验证记录](VALIDATION_0.2.43.md)。
+官方依据：[SDK实时遥操作示例](https://github.com/wuji-technology/wuji-sdk/blob/main/examples/python/retargeting/1.teleop_real.py)、[SDK说明](https://github.com/wuji-technology/wuji-sdk/blob/main/README.md)。本版结果另见[验证记录](VALIDATION_0.2.44.md)。
