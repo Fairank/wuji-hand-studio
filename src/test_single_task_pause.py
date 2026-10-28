@@ -77,6 +77,35 @@ class SingleTaskCapabilitiesTests(unittest.TestCase):
         for key,value in (('program',{'run_id':'c'*32}),('playback',{'clock_at':'synthetic-new-run'})):
             self.assertNotEqual(scope,context_digest(dict(base,**{key:value})))
 
+    def test_same_clock_replacement_changes_existing_task_revision_and_rejects_old_tab(self):
+        state=hand();player=DemoPlayer()
+        with patch('demo_player.datetime') as clock:
+            clock.now.return_value.astimezone.return_value.isoformat.return_value='2026-10-28T14:00:00+08:00'
+            player.command(dict(name='demo_start',action='fist',speed=.5,cycles=0))
+            state['playback']=player.snapshot();service,calls=self.registry(state)
+            old=service.snapshot()['tasks'][0]
+            player.command(dict(name='demo_start',action='fist',speed=.5,cycles=0))
+            state['playback']=player.snapshot();current=service.snapshot()['tasks'][0]
+        self.assertEqual(old['task_id'],current['task_id'])
+        self.assertGreater(current['revision'],old['revision'])
+        with self.assertRaisesRegex(ValueError,'Task changed'):
+            service.action(dict(task_id=old['task_id'],expected_revision=old['revision'],action='pause'))
+        self.assertEqual(calls,[])
+        service.action(dict(task_id=current['task_id'],expected_revision=current['revision'],action='pause'))
+        self.assertEqual(len(calls),1)
+
+    def test_preview_token_keeps_same_task_revision_through_pause_resume_and_legacy_clock_is_supported(self):
+        state=hand();player=DemoPlayer();player.command(dict(name='demo_start',action='fist',speed=.5,cycles=0))
+        state['playback']=player.snapshot();service,_=self.registry(state);running=service.snapshot()['tasks'][0]
+        player.command(dict(name='demo_pause',expected_run=player.run_id));state['playback']=player.snapshot()
+        paused=service.snapshot()['tasks'][0]
+        self.assertEqual(paused['revision'],running['revision']);self.assertTrue(paused['capabilities']['can_resume'])
+        player.command(dict(name='demo_resume',expected_run=player.run_id));state['playback']=player.snapshot()
+        self.assertEqual(service.snapshot()['tasks'][0]['revision'],running['revision'])
+        # An older source lacks run_id and still keys its task by clock_at.
+        legacy=dict(state,playback=dict(state['playback']));legacy['playback'].pop('run_id')
+        self.assertNotEqual(context_digest(legacy),context_digest(dict(legacy,playback=dict(legacy['playback'],clock_at='old-source-new-run'))))
+
     def test_completed_group_history_does_not_block_a_later_single_preview(self):
         state=hand();state['hardware']['group_sync']={'active':False,'phase':'stopped'}
         state['playback']=dict(active=True,running=True,cycles=1,duration_s=20.,elapsed_s=2.)

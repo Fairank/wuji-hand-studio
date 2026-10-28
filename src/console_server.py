@@ -586,6 +586,14 @@ class Controller:
     def _action(self, command):
         if not isinstance(command,dict):raise ValueError('Invalid request')
         name=command.get('name','')
+        if name in {'program_pause','program_resume','program_stop'} and 'expected_run' in command:
+            # _coordinated_action holds the controller lock through validation
+            # and dispatch. A late UI command must not affect a replacement run
+            # (or stop a newly started group through the branch below).
+            expected=command['expected_run']
+            if (not isinstance(expected,str) or not re.fullmatch('[a-f0-9]{32}',expected)
+                    or expected!=self.program.snapshot().get('run_id')):
+                raise ValueError('节目单已切换，请核对当前播放后重试 / Playlist changed; check the current run and retry')
         if name in {'hardware_trial','demo_start'} and threading.current_thread() is self.program.thread:
             # This is the final start boundary under the controller lock. A
             # pause between playlist entries cannot leak one more start.

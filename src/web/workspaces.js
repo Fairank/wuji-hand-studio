@@ -29,6 +29,8 @@
     scanReq: ['已请求扫描', 'Scan requested'], moveReq: ['已提交移动', 'Move submitted'], discReq: ['已提交断开', 'Disconnect submitted'],
     forgetReq: ['已提交移除', 'Remove submitted'], rmReq: ['已提交删除工作区', 'Workspace removal submitted'], failed: ['失败：', 'Failed: '],
     prevReq: ['已添加预览手（仅预览，未连接设备）', 'Preview hand added (preview only, no device)'],
+    cameraWarning: ['初始视角未确认，可复位重试。', 'Initial view unconfirmed. Use Reset view to retry.'],
+    connectionWarning: ['连接结果尚未确认，请在现有设备卡片中继续或断开。', 'Connection unconfirmed. Continue or disconnect from the existing device card.'],
     startReq: ['已提交启动', 'Start submitted'], stopReq: ['已提交停止', 'Stop submitted'], needName: ['请输入工作区名称', 'Enter a workspace name'],
     gone: ['设备不在最新发现结果中，请重新发现', 'Device not in latest discovery; discover again'], badSnap: ['快照格式无效', 'Invalid snapshot'],
     pollFail: ['状态刷新失败：', 'Refresh failed: '], beatFail: ['编排连接中断：', 'Group connection interrupted: '], noLease: ['启动未取得控制连接', 'Start did not establish a control connection'],
@@ -116,8 +118,13 @@
   async function op(key, fn, okKey) {                                   // one in-flight request per button key
     if (inflight.has(key)) return;
     inflight.add(key); render();
-    try { await fn(); if (okKey) say(T(okKey)); } catch (e) { say(T('failed') + errMsg(e), true); }
+    try { const result=await fn(),message=completionText(result,okKey); if(message)say(message); } catch (e) { say(T('failed') + errMsg(e), true); }
     finally { inflight.delete(key); render(); kick(); }
+  }
+  function completionText(result,okKey) {
+    if(result?.warning==='workspace_connection_unconfirmed')return T('connectionWarning');
+    const warning=result?.warning==='preview_camera_unconfirmed'?T('cameraWarning'):typeof result?.warning==='string'?result.warning:'';
+    return [okKey?T(okKey):'',warning].filter(Boolean).join(' · ');
   }
   async function poll(force) {
     if (polling) { if (force) again = true; return; }                   // never overlap snapshot requests
@@ -309,7 +316,7 @@
         serial: e.serial, connection: e.connection, connected: !!e.connected };
     });
     const ps = { workspace: { id: w.id, label: w.label || String(w.id) }, members, actions: (snap && snap.actions) || [],
-      run: w.run || {}, pending: starting.has(w.id), stale: !!pollErr };
+      run: w.run || {}, pending: starting.has(w.id), stale: !!pollErr||!!snap?.persistence_error };
     if (!viewer && window.HandGroupView) viewer = window.HandGroupView.mount($('.wsx-views'), {onCamera: (member,camera) => act('workspace_camera',{workspace:cur().id,member,camera})});
     if (viewer) viewer.render(ps,lang());
     const key = JSON.stringify(ps) + lang();
@@ -319,7 +326,7 @@
   }
   function renderErr() {                                                // concise poll/heartbeat failures only
     if (root) {
-      const error=[...new Set([pollErr, ...beatErr.values()])].filter(Boolean).join(' · ');
+      const error=[...new Set([pollErr, typeof snap?.persistence_error==='string'?snap.persistence_error:'', ...beatErr.values()])].filter(Boolean).join(' · ');
       tx($('.wsx-err'),error);
       if(management)tx($('.wsx-sheet-msg'),error||$('.wsx-status').textContent);
     }
@@ -344,7 +351,7 @@
       const d = fresh(k), id = wsId(await act('workspace_create', { label: `${T('autoLabel')} ${String(d.serial).slice(-4)}` }));
       if (id == null || id === '') throw new Error(T('noId'));
       choose(id);
-      try { await act('workspace_add', { workspace: id, serial: d.serial }); say(T('addReq')); }
+      try { const result=await act('workspace_add', { workspace: id, serial: d.serial }); say(completionText(result,'addReq')); }
       catch (e) { say(T('createdNoAdd') + errMsg(e), true); }            // never report "connected" on failure
     }),
   };

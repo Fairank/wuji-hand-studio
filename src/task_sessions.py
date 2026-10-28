@@ -113,7 +113,8 @@ def context_digest(state):
                  binding=state.get('retarget_binding'),
                  playback_owner=dict(hardware=state.get('hardware_control_id'),
                      program=object_value(state.get('program')).get('run_id'),
-                     preview=object_value(state.get('playback')).get('clock_at')),
+                     preview=object_value(state.get('playback')).get('run_id')
+                        or object_value(state.get('playback')).get('clock_at')),
                  viewer=viewer.get('session_id'), run=run.get('id'))
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
 

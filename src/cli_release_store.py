@@ -71,8 +71,9 @@ class _AssetRedirect(HTTPRedirectHandler):
 class _AssetLinks(HTMLParser):
     _void = {'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'param', 'source', 'track', 'wbr'}
 
-    def __init__(self):
+    def __init__(self,base_url=REPO_URL):
         super().__init__()
+        self.base_url=base_url
         self.links = []
         self.rows = []
         self._stack = []
@@ -134,13 +135,13 @@ class _AssetLinks(HTMLParser):
         GitHub currently repeats it in span.Truncate-text and clipboard-copy.
         A copy control also names its exact asset in its accessible label.
         """
-        rows = [row for row in self.rows if url in {urljoin(REPO_URL + '/', href) for href in row['links']}]
+        rows = [row for row in self.rows if url in {urljoin(self.base_url + '/', href) for href in row['links']}]
         if not rows:
             return None
         if len(rows) != 1 or rows[0]['nested']:
             raise ReleaseStoreError('Official HTML asset row is ambiguous')
         row = rows[0]
-        if len({urljoin(REPO_URL + '/', href) for href in row['links']}) != 1:
+        if len({urljoin(self.base_url + '/', href) for href in row['links']}) != 1:
             raise ReleaseStoreError('Official HTML row contains more than one asset link')
         digests = []
         for label, value in row['copies']:

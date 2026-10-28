@@ -120,6 +120,7 @@ class WorkbenchReleaseTests(unittest.TestCase):
         for error in (URLError('synthetic DNS failure'), HTTPError(LATEST_URL, 403, 'Forbidden', {}, None), TimeoutError('synthetic timeout')):
             with self.subTest(error=error):
                 self.network.responses[LATEST_URL] = error
+                self.network.responses[REPO_URL+'/releases/latest'] = error
                 with self.assertRaises(type(error)):
                     self.store.check()
 

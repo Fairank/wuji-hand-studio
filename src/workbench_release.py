@@ -15,8 +15,8 @@ import re
 import stat
 import tempfile
 import time
-from urllib.parse import urlsplit
-from urllib.error import HTTPError
+from urllib.parse import urlsplit,urljoin
+from urllib.error import HTTPError,URLError
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 
@@ -27,6 +27,8 @@ LATEST_URL = API_URL + '/releases/latest'
 MAX_METADATA = 2 * 1024 * 1024
 MAX_CHECKSUM = 64 * 1024
 MAX_INSTALLER = 1024 * 1024 * 1024
+DEFAULT_DOWNLOAD_TIMEOUT = 30 * 60
+DEFAULT_METADATA_TIMEOUT = 30
 _VERSION = re.compile(r'(0|[1-9][0-9]{0,3})\.(0|[1-9][0-9]{0,3})\.(0|[1-9][0-9]{0,3})')
 _SHA256 = re.compile(r'[a-fA-F0-9]{64}')
 
@@ -70,6 +72,21 @@ class _RedirectHandler(HTTPRedirectHandler):
         return super().redirect_request(request, response, code, message, headers, newurl)
 
 
+def _html_redirect(url,original):
+    if url==original:return
+    prefix=REPO_URL+'/releases/tag/'
+    if original!=REPO_URL+'/releases/latest' or not isinstance(url,str) or not url.startswith(prefix):
+        raise WorkbenchReleaseError('Release HTML redirected outside this repository latest tag')
+    _version(url[len(prefix):],tag=True)
+
+
+class _HTMLRedirectHandler(HTTPRedirectHandler):
+    def __init__(self,original):self.original=original
+    def redirect_request(self,request,response,code,message,headers,newurl):
+        _html_redirect(newurl,self.original)
+        return super().redirect_request(request,response,code,message,headers,newurl)
+
+
 def _plain(path, *, directory=None):
     """Reject symlinks, Windows junctions/reparse points and unexpected types."""
     try:
@@ -105,18 +122,19 @@ class WorkbenchRelease:
     after size/hash verification. Existing current/previous pointers are never
     read, changed or used as cleanup targets.
     """
-    def __init__(self, data_dir, current_version, *, runner=None, timeout=180,
-                 socket_timeout=15, max_size=MAX_INSTALLER):
+    def __init__(self, data_dir, current_version, *, runner=None, timeout=DEFAULT_DOWNLOAD_TIMEOUT,
+                 socket_timeout=15, metadata_timeout=DEFAULT_METADATA_TIMEOUT, max_size=MAX_INSTALLER):
         _version(current_version)
-        for value in (timeout, socket_timeout):
-            if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or not 0 < value <= 600:
-                raise ValueError('Timeouts must be finite, positive and at most 600 seconds')
+        for value,limit in ((timeout,3600),(socket_timeout,600),(metadata_timeout,600)):
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or not 0 < value <= limit:
+                raise ValueError('Timeouts must be finite, positive and within their operation limit')
         if type(max_size) is not int or not 0 < max_size <= MAX_INSTALLER:
             raise ValueError('Invalid installer size limit')
         self.data_dir = Path(data_dir).expanduser().absolute()
         self.versions = self.data_dir / 'updates' / 'versions'
         self.current_version, self.runner = current_version, runner
         self.timeout, self.socket_timeout, self.max_size = timeout, socket_timeout, max_size
+        self.metadata_timeout = min(metadata_timeout,timeout)
 
     @staticmethod
     def _cancel(cancel_event, deadline):
@@ -125,19 +143,24 @@ class WorkbenchRelease:
         if time.monotonic() >= deadline:
             raise WorkbenchReleaseError('Application update preparation timed out')
 
-    def _read(self, url, *, limit, deadline, cancel_event, expected=None, output=None, asset=False, progress=None):
+    def _read(self, url, *, limit, deadline, cancel_event, expected=None, output=None, asset=False, progress=None, html=False, with_url=False):
         self._cancel(cancel_event, deadline)
         if not asset and url != LATEST_URL:
-            raise WorkbenchReleaseError('Untrusted release metadata endpoint')
+            expanded=REPO_URL+'/releases/expanded_assets/'
+            if not html or not (url==REPO_URL+'/releases/latest' or url.startswith(expanded)):
+                raise WorkbenchReleaseError('Untrusted release metadata endpoint')
+            if url.startswith(expanded):_version(url[len(expanded):],tag=True)
         _redirect(url, url, asset=asset)
-        request = Request(url, headers={'User-Agent': 'HandWorkbench-ApplicationUpdate', 'Accept': 'application/octet-stream' if asset else 'application/vnd.github+json', 'Accept-Encoding': 'identity'})
-        opener = self.runner or build_opener(_RedirectHandler(url, asset)).open
+        request = Request(url, headers={'User-Agent': 'HandWorkbench-ApplicationUpdate', 'Accept': 'text/html' if html else 'application/octet-stream' if asset else 'application/vnd.github+json', 'Accept-Encoding': 'identity'})
+        opener = self.runner or build_opener(_HTMLRedirectHandler(url) if html else _RedirectHandler(url, asset)).open
         remaining = min(self.socket_timeout, max(.001, deadline - time.monotonic()))
         chunks, total, digest = [], 0, hashlib.sha256()
         with opener(request, timeout=remaining) as response:
             if response.status != 200:
                 raise HTTPError(url, response.status, 'GitHub release request failed', response.headers, None)
-            _redirect(response.geturl(), url, asset=asset)
+            final_url=response.geturl()
+            if html:_html_redirect(final_url,url)
+            else:_redirect(final_url, url, asset=asset)
             length = response.headers.get('Content-Length')
             if length is not None:
                 if not isinstance(length, str) or not re.fullmatch(r'[0-9]{1,12}', length):
@@ -147,7 +170,11 @@ class WorkbenchRelease:
                     raise WorkbenchReleaseError('Release response size differs from metadata')
             while True:
                 self._cancel(cancel_event, deadline)
-                block = response.read(min(64 * 1024, limit - total + 1))
+                try:
+                    block = response.read(min(64 * 1024, limit - total + 1))
+                except TimeoutError as error:
+                    operation='download' if output is not None else 'metadata request'
+                    raise WorkbenchReleaseError('Application update '+operation+' stalled: no data received within the socket timeout') from error
                 self._cancel(cancel_event, deadline)
                 if not block:
                     break
@@ -164,7 +191,8 @@ class WorkbenchRelease:
                     if progress:progress(dict(stage='downloading',received_bytes=total,total_bytes=expected))
             if length is not None and total != length or expected is not None and total != expected:
                 raise WorkbenchReleaseError('Release download is truncated or has extra bytes')
-        return (digest.hexdigest(), total) if output is not None else b''.join(chunks)
+        result=(digest.hexdigest(), total) if output is not None else b''.join(chunks)
+        return (result,final_url) if with_url else result
 
     def _asset(self, item, name, tag, limit):
         if not isinstance(item, dict) or item.get('name') != name:
@@ -203,14 +231,21 @@ class WorkbenchRelease:
         return version, number, installer, checksum
 
     def check(self, *, cancel_event=None):
-        deadline = time.monotonic() + self.timeout
+        deadline = time.monotonic() + self.metadata_timeout
         try:
             release = json.loads(self._read(LATEST_URL, limit=MAX_METADATA, deadline=deadline, cancel_event=cancel_event))
         except HTTPError as error:
-            if error.code == 404:
+            if error.code in (403,429):
+                release=self._html_release(deadline,cancel_event)
+            elif error.code == 404:
                 return {'current_version': self.current_version, 'latest_version': None,
                         'available': False, 'reason': 'unpublished', 'release': None, 'asset': None}
-            raise
+            else:raise
+        except TimeoutError:
+            release=self._html_release(deadline,cancel_event)
+        except URLError as error:
+            if not isinstance(error.reason,TimeoutError):raise
+            release=self._html_release(deadline,cancel_event)
         except (UnicodeDecodeError, json.JSONDecodeError) as error:
             raise WorkbenchReleaseError('GitHub release metadata is not valid JSON') from error
         version, number, installer, checksum = self._metadata(release)
@@ -218,10 +253,47 @@ class WorkbenchRelease:
                 'available': version > _version(self.current_version), 'release': release,
                 'asset': installer, 'verification': 'github_asset_digest' if checksum is None else 'release_sha256_asset'}
 
+    def _html_release(self,deadline,cancel_event):
+        # Reuse the official CLI's already audited row/digest parser. Only the
+        # fixed same-repository /latest redirect establishes stable release.
+        from cli_release_store import _AssetLinks
+        latest=REPO_URL+'/releases/latest'
+        _,page=self._read(latest,limit=MAX_METADATA,deadline=deadline,cancel_event=cancel_event,html=True,with_url=True)
+        prefix=REPO_URL+'/releases/tag/'
+        if not page.startswith(prefix):raise WorkbenchReleaseError('Latest release HTML did not identify an exact tag')
+        tag=page[len(prefix):];version='.'.join(map(str,_version(tag,tag=True)))
+        expanded=REPO_URL+'/releases/expanded_assets/'+tag
+        raw=self._read(expanded,limit=MAX_METADATA,deadline=deadline,cancel_event=cancel_event,html=True)
+        try:html=raw.decode('utf-8')
+        except UnicodeDecodeError as error:raise WorkbenchReleaseError('Release HTML is not UTF-8') from error
+        parser=_AssetLinks(base_url=REPO_URL);parser.feed(html);parser.close()
+        name='HandWorkbench-'+version+'-windows-x64-setup.exe';assets=[]
+        for filename,limit in ((name,self.max_size),(name+'.sha256',MAX_CHECKSUM)):
+            url=REPO_URL+'/releases/download/'+tag+'/'+filename
+            if url not in {urljoin(REPO_URL+'/',href) for href in parser.links}:continue
+            digest=parser.digest_for(url,filename)
+            request=Request(url,method='HEAD',headers={'User-Agent':'HandWorkbench-ApplicationUpdate','Accept-Encoding':'identity'})
+            self._cancel(cancel_event,deadline)
+            opener=self.runner or build_opener(_RedirectHandler(url,True)).open
+            with opener(request,timeout=min(self.socket_timeout,max(.001,deadline-time.monotonic()))) as response:
+                if response.status!=200:raise WorkbenchReleaseError('Release asset size request failed')
+                _redirect(response.geturl(),url,asset=True)
+                length=response.headers.get('Content-Length')
+                if not isinstance(length,str) or not re.fullmatch('[0-9]{1,12}',length) or not 0<int(length)<=limit:
+                    raise WorkbenchReleaseError('Release HTML asset has no valid exact byte count')
+                if response.headers.get('Content-Encoding') not in (None,'identity'):
+                    raise WorkbenchReleaseError('Release asset size uses unexpected encoding')
+            self._cancel(cancel_event,deadline)
+            assets.append(dict(name=filename,browser_download_url=url,size=int(length),digest=digest))
+            if filename==name and digest is not None:break
+        release=dict(tag_name=tag,html_url=page,draft=False,prerelease=False,assets=assets,discovery_source='github_latest_release_html')
+        self._metadata(release)
+        return release
+
     def _expected(self, installer, checksum, deadline, cancel_event):
         if checksum is None:
             return installer['digest'][7:].lower(), 'github_asset_digest'
-        raw = self._read(checksum['browser_download_url'], limit=MAX_CHECKSUM, expected=checksum['size'], deadline=deadline, cancel_event=cancel_event, asset=True)
+        raw = self._read(checksum['browser_download_url'], limit=MAX_CHECKSUM, expected=checksum['size'], deadline=min(deadline,time.monotonic()+self.metadata_timeout), cancel_event=cancel_event, asset=True)
         if checksum.get('digest') and hashlib.sha256(raw).hexdigest() != checksum['digest'][7:].lower():
             raise WorkbenchReleaseError('Checksum asset failed its GitHub digest')
         try:
@@ -297,10 +369,8 @@ class WorkbenchRelease:
         self._cancel(cancel_event, deadline)
         if release is None:
             # Keep this operation's deadline across metadata and download too.
-            try:
-                release = json.loads(self._read(LATEST_URL, limit=MAX_METADATA, deadline=deadline, cancel_event=cancel_event))
-            except (UnicodeDecodeError, json.JSONDecodeError) as error:
-                raise WorkbenchReleaseError('GitHub release metadata is not valid JSON') from error
+            release=self.check(cancel_event=cancel_event)['release']
+            self._cancel(cancel_event,deadline)
         elif isinstance(release, dict) and 'release' in release:
             release = release['release']
         version, number, installer, checksum = self._metadata(release)
@@ -311,7 +381,13 @@ class WorkbenchRelease:
         destination = self.versions / number
         if _plain(destination, directory=True):
             if progress:progress(dict(stage='verifying',received_bytes=installer['size'],total_bytes=installer['size']))
-            return self._existing(destination, installer, digest, deadline, cancel_event)
+            try:
+                return self._existing(destination, installer, digest, deadline, cancel_event)
+            except WorkbenchReleaseError:
+                # A publisher may replace an asset without changing its tag.
+                # Retain an exactly verified old packet as history, rather than
+                # installing it or making every explicit retry fail forever.
+                if not self._retire_replaced(destination,installer,digest,deadline,cancel_event):raise
         if progress:progress(dict(stage='downloading',received_bytes=0,total_bytes=installer['size']))
         with self._stage(installer['name']) as stage:
             with self._create(stage / installer['name']) as stream:
@@ -337,3 +413,33 @@ class WorkbenchRelease:
                 raise WorkbenchReleaseError('Installer version was prepared by another operation; retry')
             stage.rename(destination)
             return self._existing(destination, installer, digest, deadline, cancel_event)
+
+    def _retire_replaced(self,destination,installer,digest,deadline,cancel_event):
+        _directory(destination)
+        record=destination/'manifest.json'
+        if not _plain(record,directory=False) or record.stat().st_size>MAX_CHECKSUM:return False
+        try:old=json.loads(record.read_bytes())
+        except (UnicodeDecodeError,json.JSONDecodeError):return False
+        old_digest=old.get('sha256') if isinstance(old,dict) else None
+        old_size=old.get('size') if isinstance(old,dict) else None
+        if not isinstance(old_digest,str) or not _SHA256.fullmatch(old_digest) or old_digest==digest:return False
+        if type(old_size) is not int or not 0<old_size<=self.max_size:return False
+        # Reuse all existing provenance, file-type, size, timestamp and whole
+        # SHA checks before retiring anything. Unknown/corrupt cache stays put.
+        previous=dict(installer,size=old_size)
+        self._existing(destination,previous,old_digest,deadline,cancel_event)
+        if {p.name for p in destination.iterdir()}!={installer['name'],'manifest.json'}:
+            raise WorkbenchReleaseError('Unexpected files in the old update packet; cache was preserved')
+        retired_root=self.data_dir/'updates'/'retired';_directory(retired_root,create=True)
+        container=Path(tempfile.mkdtemp(prefix=destination.name+'-',dir=retired_root))
+        target=container/'package'
+        _directory(container);_directory(destination)
+        if not destination.resolve().is_relative_to(self.versions.resolve()) or not target.resolve().is_relative_to(retired_root.resolve()):
+            raise WorkbenchReleaseError('Retired update path escaped its owned cache')
+        self._cancel(cancel_event,deadline)
+        destination.rename(target)
+        history=dict(version=destination.name,previous_sha256=old_digest,replacement_sha256=digest,
+                     reason='official_asset_replaced',at=datetime.now(timezone.utc).isoformat())
+        with self._create(container/'retired.json') as stream:
+            stream.write((json.dumps(history,ensure_ascii=False,indent=2)+'\n').encode());stream.flush();os.fsync(stream.fileno())
+        return True

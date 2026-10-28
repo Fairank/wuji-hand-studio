@@ -83,11 +83,14 @@ class ServiceTests(unittest.TestCase):
             host.info.return_value = dict(native=True, edition=EDITION['name'], pid=os.getpid(), data_dir=str(data))
             idle = Mock()
             store = Mock()
-            latest = dict(available=True, latest_version=VERSION, release={'synthetic': True})
+            asset_url='https://github.com/'+module.REPOSITORY+'/releases/download/v'+VERSION+'/'+NAME
+            latest = dict(available=True, latest_version=VERSION, release={'synthetic': True},
+                asset=dict(name=NAME,browser_download_url=asset_url,size=len(PAYLOAD),
+                    digest='sha256:'+hashlib.sha256(PAYLOAD).hexdigest()))
             store.check.return_value = copy.deepcopy(latest)
             source = data/'updates/versions'/VERSION/NAME
             prepared = dict(version=VERSION, sha256=hashlib.sha256(PAYLOAD).hexdigest(),
-                            installer=str(source), repository=module.REPOSITORY, size=len(PAYLOAD))
+                            installer=str(source), repository=module.REPOSITORY, size=len(PAYLOAD),asset_url=asset_url)
             store.prepare.return_value = copy.deepcopy(prepared)
             service = module.WorkbenchUpdate(data, dict(EDITION), idle_check=idle, desktop=lambda:host, store=store)
             yield SimpleNamespace(service=service, data=data, source=source, prepared=prepared,

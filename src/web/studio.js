@@ -2,7 +2,7 @@
   'use strict';
   const $=id=>document.getElementById(id), L=window.WujiLocale, ws=window.WujiWorkspace;
   const text=(zh,en)=>L.lang==='en'?en:zh;
-  let catalog=null,state=null,mode='hardware',restored=false;
+  let catalog=null,state=null,mode='hardware',restored=false,catalogRevision=0,catalogLoading=false,catalogError='';
   const tools=document.createElement('div');tools.className='studio-tools';
   const language=document.createElement('select');language.setAttribute('aria-label','语言 / Language');
   language.add(new Option('中文','zh'));language.add(new Option('English','en'));language.value=L.lang;
@@ -236,9 +236,23 @@
   const speedInfo=document.createElement('details');speedInfo.className='speed-explanation';const speedSummaryLabel=document.createElement('summary'),speedBody=document.createElement('p');speedInfo.append(speedSummaryLabel,speedBody);ws.views.parameters.querySelector('.parameter-tools').append(speedInfo);
   async function speedSummary(){try{const p=await(await fetch('/api/parameters',{cache:'no-store'})).json();const v=p.values;const peak=Math.min(v.PATH_SPEED_RAD_S,v.COMMAND_SPEED_RAD_S);speedSummaryLabel.textContent=text('当前速度与频率说明','Current speed and rate');speedBody.textContent=text(`当前轨迹峰值设定 ${peak} rad/s ≈ ${(peak*180/Math.PI).toFixed(1)}°/s（1×档）。规划速度与指令变化速率取较小者；还受最短过渡 ${v.MIN_TRANSITION_S}s 和停留影响。数值框没有额外速度上限，但这不代表电机可达到任意速度；官方未在控制指南给出最高关节速度。1000Hz是发送频率。`,`Configured trajectory peak ${peak} rad/s ≈ ${(peak*180/Math.PI).toFixed(1)}°/s at 1×. The lower of planning/command speed applies, with ${v.MIN_TRANSITION_S}s minimum transition and pose holds. There is no additional speed cap in the input, but this is not an achievable motor-speed guarantee. The control guide does not specify a maximum joint speed. 1000 Hz is the command rate.`);}catch{speedBody.textContent=text('速度设置读取失败','Could not read speed settings');}}
   window.addEventListener('wuji-language',()=>{render();viewerLabels();speedSummary();});
-  window.addEventListener('workspace-page',()=>{L.apply();staticEnglish();if(location.hash==='#parameters')speedSummary();});
+  window.addEventListener('workspace-page',()=>{L.apply();staticEnglish();if(location.hash==='#parameters')speedSummary();if(location.hash==='#library'&&!catalog)loadCatalog();});
   window.addEventListener('console-state',e=>{state=e.detail;restorePlayback();picker.setBusy($('trial-action').disabled);picker.update(state);$('warning-policy').dataset.hasWarnings=String(state.connection==='connected'&&!!state.hardware?.warnings?.length);if(location.hash==='#interaction')touchState();staticEnglish();});
   window.addEventListener('console-offline',()=>{state=null;touchState();});
-  fetch('/api/catalog').then(r=>{if(!r.ok)throw Error('Action catalog unavailable');return r.json();}).then(data=>{catalog=data;render();restorePlayback();}).catch(notice);
+  function acceptCatalog(data){
+    if(!Array.isArray(data?.actions)||!Array.isArray(data.official_inventory))return false;
+    catalogRevision++;catalog=data;render();restorePlayback();
+    if(catalogError&&$('service-error').textContent===catalogError){$('service-error').textContent='';$('service-error').hidden=true;}catalogError='';return true;
+  }
+  async function loadCatalog(){
+    if(catalogLoading)return;catalogLoading=true;const own=catalogRevision;
+    try{const r=await fetch('/api/catalog',{cache:'no-store',signal:AbortSignal.timeout(6000)});if(!r.ok)throw Error('Action catalog unavailable');const data=await r.json();if(own!==catalogRevision)return;if(!acceptCatalog(data))throw Error('Action catalog is incomplete');}
+    catch(e){if(own===catalogRevision){catalogError=e.message;notice(e);}}
+    finally{catalogLoading=false;}
+  }
+  // The playlist's explicit retry restores the same action catalog here too.
+  // Updating choices does not issue a preview or motor command.
+  window.addEventListener('workbench-catalog',e=>acceptCatalog(e.detail));
+  loadCatalog();
   render();viewerLabels();amplitudeLabels();speedSummary();ws.showPage();
 })();

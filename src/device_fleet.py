@@ -207,20 +207,46 @@ class DeviceFleet:
             return self.public(self.children[ident])
 
     def remove(self, ident):
-        if not isinstance(ident,str) or ident not in self.children:raise ValueError('Unknown workspace')
-        r=self.children[ident]
-        response=self.post(r,{'name':'session_close'})
-        if not response.get('ok'):return response
-        if r['process'].poll() is None:
-            r['process'].terminate()
-            try:r['process'].wait(timeout=5)
-            except subprocess.TimeoutExpired:r['process'].kill()
         with self.lock:
-            self.children.pop(ident,None)
+            if not isinstance(ident,str) or ident not in self.children:raise ValueError('Unknown workspace')
+            r=self.children[ident];process=r['process']
+
+        def current():
+            # A delayed close/exit or disk operation must never remove a new
+            # child that happens to have replaced this catalog identity.
+            if self.children.get(ident) is not r or r.get('process') is not process:
+                raise ValueError('Workspace changed while removing it; retry')
+
+        with self.lock:
+            current()
+            confirmed=r.get('_removal_close_process') is process and process.poll() is not None
+            if not confirmed:r.pop('_removal_close_process',None)
+        if not confirmed:
+            response=self.post(r,{'name':'session_close'})
+            if not response.get('ok'):return response
+            with self.lock:
+                current()
+                # Keep confirmation only for this exact live process. If the
+                # later catalog save fails, retry need not call its dead HTTP
+                # server. A still-live child must close again on every retry,
+                # because it may have reconnected after a failed termination.
+                # An unrelated already-dead child is never assumed safe.
+                r['_removal_close_process']=process
+        with self.lock:current()
+        if process.poll() is None:
+            process.terminate()
+            try:process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill();process.wait(timeout=5)
+        if process.poll() is None:
+            raise ValueError('Workspace process exit was not confirmed')
+        with self.lock:
+            current()
             rows=json.loads(self.records.read_text(encoding='utf-8')) if self.records.exists() else []
             staged=self.records.with_suffix('.pending')
             staged.write_text(json.dumps([x for x in rows if x.get('id')!=ident],ensure_ascii=False),encoding='utf-8')
             staged.replace(self.records)
+            self.children.pop(ident)
         return dict(removed=True)
 
     def close(self):

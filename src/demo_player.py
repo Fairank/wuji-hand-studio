@@ -1,5 +1,6 @@
 """Bounded scripted MuJoCo pose previews; never writes to hardware."""
 import math
+import secrets
 import threading
 import time
 from datetime import datetime
@@ -40,6 +41,7 @@ class DemoPlayer:
         self.elapsed=0.
         self.tick=time.monotonic()
         self.clock_at=None
+        self.run_id=None
         self.text='WUJI TECH'
         self.duration=PERIOD[self.action]
         self.scheduled_start=None
@@ -84,8 +86,12 @@ class DemoPlayer:
 
     def command(self, data):
         with self.lock:
-            self.advance()
             name=data['name']
+            if name in {'demo_pause','demo_resume','demo_stop'} and 'expected_run' in data:
+                expected=data['expected_run']
+                if not isinstance(expected,str) or not expected or expected!=self.run_id:
+                    raise ValueError('预览已切换，请核对当前动作后重试 / Preview changed; check the current routine and retry')
+            self.advance()
             if name=='demo_start':
                 self.scheduled_start=None
                 self.scheduled_control=None;self.group_paused=False;self.applied_epoch=0
@@ -101,6 +107,7 @@ class DemoPlayer:
                 self.action,self.speed,self.cycles=action,speed,cycles
                 self.text,self.duration=text,duration
                 self.clock_at=datetime.now().astimezone().isoformat()
+                self.run_id=secrets.token_hex(16)
                 self.active=self.running=True;self.elapsed=0.;self.tick=time.monotonic()
             elif name=='demo_pause':self.running=False
             elif name=='demo_resume':
@@ -128,7 +135,7 @@ class DemoPlayer:
             return dict(active=self.active,running=self.running,action=self.action,
                 group_paused=self.group_paused,applied_epoch=self.applied_epoch,pending_control=self.scheduled_control.copy() if self.scheduled_control else None,
                 label=CATALOG[self.action]+' · '+phase_label if self.action in CUSTOM_IDS else phase_label,speed=self.speed,cycles=self.cycles,
-                clock_at=self.clock_at,
+                clock_at=self.clock_at,run_id=self.run_id,
                 text=self.text if self.action=='text_sequence' else '',token_index=token_index,duration_s=self.duration,amplitude=self.amplitude,
                 pose_elapsed_s=display_elapsed,
                 elapsed_s=self.elapsed,cycle=min(int(self.elapsed/self.duration)+1,self.cycles) if self.cycles else int(self.elapsed/self.duration)+1,

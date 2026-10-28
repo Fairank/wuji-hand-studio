@@ -3,7 +3,7 @@
  'use strict';
  const $=id=>document.getElementById(id),L=window.WujiLocale,t=(zh,en)=>L.lang==='en'?en:zh;
  const speeds=[.1,.25,.5,.75,1,1.25,1.5,1.75,2,2.5,3,4];
- let entries=[],catalog=[],state=null,lease=null,runId=null,runEpoch=0,pending=false,starting=false,error='',loadError=false,sheet=null,mode='preview';
+ let entries=[],catalog=[],state=null,lease=null,runId=null,runEpoch=0,pending=false,starting=false,error='',loadError=false,sheet=null,mode='preview',commandRevision=0,uncertain=false;
  const program=document.createElement('section');program.id='wb-program';program.className='pe-editor';
  program.innerHTML=`<div class="pe-queue">
   <div class="pe-section-heading"><h3 id="pe-queue-title"></h3><span id="wb-program-count"></span></div>
@@ -35,7 +35,7 @@
   if(Number.isInteger(v.repeats)&&v.repeats>=0&&v.repeats<=100){$('pe-forever').checked=v.repeats===0;$('wb-repeats').value=String(v.repeats||1);}
   if(Number.isInteger(v.seed)&&v.seed>=0&&v.seed<=4294967295)$('wb-seed').value=String(v.seed);
  }catch{}
- const locked=()=>pending||starting||!!state?.program?.active;
+ const locked=()=>pending||starting||uncertain||!!state?.program?.active;
  const rows=window.PlaylistRows.mount($('wb-entries'),{speeds,
   onEdit(index,field,value){if(locked()||!entries[index])return;entries[index][field]=value;persist();render();},
   onMove(index,delta){if(locked()||!entries[index+delta])return;[entries[index],entries[index+delta]]=[entries[index+delta],entries[index]];persist();render();announce(t(`已移至第 ${index+delta+1} 项`,`Moved to position ${index+delta+1}`));},
@@ -87,7 +87,7 @@
   $('pe-hardware-options').hidden=mode!=='hardware';
   $('pe-destination-note').textContent=mode==='preview'?t('仅播放屏幕里的手部模型。','Plays the hand model on screen.'):t('使用当前连接的灵巧手与参数。','Uses the connected hand and its current parameters.');
   $('wb-program-pause').hidden=$('wb-program-stop').hidden=!active;
-  $('wb-program-pause').disabled=pending||!active;
+  $('wb-program-pause').disabled=pending||uncertain||!active;
   // Stop remains available throughout a pending pause/resume request.
   $('wb-program-stop').disabled=!active;
   $('wb-program-pause').textContent=state?.program?.paused?t('继续播放','Resume'):t('暂停','Pause');
@@ -107,24 +107,40 @@
  }
  $('wb-dance-add-button').onclick=()=>add(false);$('wb-dance-all').onclick=()=>add(true);
  async function refreshCatalog(){
-  try{const r=await fetch('/api/catalog');if(!r.ok)throw Error();const c=await r.json();catalog=(c.actions||[]).filter(a=>a.group==='dance');loadError=false;
+  try{const r=await fetch('/api/catalog',{cache:'no-store',signal:AbortSignal.timeout(6000)});if(!r.ok)throw Error();const c=await r.json();if(!Array.isArray(c?.actions)||!Array.isArray(c.official_inventory))throw Error();catalog=c.actions.filter(a=>a.group==='dance');loadError=false;
    const choice=$('wb-dance-add').value;$('wb-dance-add').replaceChildren(...catalog.map(a=>new Option(nameOf(a.id),a.id)));if(catalog.some(a=>a.id===choice))$('wb-dance-add').value=choice;
    // Never replace a saved queue on a transient empty response.
    if(catalog.length)entries=entries.filter(e=>catalog.some(a=>a.id===e.action));render();
+   window.dispatchEvent(new CustomEvent('workbench-catalog',{detail:c}));
   }catch{loadError=true;update();}
   $('pe-catalog-error').hidden=$('pe-retry').hidden=!loadError;
  }
  $('pe-retry').onclick=refreshCatalog;
  async function request(name,payload={},signal){
   if(!state?.csrf)throw Error(t('本机服务尚未就绪，请稍后重试。','Local service is not ready. Try again shortly.'));
-  const r=await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json','X-Console-Token':state.csrf},body:JSON.stringify({name,...payload}),signal});
+  const r=await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json','X-Console-Token':state.csrf},body:JSON.stringify({name,...payload}),signal:signal||AbortSignal.timeout(4000)});
   const v=await r.json();if(!r.ok||!v.ok)throw Error(v.error||'Request failed');return v;
  }
  async function command(name,payload={}){
-  pending=true;error='';if(name==='program_start')runEpoch++;update();
-  try{const v=await request(name,payload);if(v.program_lease){lease=v.program_lease;runId=typeof v.program_run_id==='string'?v.program_run_id:null;}if(name==='program_stop'){lease=null;runId=null;runEpoch++;starting=false;}
+  if((pending||uncertain)&&name!=='program_stop')return;
+  const scoped=['program_pause','program_resume','program_stop'].includes(name),expected=state?.program?.run_id;
+  if(scoped){if(typeof expected!=='string'||!expected)return;payload={...payload,expected_run:expected};}
+  const own=++commandRevision;pending=true;error='';if(name==='program_start')runEpoch++;update();
+  try{const v=await request(name,payload);if(own!==commandRevision)return;if(v.program_lease){lease=v.program_lease;runId=typeof v.program_run_id==='string'?v.program_run_id:null;}if(name==='program_stop'){lease=null;runId=null;runEpoch++;starting=false;}
    if(name==='program_start'){starting=state?.program?.run_id!==runId||state?.program?.active!==true;$('mode-'+payload.mode)?.click();sheet?.close();}
-  }catch(e){error=e.message;}finally{pending=false;update();}
+  }catch(e){if(own===commandRevision)error=e.message;}finally{
+   if(own===commandRevision){
+    try{
+     // Only a poll begun after the command can unlock its next control. Stop
+     // supersedes a pending pause/resume and owns the final reconciliation.
+     const current=await window.WujiConnection.refresh();if(own!==commandRevision)return;
+     if(!current)throw Error(t('暂时无法核对节目单状态，请稍后重试。','Playlist status is unavailable. Retry shortly.'));
+     state=current;uncertain=false;
+     if(scoped&&!error&&current.program?.run_id!==expected)error=t('节目单已切换，请核对当前播放后重试。','The playlist changed. Check the current run and retry.');
+    }catch(e){if(own===commandRevision){uncertain=true;error=error||e.message;}}
+    if(own===commandRevision){pending=false;update();}
+   }
+  }
  }
  function start(target){
   if(locked()||blocker())return;
@@ -157,7 +173,7 @@
   }finally{if(beating===beat)beating=null;}
  },250);
  window.addEventListener('pagehide',()=>{if(lease)request('program_stop').catch(()=>{});});
- window.addEventListener('console-state',e=>{state=e.detail;if(runId&&state?.program?.run_id===runId){if(state.program.active===true)starting=false;else if(ended(state,runId)&&!pending)releaseRun();}update();});
+ window.addEventListener('console-state',e=>{state=e.detail;uncertain=false;if(runId&&state?.program?.run_id===runId){if(state.program.active===true)starting=false;else if(ended(state,runId)&&!pending)releaseRun();}update();});
  function labels(){
   const text={
    'pe-queue-title':['动作列表','Routines'],'pe-add-label':['添加动作','Add a routine'],'wb-dance-add-button':['添加','Add'],'wb-dance-all':['补齐全部动作','Add missing routines'],'pe-autosave':['编辑自动保存','Edits saved automatically'],

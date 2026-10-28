@@ -26,13 +26,14 @@ class WorkbenchUpdate:
         self.store=store or WorkbenchRelease(self.data,edition['version'])
         self.lock=threading.RLock();self.closed=threading.Event();self.thread=None;self.latest=None;self.started=False
         self.result_file=None;self.apply_token=None;self.helper=None
-        self._completion_reads=0;self._completion_checked_at=0
+        self._completion_reads=0;self._completion_checked_at=0;self._completion_retired=False
         self.state=dict(current_version=edition['version'],phase='idle',busy=False,latest_version=None,
-            available=False,prepared=None,error=None,checked_at=None,source=REPOSITORY,progress=None)
+            available=False,prepared=None,error=None,error_stage=None,cancelled=False,checked_at=None,source=REPOSITORY,progress=None)
         self._restore_completed()
 
     def _restore_completed(self):
         """Only an exact completed local update to this running version is success."""
+        if self._completion_retired:return
         self._completion_reads+=1;self._completion_checked_at=time.monotonic()
         try:
             root=self.data/'updates';_directory(root)
@@ -52,6 +53,12 @@ class WorkbenchUpdate:
             if self.state['phase']=='idle':self.state['phase']='completed'
         except (OSError,ValueError,TypeError):return
 
+    def _retire_completion(self):
+        # Keep the signed-off local receipts on disk as history, but do not
+        # associate the old installed version with a new or failed operation.
+        self._completion_retired=True
+        self.state.pop('completed_version',None)
+
     def _idle(self):
         if reservation():raise ValueError('请结束官方 CLI 会话后更新 / End the official CLI session before updating')
         self.idle_check()
@@ -65,7 +72,7 @@ class WorkbenchUpdate:
         with self.lock:
             # The helper records success after launching the new process. Allow
             # its exact result to arrive after this process's constructor.
-            if not self.state.get('completed_version') and self._completion_reads<15 and time.monotonic()-self._completion_checked_at>=2:
+            if not self._completion_retired and not self.state.get('completed_version') and self._completion_reads<15 and time.monotonic()-self._completion_checked_at>=2:
                 self._restore_completed()
             result=copy.deepcopy(self.state)
             if self.result_file:
@@ -74,10 +81,13 @@ class WorkbenchUpdate:
                     report=json.loads(self.result_file.read_text(encoding='utf-8-sig'))
                     if not isinstance(report,dict) or report.get('token')!=self.apply_token or report.get('phase')!='error':
                         raise ValueError('No matching updater error result')
-                    self.state.update(phase='error',busy=False,error=str(report.get('error') or 'Update helper failed')[:700]);result=copy.deepcopy(self.state)
+                    error=str(report.get('error') or 'Update helper failed')[:700]
+                    self._retire_completion()
+                    self.state.update(phase='error',busy=False,error=error,error_stage='install',cancelled='cancel' in error.lower());result=copy.deepcopy(self.state)
                 except (OSError,ValueError,TypeError):
                     if self.helper and self._helper_settled() and self.state['phase']=='applying':
-                        self.state.update(phase='error',busy=False,error='更新助手未完成，请重试 / Update helper did not complete; retry');result=copy.deepcopy(self.state)
+                        self._retire_completion()
+                        self.state.update(phase='error',busy=False,error='更新助手未完成，请重试 / Update helper did not complete; retry',error_stage='install',cancelled=False);result=copy.deepcopy(self.state)
         result['supported']=sys.platform=='win32' and bool(getattr(sys,'frozen',False)) and self.desktop() is not None
         result['can_apply']=False
         if result['supported'] and result.get('prepared') and not result['busy'] and self._helper_settled():
@@ -106,7 +116,8 @@ class WorkbenchUpdate:
                 # Keep the old plan and result files as history. Only retire
                 # this completed association, under the same service lock.
                 self.result_file=None;self.apply_token=None;self.helper=None
-            self.closed.clear();self.state.update(busy=True,error=None,progress=None,phase='checking' if operation=='check' else 'downloading')
+            if operation=='prepare':self._retire_completion()
+            self.closed.clear();self.state.update(busy=True,error=None,error_stage=None,cancelled=False,progress=None,phase='checking' if operation=='check' else 'downloading')
             self.thread=threading.Thread(target=self._work,args=(operation,),name='Workbench software update',daemon=True);self.thread.start()
         return self.snapshot()
 
@@ -115,16 +126,27 @@ class WorkbenchUpdate:
             if operation=='check':
                 latest=self.store.check(cancel_event=self.closed)
                 with self.lock:
+                    if self.closed.is_set():raise ValueError('Application update cancelled')
                     self.latest=latest
+                    if latest.get('available') is True:self._retire_completion()
                     prepared=self.state.get('prepared')
-                    prepared_current=bool(prepared and latest.get('available') is True and prepared.get('version')==latest.get('latest_version'))
+                    prepared_current=self._prepared_matches(prepared,latest)
+                    # Leave the verified files on disk for an explicit prepare
+                    # to reuse or replace; neither polling nor checking downloads.
+                    # Sidecar-only releases must be reverified by prepare because
+                    # a metadata response cannot prove their installer digest.
+                    if not prepared_current:self.state['prepared']=None
                     self.state.update(latest_version=latest.get('latest_version'),available=latest.get('available') is True,
                         checked_at=time.time(),phase='ready' if prepared_current else 'unpublished' if latest.get('reason')=='unpublished' else 'available' if latest.get('available') else 'up_to_date')
             else:
                 prepared=self.store.prepare(self.latest,cancel_event=self.closed,progress=self._progress)
-                with self.lock:self.state.update(prepared=prepared,phase='ready')
+                with self.lock:
+                    if self.closed.is_set():raise ValueError('Application update cancelled')
+                    self.state.update(prepared=prepared,phase='ready')
         except Exception as error:
-            with self.lock:self.state.update(phase='error',error=str(error)[:700])
+            with self.lock:
+                self._retire_completion()
+                self.state.update(phase='error',error=str(error)[:700],error_stage='check' if operation=='check' else 'download',cancelled=self.closed.is_set() or 'cancel' in str(error).lower())
         finally:
             with self.lock:self.state['busy']=False
 
@@ -132,6 +154,24 @@ class WorkbenchUpdate:
         with self.lock:
             if self.state['phase']=='downloading' and not self.closed.is_set():
                 self.state['progress']=dict(value)
+
+    @staticmethod
+    def _prepared_matches(prepared,latest):
+        # A tag can be republished. A version match alone cannot authorize the
+        # old packet after a check reports a different installer identity.
+        if not isinstance(prepared,dict) or latest.get('available') is not True:return False
+        asset=latest.get('asset')
+        if not isinstance(asset,dict):return False
+        digest=asset.get('digest')
+        if not isinstance(digest,str) or not re.fullmatch(r'sha256:[0-9a-fA-F]{64}',digest):return False
+        if not isinstance(asset.get('browser_download_url'),str) or not asset['browser_download_url']:return False
+        version=latest.get('latest_version')
+        return (prepared.get('version')==version and prepared.get('repository')==REPOSITORY
+            and asset.get('name')=='HandWorkbench-'+str(version)+'-windows-x64-setup.exe'
+            and prepared.get('asset_url')==asset.get('browser_download_url')
+            and type(asset.get('size')) is int and asset['size']>0
+            and type(prepared.get('size')) is int and prepared['size']==asset['size']
+            and prepared.get('sha256')==digest[7:].lower())
 
     def _stage_installer(self,prepared):
         """Reuse the existing finite desktop prepare_update interface's layout."""
@@ -167,6 +207,7 @@ class WorkbenchUpdate:
             if self.state['busy'] or not self.state.get('prepared'):raise ValueError('Download and verify the new installer first')
             if not self._helper_settled():raise ValueError('更新助手正在结束，请稍候重试 / Update helper is still finishing; retry shortly')
             self._idle()
+            self._retire_completion()
             prepared=copy.deepcopy(self.state['prepared']);installer=self._stage_installer(prepared)
             host=self.desktop();info=host.info()
             if info.get('native') is not True or info.get('edition')!=self.edition['name'] or info.get('pid')!=os.getpid() or Path(info.get('data_dir',''))!=self.data:
@@ -189,7 +230,7 @@ class WorkbenchUpdate:
             self.helper=subprocess.Popen([str(shell),'-NoLogo','-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass',
                 '-File',str(script),'-PlanFile',str(plan_file)],creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0),env=env)
             self.result_file=result_file;self.apply_token=token
-            self.state.update(phase='applying',busy=True,error=None)
+            self.state.update(phase='applying',busy=True,error=None,error_stage=None,cancelled=False)
         return self.snapshot()
 
     def cancel_and_wait(self,timeout=16):

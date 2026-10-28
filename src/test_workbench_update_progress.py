@@ -21,7 +21,8 @@ class ProgressTests(unittest.TestCase):
             state=env.service.snapshot()
             self.assertEqual(state['phase'],'available')
             self.assertEqual(state['latest_version'],'0.2.31')
-            self.assertEqual(state['prepared']['version'],'0.2.30')
+            self.assertIsNone(state['prepared'])
+            self.assertTrue(env.source.is_file())  # Cache remains until explicit preparation.
             env.service.start('prepare');env.service.thread.run_to_end()
             env.store.prepare.assert_called_once()
 

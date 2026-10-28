@@ -27,8 +27,8 @@
     el('record').disabled=!connected||state.stale||state.recording.active||pending;
     el('stop').disabled=!service||!state?.recording.active||pending;
     el('device-address').disabled=connected||connecting||pending;
-    el('annotation').disabled=!!state?.recording.active;
-    el('duration').disabled=!!state?.recording.active;
+    el('annotation').disabled=!!state?.recording.active||pending;
+    el('duration').disabled=!!state?.recording.active||pending;
   }
   function showError(text){el('service-error').textContent=text;el('service-error').hidden=!text;}
   function offline(){service=false;state=null;controls();el('connection-state').textContent='本机服务未连接';el('connection-message').textContent='请通过“打开手部工作台”重新打开本机服务。';for(const id of ['joint-count','device-hz','host-hz','data-age'])el(id).textContent='—';el('record-progress').textContent='采集状态未知，请恢复连接后核对';window.dispatchEvent(new Event('console-offline'));}
@@ -53,7 +53,11 @@
     if(sk!==sessionsKey){sessionsKey=sk;const rows=next.sessions.map(item=>{const row=document.createElement('div');row.className='session-row';const p=document.createElement('p');p.textContent=`${labels[item.label]||item.label} · ${item.frames} 帧 · ${fmt(item.seconds,1)} 秒 · ${reasons[item.reason]||item.reason}`;const a=document.createElement('a');a.href='/api/report?id='+encodeURIComponent(item.id);a.textContent='导出报告';a.download='hand-report.json';row.append(p,a);return row;});el('sessions').replaceChildren(...rows);if(!rows.length)el('sessions').textContent='尚无采集记录';}
     controls();window.dispatchEvent(new CustomEvent('console-state',{detail:next}));
   }
-  function freshState(){return new Promise(resolve=>{waiter={after:pollId,resolve};if(!inFlight)poll();});}
+  function freshState(){return new Promise(resolve=>{
+    if(!waiter)waiter={after:pollId,resolves:[]};
+    else waiter.after=Math.max(waiter.after,pollId);
+    waiter.resolves.push(resolve);if(!inFlight)poll();
+  });}
   async function action(body){
     if(pending||!service)return false;pending=true;controls();showError('');let succeeded=false;
     try{if(body.name==='connect'&&window.WujiNetwork)body.address=await window.WujiNetwork.prepare(body.address);const response=await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json','X-Console-Token':state.csrf},body:JSON.stringify(body),signal:AbortSignal.timeout(4000)});const result=await response.json();if(!response.ok||!result.ok)throw new Error(result.error||'操作未完成');succeeded=true;}
@@ -63,6 +67,7 @@
   }
   // Shared by the connection page and the always-visible toolbar. No new motor API.
   window.WujiConnection={state:()=>state,available:()=>service&&!pending,
+    async refresh(){await freshState();return service?state:null;},
     connect:(address='',serial='')=>action({name:'connect',auto_detect:true,address,serial}),
     async disconnect(){
       if(state?.hardware?.active){
@@ -83,7 +88,7 @@
     if(inFlight)return;inFlight=true;clearTimeout(pollTimer);const id=++pollId;
     try{const r=await fetch('/api/state',{cache:'no-store',signal:AbortSignal.timeout(3000)});if(!r.ok)throw Error();render(normalize(await r.json()));}
     catch{offline();}
-    finally{inFlight=false;if(waiter&&id>waiter.after){const w=waiter;waiter=null;w.resolve();}pollTimer=setTimeout(poll,waiter?0:500);}
+    finally{inFlight=false;if(waiter&&id>waiter.after){const w=waiter;waiter=null;for(const resolve of w.resolves)resolve();}pollTimer=setTimeout(poll,waiter?0:500);}
   }
   poll();
 })();

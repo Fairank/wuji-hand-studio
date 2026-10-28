@@ -189,7 +189,27 @@
   }
   beat();
   function render(){const p=state?.playback;get('play-start').disabled=!state||pending;get('play-pause').disabled=!p?.active||pending;get('play-stop').disabled=!p?.active||pending;get('play-pause').textContent=p?.running?'暂停':'继续';get('play-status').textContent=p?.active?`${p.label} · 第${p.cycle}${p.cycles?'/'+p.cycles:''}轮 · ${p.running?'播放中':'暂停或完成'} · ${p.elapsed_s.toFixed(1)}秒`:'当前显示实机反馈或静态预览';}
-  async function send(body){if(!state||pending)return;pending=true;render();let error='';try{const r=await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json','X-Console-Token':state.csrf},body:JSON.stringify(body),signal:AbortSignal.timeout(4000)});const d=await r.json();if(!r.ok||!d.ok)throw Error(d.error||'播放操作失败');}catch(e){error=e.message;}finally{pending=false;render();if(error)document.getElementById('service-error').textContent=error;document.getElementById('service-error').hidden=!error;}}
+  async function send(body){
+    if(!state||pending)return;
+    const scoped=['demo_pause','demo_resume','demo_stop'].includes(body.name),run=state.playback?.run_id;
+    if(scoped){if(typeof run!=='string'||!run)return;body={...body,expected_run:run};}
+    pending=true;render();let error='';
+    try{const r=await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json','X-Console-Token':state.csrf},body:JSON.stringify(body),signal:AbortSignal.timeout(4000)});const d=await r.json();if(!r.ok||!d.ok)throw Error(d.error||'播放操作失败');}
+    catch(e){error=e.message;}
+    finally{
+      if(scoped){
+        try{
+          // The shared serial poll barrier starts a read after this action.
+          // An older in-flight poll cannot re-enable its previous button.
+          const current=await window.WujiConnection.refresh();
+          if(!current){state=null;throw Error(tr('播放状态暂时无法核对，请恢复连接后重试。','Preview status is unavailable. Reconnect and retry.'));}
+          state=current;
+          if(!error&&current.playback?.run_id!==run)error=tr('预览已切换，请核对当前动作后重试。','The preview changed. Check the current routine and retry.');
+        }catch(e){state=null;error=error||e.message;}
+      }
+      pending=false;render();if(error)document.getElementById('service-error').textContent=error;document.getElementById('service-error').hidden=!error;
+    }
+  }
   get('play-start').addEventListener('click',()=>send({name:'demo_start',action:get('play-action').value,speed:Number(get('play-speed').value),cycles:Number(get('play-cycles').value),...(window.WujiPerformancePayload?.()||{})}));
   get('play-pause').addEventListener('click',()=>send({name:state.playback.running?'demo_pause':'demo_resume'}));
   get('play-stop').addEventListener('click',()=>send({name:'demo_stop'}));
