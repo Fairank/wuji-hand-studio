@@ -18,7 +18,9 @@
   library.innerHTML='<div id="compact-library"></div><details class="studio-info library-reference"><summary id="official-summary"></summary><ol class="official-list" id="official-list"></ol></details>';
   const choreographyInfo=document.createElement('details');choreographyInfo.className='studio-info library-reference';
   const choreographySummary=document.createElement('summary'),choreographyBody=document.createElement('p');
-  const danceReference=document.createElement('a');danceReference.href='https://www.brambilabong.com/blogs/popping/learn-3-finger-tutting-dance-moves-tutorial';danceReference.target='_blank';danceReference.rel='noopener';danceReference.textContent='El Tiro · Finger Tutting Tutorial ↗';
+  // Historical choreography reference: https://www.brambilabong.com/blogs/popping/learn-3-finger-tutting-dance-moves-tutorial
+  // Retain attribution without exposing its unavailable/paywalled page as a tool.
+  const danceReference=document.createElement('span');danceReference.textContent='El Tiro · Finger Tutting';
   const waveReference=document.createElement('a');waveReference.href='https://howcast.com/videos/493866-how-to-do-waving-tutting/';waveReference.target='_blank';waveReference.rel='noopener';waveReference.textContent='Howcast · Waving in Tutting ↗';const signReference=document.createElement('a');signReference.href='https://www.lifeprint.com/asl101/pages-layout/fingerspelling.htm';signReference.target='_blank';signReference.rel='noopener';signReference.textContent='ASL University · Fingerspelling ↗';choreographyInfo.append(choreographySummary,choreographyBody,danceReference,document.createElement('br'),waveReference,document.createElement('br'),signReference);library.append(choreographyInfo);
   const motionLayout=document.querySelector('.motion-layout');library.prepend(motionLayout);
   const chooser=document.createElement('div');motionLayout.querySelector('.motion-controls').prepend(chooser);
