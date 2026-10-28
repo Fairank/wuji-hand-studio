@@ -132,11 +132,13 @@ class FirmwareServiceTests(unittest.TestCase):
         token = self.ready()
         self.service.start_upgrade(token, confirmed=True)
         state = self.join()
-        argv, options = self.host.calls[-1]
+        argv, options = self.host.calls[1]
         self.assertEqual(argv, ['upgrade', '--sn', SN])
         self.assertTrue(options['mutating'])
         self.assertTrue(options['interactive'])
         self.assertNotIn('timeout', options)
+        self.assertEqual(self.host.calls[-1][0], ['upgrade', '--sn', SN, '--check', '--json'])
+        self.assertFalse(self.host.calls[-1][1]['mutating'])
         self.assertEqual(state['phase'], 'completed')
         self.assertEqual(state['result']['verdict'], 'official_process_exited')
         self.assertNotIn('success', state['result'])
@@ -356,7 +358,8 @@ class FirmwareServiceTests(unittest.TestCase):
         self.host.now+=40;self.host.row.update(stale=True,selectable=False)
         self.service.start_upgrade(token,confirmed=True);state=self.join()
         self.assertEqual(state['phase'],'completed');self.assertEqual(state['operation'],'upgrade')
-        self.assertEqual(self.host.calls[-1][0],['upgrade','--sn',SN])
+        self.assertEqual(self.host.calls[1][0],['upgrade','--sn',SN])
+        self.assertEqual(self.host.calls[-1][0],['upgrade','--sn',SN,'--check','--json'])
         host=FakeHost();service=host.service();host.results=[self.report()]
         service.start_check(SN);service.thread.join(3);token=service.snapshot()['preview']['token'];host.now+=121
         with self.assertRaises(ValueError):service.start_upgrade(token,confirmed=True)

@@ -11,7 +11,7 @@
  function el(tag,zh,en,className){const node=document.createElement(tag);if(className)node.className=className;if(zh!==undefined)text(node,zh,en);return node;}
  const appearance=$('wb-appearance-title').closest('.wb-card');
  const tabs=el('div',undefined,undefined,'hub-tabs settings-tabs');tabs.setAttribute('role','tablist');
- const sections={},definitions=[['appearance','外观','Appearance'],['devices','连接与设备','Connections'],['tools','数据与工具','Data & tools']];
+ const sections={},definitions=[['appearance','外观','Appearance'],['devices','连接与设备','Connections'],['tools','关于与工具','About & tools']];
  for(const [key,zh,en] of definitions){
   const button=el('button',zh,en);button.type='button';button.id='settings-tab-'+key;button.setAttribute('role','tab');button.setAttribute('aria-controls','settings-'+key);tabs.append(button);
   const section=el('section',undefined,undefined,'settings-section');section.id='settings-'+key;section.setAttribute('role','tabpanel');section.setAttribute('aria-labelledby',button.id);sections[key]=section;

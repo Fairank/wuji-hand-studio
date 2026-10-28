@@ -12,7 +12,7 @@
  function connected(s,target){
   if(target.mode==='official'){const v=s.official_viz||{};return v.active===true&&v.phase==='running'&&serialOf(v.reported_device||v.device)===target.serial;}
   if(target.mode==='hand')return s.connection==='connected'&&s.device_id===target.serial;
-  const g=s.glove||{};return g.busy===true&&g.connection==='receiving'&&g.glove_serial===target.serial&&(!hasUser(target)||g.user?.user_id===target.user_id)&&(!target.profile||g.profile===target.profile);
+  const g=s.glove||{},f=g.feedback||{},identity=f.identified_device||{};return g.busy===true&&g.connection==='receiving'&&g.glove_serial===target.serial&&(!hasUser(target)||g.user?.user_id===target.user_id)&&(!target.profile||g.profile===target.profile)&&(!target.hand_serial||f.connection==='connected'&&f.device_id===target.hand_serial&&f.stale===false&&identity.source==='sdk_identity'&&identity.serial===target.hand_serial&&identity.profile===target.profile);
  }
  function emit(progress={}){window.dispatchEvent(new CustomEvent('connection-switch-update',{detail:{pending:switching,...progress}}));}
  async function recover(requestId){
@@ -74,7 +74,7 @@
    if(response&&!response.ok||value.ok===false)throw Error(value.error||t('设备切换未完成。','The device switch did not complete.'));
    if(value.connection_switch?.unchanged===true){const current=await state();if(value.connection_switch.request_id!==requestId||current.connection_switch?.expected_owner!==context.expected_owner||!connected(current,selected))throw Error(t('当前连接已变化，请重新核对。','The current connection changed. Verify it again.'));return {state:current,target:selected,result:value,unchanged:true};}
    const receipt=value.connection_switch_receipt,proofTarget=receipt?.target;
-   if(receipt?.version!==1||receipt.request_id!==requestId||!/^[a-f0-9]{32}$/.test(receipt.attempt_id||'')||receipt.expected_owner!==context.expected_owner||!/^[a-f0-9]{64}$/.test(receipt.after_context||'')||typeof receipt.target_task_id!=='string'||!receipt.target_task_id||proofTarget?.mode!==selected.mode||proofTarget.serial!==selected.serial||hasUser(selected)&&proofTarget.user_id!==selected.user_id||selected.profile&&proofTarget.profile!==selected.profile)throw Error(t('切换结果尚未核对，请查看当前设备任务。','The switch result is unverified. Review the current device task.'));
+   if(receipt?.version!==1||receipt.request_id!==requestId||!/^[a-f0-9]{32}$/.test(receipt.attempt_id||'')||receipt.expected_owner!==context.expected_owner||!/^[a-f0-9]{64}$/.test(receipt.after_context||'')||typeof receipt.target_task_id!=='string'||!receipt.target_task_id||proofTarget?.mode!==selected.mode||proofTarget.serial!==selected.serial||hasUser(selected)&&proofTarget.user_id!==selected.user_id||selected.profile&&proofTarget.profile!==selected.profile||selected.hand_serial&&proofTarget.hand_serial!==selected.hand_serial)throw Error(t('切换结果尚未核对，请查看当前设备任务。','The switch result is unverified. Review the current device task.'));
    let scoped=response?.connectionSwitchVerified===true?{verified:true,routed:response.connectionSwitchRouted===true}:null;
    if(recovered&&window.WujiTaskConnectionSwitch)scoped=await window.WujiTaskConnectionSwitch.accept(requestId,receipt);
    if(scoped?.routed===true)return {target:selected,result:value,routed:true};

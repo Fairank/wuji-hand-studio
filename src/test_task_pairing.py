@@ -12,6 +12,30 @@ from test_task_server import command,glove,hand,server
 
 
 class TaskPairingTests(unittest.TestCase):
+    def test_only_verified_mapping_switch_receipt_allows_replacement_sdk_session(self):
+        from task_view import _owner_context
+        for broken in (None,'target','session','context','saved_receipt'):
+            with self.subTest(broken=broken):
+                host,service,source,target=self.fixture();original=service.pairing.dispatch
+                def dispatch(endpoint,context,action,payload):
+                    result=original(endpoint,context,action,payload)
+                    if action!='pair_prepare':return result
+                    controller=host._fleet.controllers['source'];state=controller.state
+                    state['glove']['session_id']+=1
+                    receipt=dict(version=1,expected_owner=source['_context'],sdk_session=state['glove']['session_id'],
+                        target=dict(mode='teleoperation',serial=source['devices']['glove'],user_id=source['intent']['sdk_user'],
+                            profile=source['intent']['profile_id'],hand_serial=target['devices']['hand']))
+                    receipt['after_context']=_owner_context(state)
+                    state['connection_switch']={'receipt':copy.deepcopy(receipt)}
+                    if broken=='target':receipt['target']['hand_serial']='OTHER'
+                    elif broken=='session':receipt['sdk_session']=4
+                    elif broken=='context':receipt['after_context']='0'*64
+                    elif broken=='saved_receipt':state['connection_switch']={}
+                    return {'connection_switch_receipt':receipt}
+                service.pairing.dispatch=dispatch;service.pairing.start(source,target);self.join(service.pairing)
+                result=service.pairing.snapshot()
+                self.assertEqual(result['phase'],'paired' if broken is None else 'error')
+
     def fixture(self):
         host,service=server(source=glove(),target=hand())
         rows=service.registry.snapshot()['tasks']

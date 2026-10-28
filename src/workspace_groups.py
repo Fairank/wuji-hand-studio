@@ -124,6 +124,7 @@ class WorkspaceGroups:
                     return run.start(c)
                 if name=='ensemble_beat':run.beat(c.get('lease'));return {}
                 if name=='ensemble_stop':return run.stop()
+                if name in ('ensemble_pause','ensemble_resume'):return run.request_control(name.removeprefix('ensemble_'),c.get('lease'))
             if any(r.snapshot()['active'] for r in self.coordinators.values()):raise ValueError('先停止编组再修改工作区 / Stop groups before editing workspaces')
             if name=='workspace_move':
                 member=c.get('member');s=self.read(member)

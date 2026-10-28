@@ -10,6 +10,8 @@
     mode: ['模式', 'Mode'], elapsed: ['已用时间', 'Elapsed'], reason: ['原因', 'Reason'],
     authority: ['停止会作用于当前整组，以设备返回状态为准。', 'Stop applies to this group. Device status confirms the result.'],
     stop: ['停止本组', 'Stop group'], setup: ['编排设置', 'Setup'],
+    pause: ['暂停', 'Pause'], resume: ['继续', 'Resume'],
+    mChanging: ['正在切换…', 'Changing playback…'], mChanged: ['切换请求已发送。', 'Playback change requested.'], mControlErr: ['切换未完成：', 'Playback change failed: '],
     runDetails: ['运行详情', 'Run details'],
     members: ['参与的手', 'Participating hands'], count: ['已选 {n} / {t}', '{n} of {t} selected'],
     membersHelp: ['选择本次一起演示的手，设备管理中可添加或调整工作区。', 'Select the hands for this routine. Manage hands to add or organise them.'],
@@ -48,7 +50,7 @@
   };
   const P = {
     idle: ['空闲', 'Idle'], preparing: ['准备中', 'Preparing'], arming: ['使能中', 'Arming'], waiting: ['等待中', 'Waiting'],
-    playing: ['执行中', 'Playing'], completed: ['已完成', 'Completed'], stopped: ['已停止', 'Stopped'], failed: ['未完成', 'Failed'], stop_unconfirmed: ['停止待确认','Stop unconfirmed'], returning: ['返回中','Returning'], ready: ['已就绪','Ready']
+    playing: ['执行中', 'Playing'], paused: ['已暂停', 'Paused'], pausing: ['正在暂停', 'Pausing'], resuming: ['正在继续', 'Resuming'], completed: ['已完成', 'Completed'], stopped: ['已停止', 'Stopped'], failed: ['未完成', 'Failed'], stop_unconfirmed: ['停止待确认','Stop unconfirmed'], returning: ['返回中','Returning'], ready: ['已就绪','Ready']
   };
   const TONE = { preparing: 'busy', arming: 'busy', waiting: 'busy', playing: 'live', completed: 'ok', failed: 'bad' };
 
@@ -115,7 +117,7 @@
     <div class="hg-fact"><dt data-t="elapsed"></dt><dd class="hg-elapsed"></dd></div>
   </dl>
   <ul class="hg-runlist"></ul>
-  </details><button type="button" class="hg-btn hg-stop" data-cmd="stop" data-t="stop" aria-describedby="${p}authority"></button></div>
+  </details><button type="button" class="hg-btn hg-control" data-cmd="pause" hidden></button><button type="button" class="hg-btn hg-stop" data-cmd="stop" data-t="stop" aria-describedby="${p}authority"></button></div>
   <p class="hg-reason-row"><span class="hg-reason"></span></p>
   <p class="hg-foot" id="${p}authority" data-t="authority"></p>
 </section>
@@ -151,14 +153,14 @@
     const $ = s => el.querySelector(s);
     const E = {
       phase: $('.hg-phase'), mode: $('.hg-mode'), elapsed: $('.hg-elapsed'), reasonRow: $('.hg-reason-row'),
-      reason: $('.hg-reason'), runlist: $('.hg-runlist'), stop: $('[data-cmd="stop"]'), config: $('.hg-config'),
+      reason: $('.hg-reason'), runlist: $('.hg-runlist'), stop: $('[data-cmd="stop"]'), control: $('.hg-control'), config: $('.hg-config'),
       count: $('.hg-count'), empty: $('.hg-empty'), members: $('.hg-members'), note: $('.hg-note'),
       action: $('[data-k="action"]'), speed: $('[data-k="speed"]'), cycles: $('[data-k="cycles"]'), amp: $('[data-k="amp"]'),
       clear: $('.hg-clearbox'), preview: $('[data-cmd="preview"]'), hw: $('[data-cmd="hardware"]'),
       hint: $('.hg-hint'), msg: $('.hg-msg')
     };
     const st = { L: 'zh', snap: norm(null), kind: 'same', destination: 'preview', pref: { same: '', pair: '' }, sig: '', sel: new Set(),
-      pendStart: false, pendStop: false, cmd: 0, msg: null, dead: false };
+      pendStart: false, pendStop: false, pendControl: false, cmd: 0, msg: null, dead: false };
     const memMap = new Map(), runMap = new Map();
     const ix = () => (st.L === 'en' ? 1 : 0);
     const t = k => (T[k] ? T[k][ix()] : k);
@@ -271,6 +273,10 @@
       E.clear.closest('label').hidden = st.destination !== 'hardware';
       E.preview.classList.toggle('hg-primary',st.destination === 'preview');
       E.stop.disabled = st.pendStop;
+      E.control.hidden = !ev.active;
+      E.control.dataset.cmd = st.snap.run.phase === 'paused' || st.snap.run.phase === 'resuming' ? 'resume' : 'pause';
+      setText(E.control, t(E.control.dataset.cmd));
+      E.control.disabled = st.snap.stale || st.pendControl || st.pendStop || st.snap.run['can_' + E.control.dataset.cmd] !== true;
       E.stop.classList.toggle('hg-danger', ev.active || st.pendStart);
       E.note.hidden = st.kind !== 'pair';
       setText($('.hg-kind-help'), t(st.kind === 'pair' ? 'pairDesc' : 'sameDesc'));
@@ -281,7 +287,7 @@
       setText(E.hint, fmt(t(st.destination==='preview'&&ev.canPreview?'previewReady':ev.hint), ev.vars));
       setTone(E.hint, ev.canHw ? 'ok' : ev.canPreview ? 'warn' : '');
       const failure=st.snap.run.phase==='failed'?pickText(st.snap.run.reason):'';
-      const acknowledged=m&&!m.bad&&['mStarted','mStopped'].includes(m.key)&&st.snap.run.phase&&st.snap.run.phase!=='idle';
+      const acknowledged=m&&!m.bad&&['mStarted','mStopped','mChanged'].includes(m.key)&&st.snap.run.phase&&st.snap.run.phase!=='idle';
       setText(E.msg, failure || (m&&!acknowledged ? t(m.key) + (m.bad ? m.raw || t('mUnknown') : '') : ''));
       setTone(E.msg, failure?'bad':m ? m.tone : '');
       return ev;
@@ -289,21 +295,21 @@
 
     async function send(name, payload) {
       if (typeof onCommand !== 'function') { st.msg = { key: 'mNoHandler', tone: 'bad' }; update(); return; }
-      const isStart = name === 'start', id = ++st.cmd;
-      if (isStart) st.pendStart = true; else st.pendStop = true;
-      st.msg = { key: isStart ? 'mSending' : 'mStopping', tone: '' };
+      const isStart = name === 'start', isStop = name === 'stop', id = ++st.cmd;
+      if (isStart) st.pendStart = true; else if (isStop) st.pendStop = true; else st.pendControl = true;
+      st.msg = { key: isStart ? 'mSending' : isStop ? 'mStopping' : 'mChanging', tone: '' };
       update();
       let msg;
       try {
         const res = await onCommand(name, payload);
         const bad = !!res && typeof res === 'object' && (res.ok === false || (res.ok !== true && !!res.error));
-        msg = bad ? { key: isStart ? 'mStartErr' : 'mStopErr', raw: pickText(res), bad: true, tone: 'bad' }
-          : { key: isStart ? 'mStarted' : 'mStopped', tone: 'ok' };
+        msg = bad ? { key: isStart ? 'mStartErr' : isStop ? 'mStopErr' : 'mControlErr', raw: pickText(res), bad: true, tone: 'bad' }
+          : { key: isStart ? 'mStarted' : isStop ? 'mStopped' : 'mChanged', tone: 'ok' };
       } catch (err) {
-        msg = { key: isStart ? 'mStartErr' : 'mStopErr', raw: pickText(err), bad: true, tone: 'bad' };
+        msg = { key: isStart ? 'mStartErr' : isStop ? 'mStopErr' : 'mControlErr', raw: pickText(err), bad: true, tone: 'bad' };
       }
       if (st.dead) return;
-      if (isStart) st.pendStart = false; else st.pendStop = false;
+      if (isStart) st.pendStart = false; else if (isStop) st.pendStop = false; else st.pendControl = false;
       if (id === st.cmd) st.msg = msg; // the newest command's message wins
       update();
     }
@@ -322,6 +328,10 @@
       const b = e.target && e.target.closest ? e.target.closest('[data-cmd]') : null;
       if (!b || !el.contains(b) || b.disabled || st.dead) return;
       if (b.dataset.cmd === 'stop') { send('stop', {}); return; }
+      if (['pause', 'resume'].includes(b.dataset.cmd)) {
+        if (st.snap.run['can_' + b.dataset.cmd] === true && !st.snap.stale && !st.pendControl) send(b.dataset.cmd, {});
+        return;
+      }
       const mode = b.dataset.cmd === 'hardware' ? 'hardware' : 'preview', ev = update();
       if (mode === 'hardware' ? !ev.canHw : !ev.canPreview) return; // re-checked at click time
       send('start', {

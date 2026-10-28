@@ -12,6 +12,7 @@ class GroupCoordinator:
         self.read,self.post=read,post;self.lock=threading.RLock();self.pool=ThreadPoolExecutor(max_workers=8)
         self.state=dict(active=False,phase='idle',reason='',members=[])
         self.cancel=threading.Event();self.heartbeat=0.;self.token=None;self.thread=None
+        self.control_request=None;self.control_epoch=0
 
     def snapshot(self):
         with self.lock:return copy.deepcopy(self.state)
@@ -42,6 +43,7 @@ class GroupCoordinator:
                 clocks={s['hardware'].get('controller_clock_id') for s in states}
                 if len(clocks)!=1 or not next(iter(clocks)):raise ValueError('同步实机需使用同一 Linux 控制端 / Use one Linux controller for synchronized playback')
             self.cancel.clear();self.token=secrets.token_hex(16);self.heartbeat=time.monotonic()
+            self.control_request=None;self.control_epoch=0
             self.state=dict(active=True,phase='preparing',reason='',mode=mode,kind=kind,action=command['action'],members=[dict(id=i,phase='preparing') for i in ids],elapsed_s=0.)
             self.thread=threading.Thread(target=self.run,args=(copy.deepcopy(command),self.token),daemon=True,name='Shared hand choreography');self.thread.start()
             return dict(group_lease=self.token)
@@ -51,6 +53,50 @@ class GroupCoordinator:
         self.heartbeat=time.monotonic()
 
     def stop(self):self.cancel.set();return dict(stopping=True)
+
+    def request_control(self,action,token):
+        with self.lock:
+            if (action not in ('pause','resume') or not self.state['active']
+                    or not secrets.compare_digest(str(token),str(self.token))
+                    or self.cancel.is_set() or self.control_request
+                    or self.state.get('can_'+action) is not True):
+                raise ValueError('当前编组不能暂停或继续 / Group pause state changed')
+            self.control_epoch+=1
+            self.control_request=dict(action=action,epoch=self.control_epoch)
+            self.state.update(phase='pausing' if action=='pause' else 'resuming',can_pause=False,can_resume=False)
+            return dict(requested=action,epoch=self.control_epoch)
+
+    def dispatch_control(self,ids,token,groups):
+        with self.lock:
+            request=self.control_request;self.control_request=None
+        if not request:return None
+        expected='playing' if request['action']=='pause' else 'paused'
+        if any(g.get('phase')!=expected or g.get('control_version')!=1 for g in groups):
+            raise ValueError('部分手无法切换暂停状态 / A hand cannot change pause state')
+        at=max(g['clock_s'] for g in groups)+1.5
+        self.check()
+        self.broadcast(ids,dict(name='group_'+request['action'],token=token,epoch=request['epoch'],at_s=at))
+        return dict(request,at_s=at,acknowledged=False)
+
+    @staticmethod
+    def control_complete(groups,transition):
+        """Transport acceptance is insufficient: require exact worker evidence."""
+        epoch=transition['epoch'];at=transition['at_s'];action=transition['action']
+        phase='paused' if action=='pause' else 'playing'
+        if any(g.get('control_epoch',0)>epoch or g.get('applied_epoch',0)>epoch for g in groups):
+            raise ValueError('Unexpected group control epoch')
+        clock=max(g['clock_s'] for g in groups)
+        if not transition['acknowledged']:
+            if clock>=at-.15:raise ValueError('整组切换未及时确认 / Group control acknowledgement expired')
+            acknowledged=[]
+            for g in groups:
+                p=g.get('pending_control') or {}
+                acknowledged.append(g.get('control_epoch')==epoch and p.get('epoch')==epoch
+                    and p.get('action')==action and p.get('at_s')==at)
+            transition['acknowledged']=all(acknowledged)
+        complete=transition['acknowledged'] and all(g.get('applied_epoch')==epoch and g.get('phase')==phase and not g.get('pending_control') for g in groups)
+        if not complete and clock>at+.5:raise ValueError('部分手未完成整组切换 / A hand did not complete group control')
+        return complete
 
     def check(self):
         if self.cancel.is_set():raise ValueError('用户停止 / Stopped by user')
@@ -91,16 +137,30 @@ class GroupCoordinator:
                 from performance_program import program
                 duration=program(resolve_action(spec['kind'],spec['action'],'left'))['duration_s']/spec['speed']
             completion_deadline=time.monotonic()+1.5+duration*spec['cycles']+8
+            transition=None;paused=False;previous_poll=time.monotonic()
             while True:
                 self.check();self.broadcast(ids,dict(name='group_beat',token=token))
-                if time.monotonic()>completion_deadline:raise ValueError('编组未按时间轴完成 / Group did not finish its timeline')
+                now=time.monotonic()
+                if paused:completion_deadline+=max(0.,now-previous_poll)
+                previous_poll=now
+                if now>completion_deadline:raise ValueError('编组未按时间轴完成 / Group did not finish its timeline')
                 states=list(self.pool.map(self.read,ids));groups=[s.get('group',{}) for s in states]
                 if any(g.get('token')!=token or g.get('phase') in ('failed','idle','preparing') or not g.get('active') and g.get('phase')!='completed' for g in groups):
                     raise ValueError(next((g.get('reason') for g in groups if g.get('reason')),None) or '编组成员中断 / A group member stopped')
                 if spec['mode']=='hardware' and any(s['stale'] or s['connection']!='connected' for s in states):raise ValueError('编组反馈中断 / Group feedback expired')
                 phases=[g['phase'] for g in groups]
                 elapsed=[g.get('elapsed_s',0.) for g in groups]
-                self.update(phase='playing' if any(p in ('playing','returning') for p in phases) else 'waiting',elapsed_s=min(elapsed),members=[dict(id=i,phase=g['phase'],elapsed_s=g.get('elapsed_s',0)) for i,g in zip(ids,groups)],sampled_phase_spread_ms=(max(elapsed)-min(elapsed))*1000,phase_samples_not_simultaneous=True)
+                if transition and self.control_complete(groups,transition):
+                    paused=transition['action']=='pause';transition=None
+                if not transition:transition=self.dispatch_control(ids,token,groups)
+                run_phase=('pausing' if transition['action']=='pause' else 'resuming') if transition else 'paused' if paused else 'playing' if any(p in ('playing','returning') for p in phases) else 'waiting'
+                supports_control=all(g.get('control_version')==1 for g in groups)
+                with self.lock:
+                    # A user can queue a request while member reads are in flight.
+                    # Keep that newer pending phase instead of briefly re-enabling.
+                    queued=self.control_request
+                    if queued:run_phase='pausing' if queued['action']=='pause' else 'resuming'
+                    self.update(phase=run_phase,can_pause=not transition and not queued and supports_control and all(p=='playing' for p in phases),can_resume=not transition and not queued and supports_control and all(p=='paused' for p in phases),elapsed_s=min(elapsed),members=[dict(id=i,phase=g['phase'],elapsed_s=g.get('elapsed_s',0)) for i,g in zip(ids,groups)],sampled_phase_spread_ms=(max(elapsed)-min(elapsed))*1000,phase_samples_not_simultaneous=True)
                 if all(p=='completed' for p in phases):phase='completed';reason='编组完成 / Group completed';break
                 time.sleep(.12)
         except Exception as e:
@@ -124,4 +184,4 @@ class GroupCoordinator:
             if cleanup:reason+='; 停止结果待确认 / Stop unconfirmed: '+', '.join(cleanup)
             previous=self.snapshot()['members']
             final_members=[dict(m,phase='stop_unconfirmed' if m['id'] in cleanup else 'completed' if phase=='completed' else 'stopped',phase_before_stop=m['phase']) for m in previous]
-            self.update(active=False,phase=phase,reason=reason,stop_unconfirmed=cleanup,members=final_members)
+            self.update(active=False,phase=phase,reason=reason,stop_unconfirmed=cleanup,members=final_members,can_pause=False,can_resume=False)

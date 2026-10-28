@@ -140,7 +140,7 @@ class HardwareShowcase:
         self.probe=None;self.trial_result=None
         self.run_profile=plan;self.points=plan['points'];self.enabled_indices=list(range(20))
         if command.get('group_sync') is not None:
-            self.group_sync=dict(token=command['group_sync']['token'],start_s=None,deadline=now+12.)
+            self.group_sync=dict(token=command['group_sync']['token'],start_s=None,deadline=now+12.,control_epoch=0,applied_epoch=0,pending_control=None)
         self.action=plan['action'];self.speed=1.;self.cycles=plan['cycles'];self.lease=lease
         self.trial=dict(label=plan['label'],action=plan['action'],amplitude=plan['amplitude'],
             baseline=q[:],last=q[:],peak=[0.]*20,peak_current=[0.]*20,trace=[],commands_sent=0,
@@ -357,6 +357,7 @@ class HardwareShowcase:
             return
         if not self.active or c.get('lease')!=self.lease:raise ValueError('实机控制会话已过期')
         if name=='hardware_group_commit':return __import__('group_hardware').commit(self,c,now)
+        if name in ('hardware_group_pause','hardware_group_resume'):return __import__('group_hardware').control(self,c,now)
         if self.group_sync:raise ValueError('编组期间请使用整组停止 / Use group stop during synchronized playback')
         if name=='hardware_pause':
             self.target=self.position(row,now)
@@ -381,7 +382,7 @@ class HardwareShowcase:
         try:
             if now-self.last_beat>.8:raise ValueError('网页控制连接中断')
             if self.probe and now>self.probe['deadline']:raise ValueError('单关节试动达到15秒上限')
-            if self.trial and now>self.trial['deadline']:raise ValueError('整套试运行达到时间上限')
+            if self.trial and not (self.group_sync and self.paused) and now>self.trial['deadline']:raise ValueError('整套试运行达到时间上限')
             q=self.position(row,now);self.diagnostic(diag,now)
             if self.trial and row is not self.last_trial_row:
                 self.observe_trial(row,q,now)
@@ -402,6 +403,7 @@ class HardwareShowcase:
                 else:return
             self.diagnostic(diag,now,require_enabled=True)
             if __import__('group_hardware').wait(self,now):return
+            __import__('group_hardware').apply_control(self,q,now)
             if not (self.probe or self.trial) and max(abs(a-b) for a,b in zip(q,self.target))>.20:
                 raise ValueError('实际姿态与指令偏差过大')
             if not self.cadence.due(now):return
@@ -459,11 +461,12 @@ class HardwareShowcase:
         p['peak']=[max(a,abs(x-y)) for a,x,y in zip(p['peak'],q,p['baseline'])]
         p['peak_current']=[max(a,b) for a,b in zip(p['peak_current'],currents)]
         trace=p['trace']
-        if not trace or now-p['started']-trace[-1]['t']>=.1:
+        if self.phase!='paused' and (not trace or now-p['started']-trace[-1]['t']>=.1):
             trace.append(dict(t=now-p['started'],q=q[:],target=self.target[:],current_A=currents,
                 effort_A=[entries[n]['effort_A'] for n in NIDS],
                 seq=row.get('seq'),device_timestamp_us=row.get('device_timestamp_us'),
                 feedback_age_ms=(now-row['host_s'])*1000,phase=self.phase,label=p['label']))
+        if self.paused:return
         # One check near the end of every held pose, not a claim of contact.
         cycle=min(self.cycles-1,int(self.elapsed/self.period))
         t=self.elapsed-cycle*self.period

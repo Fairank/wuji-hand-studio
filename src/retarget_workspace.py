@@ -5,6 +5,10 @@ from mapping_library import MappingLibrary,validate_binding
 from retarget_settings import load as legacy_load
 
 
+class MappingSwitchRequired(ValueError):
+    """The explicit target needs a new SDK stream to load its saved mapping."""
+
+
 class RetargetWorkspace:
     def __init__(self, folder):
         self.folder=Path(folder)

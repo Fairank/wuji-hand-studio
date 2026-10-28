@@ -24,7 +24,7 @@ def validate_spec(spec,action):
 def status(motion):
     g=getattr(motion,'group_sync',None)
     if not g:return None
-    return dict(g,clock_id=clock_id(),clock_s=time.monotonic(),active=motion.active,
+    return dict(g,control_version=1,clock_id=clock_id(),clock_s=time.monotonic(),active=motion.active,
                 phase='ready' if motion.phase=='group_wait' and not g.get('start_s') else motion.phase,
                 timing=metadata(motion.run_profile),elapsed_s=motion.elapsed,
                 completed=bool((motion.trial_result or {}).get('completed')),
@@ -45,6 +45,45 @@ def commit(motion,command,now):
     motion.run_profile['points']=motion.points;motion.index_path()
     motion.trial['deadline']=start+motion.period*motion.cycles*1.5+30
     g.update(start_s=start)
+
+
+def control(motion,command,now):
+    """Reserve one future pause/resume; only the worker tick applies it."""
+    g=getattr(motion,'group_sync',None)
+    name=command['name'].removeprefix('hardware_group_')
+    epoch=command.get('epoch')
+    if (not g or g['token']!=command.get('token') or name not in ('pause','resume')
+            or type(epoch) is not int or epoch!=g.get('control_epoch',0)+1
+            or g.get('pending_control')):
+        raise ValueError('Expired or pending group control')
+    expected='playing' if name=='pause' else 'paused'
+    if motion.phase!=expected or motion.paused!=(name=='resume'):
+        raise ValueError('Group cannot '+name+' in its current phase')
+    at=number(command.get('at_s'),now+.1,now+5.)
+    if name=='pause' and at-g['start_s']>=motion.period*motion.cycles:
+        raise ValueError('Group is finishing; pause is no longer available')
+    g.update(control_epoch=epoch,pending_control=dict(action=name,at_s=at,epoch=epoch))
+
+
+def apply_control(motion,q,now):
+    g=getattr(motion,'group_sync',None)
+    pending=g.get('pending_control') if g else None
+    if not pending or now<pending['at_s']:return
+    at=pending['at_s']
+    if now-at>.03:raise ValueError('Missed common '+pending['action']+' deadline; group stopped')
+    if pending['action']=='pause':
+        if motion.phase!='playing':raise ValueError('Group left playback before pause')
+        motion.elapsed=max(0.,at-g['start_s'])
+        motion.target=q[:];motion.paused=True;motion.phase='paused';g['paused_at_s']=at
+        motion.reason='整组已暂停 / Group paused'
+    else:
+        if motion.phase!='paused' or not motion.paused:raise ValueError('Group is not paused')
+        duration=at-g['paused_at_s']
+        g['start_s']+=duration
+        motion.trial['deadline']+=duration
+        motion.paused=False;motion.phase='playing';motion.last_tick=at
+        g['paused_at_s']=None;motion.reason='整组继续播放 / Group resumed'
+    g.update(applied_epoch=pending['epoch'],pending_control=None)
 
 
 def wait(motion,now):

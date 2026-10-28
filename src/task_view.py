@@ -8,7 +8,7 @@ from task_sessions import TaskSessions,context_digest,object_value,serial
 
 TASK=re.compile(r'[0-9a-f]{24}\Z')
 CONTEXT=re.compile(r'[0-9a-f]{64}\Z')
-GROUP_ACTIONS=frozenset({'ensemble_start','ensemble_stop','ensemble_beat','workspace_camera'})
+GROUP_ACTIONS=frozenset({'ensemble_start','ensemble_stop','ensemble_beat','ensemble_pause','ensemble_resume','workspace_camera'})
 
 
 def _task(kind,number):

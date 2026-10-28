@@ -27,7 +27,7 @@ from joint_stats import JointRates
 from hardware_showcase import HardwareShowcase
 
 LABELS = {'baseline', 'thumb', 'index', 'middle', 'ring', 'little', 'withdrawal'}
-HARDWARE_COMMANDS = {'hardware_start','hardware_probe','hardware_trial','hardware_stop','hardware_pause','hardware_resume','hardware_keepalive','hardware_group_commit'}
+HARDWARE_COMMANDS = {'hardware_start','hardware_probe','hardware_trial','hardware_stop','hardware_pause','hardware_resume','hardware_keepalive','hardware_group_commit','hardware_group_pause','hardware_group_resume'}
 _session=os.environ.get('WUJI_SESSION_ID','')
 if _session and (len(_session)!=16 or any(c not in '0123456789abcdef' for c in _session)):
     raise ValueError('Invalid controller session ID')

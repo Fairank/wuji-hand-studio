@@ -8,12 +8,17 @@ html #settings-tools .workbench-update{min-width:0;scroll-margin-top:18px}
 .workbench-update #wbu-message{font-size:12px;line-height:1.65;margin:14px 0 0;color:var(--wb-sub)}
 .workbench-update #wbu-error{font-size:12px;line-height:1.65;color:var(--ui-danger,#ba302a);margin:8px 0 0}.workbench-update #wbu-error:empty{display:none}
 .wbu-actions{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin-top:16px}
-html #settings-tools .wbu-actions button{min-height:36px;padding:8px 13px;border:1px solid var(--ui-line);border-radius:10px;background:var(--ui-fill);color:var(--ui-ink);font-size:12px;font-weight:500;line-height:1.4;box-shadow:none}
-html #settings-tools .wbu-actions button.primary{background:#007aff;color:#fff;border-color:transparent}
-html #settings-tools .wbu-actions button:not(:disabled):hover{filter:brightness(.97);border-color:#85858b60}
-html #settings-tools .wbu-actions button:disabled{opacity:1!important;background:var(--ui-fill)!important;color:var(--ui-sub)!important;border-color:var(--ui-line)!important;cursor:default;filter:none;box-shadow:none}
+html .workbench-update .wbu-actions button{min-height:36px;padding:8px 13px;border:1px solid var(--ui-line);border-radius:10px;background:var(--ui-fill);color:var(--ui-ink);font-size:12px;font-weight:500;line-height:1.4;box-shadow:none}
+html .workbench-update .wbu-actions button.primary{background:#007aff;color:#fff;border-color:transparent}
+html .workbench-update .wbu-actions button:not(:disabled):hover{filter:brightness(.97);border-color:#85858b60}
+html .workbench-update .wbu-actions button:disabled{opacity:1!important;background:var(--ui-fill)!important;color:var(--ui-sub)!important;border-color:var(--ui-line)!important;cursor:default;filter:none;box-shadow:none}
 .workbench-update .wbu-meta{margin:12px 0 0;font-size:10px;line-height:1.6;color:var(--wb-sub);font-variant-numeric:tabular-nums}
 .workbench-update [hidden]{display:none!important}
 html[data-theme=dark] .workbench-update #wbu-error{color:#ffb0a6}
 @media(max-width:600px){.wbu-heading{flex-wrap:wrap;gap:10px}.wbu-heading>div{min-width:0}.wbu-versions{gap:10px 24px}.wbu-actions button{flex:1 1 150px}#wbu-state{max-width:100%}}
-@media(forced-colors:active){#wbu-state{background:Canvas;color:CanvasText;border-color:CanvasText}html #settings-tools .wbu-actions button.primary{background:ButtonFace;color:ButtonText;border-color:ButtonText}html #settings-tools .wbu-actions button:disabled{background:ButtonFace!important;color:GrayText!important;border-color:GrayText!important}}
+@media(forced-colors:active){#wbu-state{background:Canvas;color:CanvasText;border-color:CanvasText}html .workbench-update .wbu-actions button.primary{background:ButtonFace;color:ButtonText;border-color:ButtonText}html .workbench-update .wbu-actions button:disabled{background:ButtonFace!important;color:GrayText!important;border-color:GrayText!important}}
+
+.wbu-sheet{width:min(620px,calc(100vw - 32px))}.wbu-sheet .hws-body{padding-top:0}.wbu-sheet .workbench-update{padding:0;border:0;box-shadow:none;background:none}.wbu-sheet .wbu-heading h3,.wbu-sheet .wbu-heading p{display:none}.wbu-sheet .wbu-heading{justify-content:flex-end;margin-bottom:16px}.wbu-sheet .wbu-meta{margin-bottom:0}
+#wbu-progress-wrap{margin-top:18px}.wbu-progress-heading{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:9px;font-size:12px;font-variant-numeric:tabular-nums}#wbu-progress-detail{color:var(--wb-sub);white-space:nowrap}#wbu-progress{appearance:none;-webkit-appearance:none;display:block;width:100%;height:7px;border:0;border-radius:999px;overflow:hidden;accent-color:#007aff;background:var(--wb-group)}#wbu-progress::-webkit-progress-bar{background:var(--wb-group);border-radius:999px}#wbu-progress::-webkit-progress-value{background:#007aff;border-radius:999px;transition:width .2s ease}#wbu-progress:indeterminate{background:linear-gradient(90deg,transparent,#007aff55,transparent) var(--wb-group);background-size:200% 100%;animation:wbu-pending 1.6s linear infinite}#wbu-progress:indeterminate::-webkit-progress-bar{background:transparent}@keyframes wbu-pending{to{background-position:-200% 0}}@media(prefers-reduced-motion:reduce){#wbu-progress:indeterminate{animation:none}#wbu-progress::-webkit-progress-value{transition:none}}html[data-reduce-motion=true] #wbu-progress{animation:none}html[data-reduce-motion=true] #wbu-progress::-webkit-progress-value{transition:none}
+
+.workbench-update #wbu-completed{margin:16px 0 0;font-size:13px;font-weight:550;color:var(--ui-success,#218339)}

@@ -125,7 +125,10 @@ class DeviceFleet:
             data=json.dumps(dict(expected_context=expected_context,action=action,payload=payload or {})).encode(),
             headers={'Content-Type':'application/json','Origin':self.origin,
                      'X-Workbench-Owner':r['owner_token']})
-        with urlopen(request,timeout=20) as response:result=json.load(response)
+        # Pairing may perform the existing bounded SDK handover before it can
+        # return a verified feedback receipt. Do not abandon it at 20 seconds
+        # while its 45-second transaction is still legitimately running.
+        with urlopen(request,timeout=65 if action=='pair_prepare' else 20) as response:result=json.load(response)
         if result.get('ok') is not True:raise ValueError(result.get('error') or 'Task owner rejected the action')
         return result
 

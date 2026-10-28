@@ -58,8 +58,8 @@ class TaskWorkspaces:
                 status='running' if run.get('active') is True else 'connected',
                 devices=dict(hands=[m['devices']['hand'] for m in members]),
                 intent=dict(group_id=row['id'],members=[m['endpoint_id'] for m in members]),
-                observed=dict(stale=any(m['observed']['stale'] for m in members),hardware_active=run.get('active') is True,source='ensemble'),
-                capabilities=dict(can_pause=run.get('active') is True,can_disconnect=False,can_pair=False,
+                observed=dict(stale=any(m['observed']['stale'] for m in members),hardware_active=run.get('active') is True,paused=run.get('phase')=='paused',source='ensemble'),
+                capabilities=dict(can_pause=run.get('active') is True and run.get('can_pause') is True,can_resume=run.get('active') is True and run.get('can_resume') is True,can_disconnect=False,can_pair=False,
                                   can_unpair=False,can_continue_teleoperation=False),
                 view=dict(origin=origin,url=origin+'/?'+params+'#devices',page='devices',allow_native=False),
                 _scope=scope)
@@ -80,19 +80,21 @@ class TaskWorkspaces:
         ident=command.get('task_id') if isinstance(command,dict) else None
         group=next((t for t in current['tasks'] if t['task_id']==ident and t['kind']=='ensemble'),None)
         if group is None:return self.devices.action(command)
+        action=command.get('action')
         if (set(command)-{'name','task_id','expected_revision','action'}
                 or command.get('name','task_session_action')!='task_session_action'
                 or type(command.get('expected_revision')) is not int
-                or command['expected_revision']!=group['revision'] or command.get('action')!='pause'
-                or group['capabilities']['can_pause'] is not True):
+                or command['expected_revision']!=group['revision'] or action not in ('pause','resume')
+                or group['capabilities'].get('can_'+action) is not True):
             raise ValueError('多手演示任务已变化，请核对当前任务 / Ensemble task changed; review the current task')
         workspaces=self.server._workspaces
         with workspaces.lock:
-            # Re-observe under the catalog lock immediately before stopping.
+            # Re-observe under the catalog lock immediately before controlling.
             check=next((t for t in self._groups(self.devices.snapshot()) if t['task_id']==ident),None)
-            if check is None or check['revision']!=group['revision'] or check['capabilities']['can_pause'] is not True:
+            if check is None or check['revision']!=group['revision'] or check['capabilities'].get('can_'+action) is not True:
                 raise ValueError('Ensemble owner changed')
-            return workspaces.coordinator(group['intent']['group_id']).stop()
+            coordinator=workspaces.coordinator(group['intent']['group_id'])
+            return coordinator.request_control(action,coordinator.token)
 
     def allows_embedded_main(self, task_id):
         return any(t['task_id']==task_id and t['endpoint_id']=='main' for t in self.snapshot()['tasks'])

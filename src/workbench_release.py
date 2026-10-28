@@ -125,7 +125,7 @@ class WorkbenchRelease:
         if time.monotonic() >= deadline:
             raise WorkbenchReleaseError('Application update preparation timed out')
 
-    def _read(self, url, *, limit, deadline, cancel_event, expected=None, output=None, asset=False):
+    def _read(self, url, *, limit, deadline, cancel_event, expected=None, output=None, asset=False, progress=None):
         self._cancel(cancel_event, deadline)
         if not asset and url != LATEST_URL:
             raise WorkbenchReleaseError('Untrusted release metadata endpoint')
@@ -161,6 +161,7 @@ class WorkbenchRelease:
                     chunks.append(block)
                 else:
                     output.write(block)
+                    if progress:progress(dict(stage='downloading',received_bytes=total,total_bytes=expected))
             if length is not None and total != length or expected is not None and total != expected:
                 raise WorkbenchReleaseError('Release download is truncated or has extra bytes')
         return (digest.hexdigest(), total) if output is not None else b''.join(chunks)
@@ -291,7 +292,7 @@ class WorkbenchRelease:
             raise WorkbenchReleaseError('Existing prepared installer failed SHA-256 verification')
         return dict(manifest, prepared=True, installer=str(file), installer_path=str(file), manifest_path=str(manifest_file))
 
-    def prepare(self, release=None, *, cancel_event=None):
+    def prepare(self, release=None, *, cancel_event=None, progress=None):
         deadline = time.monotonic() + self.timeout
         self._cancel(cancel_event, deadline)
         if release is None:
@@ -309,12 +310,15 @@ class WorkbenchRelease:
         _directory(self.versions, create=True)
         destination = self.versions / number
         if _plain(destination, directory=True):
+            if progress:progress(dict(stage='verifying',received_bytes=installer['size'],total_bytes=installer['size']))
             return self._existing(destination, installer, digest, deadline, cancel_event)
+        if progress:progress(dict(stage='downloading',received_bytes=0,total_bytes=installer['size']))
         with self._stage(installer['name']) as stage:
             with self._create(stage / installer['name']) as stream:
-                actual, size = self._read(installer['browser_download_url'], limit=self.max_size, expected=installer['size'], deadline=deadline, cancel_event=cancel_event, output=stream, asset=True)
+                actual, size = self._read(installer['browser_download_url'], limit=self.max_size, expected=installer['size'], deadline=deadline, cancel_event=cancel_event, output=stream, asset=True, progress=progress)
                 stream.flush()
                 os.fsync(stream.fileno())
+            if progress:progress(dict(stage='verifying',received_bytes=size,total_bytes=installer['size']))
             if actual != digest:
                 raise WorkbenchReleaseError('Installer failed SHA-256 verification')
             manifest = {'schema_version': 1, 'repository': REPOSITORY, 'version': number,

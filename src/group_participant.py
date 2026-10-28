@@ -9,6 +9,7 @@ class GroupParticipant:
     def __init__(self,controller):
         self.c=controller;self.token=None;self.mode=None;self.active=False;self.internal=False
         self.heartbeat=0.;self.start_s=None;self.reason='';self.spec={};self.watch=None
+        self.control_epoch=0
 
     def snapshot(self):
         result=dict(active=self.active,mode=self.mode,phase='idle',reason=self.reason,token=self.token)
@@ -21,7 +22,7 @@ class GroupParticipant:
                 result.update(phase='completed' if g.get('completed') and h.get('stop_confirmed') else 'failed',reason=h.get('reason'))
         elif self.active:
             p=self.c.player.snapshot()
-            result.update(phase='ready' if self.start_s is None else 'waiting' if time.monotonic()<self.start_s else 'playing' if p['running'] else 'completed',elapsed_s=p['elapsed_s'])
+            result.update(phase='ready' if self.start_s is None else 'waiting' if time.monotonic()<self.start_s else 'paused' if p['group_paused'] else 'playing' if p['running'] else 'completed',elapsed_s=p['elapsed_s'],clock_s=time.monotonic(),control_version=1,control_epoch=self.control_epoch,applied_epoch=p['applied_epoch'],pending_control=p['pending_control'])
         return copy.deepcopy(result)
 
     def call(self,command):
@@ -45,6 +46,7 @@ class GroupParticipant:
         if mode=='hardware' and (s['connection']!='connected' or s['stale'] or not s['hardware'].get('trial_ready') or s['hardware'].get('group_sync_version')!=1 or s['device_profile']['generation']!='hand2' or command.get('workspace_clear') is not True):
             raise ValueError('需连接二代手、更新控制端并确认空间已清空 / Connect Hand 2, update controller, and confirm clear space')
         self.token=token;self.mode=mode;self.heartbeat=time.monotonic();self.start_s=None;self.reason=''
+        self.control_epoch=0
         self.spec=dict(command,action=action);self.active=True
         try:
             if mode=='preview':
@@ -79,6 +81,15 @@ class GroupParticipant:
                 start=number(command.get('start_s'),time.monotonic()+.1,time.monotonic()+5)
                 self.start_s=start;self.c.player.schedule(start)
             else:self.c.send(dict(name='hardware_group_commit',lease=self.c.hardware_lease,token=self.token,start_s=command.get('start_s'),timing=command.get('timing')))
+        elif name in ('group_pause','group_resume'):
+            if self.mode=='preview':
+                from group_timing import number
+                epoch=command.get('epoch')
+                if type(epoch) is not int or epoch!=self.control_epoch+1:raise ValueError('Expired group control')
+                at=number(command.get('at_s'),time.monotonic()+.1,time.monotonic()+5)
+                self.c.player.schedule_control(name.removeprefix('group_'),at,epoch)
+                self.control_epoch=epoch
+            else:self.c.send(dict(name='hardware_'+name,lease=self.c.hardware_lease,token=self.token,epoch=command.get('epoch'),at_s=command.get('at_s')))
         else:raise ValueError('Unknown group operation')
         return self.snapshot()
 

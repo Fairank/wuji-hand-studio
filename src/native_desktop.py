@@ -46,6 +46,7 @@ class NativeDesktop:
         self.data_dir=DATA;self.edition=EDITION;self.inspect_lock=threading.Lock()
         self.material=dict(mode='opaque',external_backdrop=False,refraction=False,desktop_capture=False)
         self.material_lifecycle=None
+        self.task_windows=None
 
     def start_service(self):
         from console_server import ConsoleHTTPServer,Handler,Controller
@@ -200,6 +201,17 @@ class NativeDesktop:
         viewer.events.loaded+=lambda:self.secure_window(viewer)
         return dict(ok=True)
 
+    def open_task_window(self,task_id):
+        if self.task_windows is None:raise ValueError('Desktop is still starting')
+        return self.task_windows.open(task_id)
+
+    def close_task_window(self,task_id):
+        if self.task_windows is None:raise ValueError('Desktop is still starting')
+        return self.task_windows.close(task_id)
+
+    def task_window_state(self):
+        return self.task_windows.snapshot() if self.task_windows else dict(ok=True,task_ids=[])
+
     def open_data_folder(self):
         os.startfile(str(DATA));return dict(ok=True)
 
@@ -310,7 +322,9 @@ class NativeDesktop:
 
     def run(self):
         import webview
+        from native_task_windows import TaskWindows
         self.start_service()
+        self.task_windows=TaskWindows(self,webview.create_window)
         width=self.bounds.get('width',1320);height=self.bounds.get('height',900)
         if type(width) is not int or type(height) is not int:width,height=1320,900
         width=max(960,min(width,2560));height=max(680,min(height,1600))
@@ -321,6 +335,7 @@ class NativeDesktop:
         self.window.events.loaded+=lambda:self.secure_window(self.window)
         self.window.events.resized+=self.save_bounds
         def closed():
+            self.task_windows.shutdown()
             if self.viewer is not None:self.viewer.destroy()
             self.server.shutdown()
         self.window.events.closed+=closed
@@ -338,6 +353,9 @@ class DesktopAPI:
     def __init__(self,host):self._host=host
     def info(self):return self._host.info()
     def open_viewer(self):return self._host.open_viewer()
+    def open_task_window(self,task_id):return self._host.open_task_window(task_id)
+    def close_task_window(self,task_id):return self._host.close_task_window(task_id)
+    def task_window_state(self):return self._host.task_window_state()
     def open_data_folder(self):return self._host.open_data_folder()
     def select_key_file(self):return self._host.select_key_file()
     def set_language(self,lang):return self._host.set_language(lang)

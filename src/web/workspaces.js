@@ -166,6 +166,12 @@
     if (raw === env) ['command', 'type', 'name', 'payload'].forEach(k => delete args[k]);
     const w = cur(), ws = w ? w.id : null;                              // capture target workspace before any await
     if (ws == null) throw new Error(T('loading'));
+    if (name === 'pause' || name === 'resume') {
+      const lease = leases.get(ws);
+      if (!lease) throw new Error(T('noLease'));
+      try { return await act('ensemble_' + name, { workspace: ws, lease }); }
+      finally { kick(); }
+    }
     if (/stop/i.test(name)) {
       leases.delete(ws); leaseAt.delete(ws); beatErr.delete(ws);
       if (starting.has(ws)) stopAsked.add(ws);

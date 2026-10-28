@@ -250,16 +250,18 @@ class ConnectionSwitch:
                 if started:self.catalog['busy']=not finished.is_set() or thread.is_alive() or self.catalog_cleanup_error is not None
             self.workflow_lock.release()
 
-    def _target(self,command,state,source):
+    def _target(self,command,state,source,pair_target=None):
         if (not isinstance(command,dict) or set(command)!={'name','request_id','expected_owner','target'}
                 or command.get('name')!='connection_switch' or command.get('expected_owner')!=context_digest(state)):
             raise ValueError('设备会话已变化，请重新选择 / Device session changed; select again')
         target=copy.deepcopy(command['target'])
-        if (not isinstance(target,dict) or set(target)-{'mode','serial','profile','user_id','theme','address','timeout_ms'}
+        if (not isinstance(target,dict) or set(target)-{'mode','serial','profile','user_id','theme','address','timeout_ms','hand_serial'}
                 or target.get('mode') not in ('official','teleoperation','hand')
                 or not isinstance(target.get('serial'),str) or not SERIAL.fullmatch(target['serial'])):
             raise ValueError('Invalid explicit connection target')
         mode=target['mode'];sn=target['serial']
+        if 'hand_serial' in target and (mode!='teleoperation' or not isinstance(target['hand_serial'],str)
+                or not SERIAL.fullmatch(target['hand_serial'])):raise ValueError('Invalid paired hand target')
         if 'timeout_ms' in target and (type(target['timeout_ms']) is not int or not 100<=target['timeout_ms']<=2000):
             raise ValueError('Invalid glove timeout')
         inventory=self.controller.device_inventory()
@@ -302,6 +304,29 @@ class ConnectionSwitch:
                 if not (actual or resumed or catalog):raise ValueError('请刷新并选择实际SDK佩戴者 / Refresh and select an actual SDK wearer')
                 from glove_protocol import validate
                 validate(dict(name='glove_open',serial=sn,user_id=target['user_id'],timeout_ms=target.get('timeout_ms',250)))
+            if 'hand_serial' in target:
+                if '_continuation' in target:raise ValueError('Continue calibration before selecting a hand')
+                from glove_protocol import validate
+                validate(dict(name='glove_prepare',serial=target['hand_serial'],address=target.get('address','')))
+                feedback=(state.get('glove') or {}).get('feedback') or {};identity=feedback.get('identified_device') or {}
+                exact_current=(source and source['mode']=='teleoperation' and source['serial']==sn
+                    and feedback.get('connection')=='connected' and feedback.get('stale') is False
+                    and feedback.get('device_id')==target['hand_serial'] and identity.get('source')=='sdk_identity'
+                    and identity.get('serial')==target['hand_serial'] and identity.get('profile')==selected['id'])
+                hand=next((r for r in inventory['devices'] if r['sn']==target['hand_serial']
+                    and r.get('kind')=='hand' and (not r.get('stale') or exact_current) and not r.get('conflict')
+                    and not r.get('workspace_owners') and r.get('generation')==selected['generation']
+                    and r.get('side')==selected['side']),None)
+                # The private pairing adapter has just verified and released
+                # this exact hand in its original workspace. It may disappear
+                # from that workspace's directory after release; the SDK still
+                # verifies its actual identity before feedback is accepted.
+                if (pair_target==dict(hand_serial=target['hand_serial'],profile=selected['id'],sdk_user=target['user_id'])):
+                    hand=pair_target
+                if hand is None:raise ValueError('请查找并选择空闲的同型号同侧灵巧手 / Find an available hand with the same model and side')
+                target['_binding']=dict(generation=selected['generation'],side=selected['side'],
+                    glove_serial=sn,sdk_user=target['user_id'],hand_serial=target['hand_serial'])
+                target['_mapping']=self.controller.retarget.library.snapshot(target['_binding'])
         elif mode=='hand':
             self.controller.teleoperation_handover._runtime()
             if row['kind']!='hand':raise ValueError('Select a robotic hand')
@@ -318,6 +343,21 @@ class ConnectionSwitch:
             if row['kind']=='hand' and row.get('generation')=='hand1':raise ValueError('官方画面暂不支持一代手 / Official Viewer does not support Hand 1')
             if target.get('theme','light') not in ('light','dark'):raise ValueError('Invalid Viewer theme')
         return target
+
+    def _check_mapping(self,target):
+        if '_mapping' in target and self.controller.retarget.library.snapshot(target['_binding'])!=target['_mapping']:
+            raise ValueError('目标映射在切换中已变化，请重新连接 / Target mapping changed during the switch; connect again')
+
+    def _can_attach(self,state,target):
+        """An equivalent target can attach without restarting the glove stream."""
+        g=state.get('glove') or {};stream=g.get('stream') or {};solver=stream.get('solver') or {}
+        return bool('_mapping' in target and g.get('connection')=='receiving' and stream.get('fresh') is True
+            and not (g.get('feedback') or {}).get('device_id') and not g.get('hardware')
+            and not self.controller.glove.lease and g.get('glove_serial')==target['serial']
+            and (g.get('user') or {}).get('user_id')==target['user_id'] and g.get('profile')==target['profile']
+            and solver.get('engine')=='sdk' and solver.get('applied') is True
+            and self.controller.tuning.context(target['_binding'])['engine']=='sdk'
+            and stream.get('retarget')==target['_mapping']['settings'])
 
     def _official_preflight(self):
         """Validate the existing route without preparing software or a device."""
@@ -369,7 +409,7 @@ class ConnectionSwitch:
             if proof.get('cleanup_confirmed') is not True:raise ValueError('SDK cleanup is unconfirmed')
         else:c.stop_feedback_confirmed(source['session'],source['serial'])
 
-    def start(self,command):
+    def start(self,command,*,pair_target=None):
         if not self.workflow_lock.acquire(blocking=False):raise ValueError('Another device task is switching')
         new_session=None;source=None;stopped=False;attempt_started=False
         try:
@@ -378,11 +418,22 @@ class ConnectionSwitch:
             if request_id in self.requests:raise ValueError('This switch request was already submitted; read its saved result')
             state=self.controller.snapshot();reason=self._blocked(state)
             if reason:raise ValueError(reason)
-            source=owner(state);target=self._target(command,state,source)
+            source=owner(state);target=self._target(command,state,source,pair_target)
+            attach=self._can_attach(state,target) if 'hand_serial' in target else False
             same=source and all(source.get(k)==target.get(k) for k in ('mode','serial'))
             if same and target['mode']=='teleoperation':same=(source['profile']==target['profile'] and source['user_id']==target.get('user_id')
                 and '_continuation' not in target and (state.get('glove') or {}).get('connection')=='receiving'
                 and not ((state.get('glove') or {}).get('session_cleanup') or {}).get('error'))
+            if same and 'hand_serial' in target:
+                feedback=(state.get('glove') or {}).get('feedback') or {}
+                same=(feedback.get('device_id')==target['hand_serial'] and feedback.get('stale') is False
+                    and (feedback.get('identified_device') or {}).get('source')=='sdk_identity'
+                    and (feedback.get('identified_device') or {}).get('serial')==target['hand_serial']
+                    and (feedback.get('identified_device') or {}).get('profile')==target['profile']
+                    and state.get('retarget_binding')==target['_binding']
+                    and ((state.get('glove') or {}).get('stream') or {}).get('retarget')==target['_mapping']['settings']
+                    and (((state.get('glove') or {}).get('stream') or {}).get('solver') or {}).get('engine')=='sdk'
+                    and (((state.get('glove') or {}).get('stream') or {}).get('solver') or {}).get('applied') is True)
             self.requests.add(request_id)
             if same:
                 self._set(busy=False,phase='connected',unchanged=True,request_id=request_id,attempt_id=secrets.token_hex(16),
@@ -406,6 +457,7 @@ class ConnectionSwitch:
                 elif reservation(self.controller.official_viz.folder):raise ValueError('Another official device owner is active')
                 self.preflight_check(source)
                 self.check_parent()
+                self._check_mapping(target)
                 if context_digest(self.controller.snapshot())!=command['expected_owner']:raise ValueError('Device owner changed during preflight')
                 self._check_cancel()
             if (source and source['mode']=='teleoperation'
@@ -415,14 +467,19 @@ class ConnectionSwitch:
                 timeout=((state.get('glove') or {}).get('stream') or {}).get('timeout_ms')
                 if type(timeout) is int and 100<=timeout<=2000:self.resume['timeout_ms']=timeout
                 self.resume_config=self._config()
-            self._set(phase='stopping');self._stop(source);stopped=True;self._set(source_released=True);self._check_cancel()
+            if not attach:
+                self._set(phase='stopping');self._stop(source);stopped=True;self._set(source_released=True);self._check_cancel()
             with gate(self.controller.official_viz.folder):
                 if reservation(self.controller.official_viz.folder):raise ValueError('Another session acquired the device')
-                self.idle_check();self.check_parent();self._check_cancel()
+                if not attach:self.idle_check()
+                self.check_parent();self._check_cancel();self._check_mapping(target)
                 self._set(phase='connecting')
                 if target['mode'] in ('teleoperation','hand') and target.get('profile')!=self.controller.state['device_profile']['id']:
                     self.controller.action(dict(name='device_profile_select',profile=target['profile']))
-                if target['mode']=='official':
+                if '_binding' in target:
+                    self.controller.action(dict(name='retarget_binding_save',binding=target['_binding']))
+                if attach:pass
+                elif target['mode']=='official':
                     # Discovery refreshes only after confirmed release. The
                     # explicit serial remains fixed throughout this refresh.
                     if self.deadline-self.clock()<20:raise ValueError('Switch cleanup used its time budget; find devices again before retrying')
@@ -440,7 +497,7 @@ class ConnectionSwitch:
                 else:
                     self.controller.action(dict(name='glove_scan'))
                     new_session=self.controller.glove.snapshot()['session_id']
-            if target['mode']=='teleoperation' and '_continuation' not in target:
+            if target['mode']=='teleoperation' and '_continuation' not in target and not attach:
                 def ready():
                     g=self.controller.glove.snapshot()
                     if g.get('session_id')!=new_session:raise ValueError('SDK session changed before opening')
@@ -451,6 +508,7 @@ class ConnectionSwitch:
                         or not any(u.get('user_id')==target['user_id'] for u in g.get('users',[]))):
                     raise ValueError('The exact glove or SDK wearer is no longer available')
                 self._check_cancel()
+                self._check_mapping(target)
                 self.controller.action(dict(name='glove_open',serial=target['serial'],user_id=target['user_id'],
                     timeout_ms=target.get('timeout_ms',250)))
             def connected():
@@ -476,12 +534,34 @@ class ConnectionSwitch:
                     if 'ownership is not confirmed' in text:return None
                     raise
             after=self._wait(poll_connected,12,'New device connection was not confirmed')
+            if 'hand_serial' in target:
+                self._check_cancel();self._check_mapping(target)
+                self.controller.action(dict(name='glove_prepare',serial=target['hand_serial'],address=target.get('address','')))
+                expected_session=(after.get('glove') or {}).get('session_id')
+                def prepared():
+                    current=self.controller.snapshot();g=current.get('glove') or {};feedback=g.get('feedback') or {}
+                    identity=feedback.get('identified_device') or {};hardware=g.get('hardware') or {}
+                    if (g.get('session_id')!=expected_session or g.get('glove_serial')!=target['serial']
+                            or (g.get('user') or {}).get('user_id')!=target['user_id']):
+                        raise ValueError('Glove identity changed while connecting the hand')
+                    if g.get('connection')=='error' or hardware.get('phase')=='error':raise ValueError(g.get('message') or hardware.get('reason') or 'Hand connection failed')
+                    if feedback.get('device_id') not in (None,target['hand_serial']):raise ValueError('Unexpected hand feedback identity')
+                    if (feedback.get('connection')=='connected' and feedback.get('device_id')==target['hand_serial']
+                            and feedback.get('stale') is False and identity.get('source')=='sdk_identity'
+                            and identity.get('serial')==target['hand_serial'] and identity.get('profile')==target['profile']
+                            and hardware.get('active') is False and (g.get('stream') or {}).get('fresh') is True
+                            and (g.get('stream') or {}).get('retarget')==target['_mapping']['settings']
+                            and ((g.get('stream') or {}).get('solver') or {}).get('engine')=='sdk'
+                            and ((g.get('stream') or {}).get('solver') or {}).get('applied') is True):return current
+                    return None
+                after=self._wait(prepared,12,'Hand feedback was not confirmed')
             from task_view import _owner_context
             kind='hand' if target['mode']=='hand' else (owner(after) or {})['kind']
             receipt=dict(version=1,attempt_id=self.state['attempt_id'],request_id=request_id,
                 source_task_id=task_id(source['kind'],source['serial']) if source else None,
                 target_task_id=task_id(kind,target['serial']),expected_owner=command['expected_owner'],
-                after_context=_owner_context(after),target=copy.deepcopy(self.state['target']))
+                after_context=_owner_context(after),target=copy.deepcopy(self.state['target']),
+                sdk_session=(after.get('glove') or {}).get('session_id') if target['mode']=='teleoperation' else None)
             self._set(phase='connected',receipt=receipt)
             return dict(connection_switch={**self.snapshot(after),'busy':False},connection_switch_receipt=receipt)
         except Exception as error:

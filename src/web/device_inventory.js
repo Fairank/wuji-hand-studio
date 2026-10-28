@@ -185,7 +185,7 @@
  window.WujiDeviceInventory={
   selection(kind){const serial=kind?selectedByKind.get(kind):activeSerial;const row=rows().find(item=>sn(item)===serial);return usable(row)?clone(row):null;},
   mount(target){if(target){if(root.parentElement!==target)target.append(root);}else if(root.previousSibling!==anchor)anchor.after(root);render();visibilityChanged();},
-  select,refresh,scan:()=>scan(true),snapshot:()=>inventory?JSON.parse(JSON.stringify(inventory)):null,
+  select,refresh,findMore,scan:()=>scan(true),snapshot:()=>inventory?JSON.parse(JSON.stringify(inventory)):null,
   show(kind='all'){filter=['hand','glove'].includes(kind)?kind:'all';window.WujiConnectionHub.show('device');render();schedule(0);scanButton.focus();},
   setUseHandler(handler){if(typeof handler!=='function')throw TypeError('Device inventory requires a use handler');useHandler=handler;},
   showSettings(kind){if(kind==='glove'){location.hash='#glove';window.WujiWorkspace?.showPage();document.getElementById('glove-device')?.focus({preventScroll:true});return;}advanced.open=true;advancedBody.querySelector('#connect')?.focus();advanced.scrollIntoView({block:'nearest'});},

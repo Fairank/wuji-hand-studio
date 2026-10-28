@@ -14,3 +14,13 @@
 @media(max-width:480px){.dm-sheet .hws-head{padding:20px 20px 8px}.dm-sheet .hws-body{padding:8px 20px 20px}.dm-versions{padding:16px;gap:12px}.dm-versions strong{font-size:16px}.dm-main-actions>button{flex:1}.dm-identity h3{font-size:19px}}
 @media(prefers-reduced-motion:reduce){.dm-sheet .dm-actions button{transition:none}}
 html[data-reduce-motion=true] .dm-sheet .dm-actions button{transition:none}
+
+.dm-progress{display:block;width:100%;height:6px;margin:14px 0 18px;border:0;border-radius:999px;overflow:hidden;accent-color:var(--wb-accent,#3275ef)}
+.dm-progress::-webkit-progress-bar{background:var(--wb-fill,#edf0f4);border-radius:999px}
+.dm-progress::-webkit-progress-value{background:var(--wb-accent,#3275ef);border-radius:999px}
+
+.dm-progress:indeterminate{appearance:none}
+.dm-progress:indeterminate::-webkit-progress-bar{background:linear-gradient(90deg,transparent 35%,var(--wb-accent,#3275ef) 40% 60%,transparent 65%) var(--wb-fill,#edf0f4);background-size:200% 100%;animation:dm-progress-activity 1.6s ease-in-out infinite alternate}
+@keyframes dm-progress-activity{from{background-position:100% 0}to{background-position:0 0}}
+@media(prefers-reduced-motion:reduce){.dm-progress:indeterminate::-webkit-progress-bar{animation:none;background-position:50% 0}}
+html[data-reduce-motion=true] .dm-progress:indeterminate::-webkit-progress-bar{animation:none;background-position:50% 0}

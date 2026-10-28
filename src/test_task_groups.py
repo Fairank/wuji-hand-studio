@@ -16,7 +16,9 @@ class TaskGroupTests(unittest.TestCase):
     def setUp(self):
         self.base=dict(revision=1,tasks=[hand('a','HAND-A'),hand('b','HAND-B')],pair_candidates=[],pairing={})
         self.device=SimpleNamespace(snapshot=lambda:copy.deepcopy(self.base),action=lambda c:dict(device_action=c))
-        self.run=SimpleNamespace(token='session1',snapshot=lambda:dict(active=True,members=[dict(id='a'),dict(id='b')]),stop=lambda:dict(stopping=True))
+        self.controls=[]
+        self.run=SimpleNamespace(token='session1',snapshot=lambda:dict(active=True,phase='playing',can_pause=True,can_resume=False,members=[dict(id='a'),dict(id='b')]),
+            request_control=lambda action,token:self.controls.append((action,token)) or dict(requested=action))
         self.ws=SimpleNamespace(lock=threading.RLock(),rows=[dict(id='main',label='Two hands',members=['a','b'])],
                                 coordinators={'main':self.run},coordinator=lambda ident:self.run)
         self.server=SimpleNamespace(server_address=('127.0.0.1',19876),_workspaces=self.ws)
@@ -39,10 +41,17 @@ class TaskGroupTests(unittest.TestCase):
         before=self.run.token;first=self.group();second=self.group()
         self.assertEqual(first,second);self.assertEqual(self.run.token,before)
 
-    def test_exact_group_stop_reuses_original_coordinator(self):
+    def test_exact_group_pause_reuses_original_coordinator(self):
         g=self.group();result=self.service.action(dict(name='task_session_action',task_id=g['task_id'],
             expected_revision=g['revision'],action='pause'))
-        self.assertEqual(result,dict(stopping=True))
+        self.assertEqual(result,dict(requested='pause'));self.assertEqual(self.controls,[('pause','session1')])
+
+    def test_paused_group_resumes_only_with_current_capability(self):
+        self.run.snapshot=lambda:dict(active=True,phase='paused',can_pause=False,can_resume=True,members=[dict(id='a'),dict(id='b')])
+        g=self.group();self.assertTrue(g['observed']['paused']);self.assertTrue(g['capabilities']['can_resume'])
+        result=self.service.action(dict(task_id=g['task_id'],expected_revision=g['revision'],action='resume'))
+        self.assertEqual(result,dict(requested='resume'));self.assertEqual(self.controls,[('resume','session1')])
+        with self.assertRaises(ValueError):self.service.action(dict(task_id=g['task_id'],expected_revision=g['revision'],action='pause'))
 
     def test_group_restart_rejects_stale_stop(self):
         g=self.group();self.run.token='session2'
@@ -61,7 +70,7 @@ class TaskGroupTests(unittest.TestCase):
         self.assertEqual(g['devices']['hands'],['HAND-A','HAND-B'])
         self.base['tasks'][2]['revision']+=1
         self.assertEqual(self.group()['revision'],g['revision'])
-        self.assertEqual(self.service.action(dict(task_id=g['task_id'],expected_revision=g['revision'],action='pause')),dict(stopping=True))
+        self.assertEqual(self.service.action(dict(task_id=g['task_id'],expected_revision=g['revision'],action='pause')),dict(requested='pause'))
         self.run.snapshot=lambda:dict(active=False)
         self.assertEqual(self.group()['devices']['hands'],['HAND-A','HAND-B','HAND-C'])
 

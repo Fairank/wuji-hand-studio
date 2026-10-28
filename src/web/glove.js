@@ -22,7 +22,7 @@
  let state=null,online=false,pending=false,pendingName='',requestEpoch=0,operationVersion=0,selectionVersion=0,lease=null,leaseAt=0,leaseEpoch=0,seen=false,optionsKey='',lastMessage='',savedBinding=null,wantedGlove='',wantedUser=null,wantedProfile='',consentKey='',connectionEpoch=0,previousConnection='disconnected';
  const releaseLease=()=>{if(lease!==null){lease=null;leaseEpoch++;}};
  let bindingRequest=null,bindingIdentity='';
- function refreshBinding(){if(bindingRequest)return bindingRequest;bindingRequest=fetch('/api/retarget/context',{cache:'no-store'}).then(r=>r.ok?r.json():Promise.reject(Error('context'))).then(c=>{savedBinding=c.binding;optionsKey='';render();}).catch(()=>{}).finally(()=>{bindingRequest=null;});return bindingRequest;}refreshBinding();
+ function refreshBinding(){if(bindingRequest)return bindingRequest;const identity=sourceIdentity();bindingRequest=fetch('/api/retarget/context',{cache:'no-store',signal:AbortSignal.timeout(6000)}).then(r=>r.ok?r.json():Promise.reject(Error('context'))).then(c=>{if(identity!==sourceIdentity())return;savedBinding=c.binding;optionsKey='';render();}).catch(()=>{}).finally(()=>{bindingRequest=null;if(online&&identity!==sourceIdentity())refreshBinding();});return bindingRequest;}refreshBinding();
  const labels={
   'glove-title':['遥操作','Teleoperation'],'glove-subtitle':['先预览映射，再由你开启灵巧手跟随。','Preview the mapping, then choose when the hand follows.'],
   'glove-receive-title':['设备与映射','Devices and mapping'],'glove-model-label':['映射型号','Hand model'],'glove-scan':['查找设备','Find devices'],
@@ -81,7 +81,7 @@
   const canOpen=online&&!pending&&controllerBusy&&g.connection==='ready'&&!!selectedGlove&&!!selectedUser&&$('glove-user').value!==userNone&&!viewerOwned&&!scanInProgress&&!otherOwner;
   const bindingCurrent=sameSource(savedBinding,bindingFor(target));
   const canHandScan=online&&!pending&&!lease&&controllerBusy&&!otherOwner&&!viewerOwned&&!transferBusy&&receiving&&stream.fresh===true&&!feedback.device_id&&g.can_prepare===true;
-  const canPrepare=online&&!pending&&!lease&&controllerBusy&&!otherOwner&&!viewerOwned&&!transferBusy&&receiving&&stream.fresh===true&&!!target&&bindingCurrent&&g.can_prepare===true;
+  const canPrepare=switchReady&&!lease&&controllerBusy&&!otherOwner&&!viewerOwned&&receiving&&stream.fresh===true&&!!target&&bindingCurrent&&g.can_prepare===true;
   const sessionMatches=receiving&&g.profile===profile.id&&g.glove_serial===savedBinding?.glove_serial&&typeof g.user?.user_id==='string'&&g.user.user_id===savedBinding?.sdk_user;
   const feedbackMatches=!!target&&feedback.device_id===target&&actualIdentity.serial===target&&actualIdentity.source==='sdk_identity'&&actualIdentity.profile===profile.id&&bindingCurrent&&savedBinding.hand_serial===target&&sessionMatches;
   const canFollow=online&&!pending&&!lease&&controllerBusy&&!otherOwner&&!viewerOwned&&!transferBusy&&!sourceChanged&&receiving&&stream.fresh===true&&feedback.stale===false&&feedbackMatches&&hw.probe_ready===true&&hw.active===false&&$('glove-clear').checked;
@@ -156,7 +156,7 @@
   }catch(error){if(stillCurrent())lastMessage=actionError(error);}finally{if(epoch===requestEpoch){pending=false;pendingName='';render();}}}
  async function switchConnection(target){
   if(pending)return;const operation=++operationVersion;++requestEpoch;pending=true;pendingName='connection_switch';lastMessage='';$('glove-clear').checked=false;render();
-  try{if(!window.WujiConnectionSwitch)throw Error(t('切换入口尚未就绪，请稍后重试。','Connection switching is not ready. Retry shortly.'));const result=await window.WujiConnectionSwitch.run(target);if(operation!==operationVersion||result.routed)return;state=result.state;releaseLease();wantedProfile='';wantedUser=null;wantedGlove=result.state.glove?.glove_serial||'';optionsKey='';if(target.mode==='official'){window.WujiConnectionHub?.show('official');await window.WujiOfficialViz?.selectDevice(target.serial);}}
+  try{if(!window.WujiConnectionSwitch)throw Error(t('切换入口尚未就绪，请稍后重试。','Connection switching is not ready. Retry shortly.'));const result=await window.WujiConnectionSwitch.run(target);if(operation!==operationVersion||result.routed)return;state=result.state;releaseLease();wantedProfile='';wantedUser=null;wantedGlove=result.state.glove?.glove_serial||'';const binding=state.retarget_binding,g=state.glove||{},profile=state.device_profile||{};if(binding&&binding.glove_serial===g.glove_serial&&binding.sdk_user===g.user?.user_id&&binding.generation===profile.generation&&binding.side===profile.side)savedBinding=binding;optionsKey='';if(target.mode==='official'){window.WujiConnectionHub?.show('official');await window.WujiOfficialViz?.selectDevice(target.serial);}}
   catch(error){if(operation===operationVersion)lastMessage=actionError(error);}
   finally{if(operation===operationVersion){pending=false;pendingName='';render();}}
  }
@@ -165,7 +165,7 @@
  $('glove-open').onclick=()=>{if(!$('glove-open').disabled)act({name:'glove_open',serial:$('glove-device').value,user_id:$('glove-user').value,timeout_ms:Number($('glove-timeout').value)});};
  $('glove-switch-source').onclick=()=>{if(!$('glove-switch-source').disabled)switchConnection({...retrySource()||{mode:'teleoperation',serial:$('glove-device').value,user_id:$('glove-user').value,profile:wantedProfile||state.device_profile.id},timeout_ms:Number($('glove-timeout').value)});};
  $('glove-switch-cli').onclick=()=>{if(!$('glove-switch-cli').disabled&&state?.glove?.glove_serial)switchConnection({mode:'official',serial:state.glove.glove_serial,theme:document.documentElement.dataset.theme==='dark'?'dark':'light'});};
- $('glove-prepare').onclick=()=>{if(!$('glove-prepare').disabled)act({name:'glove_prepare',address:$('glove-hand-address').value.trim(),serial:$('glove-hand-device').value});};
+ $('glove-prepare').onclick=()=>{if(!$('glove-prepare').disabled)switchConnection({mode:'teleoperation',serial:$('glove-device').value,user_id:$('glove-user').value,profile:state.device_profile.id,hand_serial:$('glove-hand-device').value,address:$('glove-hand-address').value.trim(),timeout_ms:Number($('glove-timeout').value)});};
  $('glove-follow').onclick=()=>{if(!$('glove-follow').disabled)act({name:'glove_follow',workspace_clear:$('glove-clear').checked});};
  $('glove-stop').onclick=()=>act({name:'glove_stop'},true);$('glove-disconnect').onclick=()=>act({name:'glove_disconnect'},true);
  $('glove-handover').onclick=()=>{const viewer=viewerGlove();if(viewer&&!$('glove-handover').disabled)switchConnection({mode:'teleoperation',serial:viewer.serial,...(wantedProfile?{profile:wantedProfile}:{})});};$('glove-handover-cancel').onclick=()=>{const owner=attempt(state?.teleoperation_connection);if(owner&&!$('glove-handover-cancel').disabled)act({name:'teleoperation_handover_cancel',...owner},true);};

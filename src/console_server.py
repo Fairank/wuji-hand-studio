@@ -220,7 +220,13 @@ class Controller:
                     or glove.get('connection')!='receiving' or not (glove.get('stream') or {}).get('fresh')
                     or (glove.get('feedback') or {}).get('device_id')):
                 raise ValueError('Pairing source, user or target profile changed')
-            self.action(dict(name='retarget_binding_save',binding=dict(binding,hand_serial=payload['hand_serial'])))
+            from retarget_workspace import MappingSwitchRequired
+            try:self.action(dict(name='retarget_binding_save',binding=dict(binding,hand_serial=payload['hand_serial'])))
+            except MappingSwitchRequired:
+                from task_sessions import context_digest
+                return self.connection_switch.start(dict(name='connection_switch',request_id=secrets.token_hex(16),
+                    expected_owner=context_digest(state),target=dict(mode='teleoperation',serial=binding['glove_serial'],
+                        user_id=binding['sdk_user'],profile=profile['id'],hand_serial=payload['hand_serial'])),pair_target=payload)
             return self.action(dict(name='glove_prepare',serial=payload['hand_serial']))
         if action=='unpair':
             session=glove.get('session_id')
@@ -652,7 +658,8 @@ class Controller:
                     equal=equal and solver.get('applied') is True and solver.get('engine')==tuning['engine']
                     if tuning['engine']=='official_open':equal=equal and solver.get('values_sha256')==tuning['values_sha256']
                     if not equal:
-                        raise ValueError('此目标使用另一套映射，请断开预览，先选目标，再重新预览核对 / This target uses different mapping settings; disconnect preview, choose the target, then reopen and review')
+                        from retarget_workspace import MappingSwitchRequired
+                        raise MappingSwitchRequired('此目标使用另一套映射，请使用连接灵巧手进行切换 / This target uses different mapping settings; use Connect hand to switch')
             elif glove['connection'] not in ('disconnected','ready','error'):
                 raise ValueError('先断开手套预览再改变配对 / Disconnect preview before changing pairing')
             return dict(mapping=self.retarget.select(command.get('binding'),self.state['device_profile']))
@@ -1333,6 +1340,7 @@ class Handler(BaseHTTPRequestHandler):
             if path.exists():
                 return self.reply(200, path.read_bytes(), filename='left-hand-'+ident+'.json')
             return self.reply(404, dict(error='Report not found'))
+        window_query=parse_qs(url.query,keep_blank_values=True)
         assets = {'/': ('index.html', 'text/html; charset=utf-8'),
                   '/style.css': ('style.css', 'text/css; charset=utf-8'),
                   '/app.js': ('app.js', 'text/javascript; charset=utf-8')}
@@ -1364,10 +1372,19 @@ class Handler(BaseHTTPRequestHandler):
         for name in ('official_terminal.css','workbench_update.css','vendor/terminal/xterm.css'):assets['/'+name]=(name,'text/css; charset=utf-8')
         assets['/official_studio_viewer.html']=('official_studio_viewer.html','text/html; charset=utf-8')
         for name in ('task_workspace.js','calibration_continuation.js','viewport_resize.js'):assets['/'+name]=(name,'text/javascript; charset=utf-8')
+        for name in ('task_frame_host.js','task_window.js'):assets['/'+name]=(name,'text/javascript; charset=utf-8')
+        assets['/task_window.css']=('task_window.css','text/css; charset=utf-8')
         for name in ('task_workspace.css','calibration_continuation.css','viewport_resize.css'):assets['/'+name]=(name,'text/css; charset=utf-8')
         assets['/favicon.ico']=('favicon.ico','image/x-icon')
         assets['/app-icon.png']=('app-icon.png','image/png')
         assets['/wuji-logo.png']=('wuji-logo.png','image/png')
+        if url.path=='/' and 'task_window' in window_query:
+            ids=window_query['task_window']
+            if len(ids)!=1 or not re.fullmatch(r'[0-9a-f]{24}',ids[0]) or any(key not in {'task_window','desktop'} for key in window_query) or ('desktop' in window_query and window_query['desktop']!=['1']):
+                return self.reply(400,dict(error='Invalid task window'))
+            if not any(task.get('task_id')==ids[0] and task.get('status')!='disconnected' for task in self.server.tasks.snapshot().get('tasks',[])):
+                return self.reply(404,dict(error='Device task is not available'))
+            assets['/']=('task_window.html','text/html; charset=utf-8')
         if url.path not in assets:
             return self.reply(404, dict(error='Not found'))
         name, mime = assets[url.path]

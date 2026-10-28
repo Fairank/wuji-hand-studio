@@ -30,7 +30,7 @@
  function setMode(value){if(!['simple','full'].includes(value))return;mode=value;document.documentElement.dataset.experience=mode;try{localStorage.setItem(key,mode);}catch{}labels();window.dispatchEvent(new CustomEvent('experience-mode',{detail:mode}));}
  function labels(){title.textContent=link.lastElementChild.textContent=t('设备','Devices');description.textContent=t('查看当前设备，选择后接入。','View available devices and choose one to connect.');browse.textContent=t('选择动作','Choose a motion');historyDock.setAttribute('aria-label',t('最近连接','Recent connections'));discoveryDock.setAttribute('aria-label',t('当前设备','Current devices'));switchTitle.textContent=t('工作台模式','Workbench mode');segment.setAttribute('aria-label',t('工作台模式','Workbench mode'));choices.simple.textContent=t('简单','Simple');choices.full.textContent=t('完整','Full');for(const [value,b]of Object.entries(choices)){b.setAttribute('aria-checked',String(mode===value));b.tabIndex=mode===value?0:-1;}
   const sl=$('experience-setting-label'),sb=$('experience-setting-toggle');if(sl)sl.textContent=t('工作台模式','Workbench mode');if(sb){sb.textContent=mode==='simple'?t('简单模式 · 切换到完整','Simple · Switch to full'):t('完整模式 · 切换到简单','Full · Switch to simple');sb.setAttribute('aria-label',sb.textContent);}
-  const toolsTab=$('settings-tab-tools');if(toolsTab)toolsTab.textContent=mode==='simple'?t('关于','About'):t('数据与工具','Data & tools');
+  const toolsTab=$('settings-tab-tools');if(toolsTab)toolsTab.textContent=t('关于与工具','About & tools');
   if(document.body.dataset.page==='home')document.title=t('设备','Devices')+' · Hand Workbench';
  }
  window.WujiExperience={setMode,mode:()=>mode,home:()=>destination('home')};

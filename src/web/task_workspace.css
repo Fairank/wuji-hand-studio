@@ -44,6 +44,8 @@ html body .tw-tabs .tw-tab-item>.tw-tab[aria-selected=true]{background:transpare
 .tw-pane-identities{margin:0;padding:8px 12px;border-bottom:1px solid var(--ui-line);font-size:11px;line-height:1.45;color:var(--ui-sub);overflow-wrap:anywhere}
 .tw-pane-error{margin:0;padding:10px 12px;background:var(--ui-fill);font-size:12px;line-height:1.5;overflow-wrap:anywhere}
 .tw-pane-content{flex:1;min-height:0;min-width:0;position:relative;overflow:hidden}
+.tw-pane-content[hidden],.tw-window-return[hidden]{display:none!important}
+.tw-workbench .tw-window-return{align-self:center;margin:auto;padding:10px 18px}
 .tw-proceed{padding:9px 12px;border-bottom:1px solid var(--ui-line);display:flex;justify-content:flex-end}
 .tw-frame{position:absolute;inset:0;width:100%;height:100%;border:0;background:var(--ui-card);display:block}
 .tw-empty{grid-column:1/-1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;min-height:240px;border:1px dashed var(--ui-line);border-radius:14px;background:var(--ui-fill);pointer-events:auto;text-align:center;padding:20px}

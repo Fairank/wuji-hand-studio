@@ -108,7 +108,7 @@ class FirmwareService:
         self._cancelled = False
         self.state = dict(busy=False, locked=False, phase='idle', device=None,
                           preview=None, check_report=None, catalog_report=None,
-                          result=None, error=None, events=[], checked_at=None,
+                          result=None, error=None, events=[], checked_at=None, verification_report=None,
                           finished_at=None, recovery_required=False,
                           notification=None, current_version=None, target_version=None,
                           operation=None, automatic=False,
@@ -171,7 +171,7 @@ class FirmwareService:
         with self.lock:
             if self.state['busy'] or self.state['locked'] or self._reservation is not None:
                 raise ValueError('固件操作尚未结束 / Firmware operation has not finished')
-            self.state.update(busy=True, phase=phase, error=None, result=None,
+            self.state.update(busy=True, phase=phase, error=None, result=None, verification_report=None,
                               events=[], finished_at=None, recovery_required=False)
 
     def _reserve(self, kind='firmware'):
@@ -399,15 +399,50 @@ class FirmwareService:
             with self.lock:
                 self.state['result'] = dict(returncode=code, stdout=out, stderr=err,
                                            verdict='official_process_exited')
-            # Human-mode output is deliberately not scraped into a fabricated
-            # per-device verdict. Exit zero includes skipped/cancelled/no-change;
-            # this means the official flow ended, not verified device success.
-            self._finish('completed' if code == 0 else 'failed',
-                         None if code == 0 else (err or '官方升级未完成 / Official upgrade did not complete')[:800])
+            # Human-mode exit zero includes No/cancel/no-change. Read the same
+            # device while retaining the lease, and bind success to the target
+            # from this operation's verified preflight, never to terminal text.
+            if code:
+                self._finish('failed', (err or '官方升级未完成 / Official upgrade did not complete')[:800])
+                return
+            self._verify_upgrade(device, preview)
         except Exception as error:
             self._finish('unknown' if attempted else 'failed',
                          '固件升级结束状态未确认，请核验设备 / Firmware completion is unconfirmed; verify the device' if attempted else str(error)[:800],
                          unknown=attempted)
+
+    def _verify_upgrade(self, device, preview):
+        from device_versions import parse_official_check_report
+        before=preview.get('checked_device')
+        expected_type='wuji_glove' if device.get('kind')=='glove' else 'wuji_hand_2' if device.get('generation')=='hand2' else 'wuji_hand' if device.get('generation')=='hand1' else None
+        with self.lock:
+            self.state.update(phase='verifying',notification=None,current_version=None,checked_at=None)
+        if _identity(self.cli_identity())!=preview['cli']:
+            self._finish('completed','官方流程已结束，但组件已变化，设备版本尚未确认 / The official flow ended, but the component changed; verify the device version')
+            return
+        check=self._query(['upgrade','--sn',device['sn'],'--check','--json'])
+        with self.lock:self.state['verification_report']=check
+        report=(parse_official_check_report(check['stdout'],device['sn'],expected_type)
+                if check['returncode']==0 and expected_type else None)
+        if _identity(self.cli_identity())!=preview['cli']:report=None
+        if report is None:
+            detail=(check['stderr'] or '设备身份与版本未通过核对 / Device identity and version were not verified')[:500]
+            self._finish('completed','官方流程已结束，但未能读回设备版本，请重新检查 / The official flow ended; check the device version again. '+detail)
+            return
+        matched=bool(before and before.get('update_available') is True
+                     and before['serial']==report['serial'] and before['device_type']==report['device_type']
+                     and report['current']==before['latest'])
+        unchanged=bool(before and report['current']==before['current'])
+        with self.lock:
+            self.state.update(notification=report,current_version=report['current'],checked_at=self._now())
+            self.state['result'].update(sn=device['sn'],firmware_version=report['current'],
+                expected_version=before['latest'] if before else None,version_verified=matched,
+                verdict='target_version_verified' if matched else 'unchanged' if unchanged else 'version_not_matched')
+        # A changed catalog does not rewrite this operation's target. The fresh
+        # report can independently advertise another release without claiming
+        # that this run installed it.
+        self._finish('verified' if matched else 'completed',None if matched or unchanged else
+            '设备版本已读回，但未匹配本次更新目标，请重新检查 / The device version was read but did not match this update target; check again')
 
     def verify_recovery(self):
         """Explicit host-only recovery; not a client-supplied unlock assertion."""

@@ -3,6 +3,9 @@ $ErrorActionPreference='Stop'
 $ProgressPreference='SilentlyContinue'
 $plan=$null
 $resultValidated=$false
+$versionVerified=$false
+$launchStarted=$false
+$applicationExited=$false
 function PlainPath([string]$path) {
     $item=Get-Item -LiteralPath $path -Force
     if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Update paths must not be redirects' }
@@ -10,7 +13,7 @@ function PlainPath([string]$path) {
 }
 function Result([string]$phase,[string]$errorText='') {
     if ($null -eq $plan -or -not $resultValidated) { return }
-    $record=@{token=$plan.token;phase=$phase;version=$plan.version;sha256=$plan.sha256;error=$errorText;at=[DateTime]::UtcNow.ToString('o')}
+    $record=@{token=$plan.token;phase=$phase;version=$plan.version;sha256=$plan.sha256;error=$errorText;version_verified=$versionVerified;launch_started=$launchStarted;at=[DateTime]::UtcNow.ToString('o')}
     [IO.File]::WriteAllText($plan.result_file,($record|ConvertTo-Json -Compress),(New-Object Text.UTF8Encoding($false)))
 }
 try {
@@ -61,15 +64,38 @@ try {
         if ([DateTime]::UtcNow -ge $deadline) { throw 'Application did not exit; installer was not started' }
         Start-Sleep -Milliseconds 200
     }
+    $applicationExited=$true
     [void](PlainPath $installer)
     if ((Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant() -cne $plan.sha256) { throw 'Installer changed after preflight' }
-    $arguments=@('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/CURRENTUSER','/NOCLOSEAPPLICATIONS','/NORESTARTAPPLICATIONS',('/DIR="'+[IO.Path]::GetDirectoryName($exe)+'"'))
-    $installed=Start-Process -FilePath $installer -ArgumentList $arguments -WindowStyle Hidden -PassThru -Wait
+    # Inno's existing progress window stays visible after the workbench closes.
+    # /SILENT skips setup questions but does not hide installation progress.
+    $arguments=@('/SILENT','/SUPPRESSMSGBOXES','/NORESTART','/CURRENTUSER','/NOCLOSEAPPLICATIONS','/NORESTARTAPPLICATIONS',('/DIR="'+[IO.Path]::GetDirectoryName($exe)+'"'))
+    Result 'installing'
+    $installed=Start-Process -FilePath $installer -ArgumentList $arguments -WindowStyle Normal -PassThru -Wait
     if ($installed.ExitCode -ne 0) { throw ('Installer exited with code '+$installed.ExitCode) }
+    $editionPath=Join-Path ([IO.Path]::GetDirectoryName($exe)) '_internal\edition.json'
+    $editionFile=PlainPath $editionPath
+    if ($editionFile.Length -ge 65536) { throw 'Installed application identity exceeds its limit' }
+    $edition=Get-Content -LiteralPath $editionPath -Raw -Encoding UTF8|ConvertFrom-Json
+    if ($edition.name -cne 'workbench' -or $edition.product_id -cne 'hand-workbench' -or $edition.version -cne $plan.version) { throw 'Installed application version does not match the update' }
+    [void](PlainPath $exe)
+    $versionVerified=$true
+    Result 'restarting'
+    $restarted=Start-Process -FilePath $exe -WindowStyle Normal -PassThru
+    if ($null -eq $restarted -or $restarted.Id -le 0) { throw 'Updated application did not start' }
+    $launchStarted=$true
     Result 'installed'
-    Start-Process -FilePath $exe
     exit 0
 } catch {
-    try { Result 'error' $_.Exception.Message } catch { }
+    $failureText=$_.Exception.Message
+    try { Result 'error' $failureText } catch { }
+    if ($applicationExited) {
+        # The original window is gone. Use the system dialog so this failure
+        # cannot disappear into a hidden helper's result file.
+        try {
+            $notice=New-Object -ComObject WScript.Shell
+            [void]$notice.Popup(('Hand Workbench update did not complete.'+[Environment]::NewLine+[Environment]::NewLine+$failureText+[Environment]::NewLine+[Environment]::NewLine+'Open Hand Workbench and retry the update.'),0,'Hand Workbench',16)
+        } catch { }
+    }
     exit 1
 }

@@ -125,7 +125,7 @@ class ServiceTests(unittest.TestCase):
             env.store.prepare.assert_not_called()
             env.service.thread.run_to_end()
             self.assertEqual(env.service.snapshot()['prepared'], env.prepared)
-            env.store.prepare.assert_called_once_with(env.latest, cancel_event=env.service.closed)
+            env.store.prepare.assert_called_once_with(env.latest, cancel_event=env.service.closed, progress=env.service._progress)
             env.host.stop_and_close.assert_not_called()
             env.popen.assert_not_called()
 

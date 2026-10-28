@@ -58,6 +58,10 @@
   for(const key of ['library','devices','glove','connection']){
    const link=nav.querySelector(`[data-page="${key}"]`);if(link)nav.insertBefore(link,nav.querySelector('.nav-advanced'));
   }
+  // Keep secondary tools below every primary destination, including Settings.
+  // Toggling simple/full must not insert a new row above the selected page.
+  const toolDisclosure=nav.querySelector('.nav-advanced'),modeSwitcher=nav.querySelector('.experience-switcher');
+  if(toolDisclosure)nav.insertBefore(toolDisclosure,modeSwitcher||null);
   function labels(){
    for(const {item,zh,en}of sheets)item.setLabels({title:t(zh,en),triggerLabel:t(zh,en),closeLabel:t('关闭','Close')});
    summary.textContent=t('循环与幅度','Cycles & amplitude');

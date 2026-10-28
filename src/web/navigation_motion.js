@@ -199,7 +199,7 @@
       else refresh(true);
     };
     window.addEventListener('resize',onLayout);window.addEventListener('wuji-language',onLayout);
-    window.addEventListener('workspace-page',onPage);
+    window.addEventListener('workspace-page',onPage);window.addEventListener('experience-mode',onPage);
     document.addEventListener('visibilitychange',onVisibility);
     scope.addEventListener('change',onChange);
     scope.addEventListener('wuji-selection-sync',onSync);
@@ -210,7 +210,7 @@
       destroyed=true;if(frame)cancelAnimationFrame(frame);observer.disconnect();preferences.disconnect();
       for(const group of [...groups.values()])remove(group);
       window.removeEventListener('resize',onLayout);window.removeEventListener('wuji-language',onLayout);
-      window.removeEventListener('workspace-page',onPage);
+      window.removeEventListener('workspace-page',onPage);window.removeEventListener('experience-mode',onPage);
       document.removeEventListener('visibilitychange',onVisibility);reducedSystem.removeEventListener('change',onPreference);
       scope.removeEventListener('change',onChange);
       scope.removeEventListener('wuji-selection-sync',onSync);

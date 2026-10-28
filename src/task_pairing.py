@@ -155,6 +155,20 @@ class TaskPairing:
             self._checkpoint(cancel)
             result=self.dispatch(source['endpoint_id'], source['_context'], 'pair_prepare', payload)
             if isinstance(result,dict) and result.get('ok') is False:raise ValueError(result.get('error') or 'Pair preparation was not accepted')
+            expected_session=source['observed']['session']
+            receipt=object_value(object_value(result).get('connection_switch_receipt'))
+            if receipt:
+                from task_view import _owner_context
+                current=self.read(source['endpoint_id']);transition=object_value(object_value(current).get('connection_switch'))
+                expected_target=dict(mode='teleoperation',serial=source['devices']['glove'],
+                    user_id=source['intent']['sdk_user'],profile=source['intent']['profile_id'],hand_serial=target['devices']['hand'])
+                actual_target=object_value(receipt.get('target'))
+                if (receipt.get('version')!=1 or receipt.get('expected_owner')!=source['_context']
+                        or any(actual_target.get(k)!=v for k,v in expected_target.items())
+                        or type(receipt.get('sdk_session')) is not int or transition.get('receipt')!=receipt
+                        or receipt.get('after_context')!=_owner_context(current)):
+                    raise ValueError('Pairing switch receipt does not match the selected devices')
+                expected_session=receipt['sdk_session']
             deadline = self.clock()+self.timeout
             while True:
                 self._checkpoint(cancel)
@@ -163,7 +177,7 @@ class TaskPairing:
                 glove = object_value(state.get('glove'));feedback=object_value(glove.get('feedback'))
                 if (glove.get('connection')!='receiving' or object_value(glove.get('stream')).get('fresh') is not True
                         or glove.get('glove_serial') != source['devices']['glove']
-                        or glove.get('session_id') != source['observed']['session']
+                        or glove.get('session_id') != expected_session
                         or object_value(glove.get('user')).get('user_id') != source['intent'].get('sdk_user')
                         or object_value(state.get('device_profile')).get('id')!=source['intent'].get('profile_id')
                         or glove.get('profile') not in (None,source['intent'].get('profile_id'))):

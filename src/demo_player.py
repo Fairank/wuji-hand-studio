@@ -43,17 +43,39 @@ class DemoPlayer:
         self.text='WUJI TECH'
         self.duration=PERIOD[self.action]
         self.scheduled_start=None
+        self.scheduled_control=None
+        self.group_paused=False
+        self.applied_epoch=0
         self.amplitude=1.
 
     def schedule(self,start):
         with self.lock:
             self.scheduled_start=start;self.elapsed=0.;self.tick=start;self.running=True
+            self.scheduled_control=None;self.group_paused=False;self.applied_epoch=0
+
+    def schedule_control(self,action,at,epoch):
+        with self.lock:
+            self.advance()
+            if (not self.active or self.scheduled_start is not None or self.scheduled_control
+                    or action not in ('pause','resume') or self.group_paused!=(action=='resume')
+                    or self.running!=(action=='pause')):
+                raise ValueError('Preview cannot change its pause state now')
+            if action=='pause' and self.cycles and self.elapsed+(at-self.tick)*self.speed>=self.duration*self.cycles:
+                raise ValueError('Preview is finishing')
+            self.scheduled_control=dict(action=action,at_s=at,epoch=epoch)
 
     def advance(self):
         now=time.monotonic()
         if self.scheduled_start is not None:
             if now<self.scheduled_start:return
             self.tick=self.scheduled_start;self.scheduled_start=None
+        pending=self.scheduled_control
+        if pending and now>=pending['at_s']:
+            at=pending['at_s']
+            if self.active and self.running:self.elapsed+=(at-self.tick)*self.speed
+            self.tick=at;self.group_paused=pending['action']=='pause'
+            self.running=self.active and not self.group_paused
+            self.applied_epoch=pending['epoch'];self.scheduled_control=None
         if self.active and self.running:self.elapsed+=(now-self.tick)*self.speed
         self.tick=now
         if self.cycles and self.elapsed>=self.duration*self.cycles:
@@ -66,6 +88,7 @@ class DemoPlayer:
             name=data['name']
             if name=='demo_start':
                 self.scheduled_start=None
+                self.scheduled_control=None;self.group_paused=False;self.applied_epoch=0
                 self.amplitude=1.
                 action=data.get('action');speed=data.get('speed');cycles=data.get('cycles')
                 if action not in CATALOG or type(speed) not in {int,float} or speed not in PLAYBACK_SPEEDS:
@@ -83,7 +106,9 @@ class DemoPlayer:
             elif name=='demo_resume':
                 if self.cycles and self.elapsed>=self.duration*self.cycles:self.elapsed=0.
                 self.running=self.active
-            elif name=='demo_stop':self.active=self.running=False;self.scheduled_start=None
+            elif name=='demo_stop':
+                self.active=self.running=False;self.scheduled_start=None
+                self.scheduled_control=None;self.group_paused=False
             else:raise ValueError('Unknown preview command')
 
     def snapshot(self):
@@ -101,6 +126,7 @@ class DemoPlayer:
                 steps=route(self.action,at=datetime.fromisoformat(self.clock_at) if self.clock_at else None)
                 phase_label=steps[min(len(steps)-1,int((display_elapsed%PERIOD[self.action])/3.))][0]
             return dict(active=self.active,running=self.running,action=self.action,
+                group_paused=self.group_paused,applied_epoch=self.applied_epoch,pending_control=self.scheduled_control.copy() if self.scheduled_control else None,
                 label=CATALOG[self.action]+' · '+phase_label if self.action in CUSTOM_IDS else phase_label,speed=self.speed,cycles=self.cycles,
                 clock_at=self.clock_at,
                 text=self.text if self.action=='text_sequence' else '',token_index=token_index,duration_s=self.duration,amplitude=self.amplitude,

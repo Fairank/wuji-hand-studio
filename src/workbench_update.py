@@ -3,6 +3,7 @@ import copy
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import subprocess
@@ -25,8 +26,31 @@ class WorkbenchUpdate:
         self.store=store or WorkbenchRelease(self.data,edition['version'])
         self.lock=threading.RLock();self.closed=threading.Event();self.thread=None;self.latest=None;self.started=False
         self.result_file=None;self.apply_token=None;self.helper=None
+        self._completion_reads=0;self._completion_checked_at=0
         self.state=dict(current_version=edition['version'],phase='idle',busy=False,latest_version=None,
-            available=False,prepared=None,error=None,checked_at=None,source=REPOSITORY)
+            available=False,prepared=None,error=None,checked_at=None,source=REPOSITORY,progress=None)
+        self._restore_completed()
+
+    def _restore_completed(self):
+        """Only an exact completed local update to this running version is success."""
+        self._completion_reads+=1;self._completion_checked_at=time.monotonic()
+        try:
+            root=self.data/'updates';_directory(root)
+            pointer=root/'last-application-update.json'
+            if not _plain(pointer,directory=False) or pointer.stat().st_size>65536:return
+            plan=json.loads(pointer.read_text('utf-8'))
+            if not isinstance(plan,dict) or plan.get('repository')!=REPOSITORY or plan.get('app_id')!=APP_ID:return
+            token=plan.get('token');version=plan.get('version');digest=plan.get('sha256')
+            if not isinstance(token,str) or not re.fullmatch('[0-9a-f]{32}',token):return
+            if version!=self.edition['version'] or not isinstance(digest,str) or not re.fullmatch('[0-9a-f]{64}',digest):return
+            result=root/('apply-'+token+'.result.json')
+            if not _plain(result,directory=False) or result.stat().st_size>65536:return
+            report=json.loads(result.read_text('utf-8-sig'))
+            if not isinstance(report,dict) or any(report.get(k)!=plan[k] for k in ('token','version','sha256')) or report.get('phase')!='installed':return
+            if report.get('launch_started') is not True or report.get('version_verified') is not True:return
+            self.state['completed_version']=version
+            if self.state['phase']=='idle':self.state['phase']='completed'
+        except (OSError,ValueError,TypeError):return
 
     def _idle(self):
         if reservation():raise ValueError('请结束官方 CLI 会话后更新 / End the official CLI session before updating')
@@ -39,6 +63,10 @@ class WorkbenchUpdate:
 
     def snapshot(self):
         with self.lock:
+            # The helper records success after launching the new process. Allow
+            # its exact result to arrive after this process's constructor.
+            if not self.state.get('completed_version') and self._completion_reads<15 and time.monotonic()-self._completion_checked_at>=2:
+                self._restore_completed()
             result=copy.deepcopy(self.state)
             if self.result_file:
                 try:
@@ -78,7 +106,7 @@ class WorkbenchUpdate:
                 # Keep the old plan and result files as history. Only retire
                 # this completed association, under the same service lock.
                 self.result_file=None;self.apply_token=None;self.helper=None
-            self.closed.clear();self.state.update(busy=True,error=None,phase='checking' if operation=='check' else 'downloading')
+            self.closed.clear();self.state.update(busy=True,error=None,progress=None,phase='checking' if operation=='check' else 'downloading')
             self.thread=threading.Thread(target=self._work,args=(operation,),name='Workbench software update',daemon=True);self.thread.start()
         return self.snapshot()
 
@@ -88,15 +116,22 @@ class WorkbenchUpdate:
                 latest=self.store.check(cancel_event=self.closed)
                 with self.lock:
                     self.latest=latest
+                    prepared=self.state.get('prepared')
+                    prepared_current=bool(prepared and latest.get('available') is True and prepared.get('version')==latest.get('latest_version'))
                     self.state.update(latest_version=latest.get('latest_version'),available=latest.get('available') is True,
-                        checked_at=time.time(),phase='ready' if self.state.get('prepared') else 'unpublished' if latest.get('reason')=='unpublished' else 'available' if latest.get('available') else 'up_to_date')
+                        checked_at=time.time(),phase='ready' if prepared_current else 'unpublished' if latest.get('reason')=='unpublished' else 'available' if latest.get('available') else 'up_to_date')
             else:
-                prepared=self.store.prepare(self.latest,cancel_event=self.closed)
+                prepared=self.store.prepare(self.latest,cancel_event=self.closed,progress=self._progress)
                 with self.lock:self.state.update(prepared=prepared,phase='ready')
         except Exception as error:
             with self.lock:self.state.update(phase='error',error=str(error)[:700])
         finally:
             with self.lock:self.state['busy']=False
+
+    def _progress(self,value):
+        with self.lock:
+            if self.state['phase']=='downloading' and not self.closed.is_set():
+                self.state['progress']=dict(value)
 
     def _stage_installer(self,prepared):
         """Reuse the existing finite desktop prepare_update interface's layout."""
@@ -143,6 +178,8 @@ class WorkbenchUpdate:
                 executable=str(Path(sys.executable).absolute()),origin=host.origin,expected_app_pid=os.getpid(),
                 old_version=self.edition['version'],result_file=str(result_file))
             atomic(plan_file,plan)
+            atomic(updates/'last-application-update.json',dict(app_id=APP_ID,repository=REPOSITORY,
+                token=token,version=prepared['version'],sha256=prepared['sha256']))
             shell=Path(os.environ.get('SystemRoot',r'C:\Windows'))/'System32/WindowsPowerShell/v1.0/powershell.exe'
             script=RESOURCE/'workbench_update_apply.ps1'
             if not script.is_file():raise ValueError('Application updater is missing from this installation')

@@ -20,6 +20,37 @@ class Links(HTMLParser):
 
 
 class WebAssetsTests(unittest.TestCase):
+    def test_task_window_root_uses_lightweight_host_and_validates_identity(self):
+        task_id='a'*24
+        server=SimpleNamespace(tasks=SimpleNamespace(snapshot=lambda:dict(tasks=[dict(task_id=task_id,status='connected')])))
+        for query,expected in ((f'task_window={task_id}&desktop=1',200),
+                               (f'task_window={task_id}',200),
+                               ('task_window=',400),('task_window=bad',400),
+                               (f'task_window={task_id}&task_window={task_id}',400),
+                               (f'task_window={task_id}&desktop=1&desktop=1',400),
+                               (f'task_window={task_id}&embedded=1',400),
+                               ('task_window='+'b'*24,404)):
+            with self.subTest(query=query):
+                responses=[]
+                request=SimpleNamespace(path='/?'+query,allowed_host=lambda:True,server=server,
+                    reply=lambda status,body,mime=None:responses.append((status,body,mime)))
+                console_server.Handler.do_GET(request)
+                self.assertEqual(responses[0][0],expected)
+                if expected==200:
+                    self.assertEqual(responses[0][1],(console_server.HERE/'web/task_window.html').read_bytes())
+                    self.assertNotIn(b'/app.js',responses[0][1])
+                    self.assertNotIn(b'/workbench_upgrade.js',responses[0][1])
+
+    def test_task_window_assets_are_served(self):
+        parser=Links();parser.feed((console_server.HERE/'web/task_window.html').read_text(encoding='utf-8'))
+        for path in parser.paths:
+            with self.subTest(path=path):
+                responses=[]
+                request=SimpleNamespace(path=path,allowed_host=lambda:True,
+                    reply=lambda status,body,mime=None:responses.append((status,body,mime)))
+                console_server.Handler.do_GET(request)
+                self.assertEqual(responses[0][0],200)
+
     def test_every_entrypoint_script_and_stylesheet_is_served(self):
         parser=Links();parser.feed((console_server.HERE/'web/index.html').read_text(encoding='utf-8'))
         for path in parser.paths:

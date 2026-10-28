@@ -1,0 +1,9 @@
+:root{font-family:Inter,"Segoe UI","Microsoft YaHei",sans-serif;color-scheme:light;--ui-ink:#202126;--ui-sub:#676b73;--ui-line:#dedfe4;--ui-fill:#f5f6f8;--ui-card:#fff;--ui-hover:#eceef2;--ui-blue:#007aff;--wb-card:var(--ui-card);--wb-ink:var(--ui-ink);--wb-sub:var(--ui-sub);--wb-line:var(--ui-line);--wb-group:var(--ui-fill)}
+:root[data-theme=dark]{color-scheme:dark;--ui-ink:#f2f3f6;--ui-sub:#afb2ba;--ui-line:#41434b;--ui-fill:#282a31;--ui-card:#202127;--ui-hover:#343640;--ui-blue:#75b2ff}
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:var(--ui-card);color:var(--ui-ink)}
+[hidden]{display:none!important}
+html[data-task-window=true] :is(.directory,.page-area,.tw-tabbar,.tw-heading,.tw-pane-zone,.tw-pane-close,.float-panel-bar){display:none!important}
+html[data-task-window=true] .tw-workbench{padding:0;gap:0;box-sizing:border-box}
+html[data-task-window=true] .tw-pane{border:0;border-radius:0}
+html[data-task-window=true] .tw-message{margin:10px}
+html[data-task-window=true] .tw-offpage>.tw-message{visibility:visible}

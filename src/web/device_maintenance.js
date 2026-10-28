@@ -21,11 +21,12 @@
  const body=sheet.body,identity=el('header','dm-identity',body),name=el('h3','',identity),serial=el('p','dm-serial',identity);
  const versions=el('div','dm-versions',body),from=el('div','',versions),fromLabel=el('span','',from),fromValue=el('strong','',from),arrow=el('span','dm-arrow',versions),to=el('div','',versions),toLabel=el('span','',to),toValue=el('strong','',to);arrow.setAttribute('aria-hidden','true');text(arrow,'→');
  const status=el('p','dm-status',body);status.id='dm-status';status.setAttribute('role','status');status.setAttribute('aria-live','polite');
+ const progress=el('progress','dm-progress',body);progress.hidden=true;progress.setAttribute('aria-labelledby','dm-status');
  const error=el('p','dm-error',body);error.id='dm-error';error.setAttribute('role','alert');
  const controls=el('div','dm-actions dm-main-actions',body),check=el('button','',controls),primary=el('button','primary',controls);check.type=primary.type='button';check.id='dm-check';primary.id='dm-start';
  const terminalHost=el('section','',body),terminal=window.OfficialTerminal?.mount(terminalHost,{endpoint:'/api/firmware-terminal',actionName:'firmware_terminal_input',title:()=>t('官方升级','Official update')});
  const details=el('details','dm-details',body),summary=el('summary','',details),records=el('pre','',details);records.id='dm-records';
- let selected=null,state=null,fresh=false,pending='',loading=null,epoch=0,timer=0,transportError='',actionError='',uncertain=false,openRequest=0;
+ let selected=null,state=null,fresh=false,pending='',loading=null,epoch=0,timer=0,transportError='',actionError='',uncertain=false,openRequest=0,terminalPresentation='';
  const busyPhases=new Set(['checking','preparing','downloading','upgrading','updating','flashing','reconnecting','awaiting_reconnect','verifying']);
  const recoveryPhases=new Set(['unknown','unconfirmed','recovery_required','reconnect_required']);
  function available(row){
@@ -42,6 +43,7 @@
  function label(row){const model=row?.model;return typeof model==='string'&&model.length<100?model:row?.kind==='glove'?'Wuji Glove':'Wuji Hand';}
  function humanError(value){
   const message=String(value||'');
+  if(/official flow ended|device version was read|未能读回设备版本|未匹配本次更新目标/i.test(message))return t('官方流程已结束，设备版本尚未确认。请重新检查。','The official flow ended. Check the device version again to confirm the update.');
   if(/idle|session|会话|disconnect|断开|workspace|工作区/i.test(message))return t('请先结束设备会话，再检查更新。','End device sessions before checking updates.');
   if(/expired|过期|token|preview/i.test(message))return t('更新方案已过期，请重新检查。','The update plan expired. Check again.');
   if(/unsupported|不支持|not supported|match|匹配|incompat/i.test(message))return t('暂不支持此设备的更新，请查看详细记录。','An update is unavailable for this device. See details.');
@@ -56,26 +58,36 @@
   resume.hidden=!resumable||!!row&&sn(row)===sn(state.device);text(resume,t('返回设备更新','Return to device update'));
   text(name,label(selected));text(serial,sn(selected));text(fromLabel,t('当前版本','Current version'));text(toLabel,t('可用版本','Available version'));
   const current=state?.current_version||(state?.result?.verdict==='recovery_verified'&&state.result.sn===sn(selected)?state.result.firmware_version:null);
-  versions.hidden=!same()||(!current&&!state.target_version);from.hidden=!same()||!current;to.hidden=!same()||!state.target_version;arrow.hidden=from.hidden||to.hidden;
+  versions.hidden=!same()||(!current&&!state.target_version);from.hidden=!same()||!current;to.hidden=!same()||!state.target_version||current===state.target_version;arrow.hidden=from.hidden||to.hidden;
   text(fromValue,same()&&current||'—');text(toValue,same()&&state.target_version||'—');
   const phase=fresh&&same()?state.phase:'idle',busy=active(),other=fresh&&state?.busy===true&&!same();
+  const verified=phase==='verified'&&state.result?.verdict==='target_version_verified'&&state.result.version_verified===true&&state.result.sn===sn(selected)&&state.result.firmware_version===state.result.expected_version&&state.result.firmware_version===current;
+  const unchanged=phase==='completed'&&state.result?.verdict==='unchanged'&&state.result.sn===sn(selected)&&state.result.version_verified===false;
   const messages={idle:['先检查设备，再打开官方升级。','Check the device, then open the official update.'],checking:['正在检查设备…','Checking the device…'],preparing:['正在打开官方升级…','Opening the official update…'],downloading:['请查看下方官方升级进度。','Follow the official update progress below.'],ready:['检查已完成。打开后跟随官方提示确认升级。','Device checked. Follow the official prompts after opening the update.'],available:['检查已完成。打开后跟随官方提示确认升级。','Device checked. Follow the official prompts after opening the update.'],up_to_date:['设备已是最新版本。','The device is up to date.'],upgrading:['请跟随下方官方提示，保持设备供电与连接。','Follow the official prompts below. Keep the device powered and connected.'],running:['请跟随下方官方提示，保持设备供电与连接。','Follow the official prompts below. Keep the device powered and connected.'],updating:['请跟随下方官方提示，保持设备供电与连接。','Follow the official prompts below. Keep the device powered and connected.'],flashing:['正在写入固件，请保持设备供电与连接。','Writing firmware. Keep the device powered and connected.'],reconnecting:['等待设备重新连接…','Waiting for the device to reconnect…'],awaiting_reconnect:['等待设备重新连接…','Waiting for the device to reconnect…'],verifying:['正在核对设备版本…','Checking the device version…'],succeeded:['官方流程已结束，请核对设备版本。','The official process ended. Check the device version.'],completed:['官方流程已结束，请核对设备版本。','The official process ended. Check the device version.'],unsupported:['此设备暂不支持在线更新。','Online updates are unavailable for this device.'],unconfirmed:['更新结果尚未确认，请核对设备。','The update result is unconfirmed. Check the device.'],recovery_required:['请核对设备的实际版本后继续。','Check the actual device version before continuing.'],reconnect_required:['请重新连接设备，再核对更新结果。','Reconnect the device, then verify the update.'],failed:['官方升级未完成，请查看详细记录。','The official update did not complete. See details.'],error:['操作未完成，请查看详细记录。','The operation did not complete. See details.']};
   const message=state?.supported===false?t('当前控制环境暂不支持官方升级。','Official updates are unavailable in the current controller environment.'):other?t('另一设备正在更新，请稍后再试。','Another device is updating. Try again shortly.'):phase==='unknown'||state?.locked===true?t('官方升级的结束状态尚未确认，请先核对设备。','The official update exit is unconfirmed. Check the device first.'):phase==='verified'?t('已核对设备版本。','The device version has been verified.'):uncertain?t('请求结果尚未确认，请先重新读取状态。','The request result is unconfirmed. Reload status first.'):pending==='firmware_upgrade'?t('正在打开官方升级…','Opening the official update…'):pending==='firmware_check'?t('正在检查设备…','Checking the device…'):pending==='firmware_recovery_check'?t('正在核对设备…','Checking the device…'):t(...(messages[phase]||['正在读取设备状态…','Reading device status…']));
   const problem=transportError||actionError||(same()&&state.error)||'';
   const viewer=state?.viewer,ownedPreview=viewer?.active===true&&viewer.phase==='running'&&viewer.serial===sn(selected)&&/^[0-9a-f]{32}$/.test(viewer.session_id||'');
   const checkFailure=['failed','check_failed'].includes(phase)&&state?.operation!=='upgrade';
-  const reportMessage=checkFailure?t('版本检查未完成，可以重新检查。','Version check incomplete. Try again.'):phase==='available'?t('有适用于这台设备的新固件。','New firmware is available for this device.'):phase==='checked'?t('官方检查已结束，可打开官方流程查看详情。','Official check finished. Open the official flow for details.'):phase==='up_to_date'?t('固件已是最新版本。','Firmware is up to date.'):phase==='unknown'&&state?.operation==='check'?t('检查进程退出尚未确认，请先核对检查。','The check process exit is unconfirmed. Verify the check first.'):message;
+  const reportMessage=verified?t('更新已确认。','Update confirmed.'):unchanged?t('设备版本未变化，可重新检查。','The device version is unchanged. You can check again.'):checkFailure?t('版本检查未完成，可以重新检查。','Version check incomplete. Try again.'):phase==='available'?t('有适用于这台设备的新固件。','New firmware is available for this device.'):phase==='checked'?t('官方检查已结束，可打开官方流程查看详情。','Official check finished. Open the official flow for details.'):phase==='up_to_date'?t('固件已是最新版本。','Firmware is up to date.'):phase==='unknown'&&state?.operation==='check'?t('检查进程退出尚未确认，请先核对检查。','The check process exit is unconfirmed. Verify the check first.'):message;
   text(status,problem?humanError(problem):ownedPreview&&!active()?t('更新前需要结束这台设备的预览；仅在你继续后执行。','This device’s preview must end before an update. It ends only when you continue.'):reportMessage);status.classList.toggle('dm-status-error',!!problem);error.hidden=true;
-  sheet.element.dataset.phase=phase;sheet.element.setAttribute('aria-busy',String(busy));
+  sheet.element.dataset.phase=phase;sheet.element.setAttribute('aria-busy',String(busy));progress.hidden=!busy;
   text(check,!fresh||uncertain||state?.supported===false?t('重新读取','Reload status'):t('重新检查','Check again'));check.hidden=true;check.disabled=!!pending||busy;
   const recover=fresh&&same()&&(recoveryPhases.has(phase)||state.locked===true||state.recovery_required===true);text(primary,recover?t('核对设备','Check device'):preview()?t('打开官方升级','Open official update'):t('检查设备','Check device'));
   primary.disabled=!fresh||busy||other||uncertain||!!transportError||state?.supported===false;primary.hidden=['up_to_date','unsupported'].includes(phase);
   if(!fresh||uncertain||transportError){text(primary,t('重新读取','Reload status'));primary.disabled=!!pending||busy;primary.hidden=false;}
   else if(ownedPreview&&!recover&&!active()){text(primary,t('结束预览并检查更新','End preview and check'));primary.disabled=false;primary.hidden=false;}
   check.disabled=check.disabled||fresh&&state?.locked===true;
-  const run=same()&&object(state.run)?state.run:{};controls.hidden=run.source==='official_tty'&&run.running===true;sheet.element.classList.toggle('dm-native',run.source==='official_tty'&&!!run.id);terminal?.render(run,{fresh:fresh&&same()});
-  const lines=[];if(problem)lines.push(problem);if(same()){for(const [key,title] of [['check_report',t('官方设备检查','Official device check')],['catalog_report',t('官方固件列表','Official firmware list')]]){const report=state[key];if(object(report)){lines.push(title);if(typeof report.stdout==='string')lines.push(report.stdout);if(typeof report.stderr==='string')lines.push(report.stderr);}}
-   for(const event of (state.events||[]).slice(-40)){if(typeof event==='string')lines.push(event);else if(object(event)){const value=event.message||event.text||event.event||event.phase;if(typeof value==='string')lines.push(value);}}}text(records,lines.map(line=>String(line).slice(0,12000)).join('\n'));details.hidden=!lines.length;text(summary,t('详细记录','Details'));
+  const run=same()&&object(state.run)?state.run:{},runningTTY=run.source==='official_tty'&&run.running===true;
+  const archivedTTY=run.source==='official_tty'&&!!run.id&&run.running===false;
+  const presentation=archivedTTY?run.id+':'+phase:'';
+  controls.hidden=runningTTY;sheet.element.classList.toggle('dm-native',runningTTY);
+  if(archivedTTY){
+   if(terminalHost.parentNode!==details)details.insertBefore(terminalHost,records);
+   if(presentation!==terminalPresentation){details.open=false;body.scrollTop=0;requestAnimationFrame(()=>{body.scrollTop=0;});}
+  }else if(terminalHost.parentNode!==body)body.insertBefore(terminalHost,details);
+  terminalPresentation=presentation;terminal?.render(run,{fresh:fresh&&same()});
+  const lines=[];if(problem)lines.push(problem);if(same()){for(const [key,title] of [['check_report',t('官方设备检查','Official device check')],['verification_report',t('更新后的版本核对','Version check after update')],['catalog_report',t('官方固件列表','Official firmware list')]]){const report=state[key];if(object(report)){lines.push(title);if(typeof report.stdout==='string')lines.push(report.stdout);if(typeof report.stderr==='string')lines.push(report.stderr);}}
+   for(const event of (state.events||[]).slice(-40)){if(typeof event==='string')lines.push(event);else if(object(event)){const value=event.message||event.text||event.event||event.phase;if(typeof value==='string')lines.push(value);}}}text(records,lines.map(line=>String(line).slice(0,12000)).join('\n'));details.hidden=!lines.length&&!archivedTTY;text(summary,t('详细记录','Details'));
  }
  async function load(){
   if(loading)return loading;const version=epoch;

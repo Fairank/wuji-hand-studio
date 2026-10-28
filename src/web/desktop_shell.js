@@ -23,7 +23,7 @@
   document.documentElement.dataset.nativeMaterial=result.mode||'solid';if(info)info.material=result;
  }
  function applyMaterial(){
-  if(!native)return Promise.resolve();
+  if(!native||typeof native.set_window_material!=='function')return Promise.resolve();
   const revision=++materialRevision,enabled=!reduceMaterial();
   // The bridge runs calls on separate Python threads. Serialize fast toggles so
   // an older result cannot replace the user's latest preference.
@@ -95,13 +95,14 @@
   setAppearance(key,value){if(key==='language'){window.WujiLocale.setLanguage(value);return;}appearance(key,value);$(key==='reduceMotion'?'desktop-motion':'desktop-transparency').checked=value;},
   setMenu(opened){if(opened&&!menu.open){labels();menu.showModal();}else if(!opened)menu.close();},
   confirmClose(){menu.close();labels();$('desktop-close-status').textContent='';if(!closeDialog.open)closeDialog.showModal();}};
- async function ready(){native=window.pywebview?.api;if(!native)return;info=await native.info();document.documentElement.dataset.desktop='true';document.documentElement.dataset.platform=info.platform;if($('studio-desktop'))$('studio-desktop').hidden=true;await native.set_language(window.WujiLocale.lang);await applyMaterial();labels();}
+ async function ready(){native=window.pywebview?.api;if(!native)return;info=await native.info();document.documentElement.dataset.desktop='true';document.documentElement.dataset.platform=info.platform;if($('studio-desktop'))$('studio-desktop').hidden=true;if(typeof native.set_language==='function')await native.set_language(window.WujiLocale.lang);await applyMaterial();labels();}
  window.addEventListener('pywebviewready',()=>ready().catch(e=>{$('desktop-menu-status').textContent=e.message;}));
  if(window.pywebview?.api)ready().catch(()=>{});
- window.addEventListener('wuji-language',()=>{labels();if(native)native.set_language(window.WujiLocale.lang).catch(()=>{});});
+ window.addEventListener('wuji-language',()=>{labels();if(typeof native?.set_language==='function')native.set_language(window.WujiLocale.lang).catch(()=>{});});
  window.addEventListener('console-state',e=>{state=e.detail;if(menu.open||closeDialog.open)labels();});
  for(const query of ['(prefers-reduced-transparency: reduce)','(forced-colors: active)'])matchMedia(query).addEventListener('change',()=>applyMaterial().catch(()=>{}));
  document.addEventListener('keydown',e=>{
+  if(new URLSearchParams(location.search).has('task_window'))return;
   if((e.ctrlKey||e.metaKey)&&e.key===','){e.preventDefault();menu.close();location.hash='#settings';window.WujiWorkspace.showPage();}
   if((e.ctrlKey||e.metaKey)&&e.shiftKey&&e.code==='KeyV'&&native){e.preventDefault();native.open_viewer();}
   if(native&&(e.key==='F5'||(e.ctrlKey||e.metaKey)&&e.code==='KeyR')){e.preventDefault();}
