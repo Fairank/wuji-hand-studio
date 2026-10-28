@@ -87,7 +87,7 @@ class Controller:
         self.generation = 0
         self.last_update = 0.
         self.csrf = secrets.token_urlsafe(32)
-        self.state = dict(connection='disconnected', message='接好灵巧手后，点击“自动连接”', devices=[],
+        self.state = dict(connection='disconnected', message='选择设备后，点击“连接”', devices=[],
             latest=None, metrics=dict(host_hz=None, device_hz=None, age_ms=None),
             device_id=None, identified_device=None, joint_rates=[], mapping=[], mapping_device_id=None, display_selected=None,
             recording=dict(active=False, frames=0, elapsed_s=0, label='baseline', seconds=30),
@@ -1667,6 +1667,19 @@ class ConsoleHTTPServer(ThreadingHTTPServer):
         if service.snapshot().get('locked'):raise ValueError('版本检查退出尚未确认 / Version check exit is unconfirmed')
 
     def maintenance_action(self,command):
+        name=command.get('name')
+        if name in {'firmware_check','firmware_upgrade','firmware_recovery_check',
+                    'sdk_release_check','sdk_update_prepare','sdk_update_recover'}:
+            # The operator's request yields our read-only discovery first.
+            # No Viewer, calibration, teleoperation or firmware write is stopped.
+            with self.controller.official_viz.discovery_priority():
+                monitor=getattr(self,'_update_notifications',None)
+                if monitor is not None and not monitor.give_user_priority():
+                    raise ValueError('版本检查退出尚未确认 / Version-check process exit is unconfirmed')
+                return self._maintenance_action(command)
+        return self._maintenance_action(command)
+
+    def _maintenance_action(self,command):
         name=command.get('name')
         if name in {'sdk_release_check','sdk_update_prepare'} and set(command)=={'name'}:
             return dict(sdk_maintenance=self.sdk_maintenance.start('check' if name=='sdk_release_check' else 'update'))

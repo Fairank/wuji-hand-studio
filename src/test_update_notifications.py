@@ -55,11 +55,11 @@ class NotificationTests(unittest.TestCase):
         self.rows=[self.fresh()];self.monitor.tick();self.now+=40;self.monitor.tick()
         self.firmware.start_check.assert_not_called()
 
-    def test_explicit_session_defers_firmware_check_until_idle_and_fresh(self):
+    def test_disconnection_never_reopens_a_previously_connected_device(self):
         self.states=[self.connected()];self.idle.side_effect=ValueError('active worker')
         self.rows=[self.fresh()];self.monitor.tick();self.firmware.start_check.assert_not_called()
         self.states=[];self.idle.side_effect=None;self.monitor.tick();self.now+=31;self.monitor.tick()
-        self.firmware.start_check.assert_called_once_with('SYNTHETIC-GLOVE',notification_only=True)
+        self.firmware.start_check.assert_not_called();self.idle.assert_not_called()
 
     def test_stale_different_or_conflicting_device_does_not_open(self):
         self.monitor.observe([self.connected()]);self.monitor.idle_since=self.now-31
@@ -124,25 +124,25 @@ class NotificationTests(unittest.TestCase):
 
     def test_failed_async_firmware_check_retries_after_backoff_instead_of_a_day(self):
         self.monitor.observe([self.connected()]);self.monitor.idle_since=self.now-31
-        self.rows=[self.fresh()];self.monitor.tick();started=self.now
+        self.rows=[self.fresh()];self.monitor.pending_firmware=('SYNTHETIC-GLOVE',self.now)
         self.now+=16
         self.firmware.snapshot.return_value=dict(device=dict(sn='SYNTHETIC-GLOVE'),phase='failed',finished_at=self.now,notification=None)
         self.monitor.tick();self.assertEqual(self.monitor.next_check['firmware:SYNTHETIC-GLOVE'],self.now+RETRY)
-        self.assertIsNone(self.monitor.pending_firmware);self.assertEqual(self.firmware.start_check.call_count,1)
+        self.assertIsNone(self.monitor.pending_firmware);self.firmware.start_check.assert_not_called()
 
     def test_completion_for_another_serial_does_not_release_pending_check(self):
         self.monitor.pending_firmware=('SYNTHETIC-GLOVE',self.now-1);self.monitor.idle_since=self.now-31
         self.firmware.snapshot.return_value=dict(device=dict(sn='ANOTHER-GLOVE'),phase='failed',finished_at=self.now,notification=None)
         self.monitor.tick();self.assertEqual(self.monitor.pending_firmware[0],'SYNTHETIC-GLOVE')
 
-    def test_next_background_tick_can_use_real_thirty_second_discovery_authority(self):
+    def test_fresh_discovery_and_connection_history_never_authorize_a_background_query(self):
         from device_inventory import normalize_devices
         self.monitor.observe([self.connected()]);scanned_at=self.now
         raw=[dict(serial='SYNTHETIC-GLOVE',device_type='wuji_glove',handedness='right')]
         self.monitor.devices=lambda:normalize_devices(raw,source='official_cli',observed_at=scanned_at,now=self.now)['devices']
         self.monitor.tick();self.firmware.start_check.assert_not_called()
         self.now+=15;self.monitor.tick()
-        self.firmware.start_check.assert_called_once_with('SYNTHETIC-GLOVE',notification_only=True)
+        self.firmware.start_check.assert_not_called()
 
     def test_close_during_idle_callback_does_not_start_a_new_device_query(self):
         self.monitor.observe([self.connected()]);self.monitor.idle_since=self.now-31;self.rows=[self.fresh()]
@@ -204,7 +204,7 @@ class NotificationTests(unittest.TestCase):
         self.firmware.cancel_notification_check.assert_called_once_with(timeout=2)
         self.monitor.tick();self.firmware.start_check.assert_not_called()
         self.now+=61;self.monitor.tick()
-        self.firmware.start_check.assert_called_once_with('SYNTHETIC-GLOVE',notification_only=True)
+        self.firmware.start_check.assert_not_called()
 
     def test_user_action_is_not_authorized_when_read_exit_is_unconfirmed(self):
         self.firmware.cancel_notification_check.return_value=False

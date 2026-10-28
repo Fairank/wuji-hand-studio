@@ -47,12 +47,12 @@ def controller_args(config, args):
     raise ValueError('Remote calibration needs the official CLI on that Linux controller / 请在远程 Linux 控制端运行官方标定')
 
 
-def cli_json(config, *args):
+def cli_json(config, *args, cancelled=None):
     from official_device_discovery import use_native
     if use_native(config):
         if args==('devices',):
             from official_device_discovery import native_devices
-            return native_devices()
+            return native_devices() if cancelled is None else native_devices(cancelled=cancelled)
         from native_cli import json_command
         return json_command(*args)
     if args==('devices',):

@@ -1,9 +1,9 @@
 """Background version checks, with no automatic install or device discovery.
 
 Software checks read official metadata and import the configured SDK only.
-Firmware checks require a previously explicit session, fresh exact-SN discovery
-and the normal all-workspace idle/ownership gate. An unknown report is never
-interpreted as up-to-date. Callbacks keep this scheduler independently testable.
+Hardware reminders consume already sampled handle metadata and explicit check
+results. They never reopen a disconnected device or start a firmware query.
+An unknown report is never interpreted as up-to-date.
 """
 import copy
 import hashlib
@@ -224,40 +224,9 @@ class UpdateNotifications:
             service=self.firmware()
             return service.cancel_notification_check(timeout=timeout)
 
-    def _dispatch_firmware(self,service,sn):
-        with self.dispatch_lock:
-            if self.closed.is_set() or self.clock()<self.user_priority_until:return False
-            service.start_check(sn,notification_only=True)
-            return True
-
     def _hardware(self,now):
         if self.closed.is_set():return
-        service=self.firmware();state=service.snapshot()
-        self._ingest_firmware(state,now)
-        if state.get('busy') or state.get('locked') or state.get('can_upgrade'):return
-        if now<self.user_priority_until:return
-        try:self.idle()
-        except Exception:self.idle_since=None;return
-        if self.closed.is_set():return
-        if self.idle_since is None:self.idle_since=now;return
-        # Discovery authority expires after 30 seconds. A 5-second grace lets
-        # the next 15-second tick use that evidence without starting a new scan.
-        if now-self.idle_since<5:return
-        rows=self.devices()
-        if self.closed.is_set():return
-        for row in rows:
-            sn=_serial(row.get('serial') or row.get('sn'))
-            if (sn not in self.known or not self._due('firmware:'+sn,now)
-                    or row.get('stale') is not False or row.get('selectable') is not True
-                    or row.get('conflict') or row.get('in_use') or row.get('kind')!=self.known[sn]['kind']):continue
-            # The service repeats freshness, exact identity and the global gate.
-            # Only a finite read-only --check runs; no --list/write/yes action.
-            try:
-                if not self._dispatch_firmware(service,sn):return
-                self.pending_firmware=(sn,now)
-                self.next_check['firmware:'+sn]=now+FIRMWARE_INTERVAL
-            except Exception:self.next_check['firmware:'+sn]=now+RETRY
-            break
+        self._ingest_firmware(self.firmware().snapshot(),now)
 
     def tick(self):
         now=self.clock()

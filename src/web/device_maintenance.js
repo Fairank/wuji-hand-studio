@@ -37,6 +37,10 @@
  function same(){return !!selected&&sn(state?.device)===sn(selected);}
  function retainedRecord(){return serialOK(sn(state?.device))&&(state?.locked===true||state?.busy===true||!!state?.run?.id||clock(state?.checked_at)>Date.now()-86400000&&clock(state?.checked_at)<=Date.now()+30000);}
  function active(){return !!pending||fresh&&(state?.busy===true||busyPhases.has(state?.phase));}
+ function syncDiscovery(){
+  const hold=sheet.element.open||!!pending||state?.busy===true||state?.locked===true||busyPhases.has(state?.phase);
+  if(hold)inventory.pauseDiscovery?.('device-maintenance');else inventory.resumeDiscovery?.('device-maintenance');
+ }
  function preview(){const value=state?.preview;return fresh&&same()&&!active()&&!uncertain&&!state.error&&!state.locked&&state.supported!==false&&['ready','available'].includes(state.phase)&&value?.sn===sn(selected)&&value.mode==='official_confirmation'&&typeof value.token==='string'&&value.token.length>0&&value.token.length<=256&&clock(value.expires_at)>Date.now();}
  function valid(value){return object(value)&&typeof value.busy==='boolean'&&typeof value.phase==='string'&&value.phase.length<81&&(value.device==null||object(value.device))&&(value.error==null||typeof value.error==='string')&&(value.events==null||Array.isArray(value.events));}
  function accept(value){if(!valid(value))throw Error(t('设备更新状态不完整，请重新读取。','Device update status is incomplete. Reload it.'));state=value;fresh=true;transportError='';uncertain=false;}
@@ -51,6 +55,7 @@
   return t('操作未完成，请查看详细记录后重试。','The operation did not complete. Review details and retry.');
  }
  function render(){
+  syncDiscovery();
   sheet.setLabels({title:t('设备更新','Device update'),triggerLabel:t('设备更新','Device update'),closeLabel:t('关闭','Close')});
   const row=inventory.selection(),retained=retainedRecord(),resumeSelected=retained&&sn(row)===sn(state.device);
   trigger.disabled=state?.supported===false&&!retained||!available(row)&&!resumeSelected;trigger.title=trigger.disabled?t('先选择刚发现的设备','Select a freshly discovered device'):'';
@@ -94,14 +99,14 @@
   loading=(async()=>{try{const response=await fetch('/api/device-maintenance',{cache:'no-store',signal:AbortSignal.timeout(6000)});if(!response.ok)throw Error('Update status unavailable');const value=await response.json();if(version!==epoch)return;accept(value);}catch(failure){if(version!==epoch)return;fresh=false;transportError=failure.message||'Update status unavailable';}finally{loading=null;render();schedule();}})();return loading;
  }
  async function request(command){
-  if(pending)return;pending=command.name;epoch++;actionError='';transportError='';render();
+  if(pending)return;pending=command.name;epoch++;actionError='';transportError='';syncDiscovery();render();
   try{
    const session=await fetch('/api/state',{cache:'no-store',signal:AbortSignal.timeout(6000)});if(!session.ok)throw Error('Session unavailable');const token=(await session.json()).csrf;if(typeof token!=='string'||!token)throw Error('Session unavailable');
    const response=await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json','X-Console-Token':token},body:JSON.stringify(command),signal:AbortSignal.timeout(command.name==='firmware_check'?60000:15000)}),result=await response.json();
    if(!response.ok||result.ok===false)throw Error(result.error||'Device update did not complete');
    const value=result.device_maintenance||result.maintenance;if(value)accept(value);else fresh=false;
   }catch(failure){fresh=false;actionError=failure.message||'Device update did not complete';if(command.name==='firmware_upgrade')uncertain=true;}
-  finally{pending='';render();await load();}
+  finally{pending='';syncDiscovery();render();await load();syncDiscovery();}
  }
  async function checkSelected(){
   const number=sn(selected);
@@ -110,12 +115,13 @@
   // A finished official process should not require a separate manual rescan.
   await request({name:'firmware_check',serial:number});
  }
- function schedule(){clearTimeout(timer);if(sheet.element.open)timer=setTimeout(()=>{if(!pending)load();else schedule();},active()?1000:5000);}
+ function schedule(){clearTimeout(timer);if(sheet.element.open||pending||state?.busy===true||state?.locked===true||busyPhases.has(state?.phase))timer=setTimeout(()=>{if(!pending)load();else schedule();},active()?1000:5000);}
  function openSelection(show=true,saved=false){const row=inventory.selection(),previous=state?.device,retained=retainedRecord();if(saved&&retained)selected=previous;else if(available(row))selected=row;else if(retained&&(!row||sn(row)===sn(previous)))selected=previous;else return false;actionError='';transportError='';epoch++;fresh=false;if(show)sheet.open();render();load();return true;}
  check.onclick=()=>!fresh||uncertain||state?.supported===false?load():checkSelected();
  primary.onclick=()=>{if(!fresh||uncertain||transportError){load();return;}const viewer=state?.viewer;if(viewer?.active===true&&viewer.phase==='running'&&viewer.serial===sn(selected)&&/^[0-9a-f]{32}$/.test(viewer.session_id||'')){request({name:'firmware_check',serial:sn(selected),viewer_token:viewer.session_id});return;}if(preview())request({name:'firmware_upgrade',preview_token:state.preview.token,confirmed:true});else if(fresh&&same()&&(recoveryPhases.has(state.phase)||state.locked===true||state.recovery_required===true))request({name:'firmware_recovery_check'});else checkSelected();};
  resume.onclick=()=>openSelection(true,true);
- sheet.element.addEventListener('close',()=>clearTimeout(timer));
+ const discoveryObserver=new MutationObserver(syncDiscovery);discoveryObserver.observe(sheet.element,{attributes:true,attributeFilter:['open']});
+ sheet.element.addEventListener('close',()=>{syncDiscovery();schedule();});
  window.addEventListener('device-inventory-selection',render);window.addEventListener('device-inventory-update',render);window.addEventListener('wuji-language',render);
  window.addEventListener('device-inventory-use',()=>{openRequest++;sheet.close();document.getElementById('di-device-more')?.removeAttribute('open');});
  window.addEventListener('console-offline',()=>{fresh=false;transportError=t('工作台服务已离线。','Workbench service is offline.');render();});

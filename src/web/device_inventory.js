@@ -25,7 +25,7 @@
  for(const element of [...host.children])if(element.matches('.cr-device-grid,.cr-next'))advancedBody.append(element);
  root.after(advanced);const oldIntro=host.querySelector(':scope > .hub-intro');if(oldIntro)oldIntro.hidden=true;
  let inventory=null,previousDisplayRows=[],scanFocus='',online=false,loading=null,scanning=false,using=false,pendingMode='',filter='all',activeSerial='',useHandler=null,timer=0,lastRead=0,backoffUntil=0,lastErrorKey='',localError='',consumerError='',consoleState=null,destroyed=false,discoveryWanted=true,sessionBaseline=new Set(),sessionCount=0,pausedForSession=false;
- const selectedByKind=new Map(),cards=new Map();
+ const selectedByKind=new Map(),cards=new Map(),discoveryHolds=new Set();
  const getTime=value=>{if(typeof value==='number'&&Number.isFinite(value))return value<1e12?value*1000:value;if(typeof value==='string'){const parsed=Date.parse(value);return Number.isFinite(parsed)?parsed:0;}return 0;};
  const rows=()=>{const current=Array.isArray(inventory?.devices)?inventory.devices.filter(d=>d&&typeof(d.sn||d.serial)==='string'):[],observed=online&&inventory?.scanning===true&&!inventory.error&&!localError&&!current.length?previousDisplayRows:current;return observed.filter(fresh);};
  const sn=row=>row?.sn||row?.serial||'';
@@ -109,9 +109,10 @@
   const busy=scanning||inventory?.scanning===true,hasSelection=!!selected(),row=selected(),canUse=usable(row)&&!using&&!busy;
   if(busy&&document.activeElement?.name==='inventory-device'&&!scanFocus)scanFocus=document.activeElement.value;
   setText(title,root.closest('#page-home')?t('当前设备','Current devices'):t('发现你的设备','Your devices'));setText(description,t('自动查找手套与灵巧手，选中后再进入需要的功能。','Find gloves and hands automatically. Select one, then choose how to use it.'));
-  const scanState=busy?'scanning':!online?'offline':!discoveryWanted?'paused':inventory?.scan_allowed!==true?'waiting':'ready';
+  const scanState=busy?'scanning':!online?'offline':discoveryHolds.size||!discoveryWanted?'paused':inventory?.scan_allowed!==true?'waiting':'ready';
   setText(discoveryState,busy?t('正在查找设备…','Finding devices…'):!online?t('服务未连接','Service offline'):!discoveryWanted?sessionCount?t('设备会话 · 查找已暂停','Device session · Discovery paused'):(consoleState?.unconfirmed_devices||[]).length?t('停用待确认 · 查找已暂停','Stop unconfirmed · Discovery paused'):t('会话状态待核对 · 查找已暂停','Session unverified · Discovery paused'):inventory?.scan_allowed!==true?t('等待可查找','Waiting to discover'):t('自动查找 · 每5秒','Auto-discovery · Every 5s'));
-  discoveryState.dataset.state=scanState;setText(scanText,busy?t('查找中…','Finding…'):!discoveryWanted?t('添加设备','Add device'):t('重新查找','Find devices'));scanButton.dataset.state=scanState;scanButton.setAttribute('aria-busy',String(busy));scanButton.setAttribute('aria-label',busy?t('正在查找设备','Finding devices'):!discoveryWanted?t('添加设备，恢复自动查找','Add device and resume automatic discovery'):t('重新查找设备','Find devices again'));scanButton.disabled=busy||using||!online||(discoveryWanted&&inventory?.scan_allowed!==true);
+  if(discoveryHolds.size)setText(discoveryState,t('设备更新 · 查找已暂停','Device update · Discovery paused'));
+  discoveryState.dataset.state=scanState;setText(scanText,busy?t('查找中…','Finding…'):!discoveryWanted?t('添加设备','Add device'):t('重新查找','Find devices'));scanButton.dataset.state=scanState;scanButton.setAttribute('aria-busy',String(busy));scanButton.setAttribute('aria-label',busy?t('正在查找设备','Finding devices'):!discoveryWanted?t('添加设备，恢复自动查找','Add device and resume automatic discovery'):t('重新查找设备','Find devices again'));scanButton.disabled=busy||using||!online||discoveryHolds.size>0||(discoveryWanted&&inventory?.scan_allowed!==true);
   scanButton.title=!online?t('正在读取设备状态','Reading device status'):!discoveryWanted?t('恢复自动查找，不影响当前设备会话','Resume automatic discovery without changing active sessions'):inventory?.scan_allowed!==true?(inventory?.blocked_reason||t('当前会话暂不允许查找','Discovery is unavailable during this session')):t('只读发现，不连接设备或启动动作','Discovery only; does not connect or move devices');
   for(const entry of statRows){setText(entry.value,String(all.filter(d=>d.kind===entry.kind&&d.side===entry.side).length));setText(entry.label,t((entry.side==='left'?'左':'右')+(entry.kind==='hand'?'灵巧手':'手套'),(entry.side==='left'?'Left ':'Right ')+(entry.kind==='hand'?'hand':'glove')));}
   filters.setAttribute('aria-label',t('筛选设备','Filter devices'));for(const button of filterButtons){setText(button,button.dataset.filter==='all'?t('全部','All'):button.dataset.filter==='hand'?t('灵巧手','Hands'):t('手套','Gloves'));button.setAttribute('aria-pressed',String(button.dataset.filter===filter));}
@@ -158,7 +159,7 @@
   })();return loading;
  }
  async function scan(manual=false){
-  if(destroyed||scanning||using||loading||!online||inventory?.scanning||inventory?.scan_allowed!==true||(!manual&&Date.now()<backoffUntil))return false;
+  if(destroyed||discoveryHolds.size||scanning||using||loading||!online||inventory?.scanning||inventory?.scan_allowed!==true||(!manual&&Date.now()<backoffUntil))return false;
   const token=consoleState?.csrf||window.WujiConnection?.state()?.csrf;if(!token)return false;
   scanning=true;localError='';render();
   try{const response=await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json','X-Console-Token':token},body:JSON.stringify({name:'device_inventory_scan'}),signal:AbortSignal.timeout(15000)}),value=await response.json();if(!response.ok||value.ok===false)throw Error(value.error||t('设备查找未完成','Discovery did not complete'));backoffUntil=0;await refresh();return true;}
@@ -186,6 +187,8 @@
   selection(kind){const serial=kind?selectedByKind.get(kind):activeSerial;const row=rows().find(item=>sn(item)===serial);return usable(row)?clone(row):null;},
   mount(target){if(target){if(root.parentElement!==target)target.append(root);}else if(root.previousSibling!==anchor)anchor.after(root);render();visibilityChanged();},
   select,refresh,findMore,scan:()=>scan(true),snapshot:()=>inventory?JSON.parse(JSON.stringify(inventory)):null,
+  pauseDiscovery(reason){if(typeof reason!=='string'||!reason)return;const changed=!discoveryHolds.has(reason);discoveryHolds.add(reason);if(changed)render();},
+  resumeDiscovery(reason){if(discoveryHolds.delete(reason)){render();schedule(0);}},
   show(kind='all'){filter=['hand','glove'].includes(kind)?kind:'all';window.WujiConnectionHub.show('device');render();schedule(0);scanButton.focus();},
   setUseHandler(handler){if(typeof handler!=='function')throw TypeError('Device inventory requires a use handler');useHandler=handler;},
   showSettings(kind){if(kind==='glove'){location.hash='#glove';window.WujiWorkspace?.showPage();document.getElementById('glove-device')?.focus({preventScroll:true});return;}advanced.open=true;advancedBody.querySelector('#connect')?.focus();advanced.scrollIntoView({block:'nearest'});},

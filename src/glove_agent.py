@@ -191,7 +191,9 @@ def worker_glove(requests,events,continuation=None,sdk_requirement=None):
             all_devices=list(manager.scan());hands=candidates(all_devices)
             from glove_discovery import scan_gloves
             from zenoh_route import managed_wsl
-            return scan_gloves(manager,sdk,all_devices,allow_direct=managed_wsl())
+            # Discovery must never open even a temporary device handle. A
+            # direct-address connection belongs only to an explicit connect.
+            return scan_gloves(manager,sdk,all_devices)
         devices=scan();devices_at=time.time();state='ready';message='选择手套和标定用户 / Select glove and SDK user'
         if continuation is not None:
             if not any(d['serial']==continuation['serial'] for d in devices):

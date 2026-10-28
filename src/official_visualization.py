@@ -1,5 +1,6 @@
 """Embed the original CLI viewer, without fabricating feedback or device state."""
 import copy
+from contextlib import contextmanager
 import json
 import os
 from pathlib import Path
@@ -39,6 +40,8 @@ class OfficialVisualization:
         self.lock=threading.RLock();self.process=None;self.thread=None;self.token=None;self.config=None
         self.native_job=None;self.native_stop=threading.Event()
         self.transport=None
+        self.scan_cancel=threading.Event();self.scan_done=threading.Event();self.scan_done.set()
+        self.scan_pauses=0
         self.state=dict(supported=sys.platform=='win32' or sys.platform.startswith('linux'),busy=False,active=False,phase='idle',device=None,devices=[],scanning=False,scanned_at=None,viewer_url=None,cli_version=None,error=None,logs=[],started_at=None,stream_freshness='not_reported',zero_on_start=False)
 
     def snapshot(self,theme=None):
@@ -85,32 +88,52 @@ class OfficialVisualization:
     def scan(self):
         token=self._begin_scan()
         try:
-            threading.Thread(target=self._collect_scan,args=(token,),name='Official CLI device discovery',daemon=True).start()
+            threading.Thread(target=self._collect_scan,args=(token,True),name='Official CLI device discovery',daemon=True).start()
         except Exception as error:
             self._set(devices=[],scanned_at=None,busy=False,scanning=False,error=str(error)[:700])
             with gate(self.folder):release(token,self.folder)
+            self.scan_done.set()
             raise
         return self.snapshot()
 
     def check_scan(self):
+        with self.lock:
+            if self.scan_pauses:raise ValueError('设备更新中，查找已暂停 / Device update in progress; discovery is paused')
         (self.scan_check or self.idle_check)()
 
-    def _begin_scan(self):
+    @contextmanager
+    def discovery_priority(self,timeout=50):
+        """Yield only our finite discovery read to an explicit maintenance task."""
+        with gate(self.folder),self.lock:
+            self.scan_pauses+=1
+            self.scan_cancel.set()
+        try:
+            if not self.scan_done.wait(timeout):
+                raise ValueError('设备查找尚未结束，请稍后重试 / Device discovery has not finished; retry shortly')
+            yield
+        finally:
+            with self.lock:self.scan_pauses-=1
+
+    def _begin_scan(self,inline=False):
         with gate(self.folder):
+            with self.lock:
+                if self.scan_pauses and not inline:raise ValueError('设备更新中，查找已暂停 / Device update in progress; discovery is paused')
             token=reserve('scan',self.folder)
-            try:self.check_scan()
+            try:(self.scan_check or self.idle_check)()
             except Exception:release(token,self.folder);raise
             with self.lock:
                 if self.state['busy'] or self.state['active']:release(token,self.folder);raise ValueError('Official CLI session is busy')
                 self.state.update(busy=True,scanning=True,error=None,devices=[],scanned_at=None)
+                self.scan_cancel.clear();self.scan_done.clear()
         return token
 
-    def _collect_scan(self,token):
+    def _collect_scan(self,token,cancellable=False):
+        clean=True
         try:
             from bridge_config import load_config
             from calibration_cli import cli_json
             config=load_config()
-            value=cli_json(config,'devices')
+            value=cli_json(config,'devices',cancelled=self.scan_cancel.is_set) if cancellable else cli_json(config,'devices')
             self._set(backend='windows_native' if native_network(config) else 'linux_controller')
             devices=value.get('devices')
             if not isinstance(devices,list):raise ValueError('Invalid official device list')
@@ -118,17 +141,21 @@ class OfficialVisualization:
             self._set(devices=devices,scanned_at=time.time())
             return copy.deepcopy(devices)
         except Exception as error:
-            self._set(devices=[],scanned_at=None,error=str(error)[:700])
+            from official_device_discovery import DiscoveryDeferred,DiscoveryCleanupUnconfirmed
+            clean=not isinstance(error,DiscoveryCleanupUnconfirmed)
+            self._set(devices=[],scanned_at=None,error=None if isinstance(error,DiscoveryDeferred) else str(error)[:700])
             return None
         finally:
             with gate(self.folder):
                 # Finish the state transition before another session can start.
-                self._set(busy=False,scanning=False)
-                release(token,self.folder)
+                if clean:
+                    self._set(busy=False,scanning=False)
+                    release(token,self.folder)
+                    self.scan_done.set()
 
     def discover_inline(self):
         """Explicit synchronous scan for calibration, with identical ownership."""
-        token=self._begin_scan()
+        token=self._begin_scan(inline=True)
         devices=self._collect_scan(token)
         if devices is None:raise ValueError(self.snapshot().get('error') or 'Official discovery failed')
         return devices
