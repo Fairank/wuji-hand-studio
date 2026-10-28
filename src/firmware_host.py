@@ -25,6 +25,22 @@ SAFE_ACTIONS = {'disconnect', 'hardware_stop', 'glove_stop', 'glove_disconnect',
     'session_keepalive', 'hardware_keepalive', 'glove_keepalive', 'program_keepalive', 'group_beat'}
 
 
+def firmware_environment():
+    """Keep the SDK user's home, supplying Windows HOME only to the child.
+
+    The official firmware downloader reads HOME even on Windows. A desktop
+    process normally has USERPROFILE instead. App-data or software-check homes
+    would create a second SDK user library, so neither is used as a fallback.
+    """
+    env={**os.environ,'WUJI_NO_UPDATE_CHECK':'1','WUJI_TELEMETRY_DISABLE':'1'}
+    if sys.platform=='win32' and not env.get('HOME'):
+        home=env.get('USERPROFILE') or str(Path.home())
+        if not isinstance(home,str) or not Path(home).is_absolute() or '\x00' in home:
+            raise ValueError('无法确定当前用户目录 / Current user home is unavailable')
+        env['HOME']=home
+    return env
+
+
 def process_state(pid, expected_start):
     """Three states: permission/query failures are not evidence of process death."""
     if sys.platform!='win32':return 'unknown'
@@ -330,7 +346,7 @@ class FirmwareHost:
                 with self.lock:self.query_exit_confirmed=True
             raise
         command = [component['binary'], *argv]
-        env = {**os.environ, 'WUJI_NO_UPDATE_CHECK':'1', 'WUJI_TELEMETRY_DISABLE':'1'}
+        env = firmware_environment()
         if not interactive:
             cancelled=cancelled or (lambda:False)
             if self.runner is None:return self._background_query(command,env,cancelled)
@@ -347,9 +363,9 @@ class FirmwareHost:
             if len(result.stdout or '') + len(result.stderr or '') > 2 * 1024 * 1024:
                 raise ValueError('Official firmware report exceeds its limit')
             return dict(returncode=result.returncode, stdout=result.stdout, stderr=result.stderr, exited=True)
-        return self._interactive(command, serial, on_event)
+        return self._interactive(command, serial, on_event, env=env)
 
-    def _interactive(self, command, serial, on_event):
+    def _interactive(self, command, serial, on_event, *, env=None):
         # Keep a durable exact device identity before launching. On a crash a
         # surviving/uncertain firmware marker must never be auto-cleared.
         with gate(self.folder):
@@ -358,7 +374,7 @@ class FirmwareHost:
             marker.update(serial=serial, command='official-interactive-upgrade')
             atomic(self.folder / 'session.json', marker)
         from native_terminal_worker import _spawn
-        process = (self.spawn or _spawn)(command)
+        process = (self.spawn or _spawn)(command,env=firmware_environment() if env is None else env)
         run_id = uuid.uuid4().hex
         # pywinpty's destructor terminates a live PTY. Retain it before *any*
         # post-spawn I/O/identity operation can fail and unwind this stack.
@@ -401,6 +417,7 @@ class FirmwareHost:
             errors.append(str(error)[:400]);status = None;exited = False
         with self.lock:
             self.session.update(running=not exited, status='finished' if exited else 'unknown', exitstatus=status)
+            output=''.join(row['text'] for row in self.chunks)
             if exited:self.process = None
-        return dict(returncode=status, stdout='', stderr='; '.join(errors), exited=exited,
+        return dict(returncode=status, stdout=output, stderr='; '.join(errors), exited=exited,
                     official_interactive=True, run_id=run_id)

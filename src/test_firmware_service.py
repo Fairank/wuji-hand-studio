@@ -274,6 +274,23 @@ class FirmwareServiceTests(unittest.TestCase):
         self.assertEqual(state['result']['returncode'], 1)
         self.assertFalse(state['locked'])
 
+    def test_official_home_failure_is_preserved_and_does_not_retry_or_read_back(self):
+        from test_firmware_environment import HEADER,BOTTOM,row,ERROR
+        token=self.ready()
+        raw=HEADER+row(SN)+BOTTOM
+        self.host.results=[dict(exited=True,returncode=1,stdout=raw,stderr='')]
+        count=len(self.host.calls);self.service.start_upgrade(token,confirmed=True);state=self.join()
+        self.assertEqual(state['phase'],'failed');self.assertFalse(state['locked'])
+        self.assertEqual(state['error'],ERROR);self.assertEqual(state['result']['official_error'],ERROR)
+        self.assertEqual(state['result']['stdout'],raw);self.assertEqual(state['result']['sn'],SN)
+        self.assertEqual(len(self.host.calls),count+1)
+
+    def test_success_exit_never_uses_an_old_failed_terminal_row_as_completion(self):
+        from test_firmware_environment import HEADER,BOTTOM,row
+        token=self.ready();self.host.results=[dict(exited=True,returncode=0,stdout=HEADER+row(SN)+BOTTOM,stderr='')]
+        self.service.start_upgrade(token,confirmed=True);state=self.join()
+        self.assertNotEqual(state['phase'],'verified');self.assertNotIn('official_error',state['result'])
+
     def test_release_failure_preserves_unknown_state(self):
         self.host.release_error = True
         self.service.start_check(SN)

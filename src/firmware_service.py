@@ -50,6 +50,41 @@ def _serial(value):
     return value
 
 
+def official_failure_detail(output,sn):
+    """Display one exact-SN failed row; never infer completion or progress.
+
+    Raw terminal output remains in the result and terminal archive. Unknown
+    table formats and other devices cannot become this device's explanation.
+    """
+    if not isinstance(output,str) or len(output)>_MAX_REPORT:return None
+    clean=re.sub(r'\x1b\[[0-?]*[ -/]*[@-~]','',output)
+    clean=re.sub(r'\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)','',clean)
+    found=[];inside=False;current=None;target_rows=0
+    for line in clean.splitlines():
+        if line.startswith('└'):
+            if not re.fullmatch(r'└─+(?:┴─+){5}┘',line):return None
+            if current:found.append(current)
+            current=None;inside=False
+            continue
+        if not line.startswith('│') or not line.endswith('│'):continue
+        cells=[part.strip() for part in line[1:-1].split('┆')]
+        if [cell.lower() for cell in cells]==['sn','status','before','after','duration','detail']:
+            if inside:return None
+            if current:found.append(current)
+            current=None;inside=True
+            continue
+        if not inside or len(cells)!=6:continue
+        if cells[0]==sn:target_rows+=1
+        if all(not cell for cell in cells[:5]) and current is not None:
+            current+=' '+cells[5]
+            continue
+        if current:found.append(current)
+        current=cells[5] if cells[0]==sn and cells[1].lower()=='failed' else None
+    # A clipped table (or repeated/conflicting summaries) is retained as raw
+    # output, never guessed into a short explanation.
+    return found[0] if not inside and target_rows==1 and len(found)==1 and _text(found[0],700) else None
+
+
 def _identity(value):
     # Host identity should include strict binary digest, version and controller.
     if isinstance(value, str) and _text(value, 4096) and value:
@@ -398,12 +433,14 @@ class FirmwareService:
             code, out, err = self._response(value)
             with self.lock:
                 self.state['result'] = dict(returncode=code, stdout=out, stderr=err,
-                                           verdict='official_process_exited')
+                                           sn=device['sn'],verdict='official_process_exited')
             # Human-mode exit zero includes No/cancel/no-change. Read the same
             # device while retaining the lease, and bind success to the target
             # from this operation's verified preflight, never to terminal text.
             if code:
-                self._finish('failed', (err or '官方升级未完成 / Official upgrade did not complete')[:800])
+                detail=official_failure_detail(out,device['sn'])
+                with self.lock:self.state['result']['official_error']=detail
+                self._finish('failed', (err or detail or '官方升级未完成 / Official upgrade did not complete')[:800])
                 return
             self._verify_upgrade(device, preview)
         except Exception as error:

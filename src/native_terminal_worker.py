@@ -38,7 +38,7 @@ def _validate_argv(argv):
     return list(argv)
 
 
-def _spawn(argv):
+def _spawn(argv, *, env=None):
     # Import is deliberately lazy; importing the worker starts no process.
     from winpty import Backend, PtyProcess, __version__
     if __version__ != PYWINPTY_VERSION or Backend.ConPTY != 0:
@@ -51,7 +51,9 @@ def _spawn(argv):
     previous = os.environ.get('PYWINPTY_BLOCK')
     os.environ['PYWINPTY_BLOCK'] = '0'
     try:
-        return PtyProcess.spawn(argv, dimensions=DIMENSIONS, backend=str(Backend.ConPTY))
+        options=dict(dimensions=DIMENSIONS,backend=str(Backend.ConPTY))
+        if env is not None:options['env']=dict(env)
+        return PtyProcess.spawn(argv, **options)
     finally:
         if previous is None:
             os.environ.pop('PYWINPTY_BLOCK', None)

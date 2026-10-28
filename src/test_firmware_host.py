@@ -340,7 +340,10 @@ class FirmwareHostTests(unittest.TestCase):
         self.assertEqual(result['returncode'],0)
         self.assertEqual(process.writes,[])
         self.assertFalse(process.closed)
-        self.host.spawn.assert_called_once_with(['verified-wuji.exe','upgrade','--sn',SN])
+        self.host.spawn.assert_called_once()
+        self.assertEqual(self.host.spawn.call_args.args[0],['verified-wuji.exe','upgrade','--sn',SN])
+        self.assertEqual(self.host.spawn.call_args.kwargs['env']['WUJI_NO_UPDATE_CHECK'],'1')
+        self.assertTrue(Path(self.host.spawn.call_args.kwargs['env']['HOME']).is_absolute())
 
     def test_unknown_transport_preserves_process_and_marker_without_killing(self):
         self.write_marker()
@@ -352,6 +355,16 @@ class FirmwareHostTests(unittest.TestCase):
         self.assertIs(self.host.process,process)
         self.assertFalse(process.closed)
         self.assertEqual(cli_coordination.reservation(self.folder)['token'],TOKEN)
+
+    def test_failed_interactive_output_is_preserved_with_child_environment(self):
+        self.write_marker();process=FakeProcess(status=1)
+        parts=['\x1b[31mfailed\x1b[0m\r\n','HOME not set; cannot locate firmware cache\r\n']
+        process.read=Mock(side_effect=[*parts,EOFError()]);self.host.spawn=Mock(return_value=process)
+        with patch.object(self.host,'_component',return_value=self.component),patch('firmware_host.identity',return_value='child'):
+            result=self.host(['upgrade','--sn',SN],mutating=True,interactive=True)
+        self.assertTrue(result['exited']);self.assertEqual(result['returncode'],1)
+        self.assertEqual(result['stdout'],''.join(parts));self.assertEqual(process.writes,[])
+        self.assertTrue(Path(self.host.spawn.call_args.kwargs['env']['HOME']).is_absolute())
 
     def test_spawned_process_is_retained_even_if_persistent_marker_write_fails(self):
         self.write_marker()

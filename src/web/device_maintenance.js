@@ -47,6 +47,9 @@
  function label(row){const model=row?.model;return typeof model==='string'&&model.length<100?model:row?.kind==='glove'?'Wuji Glove':'Wuji Hand';}
  function humanError(value){
   const message=String(value||'');
+  if(/HOME not set; cannot locate firmware cache/i.test(message))return t('升级工具找不到固件保存目录。','The update tool could not locate its firmware download folder.');
+  const official=same()&&state?.result?.sn===sn(selected)&&Number.isInteger(state?.result?.returncode)&&state.result.returncode!==0&&state?.result?.official_error;
+  if(typeof official==='string'&&official&&message===official)return t('官方升级失败：','Official update failed: ')+official;
   if(/official flow ended|device version was read|未能读回设备版本|未匹配本次更新目标/i.test(message))return t('官方流程已结束，设备版本尚未确认。请重新检查。','The official flow ended. Check the device version again to confirm the update.');
   if(/idle|session|会话|disconnect|断开|workspace|工作区/i.test(message))return t('请先结束设备会话，再检查更新。','End device sessions before checking updates.');
   if(/expired|过期|token|preview/i.test(message))return t('更新方案已过期，请重新检查。','The update plan expired. Check again.');
