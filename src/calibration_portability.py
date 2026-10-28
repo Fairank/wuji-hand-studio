@@ -87,9 +87,17 @@ def calibration_proof(snapshot, *, workspace='main'):
             or type(run.get('exit_code')) is not int or run['exit_code']!=0
             or run.get('cleanup_confirmed') is not True or run.get('error')
             or run.get('source')!='official_jsonl_native'
-            or run.get('cli_version')!=PINNED_VERSION
+            or not isinstance(run.get('cli_version'),str)
             or not isinstance(run.get('id'),str) or not RUN.fullmatch(run['id'])):
         raise ValueError('请先完成并确认本次引导标定 / Finish and verify this guided calibration first')
+    # Retained successful runs keep their original component identity even
+    # after a newer CLI becomes current. Legacy bundled-pin runs remain valid.
+    if run['cli_version']!=PINNED_VERSION or run.get('cli_binary_sha256'):
+        from native_cli_update import version_info
+        component=version_info(run['cli_version'],strict=True)
+        if (run.get('cli_binary_sha256')!=component['binary_sha256']
+                or run.get('cli_archive_sha256')!=component['archive_sha256']):
+            raise ValueError('Calibration component identity could not be verified')
     profile=run.get('user');serial=run.get('serial');side=run.get('side')
     event=run.get('result');result=event.get('result') if isinstance(event,dict) else None
     if (not isinstance(profile,str) or not PROFILE.fullmatch(profile) or profile.lower()=='default'
@@ -108,7 +116,7 @@ def calibration_proof(snapshot, *, workspace='main'):
     path=Path(result['calibrated_urdf'])
     digest,size=file_digest(path)
     proof=dict(source_run_id=run['id'],serial=serial,side=side,source_profile=profile,
-        source_workspace=str(workspace),model_sha256=digest,model_bytes=size,model_path=str(path))
+        source_workspace=str(workspace),model_sha256=digest,model_bytes=size,model_path=str(path),source_cli_version=run['cli_version'])
     proof['expected_revision']=hashlib.sha256(json.dumps(proof,sort_keys=True,separators=(',',':')).encode()).hexdigest()
     return proof
 

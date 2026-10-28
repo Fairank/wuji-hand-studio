@@ -161,15 +161,17 @@ class NativeCLIStore(CLIReleaseStore):
             raise ReleaseStoreError('ZIP must contain exactly one wuji.exe candidate')
         return sorted(files, key=lambda entry: entry['path']), binaries[0]
 
-    def _validate_software(self, binary, stage):
+    def _validate_software(self, binary, stage, version=PINNED_VERSION, *, calibration=False):
         home = stage / 'software-check-home'
         home.mkdir()
         keep = {'PATH', 'SystemRoot', 'SYSTEMROOT', 'WINDIR', 'COMSPEC', 'PATHEXT', 'TMP', 'TEMP', 'TMPDIR'}
         env = {key: value for key, value in os.environ.items() if key in keep}
         env.update(HOME=str(home), USERPROFILE=str(home), LOCALAPPDATA=str(home), APPDATA=str(home),
-                   XDG_CONFIG_HOME=str(home), XDG_DATA_HOME=str(home))
+                   XDG_CONFIG_HOME=str(home), XDG_DATA_HOME=str(home),WUJI_NO_UPDATE_CHECK='1',WUJI_TELEMETRY_DISABLE='1')
         evidence = {}
-        for label, arguments in (('version', ['--version']), ('help', ['--help']), ('viz', ['viz', '--help'])):
+        checks=(('version',['--version']),('help',['--help']),('viz',['viz','--help']))
+        if calibration:checks+=(('calibration',['calib','hand-model','--help']),)
+        for label, arguments in checks:
             self._check_cancel()
             result = self.runner([str(binary), *arguments], capture_output=True, text=True,
                                  encoding='utf-8', errors='replace', timeout=min(30, self.timeout),
@@ -181,10 +183,12 @@ class NativeCLIStore(CLIReleaseStore):
             if not isinstance(output, str) or len(output) > 128 * 1024:
                 raise ReleaseStoreError('Native CLI software check returned invalid output')
             evidence[label] = output
-        if (not re.search(r'\b' + re.escape(PINNED_VERSION) + r'\b', evidence['version']) or
+        if (not re.search(r'\b' + re.escape(version) + r'\b', evidence['version']) or
                 '--jsonl' not in evidence['help'] or '--no-zero' not in evidence['viz'] or
                 '--no-open' not in evidence['viz']):
             raise ReleaseStoreError('Native CLI version or required interfaces do not match')
+        if calibration and ('--sn' not in evidence['calibration'] or '--timeout-s' not in evidence['calibration']):
+            raise ReleaseStoreError('Native CLI calibration interface is incompatible')
         shutil.rmtree(home)
         return evidence
 
@@ -348,11 +352,31 @@ class NativeCLIStore(CLIReleaseStore):
                     shutil.rmtree(stage)
 
 
-def resolve(version=PINNED_VERSION, *, folder=None,strict=False):
-    return NativeCLIStore(folder).resolve(version,strict=strict)
+def current_info(*,folder=None,strict=False):
+    """Verified selected Windows release; the bundled pin remains the fallback."""
+    from native_cli_update import selection,version_info
+    saved=selection(folder);current=saved.get('current')
+    if current is None:return version_info(PINNED_VERSION,folder=folder,strict=strict)
+    info=version_info(current['version'],folder=folder,strict=strict)
+    if any(current.get(k)!=info.get(k) for k in ('version','archive_sha256','binary_sha256')):
+        raise ReleaseStoreError('Selected native CLI differs from its verified version')
+    return info
 
 
-def prepare(version=PINNED_VERSION, *, folder=None, release=None, archive=None,strict=False):
+def resolve(version=None, *, folder=None,strict=False):
+    if version is None:return current_info(folder=folder,strict=strict)['binary']
+    from native_cli_update import version_info
+    return version_info(version,folder=folder,strict=strict)['binary']
+
+
+def prepare(version=None, *, folder=None, release=None, archive=None,strict=False):
+    if version is None:
+        from native_cli_update import selection
+        if selection(folder).get('current') is not None:return current_info(folder=folder,strict=strict)
+        version=PINNED_VERSION
+    if version not in (PINNED_VERSION,'v'+PINNED_VERSION):
+        from native_cli_update import ManagedNativeCLIStore
+        return ManagedNativeCLIStore(folder).prepare(version,release=release,archive=archive,strict=strict)
     if version in (PINNED_VERSION,'v'+PINNED_VERSION) and release is None and archive is None:
         from runtime_paths import RESOURCE
         bundled=RESOURCE/'official-cli-native'

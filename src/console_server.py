@@ -494,9 +494,12 @@ class Controller:
         if isinstance(command,dict) and command.get('name') in {'connect','runtime_select','bridge_config_save','bridge_password_save','bridge_password_forget','parameters_sync','doctor_version','doctor_run','doctor_support','device_profile_select','glove_connect'}:
             from managed_runtime import status as runtime_status
             if runtime_status()['busy']:raise ValueError('内置控制环境正在安装，请等待完成 / Wait for controller setup to finish')
-        if isinstance(command,dict) and command.get('name') in {'official_cli_check','official_cli_update','official_cli_rollback','official_viz_scan','device_inventory_scan','official_viz_start','official_viz_stop'}:
+        if isinstance(command,dict) and command.get('name') in {'official_cli_check','official_cli_update','official_cli_rollback','official_cli_auto_update','official_viz_scan','device_inventory_scan','official_viz_start','official_viz_stop'}:
             if getattr(self,'desktop_closing',False) and command['name']!='official_viz_stop':raise ValueError('Session is closing')
             name=command['name']
+            if name=='official_cli_auto_update':
+                if set(command)!={'name','enabled'} or type(command.get('enabled')) is not bool:raise ValueError('Invalid CLI automatic update preference')
+                return dict(official_cli=self.official_cli.set_auto_update(command['enabled']))
             if name=='official_cli_check':return dict(official_cli=self.official_cli.start(check_only=True))
             if name=='official_cli_update':return dict(official_cli=self.official_cli.start())
             if name=='official_cli_rollback':return dict(official_cli=self.official_cli.rollback())
@@ -1455,7 +1458,7 @@ class Handler(BaseHTTPRequestHandler):
                 if self.path!='/api/action':raise ValueError('Task pages cannot manage the desktop')
                 if (os.environ.get('WUJI_FLEET_PARENT') and payload.get('name') in {
                         'official_viz_start','calibration_start','calibration_handover',
-                        'calibration_profile_create','calibration_profile_switch','official_cli_update','official_cli_rollback'}):
+                        'calibration_profile_create','calibration_profile_switch','official_cli_update','official_cli_rollback','official_cli_auto_update'}):
                     raise ValueError('请在主工作台执行官方标定任务 / Open official calibration in the main workbench')
                 result=execute(self.server.controller,*task_scope,payload,**self._task_view_options())
             elif self.path == '/api/desktop':
@@ -1470,7 +1473,7 @@ class Handler(BaseHTTPRequestHandler):
                 result=self.server.tasks.action(payload)
             elif (os.environ.get('WUJI_FLEET_PARENT') and payload.get('name') in {
                     'official_viz_start','calibration_start','calibration_handover',
-                    'calibration_profile_create','calibration_profile_switch','official_cli_update','official_cli_rollback'}):
+                    'calibration_profile_create','calibration_profile_switch','official_cli_update','official_cli_rollback','official_cli_auto_update'}):
                 raise ValueError('请在主工作台执行官方标定任务 / Open official calibration in the main workbench')
             elif str(payload.get('name','')).startswith('official_studio_'):
                 if payload.get('name') not in {'official_studio_close','official_studio_probe'}:

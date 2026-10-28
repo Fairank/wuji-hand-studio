@@ -15,7 +15,7 @@
  <div class="ot-actions"><button id="ot-check" type="button" class="primary"></button><button id="ot-install" type="button"></button><button id="ot-select" type="button"></button></div>
  <details id="ot-system"><summary id="ot-system-title"></summary><p id="ot-system-note"></p><button id="ot-system-install" type="button"></button><p id="ot-system-status" role="status"></p></details>`;
  const releases=document.createElement('div');releases.className='ot-cli-release';
- releases.innerHTML='<div class="ot-cli-release-row"><span id="ot-cli-release-state" role="status"></span><div class="ot-cli-release-actions"><button id="ot-cli-check" type="button"></button><button id="ot-cli-update" type="button"></button><button id="ot-cli-rollback" type="button"></button></div></div><p id="ot-cli-release-error" role="alert"></p><details><summary id="ot-cli-release-details-label"></summary><p id="ot-cli-release-details"></p></details>';
+ releases.innerHTML='<div class="ot-cli-release-row"><span id="ot-cli-release-state" role="status"></span><div class="ot-cli-release-actions"><button id="ot-cli-check" type="button"></button><button id="ot-cli-update" type="button"></button><button id="ot-cli-rollback" type="button"></button></div></div><div id="ot-cli-auto-row" class="ot-cli-auto-row" hidden><div><label id="ot-cli-auto-label" for="ot-cli-auto"></label><p id="ot-cli-auto-note"></p></div><button id="ot-cli-auto" class="ot-cli-switch" type="button" role="switch" aria-checked="false" aria-labelledby="ot-cli-auto-label" aria-describedby="ot-cli-auto-note"><span></span></button></div><div id="ot-cli-progress-wrap" hidden><div class="ot-cli-progress-heading"><span id="ot-cli-progress-label"></span><span id="ot-cli-progress-detail"></span></div><progress id="ot-cli-progress" max="100" aria-labelledby="ot-cli-progress-label"></progress></div><p id="ot-cli-release-error" role="alert"></p><details><summary id="ot-cli-release-details-label"></summary><p id="ot-cli-release-details"></p></details>';
  card.querySelector('#ot-system').before(releases);host.prepend(card);
  // Daily version controls stay first. Environment repair keeps the same
  // controls and listeners in a disclosure rather than another dashboard.
@@ -24,7 +24,7 @@
  for(const selector of ['#ot-description','.ot-table','.ot-runtime','#ot-checked-at','#ot-status','#ot-error','.ot-actions'])environment.append(card.querySelector(selector));
  card.append(environment);
  let data=null,fresh=false,pending='',pollPromise=null,transportError='',actionError='',systemMessage='',lastRefresh=0,lastEnvironmentIssue='';
- let cliData=null,cliFresh=false,cliPending='',cliPromise=null,cliTransportError='',cliActionError='',cliLastRefresh=0;
+ let cliData=null,cliFresh=false,cliPending='',cliPromise=null,cliTransportError='',cliActionError='',cliLastRefresh=0,cliUnconfirmedPreference=null;
  function version(value){return typeof value==='string'&&value.trim()?value:t('未检查','Not checked');}
  function timestamp(value){
   if(value===null||value===undefined)return t('尚未检查','Not checked yet');
@@ -65,26 +65,38 @@
   $('ot-system').hidden=!r.supported||r.mode==='macvm';$('ot-system-install').disabled=busy;$('ot-system-status').textContent=systemMessage;renderCli();
  }
  function renderCli(){
-  const u=cliData?.update||{},current=cliData?.current||{},previous=cliData?.previous||{},busy=!!cliPending||!!cliData?.busy||!!u.checking||!!u.preparing;
+  const u=cliData?.update||{},current=cliData?.current||{},previous=cliData?.previous||{},busy=!!cliPending||cliFresh&&(!!cliData?.busy||!!u.checking||!!u.preparing);
+  const managed=u.update_method==='managed_native',phase=cliPending==='official_cli_check'?'checking':cliPending==='official_cli_update'?'checking':cliPending==='official_cli_rollback'?'verifying':u.phase;
   const bundledUpdate=cliFresh&&u.update_method==='workbench'&&u.newer_cli_available===true;
-  let label=!cliFresh?t('版本状态未核对','Version status unverified'):u.checking?t('正在检查更新','Checking for updates'):u.preparing?t('正在准备更新','Preparing update'):u.error?t('版本维护未完成','Version maintenance incomplete'):u.available?t('可更新至 ','Update available: ')+(u.latest_version||'—'):u.checked_at!=null?t('检查已完成','Check completed'):t('尚未检查更新','Updates not checked');
-  if(cliFresh&&u.checked_at!=null&&!busy&&!u.error&&!u.available&&u.latest_version&&u.latest_version===current.version)label=t('已是最新版本','Up to date');
+  const phaseLabels={checking:['正在检查更新','Checking for updates'],downloading:['正在下载更新','Downloading update'],verifying:['正在校验更新','Verifying update'],preparing:['正在准备更新','Preparing update'],waiting_idle:['设备使用中，空闲后更新','Waiting for devices to be idle'],ready:['更新已完成','Update complete']};
+  let label=!cliFresh?t('版本状态暂不可用','Version status unavailable'):phaseLabels[phase]?t(...phaseLabels[phase]):u.checking?t('正在检查更新','Checking for updates'):u.preparing?t('正在准备更新','Preparing update'):u.error?t('更新未完成','Update incomplete'):u.available?t('可更新至 ','Update available: ')+(u.latest_version||'—'):u.checked_at!=null?t('检查已完成','Check completed'):t('尚未检查更新','Updates not checked');
+  if(cliFresh&&phase!=='ready'&&u.checked_at!=null&&!busy&&!u.error&&!u.available&&u.latest_version&&u.latest_version===current.version)label=t('已是最新版本','Up to date');
   if(bundledUpdate&&!busy&&!u.error)label=t('随工作台更新 · ','Updates with workbench · ')+(u.latest_version||'—');
   $('ot-cli-release-state').textContent='CLI '+version(current.version)+' · '+label;
-  $('ot-cli-check').textContent=cliPending==='official_cli_check'||u.checking?t('正在检查…','Checking…'):t('检查更新','Check updates');$('ot-cli-update').textContent=cliPending==='official_cli_update'||u.preparing?t('正在准备…','Preparing…'):bundledUpdate?t('软件更新','Software update'):t('更新 CLI','Update CLI');$('ot-cli-rollback').textContent=t('回退上一版','Previous CLI');
+  $('ot-cli-check').textContent=!cliFresh?t('重新读取','Reload status'):phase==='checking'?t('正在检查…','Checking…'):t('检查更新','Check updates');$('ot-cli-update').textContent=busy&&phase!=='checking'?t('正在更新…','Updating…'):bundledUpdate?t('软件更新','Software update'):phase==='error'?t('重试更新','Retry update'):t('更新 CLI','Update CLI');$('ot-cli-rollback').textContent=t('切换至 ','Switch to ')+version(previous.version);
   $('ot-cli-check').disabled=busy;$('ot-cli-update').hidden=!bundledUpdate&&!u.available&&!u.preparing&&cliPending!=='official_cli_update';$('ot-cli-update').disabled=!cliFresh||busy||!bundledUpdate&&u.available!==true;$('ot-cli-rollback').hidden=!previous.version;$('ot-cli-rollback').disabled=!cliFresh||busy||!previous.version;
-  $('ot-cli-release-error').textContent=cliTransportError||cliActionError||u.error||'';
+  $('ot-cli-auto-row').hidden=!managed;$('ot-cli-auto-label').textContent=t('自动更新 CLI','Update CLI automatically');$('ot-cli-auto-note').textContent=cliPending==='official_cli_auto_update'?t('正在保存…','Saving…'):t('使用官方稳定版，设备空闲时安装。','Install official stable releases when devices are idle.');
+  $('ot-cli-auto').setAttribute('aria-checked',String(u.auto_update===true));$('ot-cli-auto').disabled=!cliFresh||!!cliPending;
+  $('ot-cli-auto').setAttribute('aria-busy',String(cliPending==='official_cli_auto_update'));
+  const failure=cliTransportError||cliActionError||(phase!=='waiting_idle'?u.error:'')||'';
+  $('ot-cli-release-error').textContent=failure?(cliTransportError?t('暂时无法读取更新状态，请重新读取。','Update status is unavailable. Reload to retry.'):cliActionError?cliActionError:t('更新未完成，当前版本仍可使用。请重试或查看版本详情。','Update did not complete. The current version remains available. Retry or see version details.')):'';
+  const progress=u.progress||{},showProgress=cliFresh&&['checking','downloading','verifying','preparing'].includes(phase),bar=$('ot-cli-progress'),received=progress.received_bytes,total=progress.total_bytes;
+  $('ot-cli-progress-wrap').hidden=!showProgress;$('ot-cli-progress-label').textContent=phaseLabels[phase]?t(...phaseLabels[phase]):'';
+  const known=phase==='downloading'&&Number.isFinite(received)&&Number.isFinite(total)&&total>0&&received>=0&&received<=total,mb=value=>(value/1048576).toFixed(1);
+  if(known){const percent=Math.floor(received/total*100);bar.value=percent;$('ot-cli-progress-detail').textContent=percent+'% · '+mb(received)+' / '+mb(total)+' MB';}
+  else{bar.removeAttribute('value');$('ot-cli-progress-detail').textContent=phase==='downloading'&&Number.isFinite(received)&&received>=0?mb(received)+' MB':'';}
+  releases.dataset.phase=cliFresh?phase||'unchecked':'unknown';
   $('ot-cli-release-details-label').textContent=t('版本详情','Version details');
-  $('ot-cli-release-details').textContent=[t('当前：','Current: ')+version(current.version)+(current.commit?' · '+String(current.commit).slice(0,12):''),t('最新：','Latest: ')+version(u.latest_version),t('上次检查：','Last checked: ')+timestamp(u.checked_at),t('上一版：','Previous: ')+version(previous.version),u.update_method==='workbench'?t('原版 CLI 随工作台软件更新，设备与标定共用同一版本。','The original CLI updates with the workbench. Discovery and calibration use the same version.'):u.auto_update===true?t('自动更新已开启','Automatic updates enabled'):t('自动更新未开启','Automatic updates not enabled')].join('\n');
+  $('ot-cli-release-details').textContent=[t('当前：','Current: ')+version(current.version)+(current.commit?' · '+String(current.commit).slice(0,12):''),t('最新：','Latest: ')+version(u.latest_version),t('上次检查：','Last checked: ')+timestamp(u.checked_at),t('上一版：','Previous: ')+version(previous.version),u.update_method==='workbench'?t('原版 CLI 随工作台软件更新，设备与标定共用同一版本。','The original CLI updates with the workbench. Discovery and calibration use the same version.'):u.auto_update===true?t('自动更新已开启','Automatic updates enabled'):t('自动更新未开启','Automatic updates not enabled'),u.error||''].filter(Boolean).join('\n');
  }
  async function loadCli(){
   if(cliPromise)return cliPromise;
-  cliPromise=(async()=>{try{const response=await fetch('/api/official-cli',{cache:'no-store',signal:AbortSignal.timeout(6000)});if(!response.ok)throw Error(t('无法读取 CLI 版本状态。','CLI version status is unavailable.'));const next=await response.json();if(!next||!next.update||!next.current)throw Error(t('CLI 版本状态不完整。','CLI version status is incomplete.'));cliData=next;cliFresh=true;cliTransportError='';cliLastRefresh=Date.now();}catch(error){cliFresh=false;cliTransportError=error.message;}finally{cliPromise=null;renderCli();}})();return cliPromise;
+  cliPromise=(async()=>{try{const response=await fetch('/api/official-cli',{cache:'no-store',signal:AbortSignal.timeout(6000)});if(!response.ok)throw Error(t('无法读取 CLI 版本状态。','CLI version status is unavailable.'));const next=await response.json();if(!next||!next.update||!next.current)throw Error(t('CLI 版本状态不完整。','CLI version status is incomplete.'));cliData=next;cliFresh=true;cliTransportError='';cliLastRefresh=Date.now();if(cliUnconfirmedPreference!==null&&next.update.auto_update===cliUnconfirmedPreference){cliUnconfirmedPreference=null;cliActionError='';}}catch(error){cliFresh=false;cliTransportError=error.message;}finally{cliPromise=null;renderCli();}})();return cliPromise;
  }
- async function cliAction(name){
-  if(cliPending)return;cliPending=name;cliActionError='';renderCli();
-  try{const sr=await fetch('/api/state',{cache:'no-store',signal:AbortSignal.timeout(5000)});if(!sr.ok)throw Error(t('工作台服务未就绪','Workbench service is not ready'));const s=await sr.json();if(!s.csrf)throw Error(t('请重新读取工作台状态','Reload the workbench state'));const response=await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json','X-Console-Token':s.csrf},body:JSON.stringify({name}),signal:AbortSignal.timeout(15000)}),body=await response.json();if(!response.ok||body.ok===false)throw Error(body.error||t('CLI 版本操作未完成','CLI version action did not complete'));await loadCli();await load();}
-  catch(error){cliActionError=error.message;}finally{cliPending='';renderCli();}
+ async function cliAction(name,extra={}){
+  if(cliPending)return;cliPending=name;cliActionError='';cliUnconfirmedPreference=null;let rejected=false;renderCli();
+  try{const sr=await fetch('/api/state',{cache:'no-store',signal:AbortSignal.timeout(5000)});if(!sr.ok)throw Error(t('工作台服务未就绪','Workbench service is not ready'));const s=await sr.json();if(!s.csrf)throw Error(t('请重新读取工作台状态','Reload the workbench state'));const response=await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json','X-Console-Token':s.csrf},body:JSON.stringify({name,...extra}),signal:AbortSignal.timeout(15000)}),body=await response.json();if(!response.ok||body.ok===false){rejected=true;throw Error(body.error||t('CLI 版本操作未完成','CLI version action did not complete'));}await loadCli();if(name!=='official_cli_auto_update')await load();}
+  catch(error){await loadCli();const confirmed=name==='official_cli_auto_update'&&cliFresh&&cliData.update.auto_update===extra.enabled;if(name==='official_cli_auto_update'&&!confirmed&&!rejected)cliUnconfirmedPreference=extra.enabled;cliActionError=name==='official_cli_auto_update'?(confirmed?'':rejected?t('自动更新设置未保存，请重试。','Automatic update setting was not saved. Try again.'):t('暂无法确认设置是否保存，请重新读取。','Unable to confirm whether the setting was saved. Reload status.')):error.message;}finally{cliPending='';renderCli();}
  }
  async function load(){
   if(pollPromise)return pollPromise;
@@ -113,10 +125,11 @@
   }catch(error){actionError=error.message||t('操作未完成，请重试','Operation failed; try again');}
   finally{pending='';render();}
  }
- function open(){location.hash='#settings';ws.showPage();$('settings-tab-devices')?.click();$('ot-title').focus({preventScroll:true});card.scrollIntoView({block:'start'});load();}
- window.WujiOfficialTools={open};
+ function open(){location.hash='#settings';ws.showPage();$('settings-tab-devices')?.click();$('ot-title').focus({preventScroll:true});card.scrollIntoView({block:'start'});load();loadCli();}
+ window.WujiOfficialTools={open,refresh:()=>Promise.all([load(),loadCli()])};
  $('ot-check').onclick=()=>fresh?act('control_tools_check'):load();
  $('ot-cli-check').onclick=()=>cliFresh?cliAction('official_cli_check'):loadCli();$('ot-cli-update').onclick=()=>{if(cliFresh&&cliData?.update?.update_method==='workbench'&&cliData.update.newer_cli_available===true){window.WujiWorkbenchUpdate?.open();return;}cliAction('official_cli_update');};$('ot-cli-rollback').onclick=()=>cliAction('official_cli_rollback');
+ $('ot-cli-auto').onclick=()=>cliAction('official_cli_auto_update',{enabled:cliData?.update?.auto_update!==true});
  $('ot-install').onclick=()=>act('runtime_install');$('ot-select').onclick=()=>act('runtime_select');
  $('ot-system-install').onclick=async()=>{
   if(pending)return;pending='system';render();

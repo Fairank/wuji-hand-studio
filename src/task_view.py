@@ -148,7 +148,8 @@ def _command(command,resource):
 
 def execute(controller,task_id,expected_context,command,*,read_groups=None,group_action=None,group_lock=None):
     """Recheck the exact owner under the existing workflow lock before dispatch."""
-    if isinstance(command,dict) and str(command.get('name','')).startswith(('firmware_','sdk_update','sdk_release_')):
+    if isinstance(command,dict) and (str(command.get('name','')).startswith(('firmware_','sdk_update','sdk_release_'))
+            or command.get('name') in {'official_cli_update','official_cli_rollback','official_cli_auto_update'}):
         raise ValueError('Device maintenance is only available in the main window')
     if (not isinstance(task_id,str) or not TASK.fullmatch(task_id)
             or not isinstance(expected_context,str) or not CONTEXT.fullmatch(expected_context)):

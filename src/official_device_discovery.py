@@ -13,7 +13,7 @@ def use_native(config):
 
 def native_devices():
     from native_cli import prepare
-    component=prepare()
+    component=prepare(strict=True)
     # A just-closed UDP preview can yield one empty discovery interval. Retry
     # once, never invent an identity or keep polling without an operator action.
     for attempt in range(2):

@@ -52,12 +52,22 @@ def runtime_command(config,command):
 
 
 class OfficialCLI:
-    def __init__(self,folder=None,idle_check=None,store=None):
+    def __init__(self,folder=None,idle_check=None,store=None,native_store=None):
         self.folder=Path(folder or root_folder());self.closed=threading.Event()
         self.store=store or CLIReleaseStore(self.folder/'versions',timeout=300,socket_timeout=20,cancel_event=self.closed)
+        from native_cli_update import ManagedNativeCLIStore
+        self.native_store=native_store or ManagedNativeCLIStore(timeout=300,socket_timeout=20,cancel_event=self.closed,progress=self._native_progress)
         self.idle_check=idle_check or (lambda:None);self.lock=threading.RLock();self.thread=None
         self.state=dict(phase='unchecked',checking=False,preparing=False,available=False,latest_version=None,checked_at=None,error=None,auto_update=True)
         self.started=False
+        self.monitor=None;self.monitor_stop=threading.Event()
+
+    def _native_progress(self,progress):
+        self._set(phase=progress['stage'],progress=progress)
+
+    def set_auto_update(self,enabled):
+        from native_cli_maintenance import set_preference
+        return set_preference(self,enabled)
 
     def snapshot(self):
         from managed_runtime import image_manifest
@@ -69,12 +79,10 @@ class OfficialCLI:
             update=copy.deepcopy(self.state)
         current=saved.get('current') or dict(version=manifest.get('cli_version'),source='bundled',validated=False)
         if native:
-            from native_cli import PINNED_VERSION,resolve
-            try:binary=resolve();validated=True
-            except (OSError,ValueError):binary=None;validated=False
-            current=dict(version=PINNED_VERSION,source='workbench_native',mode='windows_native',binary=binary,validated=validated,update_method='workbench')
-            update.update(auto_update=False,update_method='workbench')
-            return dict(update=update,current=current,previous=None,versions=[current],busy=bool(self.thread and self.thread.is_alive()) or update['checking'] or update['preparing'])
+            from native_cli_maintenance import snapshot,preference
+            current,previous=snapshot(self)
+            update.update(auto_update=preference(self),update_method='managed_native')
+            return dict(update=update,current=current,previous=previous,versions=[v for v in (current,previous) if v],busy=bool(self.thread and self.thread.is_alive()) or update['checking'] or update['preparing'])
         versions=[v for v in (current,saved.get('previous')) if v]
         return dict(update=update,current=current,previous=saved.get('previous'),versions=versions,busy=bool(self.thread and self.thread.is_alive()) or update['checking'] or update['preparing'])
 
@@ -87,6 +95,22 @@ class OfficialCLI:
             if self.started:return
             self.started=True
         self.start(check_only=True,automatic=True)
+        self.monitor_stop.clear()
+        self.monitor=threading.Thread(target=self._monitor,name='Official CLI update schedule',daemon=True);self.monitor.start()
+
+    def _monitor(self):
+        while not self.monitor_stop.wait(60):
+            from native_cli_maintenance import preference
+            if not preference(self):continue
+            from bridge_config import load_config
+            from official_device_discovery import use_native
+            if not use_native(load_config()):continue
+            with self.lock:
+                due=self.state.get('auto_update_pending') or time.time()-(self.state.get('checked_at') or 0)>=900
+                busy=bool(self.thread and self.thread.is_alive())
+            if due and not busy:
+                try:self.start(check_only=False,automatic=True)
+                except ValueError:pass
 
     def start(self,check_only=False,automatic=False):
         with self.lock:
@@ -98,14 +122,14 @@ class OfficialCLI:
     def _work(self,check_only,automatic=False):
         try:
             if self.closed.is_set():return
-            release_doc=self.store.fetch_release();version=release_doc['tag_name'].removeprefix('v')
-            saved=selected(self.folder);current=saved.get('current') or {}
             from bridge_config import load_config
             from official_device_discovery import use_native
             if use_native(load_config()):
-                from native_cli import PINNED_VERSION
-                self._set(latest_version=version,available=False,checked_at=time.time(),checking=False,phase='checked',auto_update=False,update_method='workbench',newer_cli_available=version_order(version)>version_order(PINNED_VERSION))
+                from native_cli_maintenance import run
+                run(self,check_only,automatic)
                 return
+            release_doc=self.store.fetch_release();version=release_doc['tag_name'].removeprefix('v')
+            saved=selected(self.folder);current=saved.get('current') or {}
             available=(not current.get('version') or version_order(version)>version_order(current['version'])
                 or current.get('source')=='bundled' and version_order(version)==version_order(current['version']))
             self._set(latest_version=version,available=available,checked_at=time.time(),checking=False)
@@ -137,6 +161,7 @@ class OfficialCLI:
             self._set(checking=False,preparing=False)
 
     def cancel_and_wait(self,timeout=22):
+        self.monitor_stop.set()
         self.closed.set()
         with self.lock:worker=self.thread
         if worker and worker is not threading.current_thread():worker.join(timeout=timeout)
@@ -197,7 +222,9 @@ class OfficialCLI:
     def rollback(self):
         from bridge_config import load_config
         from official_device_discovery import use_native
-        if use_native(load_config()):raise ValueError('原版 CLI 随工作台版本更新和回退 / Update or roll back the workbench to change its native CLI')
+        if use_native(load_config()):
+            from native_cli_maintenance import rollback
+            return rollback(self)
         with self.lock:
             if self.thread and self.thread.is_alive():raise ValueError('Wait for the CLI update to finish')
         with gate(self.folder):

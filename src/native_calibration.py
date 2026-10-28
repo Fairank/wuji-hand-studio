@@ -165,7 +165,8 @@ class NativeCalibration:
                     started=time.time(),event=None,result=None,error=None,exit_code=None,step=None,progress=None,
                     source='official_jsonl_native' if user else 'official_tty',terminal=user is None,
                     interface='guided' if user else 'terminal',
-                    phase='preflight',event_count=0,captured_poses=[],pose_index=None,cli_version=component['version'])
+                    phase='preflight',event_count=0,captured_poses=[],pose_index=None,cli_version=component['version'],
+                    cli_binary_sha256=component.get('binary_sha256'),cli_archive_sha256=component.get('archive_sha256'))
                 owner.thread=threading.Thread(target=self._collect,name='Official calibration terminal',daemon=True)
                 self.launching=False
             owner.thread.start()

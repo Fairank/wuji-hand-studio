@@ -196,7 +196,7 @@ class CLIReleaseStore:
     actual listed checksum asset.
     """
 
-    def __init__(self, root, *, http_open=None, runner=None, timeout=60, socket_timeout=None, git_timeout=120, lock_timeout=15, cancel_event=None):
+    def __init__(self, root, *, http_open=None, runner=None, timeout=60, socket_timeout=None, git_timeout=120, lock_timeout=15, cancel_event=None, progress=None):
         socket_timeout = timeout if socket_timeout is None else socket_timeout
         for number in (timeout, socket_timeout, git_timeout, lock_timeout):
             if isinstance(number, bool) or not isinstance(number, (int, float)) or not math.isfinite(number) or not 0 < number <= 600:
@@ -209,6 +209,7 @@ class CLIReleaseStore:
         self.git_timeout = git_timeout
         self.lock_timeout = lock_timeout
         self.cancel_event = cancel_event
+        self.progress = progress
 
     def _check_cancel(self):
         if self.cancel_event is not None and self.cancel_event.is_set():
@@ -279,6 +280,7 @@ class CLIReleaseStore:
                     raise ReleaseStoreError('Invalid release Content-Length') from error
                 if length < 0 or length > limit or (expected_size is not None and length != expected_size):
                     raise ReleaseStoreError('Release response size does not match its metadata')
+            if destination is not None and self.progress:self.progress(dict(stage='downloading',received_bytes=0,total_bytes=expected_size if expected_size is not None else length))
             while True:
                 self._check_cancel()
                 if time.monotonic() >= deadline:
@@ -292,6 +294,7 @@ class CLIReleaseStore:
                 digest.update(block)
                 if destination is not None:
                     destination.write(block)
+                    if self.progress:self.progress(dict(stage='downloading',received_bytes=total,total_bytes=expected_size if expected_size is not None else length))
                 else:
                     chunks.append(block)
             if (length is not None and total != length) or (expected_size is not None and total != expected_size):
@@ -330,6 +333,7 @@ class CLIReleaseStore:
         return release
 
     def _html_release(self, version):
+        latest = version is None
         page = REPO_URL + ('/releases/latest' if version is None else '/releases/tag/' + quote('v' + version, safe=''))
         _, final_url = self._read_http(page, limit=MAX_METADATA, with_url=True)
         if version is None:
@@ -364,6 +368,11 @@ class CLIReleaseStore:
             self._asset_url(asset, tag)
             assets.append(asset)
         release = dict(tag_name=tag, html_url=expected_page, draft=False, assets=assets, discovery_source='github_release_html', assets_page=expanded)
+        if latest:
+            # Only GitHub's fixed latest endpoint establishes a full release.
+            # A bare tag page, or a copied "Latest" badge, proves no stability.
+            # The exact repository/tag redirect has already been verified above.
+            release.update(prerelease=False, stability_source='github_latest_release_redirect', latest_url=page)
         self._asset(version, release)
         return release
 
