@@ -35,6 +35,8 @@ def brief(report,description,export):
            '以附录中官方 Doctor 的修复建议为准。向支持人员提供此简报、官方 ZIP 和现象发生时间。',
            'Follow the official Doctor recommendations below; provide this brief, official ZIP and incident time to support.',
            '', '【官方日志导出输出 / Official log export output】',export['stdout'],export['stderr']]
+    if export.get('collection_error'):
+        lines+=['','【本机收取问题 / Local collection issue】',export['collection_error']]
     if report:lines+=['','【附：最近诊断，时间以报告为准 / Latest saved diagnostic】',report_text(report)]
     else:lines+=['','尚无已保存的 Doctor 报告 / No saved Doctor report.']
     return '\n'.join(lines)+'\n'
@@ -44,7 +46,7 @@ def export_support(config,days,description,report,run_local,run_remote):
     if type(days) is not int or not 1<=days<=30:raise ValueError('Days must be 1–30')
     if not isinstance(description,str) or len(description)>2000:raise ValueError('Description must be at most 2000 characters')
     from doctor import sdk_command
-    mode=config['mode'];token=uuid.uuid4().hex
+    mode=config['mode'];token=uuid.uuid4().hex;collection_error=None
     folder=DATA/'support'/token;folder.mkdir(parents=True)
     output=folder/'official-wuji-support.zip'
     remote='/tmp/hand-workbench-support-'+token+'.zip'
@@ -72,16 +74,31 @@ def export_support(config,days,description,report,run_local,run_remote):
             finally:files.close()
         finally:client.close()
     elif mode=='macvm':
-        from macos_runtime import args,ensure_running,env,run,NAME
+        from macos_runtime import ensure_running,run,NAME
+        from calibration_cli import controller_args
         ensure_running()
-        code,stdout,stderr=run_local(['/usr/bin/env','LIMA_HOME='+env()['LIMA_HOME'],*args(command)],timeout=180)
+        code,stdout,stderr=run_local(controller_args(config,command),timeout=180)
         # Lima copies only the generated, fixed-name artifact from its own VM.
-        run('copy',NAME+':'+remote,str(output),timeout=90)
+        # A missing official ZIP must not discard the already collected CLI
+        # output and the local fault brief, including partial official failures.
+        incoming=folder/'official-wuji-support.zip.partial'
+        try:
+            run('copy',NAME+':'+remote,str(incoming),timeout=90)
+            if not incoming.is_file() or not zipfile.is_zipfile(incoming):
+                raise RuntimeError('Controller copy did not produce a valid ZIP support bundle')
+            incoming.replace(output)
+        except (OSError,RuntimeError,TimeoutError) as error:
+            collection_error=str(error)[:900] or 'Official support ZIP could not be collected from the controller'
+            # A failed transfer may leave a truncated local artifact.
+            try:incoming.unlink(missing_ok=True)
+            except OSError:pass  # Never include a failed transfer in the package.
     elif mode=='local':code,stdout,stderr=run_local(command,timeout=180)
     else:raise ValueError('Unsupported controller')
     result=dict(id=token,controller=mode,days=days,finished=time.time(),exit_code=code,
                 stdout=stdout,stderr=stderr,motor_commands_sent=False,
                 automatic_upload=False,official_archive_available=output.is_file())
+    if collection_error:result['collection_error']=collection_error
+    result['collection_complete']=code==0 and result['official_archive_available'] and not collection_error
     if output.is_file():
         if not zipfile.is_zipfile(output):raise ValueError('CLI did not produce a valid ZIP support bundle')
         with output.open('rb') as stream:result['sha256']=hashlib.file_digest(stream,'sha256').hexdigest()

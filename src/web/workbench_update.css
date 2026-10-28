@@ -7,6 +7,7 @@ html #settings-tools .workbench-update{min-width:0;scroll-margin-top:18px}
 .wbu-versions>div{display:flex;align-items:baseline;gap:12px;min-width:0}.wbu-versions span{color:var(--wb-sub)}.wbu-versions strong{font-weight:550;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
 .workbench-update #wbu-message{font-size:12px;line-height:1.65;margin:14px 0 0;color:var(--wb-sub)}
 .workbench-update #wbu-error{font-size:12px;line-height:1.65;color:var(--ui-danger,#ba302a);margin:8px 0 0}.workbench-update #wbu-error:empty{display:none}
+.workbench-update #wbu-error-details{margin-top:8px;font-size:12px;color:var(--wb-sub)}.workbench-update #wbu-error-details pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:240px;overflow:auto;font-size:11px;line-height:1.65}
 .wbu-actions{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin-top:16px}
 html .workbench-update .wbu-actions button{min-height:36px;padding:8px 13px;border:1px solid var(--ui-line);border-radius:10px;background:var(--ui-fill);color:var(--ui-ink);font-size:12px;font-weight:500;line-height:1.4;box-shadow:none}
 html .workbench-update .wbu-actions button.primary{background:#007aff;color:#fff;border-color:transparent}

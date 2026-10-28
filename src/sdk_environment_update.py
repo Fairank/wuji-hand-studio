@@ -275,7 +275,7 @@ def probe_selected(config,*,run=None,background=False):
         status,out,_=(run or remote_run)(config,argv,timeout=45)
         if status:raise ValueError('外部控制端 SDK 检查失败 / External controller SDK probe failed')
     else:
-        environment=None
+        environment=None;working_directory=None
         if mode in ('wsl','macvm'):
             if config.get('agent_directory')!=AGENT or python!=PYTHON:raise ValueError('Invalid owned SDK controller path')
             if mode=='wsl':
@@ -296,8 +296,13 @@ def probe_selected(config,*,run=None,background=False):
                 environment=runtime.env()
             argv=runtime.args(argv)
         elif sys.platform!='linux':raise ValueError('Local SDK controller requires Linux')
+        else:
+            if not directory or not directory.startswith('/'):raise ValueError('Controller directory must be absolute')
+            working_directory=directory
+            environment={**os.environ,'WUJI_TELEMETRY_DISABLE':'1'}
         result=(run or subprocess.run)(argv,capture_output=True,text=True,timeout=45,env=environment,
-                                       creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0),check=True)
+                                       creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0),check=True,
+                                       **({'cwd':working_directory} if working_directory else {}))
         out=result.stdout
     if not isinstance(out,str) or len(out)>65536:raise ValueError('Invalid SDK probe output')
     value=json.loads(out)

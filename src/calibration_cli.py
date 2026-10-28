@@ -41,9 +41,12 @@ def controller_args(config, args):
     if mode == 'macvm':
         from macos_runtime import args as runtime_args, ensure_running, env
         ensure_running()
-        return ['/usr/bin/env', 'LIMA_HOME=' + env()['LIMA_HOME'], *runtime_args(args)]
+        environment=env()
+        overrides=('LIMA_HOME','LIMA_SHELL','LIMA_WORKDIR','SSH_AUTH_SOCK')
+        return ['/usr/bin/env',*(key+'='+environment[key] for key in overrides),*runtime_args(args)]
     if mode == 'local':
-        return args
+        from bridge_config import controller_executable
+        return [controller_executable(config,args[0]),*args[1:]]
     raise ValueError('Remote calibration needs the official CLI on that Linux controller / 请在远程 Linux 控制端运行官方标定')
 
 

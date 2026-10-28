@@ -3,6 +3,7 @@ import collections
 import base64
 import os
 import copy
+import errno
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
@@ -32,6 +33,37 @@ PROJECT = HERE.parents[1]
 REPORTS = DATA/'console_reports'
 from runtime_paths import PORT
 ORIGIN = f'http://127.0.0.1:{PORT}'
+
+
+def local_file_error(error):
+    """Describe known local file failures without publishing arbitrary exceptions."""
+    number=getattr(error,'errno',None);windows=getattr(error,'winerror',None)
+    if isinstance(error,PermissionError) or number in (errno.EACCES,errno.EPERM):
+        reason='没有文件访问权限 / File access denied'
+    elif number==errno.ENOSPC or windows==112:
+        reason='本机存储空间不足 / Local storage is full'
+    elif number==errno.EROFS:
+        reason='文件位置只读 / File location is read-only'
+    elif isinstance(error,FileNotFoundError):
+        reason='文件或文件夹不存在 / File or folder is missing'
+    elif isinstance(error,NotADirectoryError):
+        reason='需要文件夹，但该位置是文件 / Expected a folder at this location'
+    elif isinstance(error,IsADirectoryError):
+        reason='需要文件，但该位置是文件夹 / Expected a file at this location'
+    elif isinstance(error,FileExistsError):
+        reason='该位置已存在文件 / A file already exists at this location'
+    elif number==errno.ENAMETOOLONG:
+        reason='文件路径过长 / File path is too long'
+    else:
+        reason='本机文件操作未完成 / Local file operation did not complete'
+    code=windows if type(windows) is int else number if type(number) is int else None
+    if code is not None:reason+=' (OS '+str(code)+')'
+    path=getattr(error,'filename',None)
+    if isinstance(path,(str,bytes)):
+        if isinstance(path,bytes):path=os.fsdecode(path)
+        path=''.join(c for c in path if c.isprintable())[:512]
+        if path:reason+=': '+path
+    return reason
 
 
 def vm_client():
@@ -1319,16 +1351,19 @@ class Handler(BaseHTTPRequestHandler):
             from support_bundle import artifact
             try:
                 query=parse_qs(url.query);path=artifact(query.get('id',[''])[0],query.get('kind',['all'])[0])
+                stream=path.open('rb')
             except (ValueError,FileNotFoundError) as error:return self.reply(404,dict(error=str(error)))
-            self.send_response(200)
-            self.send_header('Content-Type','application/zip' if path.suffix=='.zip' else 'text/plain; charset=utf-8')
-            self.send_header('Content-Length',str(path.stat().st_size))
-            self.send_header('Content-Disposition','attachment; filename="'+path.name+'"')
-            self.send_header('Cache-Control','no-store')
-            self.send_header('X-Content-Type-Options','nosniff')
-            self.end_headers()
-            import shutil
-            with path.open('rb') as stream:shutil.copyfileobj(stream,self.wfile,1024*1024)
+            except OSError as error:return self.reply(503,dict(error=local_file_error(error),error_code='local_file_error'))
+            with stream:
+                self.send_response(200)
+                self.send_header('Content-Type','application/zip' if path.suffix=='.zip' else 'text/plain; charset=utf-8')
+                self.send_header('Content-Length',str(os.fstat(stream.fileno()).st_size))
+                self.send_header('Content-Disposition','attachment; filename="'+path.name+'"')
+                self.send_header('Cache-Control','no-store')
+                self.send_header('X-Content-Type-Options','nosniff')
+                self.end_headers()
+                import shutil
+                shutil.copyfileobj(stream,self.wfile,1024*1024)
             return
         if url.path in ('/api/doctor','/api/doctor/report'):
             state=self.server.controller.doctor.snapshot()
@@ -1379,9 +1414,10 @@ class Handler(BaseHTTPRequestHandler):
             if not re.fullmatch('[a-f0-9]{32}', ident):
                 return self.reply(400, dict(error='Invalid report'))
             path = self.server.controller.reports/(ident+'.json')
-            if path.exists():
+            try:
                 return self.reply(200, path.read_bytes(), filename='left-hand-'+ident+'.json')
-            return self.reply(404, dict(error='Report not found'))
+            except FileNotFoundError:return self.reply(404, dict(error='Report not found'))
+            except OSError as error:return self.reply(503,dict(error=local_file_error(error),error_code='local_file_error'))
         window_query=parse_qs(url.query,keep_blank_values=True)
         assets = {'/': ('index.html', 'text/html; charset=utf-8'),
                   '/style.css': ('style.css', 'text/css; charset=utf-8'),
@@ -1550,7 +1586,16 @@ class Handler(BaseHTTPRequestHandler):
             self.reply(200, {'ok':True, **(result or {})})
         except (ValueError, TypeError) as error:
             self.reply(400, dict(ok=False, error=str(error)))
-        except Exception:
+        except Exception as error:
+            # These operations only read/write application files. Preserve the
+            # OS failure category; device/session exceptions retain their guard.
+            file_action=(self.path=='/api/action' and isinstance(locals().get('payload'),dict)
+                and payload.get('name') in {'workbench_update_check','workbench_update_prepare','workbench_update_apply',
+                    'parameters_save','retarget_tuning_save','retarget_tuning_export'})
+            file_desktop=(self.path=='/api/desktop' and isinstance(locals().get('payload'),dict)
+                and payload.get('operation') in {'import_model','prepare_update'})
+            if (file_action or file_desktop) and isinstance(error,OSError) and not isinstance(error,TimeoutError):
+                return self.reply(503,dict(ok=False,error=local_file_error(error),error_code='local_file_error'))
             if self.path == '/api/desktop':
                 import logging
                 logging.exception('Desktop code interface failed')

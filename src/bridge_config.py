@@ -1,12 +1,21 @@
 """Explicit SSH configuration, strict known-host verification, no bundled credentials."""
 import json, os, re, shlex, sys
-from pathlib import Path
+from pathlib import Path,PurePosixPath
 from runtime_paths import DATA,RESOURCE
 
 _source=RESOURCE.parents[1]/'controller/source' if getattr(sys,'frozen',False) else RESOURCE
 # Fresh Windows installs discover through the native CLI before optional WSL setup.
 # Existing files, including legacy SSH files without a mode, keep their own route.
 DEFAULT=dict(mode='local' if sys.platform.startswith('linux') else 'wsl' if sys.platform=='win32' else 'ssh',host='',port=22,username='',key_filename='',known_hosts='',agent_directory=str(_source) if sys.platform.startswith('linux') else '',python='python3',cli='wuji')
+
+def controller_executable(config,executable):
+    """Resolve local relative executables against the same worker directory."""
+    if config.get('mode')=='local' and '/' in executable and not executable.startswith('/'):
+        directory=config.get('agent_directory','')
+        if not directory.startswith('/'):raise ValueError('Controller directory must be absolute')
+        return str(PurePosixPath(directory)/executable)
+    return executable
+
 
 def validate(values):
     if not isinstance(values,dict) or set(values)!=set(DEFAULT):raise ValueError('Unexpected connection fields')

@@ -390,12 +390,13 @@ def prepare(version=None, *, folder=None, release=None, archive=None,strict=Fals
 def json_command(*arguments):
     """Same Windows executable and SDK HOME; no shell or web-supplied argv."""
     from windows_process_job import OwnedProcess
+    from native_environment import official_cli_environment
     # Every executable launch, including local profile reads, rehashes content.
     # Stat-based reuse is only for metadata polling that does not run a binary.
     component=prepare(strict=True)
     with OwnedProcess([component['binary'],'--json',*arguments],stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,encoding='utf-8',errors='replace',
-            env={**os.environ,'WUJI_NO_UPDATE_CHECK':'1','WUJI_TELEMETRY_DISABLE':'1'}) as owned:
+            env=official_cli_environment()) as owned:
         try:out,err=owned.process.communicate(timeout=20)
         except subprocess.TimeoutExpired as error:raise ValueError('Official CLI metadata request timed out') from error
         if owned.process.returncode:raise ValueError((err or out or 'Official CLI failed').strip()[:400])

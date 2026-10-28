@@ -8,7 +8,8 @@ MAX_OUTPUT=2*1024*1024
 
 def sdk_command(config, command):
     """The CLI must inspect the Python environment used by this controller."""
-    python=config.get('python','')
+    from bridge_config import controller_executable
+    python=controller_executable(config,config.get('python',''))
     directory=str(PurePosixPath(python).parent) if python.startswith('/') else ''
     if directory and directory!='/' and config.get('mode') in ('wsl','macvm','ssh','local'):
         return ['/usr/bin/env','PATH='+directory+':/usr/local/bin:/usr/bin:/bin',*command]
@@ -113,14 +114,13 @@ class Doctor:
     def work(self,config,args,operation):
         try:
             actual=sdk_command(config,args)
-            if config['mode']=='macvm':
-                from macos_runtime import args as runtime_args,ensure_running,env
-                ensure_running()
-                code,out,err=local_run(['/usr/bin/env','LIMA_HOME='+env()['LIMA_HOME'],*runtime_args(actual)])
-            elif config['mode']=='wsl':
-                from managed_runtime import args as runtime_args,check_ready
-                check_ready();code,out,err=local_run(runtime_args(actual))
-            else:code,out,err=local_run(actual) if config['mode']=='local' else remote_run(config,actual)
+            if config['mode'] in ('macvm','wsl','local'):
+                from calibration_cli import controller_args
+                # Resolve a custom local CLI before sdk_command wraps it in env.
+                command=controller_args(config,args) if config['mode']=='local' else args
+                actual=sdk_command(config,command)
+                code,out,err=local_run(controller_args(config,actual))
+            else:code,out,err=remote_run(config,actual)
             report=dict(operation=operation,command=args,execution_command=actual,controller=config['mode'],sdk_python=config.get('python',''),exit_code=code,stdout=out,stderr=err,finished=time.time(),motor_commands_sent=False,cli_result_unmodified=True)
             if operation=='diagnose':
                 from doctor_report import flatten_report
@@ -129,8 +129,12 @@ class Doctor:
                     from doctor_export import counts
                     report['counts']=counts(report['rows'])
                 except (ValueError,TypeError) as error:report['parse_error']=str(error)
-            DATA.mkdir(parents=True,exist_ok=True)
-            (DATA/'doctor-latest.json').write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf-8')
-            with self.lock:self.state.update(running=False,status='completed',report=report)
+            save_error=None
+            try:
+                DATA.mkdir(parents=True,exist_ok=True)
+                (DATA/'doctor-latest.json').write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf-8')
+            except OSError:
+                save_error='诊断已完成，但报告无法保存；本次原始输出仍可查看 / Diagnostic completed; report could not be saved, but its original output is still available'
+            with self.lock:self.state.update(running=False,status='completed',report=report,error=save_error)
         except Exception as error:
             with self.lock:self.state.update(running=False,status='error',error=str(error)[:500])

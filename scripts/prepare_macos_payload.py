@@ -54,7 +54,7 @@ def main():
         if path.is_file() and not path.is_symlink():
             subprocess.run(['codesign', '--force', '--sign', '-', '--entitlements', str(entitlements), str(path)], check=True)
     files = {p.relative_to(OUT).as_posix(): digest(p) for p in OUT.rglob('*') if p.is_file() and not p.is_symlink() and p.name != 'manifest.json'}
-    m = dict(schema=1, payload_id='mac-linux-1.1.0', arch='aarch64', sdk_version='2026.10.12',
+    m = dict(schema=1, payload_id='mac-linux-1.1.0', arch='aarch64', sdk_version='2026.10.12', cli_version='2026.10.12',
              lima_version='2.2.0', image='ubuntu.raw', files=files, first_setup_requires_internet=True,
              sources=[dict(url=LIMA, sha256=LIMA_SHA), dict(url=IMAGE, sha256=IMAGE_SHA)])
     (OUT / 'manifest.json').write_text(json.dumps(m, indent=2), encoding='utf-8')

@@ -284,6 +284,7 @@ class OfficialVisualization:
         try:
             from native_cli import prepare
             from windows_process_job import OwnedProcess
+            from native_environment import official_cli_environment
             component=prepare(strict=True)
             self._set(cli_version=component['version'],backend='windows_native')
             with self.lock:
@@ -293,7 +294,7 @@ class OfficialVisualization:
                 job=OwnedProcess([component['binary'],'viz','--sn',serial,'--no-zero','--no-open','--jsonl'],
                     job_name=marker['job_name'],stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,
                     text=True,encoding='utf-8',errors='replace',bufsize=1,
-                    env={**os.environ,'WUJI_NO_UPDATE_CHECK':'1','WUJI_TELEMETRY_DISABLE':'1'})
+                    env=official_cli_environment())
                 p=job.process;self.native_job=job;self.process=p
             def stderr():
                 for line in p.stderr:self._log(line.rstrip())

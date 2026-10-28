@@ -6,6 +6,7 @@
  const t=(zh,en)=>window.WujiLocale?.lang==='en'?en:zh;
  const card=document.createElement('section');card.id='workbench-update';card.className='wb-card workbench-update';card.setAttribute('aria-labelledby','wbu-title');
  card.innerHTML='<header class="wbu-heading"><div><h3 id="wbu-title" tabindex="-1"></h3><p id="wbu-description"></p></div><span id="wbu-state" role="status"></span></header><div class="wbu-versions"><div><span id="wbu-current-label"></span><strong id="wbu-current"></strong></div><div id="wbu-latest-row"><span id="wbu-latest-label"></span><strong id="wbu-latest"></strong></div></div><p id="wbu-completed" role="status" hidden></p><p id="wbu-message" role="status" aria-live="polite"></p><p id="wbu-error" role="alert"></p><div id="wbu-progress-wrap" hidden><div class="wbu-progress-heading"><span id="wbu-progress-label"></span><span id="wbu-progress-detail"></span></div><progress id="wbu-progress" max="100" aria-labelledby="wbu-progress-label"></progress></div><div class="wbu-actions"><button id="wbu-check" type="button"></button><button id="wbu-prepare" type="button" class="primary"></button><button id="wbu-apply" type="button" class="primary"></button></div><p id="wbu-checked-at" class="wbu-meta"></p>';
+ const errorDetails=document.createElement('details');errorDetails.id='wbu-error-details';errorDetails.hidden=true;errorDetails.innerHTML='<summary id="wbu-error-details-label"></summary><pre id="wbu-error-details-text"></pre>';card.querySelector('#wbu-error').after(errorDetails);
  host.prepend(card);const updateEntry=window.parent===window&&!new URLSearchParams(location.search).has('task_view')?document.createElement('button'):null;if(updateEntry){updateEntry.id='desktop-software-update';updateEntry.type='button';updateEntry.className='desktop-menu-row';updateEntry.onclick=open;document.getElementById('desktop-settings')?.after(updateEntry);}const $=id=>card.querySelector('#'+id);
  let data=null,fresh=false,loading=null,pending='',transportError='',actionError='',actionErrorStage='',lastAttempt=0,revision=0,destroyed=false,wasVisible=false,sheet=null,applyUnconfirmed=false;
  const activePhases=new Set(['checking','downloading','applying']);
@@ -27,8 +28,8 @@
   if(/\bstall(?:ed|ing)?\b|no (?:download )?progress|无进展/.test(value))return t('下载长时间没有收到新数据，已停止。请重试。','The download stopped because no new data arrived. Please retry.');
   if(state.error_stage==='install'||/updat(?:e|er) helper|installer (?:failed|exit)|安装助手/.test(value))return t('安装未完成，当前版本仍可使用。请重新检查后重试安装。','Installation did not finish. Your current version remains usable. Check again and retry installation.');
   if(state.error_stage==='download'&&/timeout|timed out/.test(value))return t('下载等待数据超时，已停止。可重新下载安装包。','The download stopped while waiting for data. Download the installer again.');
+  if(/permission|filesystem|directory|access denied|disk|enospc|no space left|storage is full|read.only|file or folder is missing|file path is too long|磁盘|权限|存储空间|只读/.test(value))return t('暂时无法保存安装包，请检查本机存储后重试。','The installer could not be saved. Check local storage and retry.');
   if(/network|dns|http|urlopen|connect|timeout|timed out|fetch|abort|网络/.test(value))return t('暂时无法连接更新服务，请稍后重试。','The update service is unavailable. Try again shortly.');
-  if(/permission|filesystem|directory|access|disk|磁盘|权限/.test(value))return t('暂时无法保存安装包，请检查本机存储后重试。','The installer could not be saved. Check local storage and retry.');
   return t('软件更新未完成，请重试。','The software update did not complete. Try again.');
  }
  function checkedAt(value){if(value==null)return '';const date=new Date(typeof value==='number'&&value<1e12?value*1000:value);return Number.isFinite(date.getTime())?date.toLocaleString(window.WujiLocale?.lang==='en'?'en-GB':'zh-CN'):'';}
@@ -53,7 +54,9 @@
   if(fresh&&s.supported===false)message=t('此环境可检查版本；请在 Windows 安装版中下载并安装更新。','You can check versions here. Download and install updates in the installed Windows app.');
   if(!fresh&&transportError&&phase!=='applying')message=t('当前更新状态无法核对，恢复连接后可继续。','Update status cannot be verified. Continue when the connection recovers.');
   const completed=fresh&&phase==='up_to_date'&&!s.available&&!s.error&&!newer(s.latest_version,s.current_version)&&version(s.completed_version)&&s.completed_version===s.current_version;
-  $('wbu-completed').hidden=!completed;text('wbu-completed',completed?t('更新完成 · ','Update complete · ')+s.current_version:'');text('wbu-message',message);text('wbu-error',phase==='applying'&&!fresh?'':transportError?userError(transportError):actionError?userError(actionError,{error_stage:actionErrorStage}):fresh&&s.error?userError(s.error,s):'');progress(pending?{}:s,phase);
+  const rawError=phase==='applying'&&!fresh?'':transportError||actionError||(fresh&&s.error)||'';
+  $('wbu-completed').hidden=!completed;text('wbu-completed',completed?t('更新完成 · ','Update complete · ')+s.current_version:'');text('wbu-message',message);text('wbu-error',rawError?userError(rawError,transportError?{}:actionError?{error_stage:actionErrorStage}:s):'');
+  errorDetails.hidden=!rawError;text('wbu-error-details-label',t('查看错误详情','View error details'));text('wbu-error-details-text',String(rawError).slice(0,1600));if(!rawError)errorDetails.open=false;progress(pending?{}:s,phase);
   text('wbu-check',!fresh?t('重新读取状态','Reload status'):phase==='checking'||pending==='workbench_update_check'?t('正在检查…','Checking…'):t('检查更新','Check updates'));
   text('wbu-prepare',phase==='downloading'||pending==='workbench_update_prepare'?t('正在下载…','Downloading…'):t('下载安装包','Download installer'));
   text('wbu-apply',phase==='applying'||pending==='workbench_update_apply'?t('正在准备安装…','Preparing installation…'):t('重启并安装','Restart and install'));

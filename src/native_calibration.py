@@ -18,6 +18,7 @@ import time
 import uuid
 
 from cli_coordination import atomic, gate, identity, release, reservation, reserve, root_folder
+from native_environment import official_cli_environment
 
 
 def _attach_pipes():
@@ -154,7 +155,7 @@ class NativeCalibration:
                     options['startupinfo']=startup
                 self.job=OwnedProcess(command,job_name=marker['job_name'],stdin=subprocess.PIPE,
                     stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,encoding='utf-8',errors='strict',bufsize=1,
-                    env={**os.environ,'WUJI_NO_UPDATE_CHECK':'1','WUJI_TELEMETRY_DISABLE':'1'},**options)
+                    env=official_cli_environment(),**options)
             except BaseException:
                 with owner.lock:self.launching=False
                 release(self.token,self.folder);self.token=None;raise

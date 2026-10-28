@@ -7,6 +7,7 @@ import copy
 import json
 import re
 import subprocess
+import sys
 import threading
 import time
 
@@ -16,9 +17,18 @@ SDK_CHECK = "import importlib.metadata,json,wuji_sdk;print(json.dumps({'sdk_vers
 def target_versions():
     from managed_runtime import image_manifest
     from official_cli import selected
-    manifest=image_manifest() or {};current=selected().get('current') or {}
+    if sys.platform=='darwin':
+        from macos_runtime import manifest as mac_manifest
+        try:manifest=mac_manifest()
+        except (OSError,ValueError):manifest={}
+        # The original Mac payload pins this CLI archive but omitted its label.
+        # Limit the legacy fallback to that exact payload, not future releases.
+        if manifest.get('payload_id')=='mac-linux-1.1.0' and not manifest.get('cli_version'):
+            manifest={**manifest,'cli_version':'2026.10.12'}
+    else:manifest=image_manifest() or {}
+    current=selected().get('current') or {}
     target={key:manifest.get(key) for key in ('cli_version','sdk_version')}
-    if current.get('validated') and current.get('mode')=='wsl':target['cli_version']=current.get('version')
+    if sys.platform!='darwin' and current.get('validated') and current.get('mode')=='wsl':target['cli_version']=current.get('version')
     return target
 
 
@@ -29,8 +39,7 @@ class OfficialTools:
                         error=None,checked_at=None,available=False,compatible=False)
 
     def snapshot(self):
-        from managed_runtime import status,image_manifest
-        manifest=image_manifest() or {}
+        from managed_runtime import status
         target=target_versions()
         with self.lock:
             return dict(target=target,
@@ -50,12 +59,18 @@ class OfficialTools:
         return self.snapshot()
 
     def run(self):
-        from managed_runtime import args,PYTHON,CLI,image_manifest,_decode
+        from managed_runtime import args,PYTHON,CLI,_decode
         flags=getattr(subprocess,'CREATE_NO_WINDOW',0)
         versions={}
         try:
+            mode='macvm' if sys.platform=='darwin' else 'wsl'
+            config=dict(mode=mode,cli=CLI)
+            if mode=='macvm':
+                from calibration_cli import controller_args
+                runtime_args=lambda command:controller_args(config,command)
+            else:runtime_args=args
             # Neither command scans, connects, subscribes or sends motor data.
-            sdk=subprocess.run(args([PYTHON,'-c',SDK_CHECK]),capture_output=True,timeout=30,creationflags=flags)
+            sdk=subprocess.run(runtime_args([PYTHON,'-c',SDK_CHECK]),capture_output=True,timeout=30,creationflags=flags)
             if sdk.returncode:raise ValueError('SDK 导入检查失败 / SDK import check failed')
             parsed=json.loads(_decode(sdk.stdout))
             sdk_version=parsed.get('sdk_version')
@@ -63,13 +78,12 @@ class OfficialTools:
                 raise ValueError('SDK 版本输出无效 / Invalid SDK version result')
             versions['sdk_version']=sdk_version
             from official_cli import cli_path
-            actual_cli=cli_path(dict(mode='wsl',cli=CLI))
-            cli=subprocess.run(args(['/usr/bin/env','WUJI_NO_UPDATE_CHECK=1',actual_cli,'--version']),capture_output=True,timeout=20,creationflags=flags)
+            actual_cli=cli_path(config)
+            cli=subprocess.run(runtime_args(['/usr/bin/env','WUJI_NO_UPDATE_CHECK=1',actual_cli,'--version']),capture_output=True,timeout=20,creationflags=flags)
             if cli.returncode:raise ValueError('CLI 版本检查失败 / CLI version check failed')
             match=re.search(r'\b(20\d{2}\.\d{1,2}\.\d{1,2}(?:[.+-][\w.-]+)?)\b',_decode(cli.stdout))
             if not match:raise ValueError('CLI 版本输出无效 / Invalid CLI version result')
             versions['cli_version']=match[1]
-            manifest=image_manifest() or {}
             target=target_versions()
             # This legacy control-image check is a baseline/repair check, not
             # the public stable SDK selector. Never offer a bundled downgrade

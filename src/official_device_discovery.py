@@ -21,13 +21,14 @@ class DiscoveryCleanupUnconfirmed(ValueError):
 
 def _cancellable_read(command,cancelled):
     from windows_process_job import OwnedProcess
+    from native_environment import official_cli_environment
     owned=None
     try:
         if cancelled():raise DiscoveryDeferred('Device discovery paused for your operation')
         try:
             owned=OwnedProcess(command,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,
                 text=True,encoding='utf-8',errors='replace',
-                env={**os.environ,'WUJI_NO_UPDATE_CHECK':'1','WUJI_TELEMETRY_DISABLE':'1'})
+                env=official_cli_environment())
         except RuntimeError as error:
             raise DiscoveryCleanupUnconfirmed('Discovery process startup exit is unconfirmed') from error
         deadline=time.monotonic()+20
@@ -48,6 +49,7 @@ def _cancellable_read(command,cancelled):
 
 def native_devices(*,cancelled=None):
     from native_cli import prepare
+    from native_environment import official_cli_environment
     component=prepare(strict=True)
     # A just-closed UDP preview can yield one empty discovery interval. Retry
     # once, never invent an identity or keep polling without an operator action.
@@ -57,7 +59,7 @@ def native_devices(*,cancelled=None):
             result=subprocess.run(command,capture_output=True,
                 text=True,encoding='utf-8',errors='replace',timeout=20,
                 creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0),
-                env={**os.environ,'WUJI_NO_UPDATE_CHECK':'1','WUJI_TELEMETRY_DISABLE':'1'})
+                env=official_cli_environment())
         else:result=_cancellable_read(command,cancelled)
         if result.returncode:raise ValueError((result.stderr or result.stdout or 'Official discovery failed')[:700])
         value=json.loads(result.stdout)

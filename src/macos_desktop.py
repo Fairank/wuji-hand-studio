@@ -48,7 +48,11 @@ class MacDesktop(NativeDesktop):
         return configure(adapter_id, address, state['device_profile']['side'])
 
     def open_data_folder(self):
-        subprocess.Popen(['/usr/bin/open', str(DATA)])
+        result=subprocess.run(['/usr/bin/open',str(DATA)],stdin=subprocess.DEVNULL,capture_output=True,
+            text=True,encoding='utf-8',errors='replace',timeout=10)
+        if result.returncode:
+            detail=(result.stderr or result.stdout or '').strip()[-500:]
+            raise ValueError('资料文件夹未能打开 / Data folder could not be opened (exit '+str(result.returncode)+')'+(': '+detail if detail else ''))
         return dict(ok=True)
 
     def secure_window(self, window):

@@ -26,19 +26,9 @@ SAFE_ACTIONS = {'disconnect', 'hardware_stop', 'glove_stop', 'glove_disconnect',
 
 
 def firmware_environment():
-    """Keep the SDK user's home, supplying Windows HOME only to the child.
-
-    The official firmware downloader reads HOME even on Windows. A desktop
-    process normally has USERPROFILE instead. App-data or software-check homes
-    would create a second SDK user library, so neither is used as a fallback.
-    """
-    env={**os.environ,'WUJI_NO_UPDATE_CHECK':'1','WUJI_TELEMETRY_DISABLE':'1'}
-    if sys.platform=='win32' and not env.get('HOME'):
-        home=env.get('USERPROFILE') or str(Path.home())
-        if not isinstance(home,str) or not Path(home).is_absolute() or '\x00' in home:
-            raise ValueError('无法确定当前用户目录 / Current user home is unavailable')
-        env['HOME']=home
-    return env
+    """Compatibility entry for the shared native CLI environment."""
+    from native_environment import official_cli_environment
+    return official_cli_environment()
 
 
 def process_state(pid, expected_start):
@@ -109,6 +99,9 @@ class FirmwareHost:
         return prepare(strict=True)
 
     def cli_identity(self):
+        # Reject a bad home before the service reserves/launches a writer;
+        # a configuration error must not become an unknown flash process.
+        firmware_environment()
         component = self._component()
         return {'version': component['version'], 'sha256': component['binary_sha256'],
                 'platform': 'windows-native'}
