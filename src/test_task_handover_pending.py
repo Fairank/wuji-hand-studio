@@ -158,7 +158,7 @@ class PendingHandoverTaskTests(unittest.TestCase):
         state=self.pending(True);state['glove'].update(connection='receiving',glove_serial='WG-A',
             hardware={'active':True},feedback={'device_id':'HAND'})
         controller=N(action=Mock(),glove=N(lease=None),hardware_lease=None)
-        with self.assertRaisesRegex(ValueError,'Pause'):Controller._task_context_dispatch(controller,'disconnect',{},state)
+        with self.assertRaisesRegex(ValueError,'Stop'):Controller._task_context_dispatch(controller,'disconnect',{},state)
         controller.action.assert_not_called()
 
 

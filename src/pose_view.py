@@ -1,7 +1,7 @@
 """Native left MuJoCo geometry driven by validated display-only mappings.
 
-Measured and raw-target paths update kinematics only. Explicit constrained
-display uses a separate native model/data; it never writes a device target.
+Measured and raw-target paths update kinematics only. Automatic mapping
+display uses a separate static geometry model; it never writes a device target.
 """
 import io
 import hashlib
@@ -92,23 +92,51 @@ class GloveCollisionPreview:
     def reset(self):
         if getattr(self,'preview',None) is not None:self.preview.close()
         self.preview=None;self.cached=None;self.last_seq=None;self.last_at=None
-        self.key=None;self.error=None
+        self.key=None;self.error=None;self.retry_at=0.;self.error_seq=None
 
     close=reset
 
+    @staticmethod
+    def source_key(state):
+        g=state.get('glove') or {};stream=g.get('stream') or {};user=g.get('user') or {}
+        solver=stream.get('solver') or {};provenance=g.get('model_provenance') or {}
+        scope=((state.get('device_profile') or {}).get('id'),g.get('session_id'),g.get('glove_serial'),
+            user.get('user_id'),stream.get('retarget'),solver.get('engine'),solver.get('values_sha256'),provenance.get('model_sha256'))
+        return json.dumps(scope,sort_keys=True,allow_nan=False,separators=(',',':'))
+
+    def still_current(self,state,result):
+        """Recheck source context after rendering; newer SDK frames are fine."""
+        try:
+            mode=state.get('teleoperation_view_mode','automatic');g=state.get('glove') or {};stream=g.get('stream') or {}
+            if state.get('view_source')!='glove' or mode not in ('automatic','target','constrained'):return False
+            if mode=='automatic' and ((g.get('feedback') or {}).get('device_id') or g.get('hardware')):return False
+            profile=(state.get('device_profile') or {}).get('id');q=stream.get('q');seq=stream.get('seq')
+            if (g.get('profile')!=profile or result.get('profile')!=profile
+                    or not isinstance(q,(list,tuple)) or len(q)!=20
+                    or not all(type(value) in (int,float) and math.isfinite(value) for value in q)
+                    or type(seq) is not int or type(result.get('source_seq')) is not int or seq<result['source_seq']):return False
+            if seq==result['source_seq'] and hashlib.sha256(struct.pack('<20d',*q)).hexdigest()!=result.get('source_target_sha256'):
+                return False
+            return (self.source_key(state)==self.key and g.get('connection')=='receiving' and g.get('busy') is True
+                and stream.get('fresh') is True)
+        except Exception:return False
+
     def update(self,state,*,now=None):
-        from collision_preview import TargetFrame,SOURCE,DISPLAY_MAX_PENETRATION_M,DISPLAY_MAX_LIMIT_EXCESS_RAD,MAX_SUBSTEPS
+        from collision_preview import TargetFrame,SOURCE,MAX_SUBSTEPS,PreviewFrameExpired
+        from mapping_collision import ALGORITHM,COVERAGE,PAIR_COUNT,MIN_CLEARANCE_M
         now=time.monotonic() if now is None else now
-        if state.get('view_source')!='glove' or state.get('teleoperation_view_mode')!='constrained':
-            self.reset();return None
+        mode=state.get('teleoperation_view_mode','automatic')
         g=state.get('glove');g=g if isinstance(g,dict) else {}
+        if (state.get('view_source')!='glove' or mode not in ('automatic','target','constrained')
+                or (mode=='automatic' and ((g.get('feedback') or {}).get('device_id') or g.get('hardware')))):
+            self.reset();return None
         stream=g.get('stream');stream=stream if isinstance(stream,dict) else {}
         device=state.get('device_profile');device=device if isinstance(device,dict) else {}
         profile=device.get('id')
         base=dict(source=SOURCE,preview_only=True,hardware_validated=False,target_modified=False,
             profile=profile,bridge_session_id=g.get('session_id'),glove_serial=g.get('glove_serial'),
             source_seq=stream.get('seq'),status='blocked',
-            message='碰撞约束预演 · 等待新鲜手套数据 / Collision-constrained preview requires fresh glove data')
+            message='映射预览等待手套数据 / Mapping preview is waiting for glove data')
         q=stream.get('q');seq=stream.get('seq');session=g.get('session_id');user=g.get('user') or {}
         age=stream.get('age_ms');timeout=stream.get('timeout_ms',250)
         finite=lambda values:isinstance(values,(list,tuple)) and len(values)==20 and all(type(x) in (int,float) and math.isfinite(x) for x in values)
@@ -117,56 +145,76 @@ class GloveCollisionPreview:
                 and finite(q) and type(seq) is int and seq>=0
                 and type(age) in (int,float) and math.isfinite(age) and age>=0
                 and type(timeout) in (int,float) and math.isfinite(timeout) and timeout>0 and age<=min(500,timeout)):
-            self._close_engine();return base
+            # A pause in frames does not invalidate immutable model geometry.
+            # Reuse only the same source context, and publish no frame here.
+            try:same_context=self.key is not None and self.key==self.source_key(state)
+            except Exception:same_context=False
+            if not (same_context and g.get('connection')=='receiving' and g.get('busy') is True):self._close_engine()
+            return base
         if not (g.get('profile')==profile and profile in ('hand1_left','hand1_right','hand2_left','hand2_right')
                 and isinstance(g.get('glove_serial'),str) and g['glove_serial']
                 and ((type(session) is int and session>=0) or (isinstance(session,str) and session))
                 and isinstance(user,dict) and isinstance(user.get('user_id'),str)):
             self._close_engine();base['message']='预演来源身份不完整，未创建模型 / Preview source identity is incomplete';return base
         try:
-            solver=stream.get('solver') or {};provenance=g.get('model_provenance') or {}
-            scope=(profile,session,g['glove_serial'],user['user_id'],stream.get('retarget'),
-                   solver.get('engine'),solver.get('values_sha256'),provenance.get('model_sha256'))
-            key=json.dumps(scope,sort_keys=True,allow_nan=False,separators=(',',':'))
+            key=self.source_key(state)
             raw=struct.pack('<20d',*q);sha=hashlib.sha256(raw).hexdigest()
         except Exception:
             self._close_engine();base['message']='预演来源设置无效 / Invalid preview source settings';return base
         if self.key!=key:
             self.reset();self.key=key
         if self.error:
-            return dict(base,status='error',message=self.error)
+            if now<self.retry_at or seq<=self.error_seq:return dict(base,status='error',message=self.error)
+            self.error=None;self.error_seq=None
         if self.last_seq is not None and seq<=self.last_seq:
             if seq==self.last_seq and self.cached is not None and self.cached.get('source_target_sha256')==sha:
                 return dict(self.cached)
-            self._close_engine();self.error='预演数据序号或目标冲突，请切换画面后重试 / Preview sequence or target changed unexpectedly; switch display source to retry'
+            self._close_engine();self.error_seq=seq;self.retry_at=now+.5
+            self.error='映射数据序号冲突，等待新数据重试 / Mapping sequence changed unexpectedly; waiting to retry'
             return dict(base,status='error',message=self.error)
-        if self.last_at is not None and now-self.last_at>.5:self._close_engine()
         try:
+            started=time.perf_counter()
             if self.preview is None:self.preview=self.factory(profile,hashlib.sha256(key.encode('utf-8')).hexdigest())
-            elapsed=.02 if self.last_at is None else min(.05,max(.002,now-self.last_at))
+            initialization_elapsed=time.perf_counter()-started
+            if age+initialization_elapsed*1000>min(500,timeout):
+                # Retain the loaded/certified geometry. Never submit this old
+                # input, widen freshness limits, or count loading as reception.
+                return dict(base,status='blocked',message='模型已载入，等待新手套数据 / Model loaded; waiting for fresh glove data')
+            received_at=now-age/1000
+            elapsed=.02 if self.last_at is None else min(.05,max(.002,received_at-self.last_at))
             substeps=min(MAX_SUBSTEPS,max(1,round(elapsed/.002)))
-            result=self.preview.advance(TargetFrame(profile,self.preview.session_id,seq,now-age/1000,raw),now=now,substeps=substeps)
+            result=self.preview.advance(TargetFrame(profile,self.preview.session_id,seq,received_at,raw),
+                now=now+initialization_elapsed,substeps=substeps)
             result=dict(result,bridge_session_id=session,glove_serial=g['glove_serial'])
-            self.last_seq=seq;self.last_at=now
+            self.last_seq=seq;self.last_at=received_at
             required=('max_all_contact_penetration_m','limit_excess_rad')
             known=all(type(result.get(k)) in (int,float) and math.isfinite(result[k]) and result[k]>=0 for k in required)
             if result.get('stable') is not True or not known:
                 raise ValueError('原生求解状态未确认 / Native preview state is unverified')
             if result.get('source_target_sha256')!=sha:raise ValueError('预演目标校验不一致 / Preview target checksum mismatch')
-            if result['limit_excess_rad']>DISPLAY_MAX_LIMIT_EXCESS_RAD:
+            if age+(time.perf_counter()-started)*1000>min(500,timeout):
+                result.update(status='blocked',message='手套数据已过期，等待下一帧 / Glove data expired; waiting for the next frame')
+            elif result['limit_excess_rad']>0:
                 result.update(status='blocked',message='预演超出模型行程，未更新画面 / Preview exceeded model limits; frame withheld')
-            elif result['max_all_contact_penetration_m']>DISPLAY_MAX_PENETRATION_M:
-                result.update(status='blocked',message='预演接触残余超过显示上限，未更新画面 / Contact residual exceeds display limit; frame withheld')
-            elif result.get('coverage')=='partial_original_hand1_masks':
-                result.update(status='partial',message='碰撞约束预演 · 非发送目标 · 一代覆盖有限 / Collision-constrained preview · Not sent to device · Hand 1 coverage limited')
-            elif result.get('coverage')=='original_hand2_masks_unvalidated':
-                result.update(status='ready',message='碰撞约束预演 · 非发送目标 / Collision-constrained preview · Not sent to device')
-            else:raise ValueError('碰撞覆盖范围未确认 / Collision coverage is unverified')
+            elif (result.get('frame_verified') is False and result.get('budget_limited') is True
+                    or result.get('budget_limited') is True and result.get('progressed') is False):
+                result.update(status='blocked',message='映射预览保持上一有效姿态，正在核验 / Mapping preview is held while geometry is checked')
+            elif (result.get('algorithm')==ALGORITHM and result.get('geometry_only') is True
+                    and result.get('frame_verified') is True and result.get('path_certified') is True
+                    and result.get('coverage')==COVERAGE and result.get('geometry_pairs_verified')==PAIR_COUNT
+                    and result.get('visual_meshes_verified')==26 and result['max_all_contact_penetration_m']==0
+                    and type(result.get('minimum_verified_clearance_m')) in (int,float)
+                    and math.isfinite(result['minimum_verified_clearance_m']) and result['minimum_verified_clearance_m']>=MIN_CLEARANCE_M-1e-12):
+                result.update(status='ready',message='映射预览 · 碰撞约束 / Mapping preview · Collision constrained')
+            else:raise ValueError('映射显示的完整几何覆盖未确认 / Complete mapping display geometry is unverified')
             if result['status']=='blocked':result.pop('display_q',None)
             self.cached=result
             return dict(result)
+        except PreviewFrameExpired:
+            return dict(base,status='blocked',message='手套数据已过期，等待下一帧 / Glove data expired; waiting for the next frame')
         except Exception as error:
-            self._close_engine();self.error='预演不可用：'+str(error)+' / Preview unavailable; switch display source to retry'
+            self._close_engine();self.error_seq=seq;self.retry_at=now+.5
+            self.error='映射预览暂不可用：'+str(error)+' / Mapping preview unavailable; waiting to retry'
             return dict(base,status='error',message=self.error)
 
 
@@ -208,7 +256,7 @@ class PoseView:
             from PIL import Image
             from device_profiles import load_native_model,FirstGenerationPreview
             from collision_preview import create_display_preview
-            collision=GloveCollisionPreview(lambda p,s:create_display_preview(mj,p,s,HERE/'assets',mode='constrained',fresh_target=True))
+            collision=GloveCollisionPreview(lambda p,s:create_display_preview(mj,p,s,HERE/'assets',mode='automatic',fresh_target=True))
             profile_id=self.controller.snapshot().get('device_profile',{}).get('id','hand2_left')
             m = load_native_model(profile_id)
             d = mj.MjData(m)
@@ -294,7 +342,7 @@ class PoseView:
                             self.meta=dict(ready=False,mode=gmode,message=info.get('message','预演不可用 / Preview unavailable'),
                                 collision_preview=info,active_joints=0,joints=[],render_hz=0,
                                 source_seq=None,glove_seq=(state.get('glove',{}).get('stream') or {}).get('seq'),
-                                no_physics_step=not bool(info.get('substeps')),no_motion_commands=True,simulation_only=True,
+                                no_physics_step=True,no_motion_commands=True,preview_only=True,
                                 device_profile=profile_id,view_source='glove')
                         time.sleep(max(0,.05-(time.monotonic()-tick)))
                         continue
@@ -353,8 +401,19 @@ class PoseView:
                         feedback=gfeedback if active else dict(latest=None,joint_rates=[],stale=True,metrics={}))
                     if gmode=='glove_constrained':
                         info=gfeedback['collision_preview']
-                        meta.update(message=info['message'],collision_preview=info,simulation_only=True,
-                                    no_physics_step=False,source_seq=None,active_joints=0)
+                        original_stream=state.get('glove',{}).get('stream') or {}
+                        age=original_stream.get('age_ms');timeout=original_stream.get('timeout_ms',250)
+                        fresh=(type(age) in (int,float) and type(timeout) in (int,float)
+                            and age+(time.monotonic()-tick)*1000<=min(500,timeout)
+                            and collision.still_current(self.controller.snapshot(),info))
+                        if not fresh:
+                            with self.lock:self.meta=dict(ready=False,mode='glove_constrained_unavailable',
+                                message='手套数据已更新，等待下一帧 / Glove source changed; waiting for the next frame',
+                                collision_preview=dict(info,status='blocked'),render_hz=0,source_seq=None,
+                                no_physics_step=True,no_motion_commands=True,preview_only=True,device_profile=profile_id,view_source='glove')
+                            time.sleep(max(0,.05-(time.monotonic()-tick)));continue
+                        meta.update(message=info['message'],collision_preview=info,preview_only=True,
+                                    no_physics_step=True,source_seq=None,active_joints=0)
                 with self.lock:
                     self.jpeg, self.meta = output.getvalue(), meta
                 time.sleep(max(0, .05-(time.monotonic()-tick)))

@@ -7,7 +7,7 @@
 .official-terminal-actions{display:flex;gap:8px;flex-wrap:wrap}
 #page-connection .official-terminal-actions button{min-height:36px;padding:7px 13px;border-radius:10px;font-size:13px;line-height:1.5}
 .official-terminal-scroll{min-width:0;max-width:100%;overflow-x:auto;border:1px solid var(--wb-line);border-radius:12px;background:#121820;padding:16px;box-sizing:border-box}
-.official-terminal-screen{min-width:640px;width:100%;height:616px}
+.official-terminal-screen{min-width:640px;width:100%;height:var(--terminal-viewport-height,616px)}
 .official-terminal-screen .xterm{padding:0}
 .official-terminal-screen .xterm-viewport{border-radius:0;scrollbar-gutter:auto}
 .official-terminal-error{margin:0;font-size:13px;line-height:1.6;color:var(--wb-sub);overflow-wrap:anywhere}

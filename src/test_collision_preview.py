@@ -8,6 +8,7 @@ import unittest
 from unittest.mock import patch
 
 from collision_preview import CollisionPreview, TargetFrame, create_remote_mujoco_preview,create_display_preview, _finger
+from mapping_collision import ALGORITHM,COVERAGE
 
 
 class FakeEngine:
@@ -19,6 +20,18 @@ class FakeEngine:
         self.calls.append((target,substeps))
         return dict(display_q=[0.]*20,contacts=[dict(distance_m=-.001,cross_finger=True)],limit_excess_rad=0.)
     def close(self):self.closed=True
+
+
+class FakeGeometryEngine(FakeEngine):
+    geometry_only=True
+    coverage=COVERAGE
+    def step(self,target,substeps):
+        self.calls.append((target,substeps))
+        return dict(display_q=[.05]*20,contacts=[],limit_excess_rad=0.,stable=True,native_warning_count=0,
+            algorithm=ALGORITHM,geometry_only=True,geometry_pairs_verified=290,visual_meshes_verified=26,
+            coverage_sha256='a'*64,minimum_verified_clearance_m=.0002,path_clearance_m=.00002,
+            display_modified=True,iterations=1,native_distance_queries=0,path_certified=True,frame_verified=True,
+            budget_limited=False,progressed=True,raw_limit_excess_rad=0.,display_target_clamped=False)
 
 
 class CollisionPreviewTests(unittest.TestCase):
@@ -115,7 +128,7 @@ class CollisionPreviewTests(unittest.TestCase):
                 create_remote_mujoco_preview('hand2_right','s','unused',allow_physics=True)
 
     def test_display_factory_needs_explicit_mode_and_fresh_target_before_runtime_access(self):
-        for mode,fresh in ((None,True),('target',True),('feedback',True),('constrained',False)):
+        for mode,fresh in ((None,True),('feedback',True),('constrained',False),('target',False)):
             with patch('collision_preview._MujocoEngine') as engine,self.assertRaises(ValueError):
                 create_display_preview(object(),'hand2_right','s','unused',mode=mode,fresh_target=fresh)
             engine.assert_not_called()
@@ -123,10 +136,40 @@ class CollisionPreviewTests(unittest.TestCase):
     def test_display_factory_uses_a_separate_native_asset_engine_without_a_host_lock(self):
         class LoadedRuntime:__version__='3.3.7'
         runtime=LoadedRuntime()
-        with patch('collision_preview.socket.gethostname',return_value='customer-desktop'),patch('collision_preview._MujocoEngine',return_value=self.engine) as engine:
-            result=create_display_preview(runtime,'hand2_right','s','native-assets',mode='constrained',fresh_target=True)
-            engine.assert_called_once_with(runtime,'hand2_right','native-assets')
-            self.assertIs(result.engine,self.engine)
+        for mode in ('automatic','target','constrained'):
+            with (patch('collision_preview.socket.gethostname',return_value='customer-desktop'),
+                    patch('mapping_collision.NativeGeometryEngine',return_value=self.engine) as engine,
+                    patch('collision_preview._MujocoEngine') as dynamic):
+                result=create_display_preview(runtime,'hand2_right','s','native-assets',mode=mode,fresh_target=True)
+                engine.assert_called_once_with(runtime,'hand2_right','native-assets')
+                self.assertIs(result.engine,self.engine);dynamic.assert_not_called()
+
+    def test_static_geometry_metadata_has_no_physics_substeps_and_keeps_raw_input(self):
+        engine=FakeGeometryEngine();preview=CollisionPreview('hand2_right','fixture-session',engine)
+        result=preview.advance(self.frame,now=10.1)
+        self.assertEqual(result['substeps'],0);self.assertTrue(result['geometry_only'])
+        self.assertEqual(result['geometry_pairs_verified'],290);self.assertEqual(result['display_q'],[.05]*20)
+        self.assertEqual(result['source_target_sha256'],hashlib.sha256(self.raw).hexdigest())
+        self.assertFalse(result['target_modified']);self.assertTrue(result['preview_only'])
+
+    def test_partial_unknown_or_inconsistent_geometry_cannot_be_published_as_safe(self):
+        for edit in (dict(geometry_pairs_verified=265),dict(visual_meshes_verified=0),dict(path_certified=False),
+                dict(minimum_verified_clearance_m=0.),dict(frame_verified=None),dict(native_warning_count=1),
+                dict(raw_limit_excess_rad=.01),dict(coverage_sha256=None),dict(algorithm='other'),
+                dict(contacts=[dict(distance_m=-.0001)])):
+            engine=FakeGeometryEngine();valid=engine.step([.1]*20,10)
+            engine.step=lambda *_,row=dict(valid,**edit):row
+            with self.subTest(edit=edit),self.assertRaises(ValueError):
+                CollisionPreview('hand2_right','fixture-session',engine).advance(self.frame,now=10.1)
+            self.assertTrue(engine.closed)
+
+    def test_expiry_during_geometry_computation_withholds_result_but_preserves_the_verified_model(self):
+        engine=FakeGeometryEngine();preview=CollisionPreview('hand2_right','fixture-session',engine)
+        with patch('collision_preview.time.perf_counter',side_effect=[0.,.6]):
+            with self.assertRaisesRegex(ValueError,'expired'):preview.advance(self.frame,now=10.)
+        self.assertFalse(engine.closed);self.assertIsNone(preview.last_seq)
+        fresh=dataclasses.replace(self.frame,seq=2,received_at=11.)
+        self.assertTrue(preview.advance(fresh,now=11.)['frame_verified'])
 
 
 if __name__=='__main__':unittest.main()

@@ -421,7 +421,8 @@ class FirmwareHostTests(unittest.TestCase):
         getter.assert_not_called()
         self.assertEqual(self.host.runner.call_args.args[0],['verified-wuji.exe','upgrade','--sn',SN,'--check','--json'])
         self.assertEqual(result,dict(process_exited=True,identity_verified=True,sn=SN,
-                                     reservation_token=TOKEN,firmware_version='2.5.1'))
+                                     reservation_token=TOKEN,firmware_version='2.5.1',
+                                     verification_report=dict(returncode=0,stdout=json.dumps(report),stderr='',exited=True)))
         # A successful probe is evidence; only the service releases the lease.
         self.assertEqual(cli_coordination.reservation(self.folder)['token'],TOKEN)
 

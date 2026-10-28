@@ -257,13 +257,13 @@ class NativeTests(unittest.TestCase):
             env.service.start_human(SN, 'left', 900)
             run_id = env.owner.run['id']
             env.service.input({'run_id': run_id, 'type': 'write', 'text': '\x1b[A中文\r'})
-            env.service.input({'run_id': run_id, 'type': 'resize', 'rows': 38, 'cols': 100})
+            env.service.input({'run_id': run_id, 'type': 'resize', 'rows': 12, 'cols': 100})
             records = [json.loads(x) for x in env.process.stdin.getvalue().splitlines()]
             self.assertEqual(records, [{'type': 'write', 'text': '\x1b[A中文\r'},
-                                       {'type': 'resize', 'rows': 38, 'cols': 100}])
+                                       {'type': 'resize', 'rows': 12, 'cols': 100}])
             for payload in [{'type': 'write', 'text': ''}, {'type': 'write', 'text': '\0'},
                             {'type': 'write', 'text': 'x' * 4097}, {'type': 'resize', 'rows': True, 'cols': 100},
-                            {'type': 'resize', 'rows': 37, 'cols': 100}, {'type': 'resize', 'rows': 38, 'cols': 241},
+                            {'type': 'resize', 'rows': 11, 'cols': 100}, {'type': 'resize', 'rows': 38, 'cols': 241},
                             {'type': 'cancel'}]:
                 with self.subTest(payload=str(payload)[:80]), self.assertRaises(ValueError):
                     env.service.input(dict(run_id=run_id, **payload))

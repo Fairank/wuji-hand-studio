@@ -20,12 +20,17 @@
    try{while(queue.length&&session===id&&fresh&&run.running===true){const item=queue.shift();await action(item.payload,item.id);}}
    catch(e){if(session===id){queue=[];fault=e.message;message();}}finally{writing=false;if(queue.length)queueMicrotask(flush);}
   }
-  function send(payload){if(!session||!fresh||run.running!==true||run.status==='cancelling')return;if(queue.length>=32){fault=t('输入较快，请稍等当前输入完成。','Please wait for the pending terminal input.');message();return;}queue.push({payload,id:session});flush();}
+  function send(payload){if(!session||!fresh||run.running!==true||run.status==='cancelling')return false;
+   // A size drag can outpace the pipe. Keep only the newest adjacent resize;
+   // never discard or reorder keyboard input around it.
+   if(payload.type==='resize'&&queue.at(-1)?.payload.type==='resize')queue[queue.length-1]={payload,id:session};
+   else{if(queue.length>=32){fault=t('输入较快，请稍等当前输入完成。','Please wait for the pending terminal input.');message();return false;}queue.push({payload,id:session});}flush();return true;}
   function resize(){
    if(!term||host.hidden||!screen.getClientRects().length)return;
    const dimensions=fit.proposeDimensions();if(!dimensions)return;
-   const cols=Math.max(81,Math.min(240,dimensions.cols)),rows=38,size=cols+'x'+rows;
-   if(lastSize===size)return;lastSize=size;term.resize(cols,rows);send({type:'resize',cols,rows});
+   if(!Number.isFinite(dimensions.cols)||!Number.isFinite(dimensions.rows))return;
+   const cols=Math.max(81,Math.min(240,Math.floor(dimensions.cols))),rows=Math.max(12,Math.min(100,Math.floor(dimensions.rows))),size=cols+'x'+rows;
+   if(lastSize===size)return;term.resize(cols,rows);if(send({type:'resize',cols,rows}))lastSize=size;
   }
   function initialize(){
    if(term)return;

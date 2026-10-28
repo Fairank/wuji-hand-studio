@@ -184,7 +184,8 @@ class FirmwareHost:
             version=observed['current']
             if reservation(self.folder).get('token')!=reservation_token:raise ValueError('Firmware recovery ownership changed')
             return dict(process_exited=True,identity_verified=True,sn=serial,
-                        reservation_token=reservation_token,firmware_version=version)
+                        reservation_token=reservation_token,firmware_version=version,
+                        verification_report=report)
 
     def run_snapshot(self):
         with self.lock:return copy.deepcopy(self.session)

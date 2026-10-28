@@ -1,9 +1,10 @@
 """Private typed owner adapter. It never accepts a raw device command."""
 import re
+from contextlib import nullcontext
 
-from task_sessions import context_digest,pending_teleoperation
+from task_sessions import context_digest,pending_teleoperation,hand_playback,hand_group_active
 
-ACTIONS=frozenset({'pause','disconnect','pair_prepare','unpair','continue_teleoperation'})
+ACTIONS=frozenset({'pause','resume','stop','disconnect','pair_prepare','unpair','continue_teleoperation'})
 
 
 def execute(controller,expected_context,action,payload=None):
@@ -42,8 +43,33 @@ def execute(controller,expected_context,action,payload=None):
     lock=controller.calibration_handover.workflow_lock
     if not lock.acquire(blocking=False):raise ValueError('Another device task is switching')
     try:
-        state=controller.snapshot()
-        if context_digest(state)!=expected_context:
+        initial=controller.snapshot()
+        if context_digest(initial)!=expected_context:
             raise ValueError('任务设备或会话已变化，请刷新后重试 / Task device or session changed; refresh before retrying')
-        return controller._task_context_dispatch(action,payload,state)
+        dispatch_action=action;needs_gate=False
+        if action in ('pause','resume'):
+            glove=initial.get('glove') or {}
+            if hand_group_active(initial):
+                raise ValueError('Use the ensemble pause/resume control')
+            controls=hand_playback(initial)
+            if glove.get('busy') or not (controls['can_pause'] or controls['can_resume']):
+                if action=='resume':raise ValueError('This playback control is unavailable; refresh the task')
+                # A glove task pause means stop following. Unknown/pending
+                # hand ownership also keeps its legacy safety-stop route.
+                # Freeze that intent before locking: a late start ACK cannot
+                # turn this gate-free operation into a reversible pause.
+                dispatch_action='stop'
+            else:needs_gate=True
+        # Serialize the final playback identity check with start/stop. A late
+        # task request must never control a replacement run on the same hand.
+        owner_lock=getattr(controller,'lock',None) if action in ('pause','resume','stop') else None
+        from cli_coordination import gate
+        # Normal commands acquire CLI gate before owner lock. Keep that order,
+        # while stop retains its gate-free route during component maintenance.
+        with gate() if needs_gate else nullcontext():
+            with owner_lock if owner_lock is not None else nullcontext():
+                state=controller.snapshot()
+                if context_digest(state)!=expected_context:
+                    raise ValueError('任务设备或会话已变化，请刷新后重试 / Task device or session changed; refresh before retrying')
+                return controller._task_context_dispatch(dispatch_action,payload,state)
     finally:lock.release()

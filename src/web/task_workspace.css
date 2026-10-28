@@ -17,6 +17,8 @@ body.tw-task-shell .top-device-cluster{display:none!important}
 html body .tw-tabs .tw-tab-item>.tw-tab[aria-selected=true]{background:transparent!important;border:0;box-shadow:none!important}
 .tw-tabs::-webkit-scrollbar{display:none;height:0!important}.tw-tabs::-webkit-scrollbar-button{display:none;width:0;height:0}
 .tw-tab-name{min-width:0;max-width:166px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tw-tab{touch-action:none;user-select:none}.tw-tab[data-dragging=true]{opacity:.55;cursor:grabbing}
+.tw-drag-ghost{position:fixed;z-index:10000;pointer-events:none;max-width:210px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:11px 15px;border:1px solid var(--ui-line,#ddd);border-radius:11px;background:var(--ui-card,#fff);color:var(--ui-ink,#202126);box-shadow:0 10px 28px #17213226;font:550 13px/1.4 system-ui}
 .tw-dot{flex:none;width:7px;height:7px;border-radius:50%;background:#9a9ca3}
 .tw-dot[data-state=connected]{background:#26895a}.tw-dot[data-state=active]{background:#16a05f}.tw-dot[data-state=unknown]{background:#c18d32}
 .tw-tab-item>.tw-tab-pause,.tw-tab-item>.tw-tab-close{border:0;background:transparent;flex:none;min-height:28px;width:28px;padding:3px;margin-right:3px;color:var(--ui-sub,#676b73);font-size:16px}

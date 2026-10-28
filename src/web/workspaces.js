@@ -304,7 +304,9 @@
     if (!panel || !w) return;
     const members = (w.members || []).map(id => {
       const e = byId.get(id) || {};
-      return { id, label: e.label || String(id), side: e.side, generation: e.generation, connected: !!e.connected };
+      return { id, label: e.label || String(id), side: e.side, generation: e.generation,
+        profile: e.profile || (e.generation && e.side ? e.generation + '_' + e.side : null),
+        serial: e.serial, connection: e.connection, connected: !!e.connected };
     });
     const ps = { workspace: { id: w.id, label: w.label || String(w.id) }, members, actions: (snap && snap.actions) || [],
       run: w.run || {}, pending: starting.has(w.id), stale: !!pollErr };

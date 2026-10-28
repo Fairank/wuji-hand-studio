@@ -60,22 +60,25 @@ class GloveViewTests(unittest.TestCase):
                 self.assertIsNone(q)
                 self.assertEqual(mode,'glove_live')
 
-    def test_preview_remains_distinct_and_requires_known_generation_and_freshness(self):
+    def test_default_mapping_display_cannot_bypass_missing_geometry_certificates(self):
         glove=dict(stream=dict(q=[.5]*20,fresh=True))
         for generation in ('hand1','hand2'):
             with self.subTest(generation=generation):
                 q,mode,feedback=pose(glove,generation)
-                self.assertEqual(q,[.5]*20)
-                self.assertEqual((mode,feedback),('glove_preview',{}))
+                self.assertIsNone(q)
+                self.assertEqual(mode,'glove_constrained_unavailable')
         for generation in (None,'hand3'):
             self.assertIsNone(pose(glove,generation)[0])
         glove['stream']['fresh']=False
         self.assertIsNone(pose(glove,'hand1')[0])
 
-    def test_explicit_target_remains_preview_after_feedback_is_connected(self):
+    def test_legacy_target_choice_does_not_bypass_constraints_after_feedback_is_connected(self):
         for generation in ('hand1','hand2'):
             glove=self.measured(generation)
-            self.assertEqual(pose(glove,generation,'target'),([9.]*20,'glove_preview',{}))
+            before=copy.deepcopy(glove)
+            self.assertIsNone(pose(glove,generation,'target')[0])
+            self.assertEqual(pose(glove,generation,'target')[1],'glove_constrained_unavailable')
+            self.assertEqual(glove,before)
             measured,mode,_=pose(glove,generation,'feedback')
             self.assertEqual(measured,[(i+1)/100 for i in range(20)])
             self.assertEqual(mode,'glove_live')
@@ -96,10 +99,11 @@ class GloveViewTests(unittest.TestCase):
     def test_unknown_display_selection_is_rejected(self):
         with self.assertRaises(ValueError):pose({},'hand2','invalid')
 
-    def test_automatic_uses_targets_only_before_a_hand_feedback_session(self):
+    def test_automatic_needs_geometry_before_feedback_and_preserves_actual_feedback(self):
         for generation in ('hand1','hand2'):
             glove=dict(stream=dict(q=[.5]*20,fresh=True),feedback={},hardware={})
-            self.assertEqual(pose(glove,generation,'automatic'),([.5]*20,'glove_preview',{}))
+            self.assertIsNone(pose(glove,generation,'automatic')[0])
+            self.assertEqual(pose(glove,generation,'automatic')[1],'glove_constrained_unavailable')
             glove=self.measured(generation)
             actual,mode,feedback=pose(glove,generation,'automatic')
             self.assertEqual(actual,[(i+1)/100 for i in range(20)])
@@ -122,7 +126,9 @@ class GloveViewTests(unittest.TestCase):
             for mode in ('automatic',None):
                 for q in ([1.]*19,[1.]*21,[float('nan')]*20,[float('inf')]*20,[True]*20,['1']*20,None):
                     with self.subTest(generation=generation,mode=mode,q=q):
-                        self.assertEqual(pose(dict(stream=dict(q=q,fresh=True)),generation,mode),(None,'glove_preview',{}))
+                        result=pose(dict(stream=dict(q=q,fresh=True)),generation,mode)
+                        self.assertIsNone(result[0])
+                        self.assertEqual(result[1],'glove_constrained_unavailable')
 
     def test_actual_feedback_rejects_duplicate_or_malformed_channels_and_nonfinite_values(self):
         for generation in ('hand1','hand2'):

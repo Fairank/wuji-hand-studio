@@ -5,10 +5,11 @@
   const rows=new Map();let language='zh',dead=false,timer=null;
   const text=(zh,en)=>language==='en'?en:zh;
   const host=document.createElement('div');host.className='hgv-grid';root.append(host);
+  const memberScope=m=>JSON.stringify([m.id,m.profile??null,m.generation??null,m.side??null,m.serial??null,m.device_id??null,m.session_id??null,m.glove_serial??null,m.connected??null,m.connection==='disconnected']);
   function add(member){
    const card=document.createElement('article');card.className='hgv-card';
    card.innerHTML='<header><strong></strong><button type="button"></button></header><div class="hgv-picture"><img draggable="false"><span class="hgv-unavailable"></span></div><p class="hgv-source"></p>';
-   const row={card,img:card.querySelector('img'),status:card.querySelector('.hgv-source'),notice:card.querySelector('.hgv-unavailable'),button:card.querySelector('button'),member,busy:false,cameraBusy:false,camera:null,request:null};
+   const row={card,img:card.querySelector('img'),status:card.querySelector('.hgv-source'),notice:card.querySelector('.hgv-unavailable'),button:card.querySelector('button'),member,scope:memberScope(member),revision:0,busy:false,cameraBusy:false,camera:null,request:null};
    row.button.addEventListener('click',async()=>{
     if(row.cameraBusy)return;row.cameraBusy=true;row.button.disabled=true;
     try{await onCamera(row.member.id,{azimuth:row.member.side==='left'?270:90,elevation:-5,distance:.38,lookat:[0,0,.115]});}
@@ -25,24 +26,29 @@
    host.append(card);return row;
   }
   async function frame(row){
-   if(row.busy)return;row.busy=true;const controller=new AbortController();row.request=controller;
+   if(row.busy)return;row.busy=true;const revision=row.revision,controller=new AbortController();row.request=controller;
    const timeout=setTimeout(()=>controller.abort(),1800);
    try{
     const reply=await fetch('/api/workspace-view?member='+encodeURIComponent(row.member.id),{cache:'no-store',signal:controller.signal});
     if(!reply.ok)throw new Error('HTTP '+reply.status);
-    const result=await reply.json();if(dead||!row.card.isConnected)return;
-    const m=result.meta||{},preview=m.mode==='demo'||m.mode==='glove_preview';
+    const result=await reply.json();if(dead||!row.card.isConnected||revision!==row.revision)return;
+    const m=result.meta||{},constrained=['glove_constrained','glove_constrained_unavailable'].includes(m.mode),preview=constrained||m.mode==='demo'||m.mode==='glove_preview';
     const measured=!preview&&m.feedback?.stale===false&&m.active_joints>0;
     row.camera=m.camera||null;
     // A stale/unknown source is explicitly covered, never presented as current feedback.
-    const valid=m.ready===true&&typeof result.image==='string'&&result.image.startsWith('data:image/jpeg;base64,');
+    const profile=typeof row.member.profile==='string'?row.member.profile:row.member.generation&&row.member.side?row.member.generation+'_'+row.member.side:null;
+    const valid=m.ready===true&&typeof result.image==='string'&&result.image.startsWith('data:image/jpeg;base64,')
+      &&(!profile||m.device_profile==null||m.device_profile===profile)
+      &&!(m.mode==='live'&&row.member.connection==='disconnected')
+      &&!(m.mode==='glove_live'&&(m.feedback?.connection==='disconnected'||m.feedback?.stale!==false||m.source_seq==null||!(m.active_joints>0)));
     if(valid)row.img.src=result.image;
     row.img.hidden=!valid;row.notice.hidden=valid;
     row.notice.textContent=text('画面暂不可用','View unavailable');
-    const source=preview?text('动作预览 · 未驱动实机','Action preview · no physical motion'):measured?text('实测关节反馈','Measured joint feedback'):text('模型参考姿态 · 无实时反馈','Reference pose · no live feedback');
+    const source=constrained?text('映射预览 · 碰撞约束','Mapping preview · Collision constrained'):m.mode==='glove_preview'?text('映射预览','Mapping preview'):preview?text('动作预览 · 未驱动实机','Action preview · no physical motion'):measured?text('实测关节反馈','Measured joint feedback'):text('模型参考姿态 · 无实时反馈','Reference pose · no live feedback');
+    row.status.title=constrained?text('显示姿态经过官方模型的几何约束；SDK 原始目标与实机指令未修改，不代表实物避碰。','The displayed pose uses geometry constraints from the official model. Original SDK targets and hardware commands are unchanged; this does not establish collision avoidance on hardware.') : '';
     row.status.textContent=source+(valid?' · '+Math.round(m.render_hz||0)+' fps':' · '+text('画面已中断','View interrupted'));
     row.card.dataset.source=preview?'preview':measured?'measured':'reference';
-   }catch(e){if(!dead&&row.card.isConnected){row.img.hidden=true;row.notice.hidden=false;row.notice.textContent=text('画面连接中断','View connection interrupted');row.status.textContent=String(e.message||e);}}
+   }catch(e){if(!dead&&row.card.isConnected&&revision===row.revision){row.img.hidden=true;row.notice.hidden=false;row.notice.textContent=text('画面连接中断','View connection interrupted');row.status.textContent=String(e.message||e);}}
    finally{clearTimeout(timeout);row.busy=false;row.request=null;}
   }
   function tick(){
@@ -57,7 +63,9 @@
    const ids=new Set(members.map(m=>m.id));
    for(const [id,row]of rows)if(!ids.has(id)){row.request?.abort();row.card.remove();rows.delete(id);}
    members.forEach((m,i)=>{
-    let row=rows.get(m.id);if(!row){row=add(m);rows.set(m.id,row);}row.member=m;
+    let row=rows.get(m.id);if(!row){row=add(m);rows.set(m.id,row);}
+    const scope=memberScope(m);if(scope!==row.scope){row.scope=scope;row.revision++;row.request?.abort();row.img.removeAttribute('src');row.img.hidden=true;row.notice.hidden=false;row.notice.textContent=text('正在准备画面','Preparing view');row.status.textContent='';row.camera=null;}
+    row.member=m;
     row.card.querySelector('strong').textContent=(m.side==='left'?text('左手','Left hand'):text('右手','Right hand'))+' · '+m.label;
     row.img.alt=text('原生 MuJoCo 手部姿态','Native MuJoCo hand pose');row.img.title=text('拖动后松开调整视角','Drag and release to rotate the view');row.button.textContent=text('正面视角','Front view');
     if(host.children[i]!==row.card)host.insertBefore(row.card,host.children[i]||null);

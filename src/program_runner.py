@@ -7,6 +7,11 @@ import copy
 import secrets
 import threading
 import time
+from contextlib import nullcontext
+
+
+class ProgramEntryPaused(ValueError):
+    """The owner rejected an entry start after its last external pause check."""
 
 
 class ProgramRunner:
@@ -69,13 +74,35 @@ class ProgramRunner:
         if time.monotonic()-self.heartbeat>.8:raise ValueError('节目控制连接中断 / Playlist control connection expired')
 
     def pause(self, paused):
-        if not self.state['active']:raise ValueError('No active playlist')
-        self.update(paused=paused)
-        mode=self.state['mode']
-        if mode=='hardware' and self.controller.hardware_lease:
-            self.controller._action(dict(name='hardware_pause' if paused else 'hardware_resume',lease=self.controller.hardware_lease))
-        elif mode=='preview':
-            self.controller.player.command(dict(name='demo_pause' if paused else 'demo_resume'))
+        # Use the same lock order as Controller.action: owner before program.
+        # Entry startup rechecks the flag under this lock, closing the gap
+        # between its last pause check and the next motor/preview start.
+        owner_lock=getattr(self.controller,'lock',None)
+        with owner_lock if owner_lock is not None else nullcontext():
+            state=self.snapshot()
+            if not state['active'] or self.cancel.is_set():raise ValueError('No active playlist')
+            if type(paused) is not bool:raise ValueError('Invalid pause state')
+            if state['paused'] is paused:return dict(paused=paused)
+            mode=state['mode']
+            if mode=='hardware' and self.controller.hardware_lease:
+                self.controller._action(dict(name='hardware_pause' if paused else 'hardware_resume',lease=self.controller.hardware_lease))
+            elif mode=='preview':
+                p=self.controller.player.snapshot()
+                # A completed entry waits for the playlist thread. Resuming it
+                # here would rewind DemoPlayer and replay an already ended item.
+                if p['active'] and (not p.get('cycles') or p['elapsed_s']<p['duration_s']*p['cycles']):
+                    self.controller.player.command(dict(name='demo_pause' if paused else 'demo_resume'))
+            self.update(paused=paused)
+            return dict(paused=paused)
+
+    def start_cycle(self, command):
+        while True:
+            self.check()
+            if not self.snapshot()['paused']:
+                try:
+                    return self.controller.action(command)
+                except ProgramEntryPaused:pass
+            time.sleep(.05)
 
     def run(self, plan, mode, amplitude):
         from playlist_plan import iter_plan
@@ -93,7 +120,7 @@ class ProgramRunner:
                     while self.snapshot()['paused']:
                         self.check();time.sleep(.05)
                     if mode=='preview':
-                        self.controller.action(dict(name='demo_start',action=entry['action'],speed=entry['speed'],cycles=1))
+                        self.start_cycle(dict(name='demo_start',action=entry['action'],speed=entry['speed'],cycles=1))
                         while True:
                             self.check()
                             p=self.controller.player.snapshot()
@@ -102,7 +129,7 @@ class ProgramRunner:
                             time.sleep(.05)
                     else:
                         started=time.time()
-                        result=self.controller.action(dict(name='hardware_trial',action=entry['action'],
+                        result=self.start_cycle(dict(name='hardware_trial',action=entry['action'],
                             speed=entry['speed'],amplitude=amplitude,cycles=1,workspace_clear=True))
                         lease=result['lease'];seen=False;deadline=time.monotonic()+8
                         while True:

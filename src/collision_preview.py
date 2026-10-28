@@ -1,7 +1,9 @@
-"""Explicit display-only dynamics; never a device controller or target writer.
+"""Separate display geometry; never a device controller or target writer.
 
 The validation factory is restricted to 5090. The product factory receives an
-already loaded renderer runtime after an explicit fresh-target display choice.
+already loaded renderer runtime for a fresh mapping display. It never steps
+dynamics. The old dynamics engine remains restricted to the remote research
+factory, which is not used by the product renderer.
 Importing this module or using a fake engine never imports physics. Raw targets
 and measured feedback must never be replaced by this separate display output.
 """
@@ -24,6 +26,10 @@ MAX_FRAME_AGE_S = .5
 MAX_SUBSTEPS = 25
 DISPLAY_MAX_PENETRATION_M = .001
 DISPLAY_MAX_LIMIT_EXCESS_RAD = .001
+
+
+class PreviewFrameExpired(ValueError):
+    """Source age invalidates a frame, not a verified geometry instance."""
 
 
 def _angles(raw):
@@ -96,13 +102,39 @@ class CollisionPreview:
                     raise ValueError('Preview engine returned invalid contact distance')
             if hashlib.sha256(frame.target_bytes).hexdigest() != target_sha or frame.target_bytes != raw:
                 raise ValueError('Preview input changed')
+            if now+(time.perf_counter()-start)-frame.received_at>MAX_FRAME_AGE_S:
+                raise PreviewFrameExpired('Preview source expired during display computation')
+            geometry=getattr(self.engine,'geometry_only',False) is True
+            if geometry:
+                from mapping_collision import ALGORITHM,COVERAGE,PAIR_COUNT,MIN_CLEARANCE_M,PATH_CLEARANCE_M,MAX_DISPLAY_LIMIT_CLAMP_RAD
+                valid=lambda key:type(snapshot.get(key)) in (int,float) and math.isfinite(snapshot[key])
+                if snapshot.get('algorithm')!=ALGORITHM or getattr(self.engine,'coverage',None)!=COVERAGE:
+                    raise ValueError('Mapping geometry method or coverage is unverified')
+                if snapshot.get('frame_verified') is True:
+                    if (snapshot.get('geometry_pairs_verified')!=PAIR_COUNT or snapshot.get('visual_meshes_verified')!=26
+                            or snapshot.get('path_certified') is not True
+                            or not valid('minimum_verified_clearance_m') or snapshot['minimum_verified_clearance_m']<MIN_CLEARANCE_M-1e-12
+                            or not valid('path_clearance_m') or snapshot['path_clearance_m']<PATH_CLEARANCE_M
+                            or any(row['distance_m']<MIN_CLEARANCE_M-1e-12 for row in contacts)):
+                        raise ValueError('Mapping display has incomplete geometry certificates')
+                elif not (snapshot.get('frame_verified') is False and snapshot.get('budget_limited') is True
+                        and snapshot.get('geometry_pairs_verified')==0):
+                    raise ValueError('Unknown geometry verification status')
+                if (snapshot.get('stable') is not True or snapshot.get('native_warning_count')!=0
+                        or snapshot.get('limit_excess_rad')!=0.
+                        or not valid('raw_limit_excess_rad') or not 0<=snapshot['raw_limit_excess_rad']<=MAX_DISPLAY_LIMIT_CLAMP_RAD
+                        or not isinstance(snapshot.get('coverage_sha256'),str)
+                        or not re.fullmatch('[0-9a-f]{64}',snapshot['coverage_sha256'])):
+                    raise ValueError('Mapping geometry state is invalid')
+        except PreviewFrameExpired:
+            raise
         except Exception:
             self.close()
             raise
         self.last_seq = frame.seq
         penetration = max([max(0., -row['distance_m']) for row in contacts if row.get('cross_finger') is True], default=0.)
         all_penetration = max([max(0., -row['distance_m']) for row in contacts], default=0.)
-        return dict(source=SOURCE, preview_only=True, hardware_validated=False, target_modified=False,
+        result=dict(source=SOURCE, preview_only=True, hardware_validated=False, target_modified=False,
             profile=self.profile, session_id=self.session_id, source_seq=frame.seq,
             source_target_sha256=target_sha, display_q=list(display), contacts=contacts,
             max_inter_finger_penetration_m=penetration,
@@ -111,8 +143,14 @@ class CollisionPreview:
             coverage=getattr(self.engine,'coverage','unknown'), model_sha256=getattr(self.engine,'model_sha256',None),
             limit_excess_rad=snapshot.get('limit_excess_rad'),
             stable=snapshot.get('stable'),native_warning_count=snapshot.get('native_warning_count'),
-            wall_ms=(time.perf_counter()-start)*1000, substeps=substeps,
+            wall_ms=(time.perf_counter()-start)*1000, substeps=0 if geometry else substeps,
             note='Collision-constrained display only; not measured feedback or a device command')
+        if geometry:
+            for key in ('algorithm','geometry_only','geometry_pairs_verified','visual_meshes_verified','coverage_sha256',
+                    'minimum_verified_clearance_m','path_clearance_m','display_modified','iterations','native_distance_queries',
+                    'path_certified','frame_verified','budget_limited','progressed','raw_limit_excess_rad','display_target_clamped'):
+                result[key]=snapshot.get(key)
+        return result
 
     def close(self):
         if not self.closed:
@@ -140,19 +178,21 @@ def create_remote_mujoco_preview(profile, session_id, asset_root, *, allow_physi
 
 
 def create_display_preview(mj, profile, session_id, asset_root, *, mode=None, fresh_target=False):
-    """Use the renderer's loaded runtime only after an explicit display choice.
+    """Use the renderer's loaded runtime for separate static mapping geometry.
 
     This factory deliberately has no SDK/publisher reference. Its model is
     loaded independently from native assets, never the portrait-rotated renderer.
-    Software verification injects a fake engine; physical checks run on 5090.
+    Legacy constrained selection uses the SAME static adapter as automatic
+    mapping preview. It cannot reach the research dynamics/mj_step path.
     """
-    if mode != 'constrained' or fresh_target is not True:
-        raise ValueError('An explicit constrained display with a fresh target is required')
+    if mode not in ('automatic','target','constrained') or fresh_target is not True:
+        raise ValueError('A mapping display with a fresh target is required')
     if profile not in PROFILES or not isinstance(session_id,str) or not session_id:
         raise ValueError('Explicit supported profile and session are required')
     if getattr(mj,'__version__',None) != MUJOCO_VERSION:
         raise RuntimeError('Collision preview requires the bundled MuJoCo 3.3.7')
-    return CollisionPreview(profile,session_id,_MujocoEngine(mj,profile,asset_root))
+    from mapping_collision import NativeGeometryEngine
+    return CollisionPreview(profile,session_id,NativeGeometryEngine(mj,profile,asset_root))
 
 
 class _MujocoEngine:

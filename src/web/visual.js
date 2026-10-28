@@ -15,8 +15,37 @@
   const slot = document.getElementById('visual-slot') || document.querySelector('main') || document.body;
   slot.append(host);
   const byId = id => document.getElementById(id);
-  let state = null, selected = null, mappingKey = '', mappingPending = false, decodedImage = null;
-  let hasImage=false,lastImageMode=null,viewStatus={kind:'loading',message:'正在载入原生手部模型'};
+  let state = null, selected = null, mappingKey = '', mappingPending = false, decodedImage = null,serviceOffline=false;
+  let hasImage=false,lastImageMode=null,lastImageScope=null,sourceScope=null,viewStatus={kind:'loading',message:'正在载入原生手部模型'};
+  const sourceKind=mode=>mode==='glove_constrained_unavailable'?'glove_constrained':mode;
+  function stateScope(value){
+    if(!value)return null;const g=value.glove||{},feedback=g.feedback||{};
+    return JSON.stringify([value.view_source||'feedback',value.teleoperation_view_mode||'automatic',value.device_profile?.id||null,
+      value.device_id||null,g.profile||null,g.session_id??null,g.glove_serial||null,g.user?.user_id??null,
+      feedback.device_id||null,feedback.connection==='disconnected',g.model_provenance?.model_sha256||null,
+      value.view_source==='glove'?g.connection==='disconnected':value.view_source!=='preview'&&value.connection==='disconnected']);
+  }
+  function payloadMatches(meta){
+    if(!state)return false;const g=state.glove||{},proof=meta.collision_preview||{},kind=sourceKind(meta.mode);
+    if(kind?.startsWith('glove_')&&g.connection==='disconnected')return false;
+    if(kind==='glove_live'&&(g.feedback?.connection==='disconnected'||meta.feedback?.connection==='disconnected'))return false;
+    if(kind==='live'&&state.connection==='disconnected')return false;
+    const matches=(value,current)=>value==null||value===current;
+    return matches(meta.device_profile,state.device_profile?.id)&&matches(meta.view_source,state.view_source)
+      &&matches(proof.profile,g.profile)&&matches(proof.bridge_session_id,g.session_id)&&matches(proof.glove_serial,g.glove_serial)
+      &&matches(meta.feedback?.device_id,kind==='glove_live'?g.feedback?.device_id:state.device_id);
+  }
+  function imageScope(meta){
+    const proof=meta?.collision_preview||{};
+    return JSON.stringify([sourceScope,sourceKind(meta?.mode),meta?.device_profile??null,meta?.view_source??null,
+      proof.profile??null,proof.bridge_session_id??null,proof.glove_serial??null,meta?.feedback?.device_id??null]);
+  }
+  function discardImage(){hasImage=false;lastImageMode=null;lastImageScope=null;byId('pose-image').removeAttribute('src');}
+  function syncSource(next){
+    const key=stateScope(next);state=next;serviceOffline=false;if(key===sourceScope)return;
+    sourceScope=key;viewRevision++;viewRequest?.abort();if(decodedImage)decodedImage.src='';
+    discardImage();viewStatus={kind:'loading',message:text('正在准备画面','Preparing view'),meta:null};renderStatus();
+  }
   const cells = [];
   for (let f=0;f<5;f++) {
     const column = document.createElement('div'); column.className='finger-column';
@@ -34,7 +63,7 @@
     byId('joint-grid').append(column);
   }
   async function action(body) {
-    if(!state?.csrf)throw new Error('本机控制服务未连接');
+    if(serviceOffline||!state?.csrf)throw new Error('本机控制服务未连接');
     const response=await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json','X-Console-Token':state.csrf},body:JSON.stringify(body),signal:AbortSignal.timeout(4000)});
     const result=await response.json();if(!response.ok||!result.ok)throw new Error(result.error||'操作未完成');
   }
@@ -62,17 +91,17 @@
     byId('pose-message').textContent=message;
     notice.hidden=ready;notice.textContent=viewStatus.kind==='unavailable'?text('画面暂不可用','View unavailable')+(message?' · '+message:''):message;
     byId('render-rate').textContent=ready?(english()?`MuJoCo rendering ${fmt(meta.render_hz,1)} fps`:`MuJoCo 渲染 ${fmt(meta.render_hz,1)} 帧/秒`):text('画面刷新 —','Rendering —');
-    const source=meta?.mode||lastImageMode,glove=source==='glove_preview'||source==='glove_live';
-    byId('pose-frame').textContent=glove?(source==='glove_live'?text('实机反馈','Hand feedback'):text('预览','Preview'))+(ready?'':hasImage?text(' · 已过期',' · Stale'):viewStatus.kind==='loading'?text(' · 正在载入',' · Loading'):text(' · 暂不可用',' · Unavailable')):
+    const source=meta?.mode||lastImageMode,constrained=source==='glove_constrained'||source==='glove_constrained_unavailable',glove=constrained||source==='glove_preview'||source==='glove_live';
+    byId('pose-frame').title=constrained?text('显示姿态经过官方模型的几何约束；SDK 原始目标与实机指令未修改，不代表实物避碰。','The displayed pose uses geometry constraints from the official model. Original SDK targets and hardware commands are unchanged; this does not establish collision avoidance on hardware.') : '';
+    byId('pose-frame').textContent=glove?(source==='glove_live'?text('实机反馈','Hand feedback'):constrained?text('映射预览 · 碰撞约束','Mapping preview · Collision constrained'):text('映射预览','Mapping preview'))+(ready?'':hasImage?text(' · 已过期',' · Stale'):viewStatus.kind==='loading'?text(' · 正在载入',' · Loading'):text(' · 暂不可用',' · Unavailable')):
       !ready?(hasImage?text('画面过期 · 不代表当前姿态','Stale image · Not the current pose'):viewStatus.kind==='loading'?text('正在准备画面','Preparing view'):text('尚无画面','No image received')):
       meta.mode==='demo'?text('动作预览 · 非实测反馈','Action preview · Not measured feedback'):meta.source_seq==null?text('模型预览 · 未接收实机姿态','Model preview · No measured hand pose'):
       english()?`Hand feedback frame ${meta.source_seq} · Chart and pose use the same frame`:`实机反馈帧 ${meta.source_seq} · 图表与姿态使用同一帧`;
   }
   function clearVisual(message,kind='error',meta=null) {
-    // A cached generated preview cannot stand in for a newly opened hand's
-    // missing feedback. Retain stale images only from the same source kind.
+    // Stale frames belong to an exact source scope, never just a display mode.
     const nextMeta=meta||viewStatus.meta;
-    if(nextMeta?.mode==='glove_live'&&lastImageMode!=='glove_live')hasImage=false;
+    if(!nextMeta||!payloadMatches(nextMeta)||lastImageScope!==imageScope(nextMeta))discardImage();
     viewStatus={kind,message,meta:nextMeta};renderStatus();
     for(const c of cells){c.value.textContent='—';c.status.textContent=text('无新反馈','No fresh feedback');c.bar.hidden=true;c.button.classList.remove('live','provisional');}
     byId('joint-detail-body').replaceChildren();
@@ -80,13 +109,16 @@
   async function showFrame(payload, current) {
     if(!current())return;
     const meta=payload?.meta||{};
+    if(!payloadMatches(meta)){discardImage();clearVisual(text('设备已切换，等待新画面','Device changed; waiting for a new view'),'unavailable',meta);return;}
+    const scope=imageScope(meta);
+    if(hasImage&&lastImageScope!==scope){discardImage();viewStatus={kind:'loading',message:text('正在准备画面','Preparing view'),meta};renderStatus();}
     if(meta.mode==='glove_live'&&(meta.feedback?.stale!==false||meta.source_seq==null)){clearVisual(meta.message||'实机反馈已过期','stale',meta);return;}
     if(meta.ready!==true||typeof payload.image!=='string'||!payload.image){clearVisual(meta.message||'画面尚未就绪',meta.mode==='loading'?'loading':meta.mode==='error'?'error':meta.mode==='stale'?'stale':'unavailable',meta);return;}
     const decoded=new Image();decodedImage=decoded;decoded.src=payload.image;
     try{await decoded.decode();}catch(error){throw new Error(text('画面图像无法解码：','View image could not be decoded: ')+String(error.message||error));}finally{if(decodedImage===decoded)decodedImage=null;}
-    if(!current())return;
+    if(!current()||!payloadMatches(meta)||scope!==imageScope(meta))return;
     byId('pose-image').src=payload.image;
-    hasImage=true;lastImageMode=meta.mode;viewStatus={kind:'ready',meta};renderStatus();
+    hasImage=true;lastImageMode=meta.mode;lastImageScope=scope;viewStatus={kind:'ready',meta};renderStatus();
     const rates=new Map((meta.feedback?.joint_rates||[]).map(r=>[r.nid,r]));
     const readings=new Map((meta.feedback?.latest?.joints||[]).map(r=>[r.nid,r]));
     for(const j of meta.joints||[]) {
@@ -141,8 +173,8 @@
     }catch(e){byId('mapping-notice').textContent=e.message;}
     finally{mappingPending=false;}
   });
-  window.addEventListener('console-state',event=>{state=event.detail;mappingForm(state);});
-  window.addEventListener('console-offline',()=>{state=null;byId('save-mapping').disabled=true;clearVisual('本机服务连接中断');});
+  window.addEventListener('console-state',event=>{syncSource(event.detail);mappingForm(state);});
+  window.addEventListener('console-offline',()=>{serviceOffline=true;viewRevision++;viewRequest?.abort();if(decodedImage)decodedImage.src='';byId('save-mapping').disabled=true;clearVisual('本机服务连接中断');});
   window.addEventListener('wuji-language',renderStatus);
   renderStatus();
   // Display work only. Device feedback and all control keepalives use separate lanes.
@@ -158,8 +190,8 @@
   }
   async function pollView(){
     if(viewPolling||!visible()){syncView();return;}
-    viewPolling=true;const revision=viewRevision,controller=new AbortController();viewRequest=controller;
-    const timeout=setTimeout(()=>controller.abort(),2500),current=()=>revision===viewRevision&&visible();
+    viewPolling=true;const revision=viewRevision,scope=sourceScope,controller=new AbortController();viewRequest=controller;
+    const timeout=setTimeout(()=>controller.abort(),2500),current=()=>!serviceOffline&&revision===viewRevision&&scope===sourceScope&&visible();
     try{const r=await fetch('/api/view',{cache:'no-store',signal:controller.signal});if(!r.ok){let detail='';try{detail=(await r.json()).error||'';}catch{}throw Error('HTTP '+r.status+(detail?' · '+detail:''));}const payload=await r.json();if(current())await showFrame(payload,current);}
     catch(error){if(current())clearVisual(error.name==='AbortError'?'画面请求超时，请检查本机控制服务':String(error.message||'画面连接中断，请检查本机控制服务'));}
     finally{clearTimeout(timeout);if(viewRequest===controller)viewRequest=null;viewPolling=false;if(visible())scheduleView(revision===viewRevision?50:0);else syncView();}

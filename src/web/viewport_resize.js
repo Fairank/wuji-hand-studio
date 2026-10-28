@@ -13,6 +13,18 @@
   if(id==='official')target.after(control);else container.append(control);
   const grip=control.querySelector('.vp-grip'),range=control.querySelector('input'),value=control.querySelector('.vp-value'),reset=control.querySelector('.vp-reset');
   let desired=read(id),drag=null;
+  function sizeTerminal(){
+   if(id!=='official')return;
+   for(const screen of target.querySelectorAll('.official-terminal-screen')){
+    if(desired===null){screen.style.removeProperty('--terminal-viewport-height');continue;}
+    if(!screen.getClientRects().length)continue;
+    // Keep the original terminal node and let its existing FitAddon observer
+    // send the resulting PTY dimensions; only the available display changes.
+    const bottom=parseFloat(getComputedStyle(screen.parentElement).paddingBottom)||0;
+    const height=Math.max(160,Math.round(target.getBoundingClientRect().bottom-screen.getBoundingClientRect().top-bottom-1));
+    screen.style.setProperty('--terminal-viewport-height',height+'px');
+   }
+  }
   if(!target.id)target.id='vp-'+id+'-screen';grip.setAttribute('aria-controls',target.id);range.setAttribute('aria-controls',target.id);
   function actual(){return Math.round(target.getBoundingClientRect().height)||limits().min;}
   function translate(){
@@ -32,7 +44,7 @@
   function apply(){
    if(desired===null){target.removeAttribute('data-vp-sized');target.style.removeProperty('--vp-height');}
    else{target.dataset.vpSized='true';target.style.setProperty('--vp-height',clamp(desired,limits().min,limits().max)+'px');}
-   update();
+   sizeTerminal();update();
   }
   function choose(height,persist=true){desired=Math.round(clamp(height,limits().min,limits().max));apply();if(persist)save(id,desired);}
   function automatic(){desired=null;apply();save(id,null);}
@@ -52,7 +64,8 @@
   grip.addEventListener('pointermove',event=>{if(drag?.id===event.pointerId)choose(drag.height+event.clientY-drag.y,false);});
   function finish(event){if(drag?.id!==event.pointerId)return;drag=null;delete control.dataset.dragging;if(desired!==null)save(id,desired);}
   grip.addEventListener('pointerup',finish);grip.addEventListener('pointercancel',finish);grip.addEventListener('lostpointercapture',finish);
-  new ResizeObserver(update).observe(target);
+  new ResizeObserver(()=>{sizeTerminal();update();}).observe(target);
+  if(id==='official')new MutationObserver(()=>requestAnimationFrame(sizeTerminal)).observe(target,{childList:true,subtree:true,attributes:true,attributeFilter:['hidden','data-human-tty','data-guided-native']});
   const area={target,control,refresh(){control.hidden=id==='glove'&&!document.querySelector('#page-glove')?.contains(target);translate();},resize:apply};
   areas.set(id,area);apply();area.refresh();return area;
  }

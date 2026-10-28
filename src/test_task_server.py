@@ -118,7 +118,8 @@ class TaskServerIntegrationTests(unittest.TestCase):
         self.assertEqual(host.controller.calls,[])
 
     def test_main_pause_uses_empty_typed_payload_and_one_exact_controller(self):
-        state=hand();state['hardware']['active']=True
+        state=hand();state['hardware'].update(active=True,paused=False,phase='playing')
+        state['hardware_control_id']='a'*64
         host,service=server(state,other=hand('HAND-B'))
         task=next(t for t in service.snapshot()['tasks'] if t['endpoint_id']=='main')
         service.action(command(task,'pause'))
@@ -288,7 +289,8 @@ class TaskServerIntegrationTests(unittest.TestCase):
 
     def test_actual_http_handler_assets_csp_and_exact_public_task_action(self):
         import console_server
-        state=hand();state['hardware']['active']=True
+        state=hand();state['hardware'].update(active=True,paused=False,phase='playing')
+        state['hardware_control_id']='a'*64
         host,unused=server(state)
         controller=host.controller;controller.csrf='synthetic-task-csrf'
         controller.state['csrf']=controller.csrf

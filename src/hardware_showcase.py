@@ -94,6 +94,7 @@ class HardwareShowcase:
         self.latest_observation=None
         self.refresh_before_enable=None
         self.group_sync=None
+        self.single_pause_started_at=None
         self.publish_timing=PublishTiming()
 
     def status(self):
@@ -290,7 +291,7 @@ class HardwareShowcase:
         self.index_path()
         self.target=q[:];self.elapsed=0.;self.last_beat=now;self.last_tick=now;self.last_send=now
         self.pre_enable_seed=q[:]
-        self.phase='enabling';self.paused=False;self.enable_deadline=now+5.;self.reason='正在启用低速展示'
+        self.phase='enabling';self.paused=False;self.single_pause_started_at=None;self.enable_deadline=now+5.;self.reason='正在启用低速展示'
         self.approach_deadline=now+30.
         self.owned=True;self.disable_confirmed=False
         try:
@@ -325,7 +326,8 @@ class HardwareShowcase:
 
     def enable_verified(self,q,now):
         """Seed the current measured pose before enabling the selected joints."""
-        self.phase='enabling';self.enable_deadline=now+5.;self.approach_deadline=now+30.
+        self.phase='enabling';self.paused=False;self.single_pause_started_at=None
+        self.enable_deadline=now+5.;self.approach_deadline=now+30.
         self.last_tick=now;self.last_send=now;self.target=q[:]
         self.cadence=CommandCadence(now)
         self.publisher=self.hand.joint_command().publish()
@@ -359,10 +361,19 @@ class HardwareShowcase:
         if name=='hardware_group_commit':return __import__('group_hardware').commit(self,c,now)
         if name in ('hardware_group_pause','hardware_group_resume'):return __import__('group_hardware').control(self,c,now)
         if self.group_sync:raise ValueError('编组期间请使用整组停止 / Use group stop during synchronized playback')
+        if self.probe or self.phase not in ('enabling','approach','playing'):
+            raise ValueError('当前动作阶段不能暂停或继续 / Playback cannot pause or resume in this phase')
         if name=='hardware_pause':
-            self.target=self.position(row,now)
+            if self.paused:return
+            self.target=self.position(row,now);self.single_pause_started_at=now
             self.paused=True;self.reason='已暂停，低电流保持当前位置'
-        elif name=='hardware_resume':self.paused=False;self.reason='继续实机展示'
+        elif name=='hardware_resume':
+            if not self.paused:return
+            duration=max(0.,now-self.single_pause_started_at)
+            if self.trial:self.trial['deadline']+=duration
+            if self.phase in ('enabling','approach'):self.approach_deadline+=duration
+            self.last_tick=now;self.single_pause_started_at=None
+            self.paused=False;self.reason='继续实机展示'
         else:raise ValueError('未知实机操作')
 
     def capture_observation(self,row,diag,now):
@@ -382,7 +393,7 @@ class HardwareShowcase:
         try:
             if now-self.last_beat>.8:raise ValueError('网页控制连接中断')
             if self.probe and now>self.probe['deadline']:raise ValueError('单关节试动达到15秒上限')
-            if self.trial and not (self.group_sync and self.paused) and now>self.trial['deadline']:raise ValueError('整套试运行达到时间上限')
+            if self.trial and not self.paused and now>self.trial['deadline']:raise ValueError('整套试运行达到时间上限')
             q=self.position(row,now);self.diagnostic(diag,now)
             if self.trial and row is not self.last_trial_row:
                 self.observe_trial(row,q,now)
@@ -450,7 +461,7 @@ class HardwareShowcase:
     def observe_trial(self,row,q,now):
         p=self.trial;p['last']=q[:]
         entries={j['nid']:j for j in row['joints']};currents=[abs(entries[n]['effort_A']) for n in NIDS]
-        if self.phase=='playing':
+        if self.phase=='playing' and not self.paused:
             p['tracking_samples']+=1
             p['tracking_max_error_deg']=max(p['tracking_max_error_deg'],
                 math.degrees(max(abs(a-b) for a,b in zip(q,self.target))))
@@ -461,7 +472,7 @@ class HardwareShowcase:
         p['peak']=[max(a,abs(x-y)) for a,x,y in zip(p['peak'],q,p['baseline'])]
         p['peak_current']=[max(a,b) for a,b in zip(p['peak_current'],currents)]
         trace=p['trace']
-        if self.phase!='paused' and (not trace or now-p['started']-trace[-1]['t']>=.1):
+        if not self.paused and (not trace or now-p['started']-trace[-1]['t']>=.1):
             trace.append(dict(t=now-p['started'],q=q[:],target=self.target[:],current_A=currents,
                 effort_A=[entries[n]['effort_A'] for n in NIDS],
                 seq=row.get('seq'),device_timestamp_us=row.get('device_timestamp_us'),
@@ -486,7 +497,7 @@ class HardwareShowcase:
         stopped_phase=self.phase
         if self.trial and was_active:
             self.trial['stop_observation']=deepcopy(self.latest_observation)
-        self.active=False;self.paused=False;self.phase='stopped';self.reason=reason
+        self.active=False;self.paused=False;self.single_pause_started_at=None;self.phase='stopped';self.reason=reason
         if self.owned or force_disable:
             self.owned=True;self.disable_confirmed=False
             try:self.hand.disable()

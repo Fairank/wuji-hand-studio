@@ -284,7 +284,10 @@
       $('.hg-members-help').hidden = n > 0;
       E.members.hidden = n === 0;
       setText(E.count, n ? fmt(t('count'), { n: ev.sel.length, t: n }) : '');
-      setText(E.hint, fmt(t(st.destination==='preview'&&ev.canPreview?'previewReady':ev.hint), ev.vars));
+      // The phase and primary action already describe normal operation.
+      // Keep this space for a condition the user actually needs to resolve.
+      const hint = ['hReady','hActive'].includes(ev.hint)||st.destination==='preview'&&ev.canPreview ? '' : fmt(t(ev.hint), ev.vars);
+      setText(E.hint, hint);E.hint.hidden=!hint;
       setTone(E.hint, ev.canHw ? 'ok' : ev.canPreview ? 'warn' : '');
       const failure=st.snap.run.phase==='failed'?pickText(st.snap.run.reason):'';
       const acknowledged=m&&!m.bad&&['mStarted','mStopped','mChanged'].includes(m.key)&&st.snap.run.phase&&st.snap.run.phase!=='idle';

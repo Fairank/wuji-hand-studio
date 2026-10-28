@@ -472,9 +472,24 @@ class FirmwareService:
                     result.get('reservation_token') != token or
                     not _text(result.get('firmware_version'), 80) or not result['firmware_version']):
                 raise ValueError('官方进程或设备版本尚未确认 / Official process or actual device version remains unconfirmed')
+            verification=result.get('verification_report');observed=None
+            if verification is not None:
+                from device_versions import parse_official_check_json
+                code,out,err=self._response(verification)
+                device=self.state['device']
+                expected_type=('wuji_glove' if device.get('kind')=='glove' else
+                    'wuji_hand_2' if device.get('generation')=='hand2' else
+                    'wuji_hand' if device.get('generation')=='hand1' else None)
+                observed=parse_official_check_json(out,sn,expected_type) if code==0 else None
+                if observed is None or observed['current']!=result['firmware_version']:
+                    raise ValueError('恢复核验的设备身份或版本不一致 / Recovery device identity or version is inconsistent')
             with self.lock:
                 self.state['result'] = dict(verdict='recovery_verified', sn=sn,
                                             firmware_version=result['firmware_version'])
+                # A recovered write is a new actual observation. Do not let
+                # the preflight version or reminder masquerade as this read.
+                self.state.update(current_version=result['firmware_version'],checked_at=self._now(),
+                    notification=copy.deepcopy(observed),verification_report=copy.deepcopy(verification))
             self._finish('verified')
         except Exception as error:
             self._finish('unknown', str(error)[:800], unknown=True)

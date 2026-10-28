@@ -213,8 +213,8 @@ class NativeCalibration:
                 payload=dict(type=kind,text=value)
             elif kind=='resize':
                 rows,cols=command.get('rows'),command.get('cols')
-                if type(rows) is not int or type(cols) is not int or not 38<=rows<=100 or not 81<=cols<=240:
-                    raise ValueError('Official guidance requires at least 81 columns and 38 rows')
+                if type(rows) is not int or type(cols) is not int or not 12<=rows<=100 or not 81<=cols<=240:
+                    raise ValueError('Terminal size must be 81–240 columns and 12–100 rows')
                 payload=dict(type=kind,rows=rows,cols=cols)
             else:raise ValueError('Unsupported terminal input')
             self._send(payload)

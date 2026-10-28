@@ -245,11 +245,32 @@ class Controller:
                 if not current.get('busy') or current.get('connection')!='receiving':break
                 time.sleep(.025)
             raise ValueError('灵巧手释放尚未确认，未标记解除配对 / Hand cleanup unconfirmed; unpair was not marked complete')
-        if action=='pause':
+        if action in ('pause','resume'):
+            if glove.get('busy'):
+                if action=='resume':raise ValueError('Start hand following explicitly from teleoperation')
+                return self.action(dict(name='glove_stop'))
+            from task_sessions import hand_playback,hand_group_active
+            controls=hand_playback(state)
+            if hand_group_active(state):
+                raise ValueError('Use the ensemble pause/resume control')
+            if action=='pause' and controls['can_resume']:return dict(paused=True)
+            if action=='resume' and controls['can_pause']:return dict(paused=False)
+            if controls['can_'+action]:
+                prefix={'program':'program','hardware':'hardware','preview':'demo'}[controls['mode']]
+                command=dict(name=prefix+'_'+action)
+                if prefix=='hardware':command['lease']=self.hardware_lease
+                return self.action(command)
+            # Old clients used pause as the emergency stop for pending/unknown
+            # hardware. Preserve that escape, never reinterpret it as resume.
+            if action=='resume' or not (self.hardware_lease or (state.get('hardware') or {}).get('active') is not False):
+                raise ValueError('This playback control is unavailable; refresh the task')
+            action='stop'
+        if action=='stop':
             if glove.get('busy'):return self.action(dict(name='glove_stop'))
             result=self.action(dict(name='program_stop'))
             if self.hardware_lease or (state.get('hardware') or {}).get('active') is not False:
                 return self.action(dict(name='hardware_stop'))
+            if (state.get('playback') or {}).get('active'):return self.action(dict(name='demo_stop'))
             return result
         if action=='disconnect':
             if (state.get('calibrated_teleoperation') or {}).get('busy'):
@@ -264,13 +285,13 @@ class Controller:
             if glove.get('busy'):
                 from device_termination import unconfirmed
                 if (glove.get('hardware') or {}).get('active',False) is not False or self.glove.lease or unconfirmed(state):
-                    raise ValueError('Pause and confirm the exact hand stop before disconnecting')
+                    raise ValueError('请先停止动作并确认停用，再断开设备 / Stop and confirm the exact hand disable before disconnecting')
                 return self.action(dict(name='glove_disconnect'))
             if (state.get('official_viz') or {}).get('active'):return self.action(dict(name='official_viz_stop'))
             if (state.get('calibration') or {}).get('running'):return self.action(dict(name='calibration_cancel'))
             from device_termination import unconfirmed
             if self.hardware_lease or (state.get('hardware') or {}).get('active') is not False or unconfirmed(state):
-                raise ValueError('Pause and confirm the exact hand stop before disconnecting')
+                raise ValueError('请先停止动作并确认停用，再断开设备 / Stop and confirm the exact hand disable before disconnecting')
             return self.action(dict(name='disconnect'))
         raise ValueError('Unsupported typed task action')
 
@@ -321,6 +342,9 @@ class Controller:
             result['glove']['controller_config']=getattr(self,'sdk_session_configs',{}).get(result['glove'].get('session_id'))
             result['unconfirmed_devices']=self.termination.snapshot()
             result['program']=self.program.snapshot()
+            # Public run identity without exposing the secret motion lease.
+            result['hardware_control_id']=(__import__('hashlib').sha256(self.hardware_lease.encode()).hexdigest()
+                if self.hardware_lease else None)
             result['group']=self.group.snapshot()
             with self.calibration.lock:
                 result['calibration']={k:self.calibration.run.get(k) for k in ('running','status','side','user','id','serial','source','phase','cleanup_confirmed','interface')}
@@ -562,6 +586,13 @@ class Controller:
     def _action(self, command):
         if not isinstance(command,dict):raise ValueError('Invalid request')
         name=command.get('name','')
+        if name in {'hardware_trial','demo_start'} and threading.current_thread() is self.program.thread:
+            # This is the final start boundary under the controller lock. A
+            # pause between playlist entries cannot leak one more start.
+            self.program.check()
+            if self.program.snapshot()['paused']:
+                from program_runner import ProgramEntryPaused
+                raise ProgramEntryPaused('Playlist is paused before the next entry')
         if getattr(self,'desktop_closing',False) and name not in {'disconnect','hardware_stop','glove_stop','glove_disconnect','glove_keepalive','hardware_keepalive','demo_stop','calibration_cancel','group_stop','program_stop'}:
             raise ValueError('会话正在结束，请稍候 / Session is closing; please wait')
         if name.startswith('group_'):

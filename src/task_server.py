@@ -56,7 +56,7 @@ class TaskServer:
                     raise ValueError('请先停止此设备所属的多手演示 / Stop this device\'s ensemble first')
 
     def dispatch(self, endpoint, expected_context, action, payload=None):
-        if action in ('pause','disconnect'):
+        if action in ('pause','stop','disconnect'):
             try:current=self.read(endpoint)
             except (OSError,ValueError):current=None
             self.pairing.cancel(endpoint,expected_context,current)

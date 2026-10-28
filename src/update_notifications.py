@@ -171,8 +171,25 @@ class UpdateNotifications:
             if ((device.get('sn') or device.get('serial'))==sn and type(finished) in (int,float) and finished>=started):
                 if not state.get('notification'):self.next_check['firmware:'+sn]=now+RETRY
                 self.pending_firmware=None
+        recovery=state.get('result') or {};device=state.get('device') or {}
+        recovered_sn=_serial(device.get('sn') or device.get('serial'))
+        recovered_at=state.get('checked_at')
+        recovered=(state.get('phase')=='verified' and state.get('locked') is False and state.get('busy') is False
+            and recovery.get('verdict')=='recovery_verified' and recovery.get('sn')==recovered_sn
+            and _version(recovery.get('firmware_version')) is not None
+            and state.get('current_version')==recovery.get('firmware_version')
+            and type(recovered_at) in (int,float) and 0<=now-recovered_at<FIRMWARE_INTERVAL)
+        if recovered:
+            with self.lock:
+                known=self.known.get(recovered_sn)
+                if known is not None and recovered_at>=known.get('firmware_observed_at',0):
+                    known.update(firmware_version=recovery['firmware_version'],firmware_observed_at=recovered_at,
+                        firmware_version_source='official_cli_recovery')
         report=state.get('notification')
         if not isinstance(report,dict):
+            # A host may prove the actual version without a current catalog.
+            # Its old preflight is retained as history, never re-timestamped.
+            if recovered:return
             check=state.get('check_report') or {};device=state.get('device') or {}
             sn=_serial(device.get('sn') or device.get('serial'));known=self.known.get(sn)
             if known and check.get('returncode')==0:
