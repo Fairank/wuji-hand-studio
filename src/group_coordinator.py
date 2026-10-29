@@ -45,7 +45,14 @@ class GroupCoordinator:
             self.cancel.clear();self.token=secrets.token_hex(16);self.heartbeat=time.monotonic()
             self.control_request=None;self.control_epoch=0
             self.state=dict(active=True,phase='preparing',reason='',mode=mode,kind=kind,action=command['action'],members=[dict(id=i,phase='preparing') for i in ids],elapsed_s=0.)
-            self.thread=threading.Thread(target=self.run,args=(copy.deepcopy(command),self.token),daemon=True,name='Shared hand choreography');self.thread.start()
+            try:
+                self.thread=threading.Thread(target=self.run,args=(copy.deepcopy(command),self.token),daemon=True,name='Shared hand choreography');self.thread.start()
+            except Exception as error:
+                # Participant preparation has not run. Drop only the new
+                # local lease instead of broadcasting an unrelated abort.
+                self.thread=None;self.token=None;self.heartbeat=0.
+                self.state.update(active=False,phase='failed',reason=str(error)[:700],can_pause=False,can_resume=False)
+                raise
             return dict(group_lease=self.token)
 
     def beat(self,token):

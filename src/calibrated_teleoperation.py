@@ -132,8 +132,15 @@ class CalibratedTeleoperation:
                 run_id=proof['source_run_id'],serial=proof['serial'],side=proof['side'],profile=proof['source_profile'],
                 model_sha256=proof['model_sha256'],expected_revision=proof['expected_revision'],attempt_id=secrets.token_hex(16))
             if not synchronous:
-                self.thread=threading.Thread(target=self._work,args=(proof,),name='Calibrated glove continuation',daemon=True)
-                self.thread.start()
+                try:
+                    self.thread=threading.Thread(target=self._work,args=(proof,),name='Calibrated glove continuation',daemon=True)
+                    self.thread.start()
+                except Exception as error:
+                    # No worker/session was launched. Reconcile only this new
+                    # local intent; never disconnect an existing SDK owner.
+                    self.thread=None
+                    self.state.update(busy=False,phase='error',error=str(error)[:700],connected=False)
+                    raise
         if synchronous:self._work(proof)
         return self.snapshot()
 

@@ -103,14 +103,14 @@
   loading=(async()=>{try{const response=await fetch('/api/device-maintenance',{cache:'no-store',signal:AbortSignal.timeout(6000)});if(!response.ok)throw Error('Update status unavailable');const value=await response.json();if(version!==epoch)return;accept(value);}catch(failure){if(version!==epoch)return;fresh=false;transportError=failure.message||'Update status unavailable';}finally{loading=null;render();schedule();}})();return loading;
  }
  async function request(command){
-  if(pending)return;pending=command.name;epoch++;actionError='';transportError='';syncDiscovery();render();
+  if(pending)return;pending=command.name;const version=++epoch;actionError='';transportError='';syncDiscovery();render();
   try{
-   const session=await fetch('/api/state',{cache:'no-store',signal:AbortSignal.timeout(6000)});if(!session.ok)throw Error('Session unavailable');const token=(await session.json()).csrf;if(typeof token!=='string'||!token)throw Error('Session unavailable');
+   const session=await fetch('/api/state',{cache:'no-store',signal:AbortSignal.timeout(6000)});if(!session.ok)throw Error('Session unavailable');const token=(await session.json()).csrf;if(version!==epoch)return;if(typeof token!=='string'||!token)throw Error('Session unavailable');
    const response=await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json','X-Console-Token':token},body:JSON.stringify(command),signal:AbortSignal.timeout(command.name==='firmware_check'?60000:15000)}),result=await response.json();
-   if(!response.ok||result.ok===false)throw Error(result.error||'Device update did not complete');
+   if(version!==epoch)return;if(!response.ok||result.ok===false)throw Error(result.error||'Device update did not complete');
    const value=result.device_maintenance||result.maintenance;if(value)accept(value);else fresh=false;
-  }catch(failure){fresh=false;actionError=failure.message||'Device update did not complete';if(command.name==='firmware_upgrade')uncertain=true;}
-  finally{pending='';syncDiscovery();render();await load();syncDiscovery();}
+  }catch(failure){if(version===epoch){fresh=false;actionError=failure.message||'Device update did not complete';if(command.name==='firmware_upgrade')uncertain=true;}}
+  finally{pending='';syncDiscovery();render();if(version===epoch)await load();syncDiscovery();}
  }
  async function checkSelected(){
   const number=sn(selected);
@@ -128,7 +128,7 @@
  sheet.element.addEventListener('close',()=>{syncDiscovery();schedule();});
  window.addEventListener('device-inventory-selection',render);window.addEventListener('device-inventory-update',render);window.addEventListener('wuji-language',render);
  window.addEventListener('device-inventory-use',()=>{openRequest++;sheet.close();document.getElementById('di-device-more')?.removeAttribute('open');});
- window.addEventListener('console-offline',()=>{fresh=false;transportError=t('工作台服务已离线。','Workbench service is offline.');render();});
+ window.addEventListener('console-offline',()=>{epoch++;fresh=false;transportError=t('工作台服务已离线。','Workbench service is offline.');render();});
  async function openBySerial(number){const request=++openRequest;await load();if(request!==openRequest)return;const chosen=inventory.select(number)&&sn(inventory.selection())===number,retained=sn(state?.device)===number&&retainedRecord();if(chosen||retained)openSelection(true,!chosen&&retained);else{inventory.show();inventory.select(number);}}
  window.WujiDeviceMaintenance=Object.freeze({open(serial){if(serial!==undefined){if(!serialOK(serial))return false;openBySerial(serial);return true;}return openSelection();},refresh:load});render();load();
 })();

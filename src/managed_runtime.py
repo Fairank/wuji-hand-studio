@@ -146,7 +146,11 @@ def start_install(repair=False):
             select();_state['stage']='ready'
         except Exception as error:_state.update(stage='failed',error=str(error))
         finally:_state['busy']=False;_lock.release()
-    threading.Thread(target=work,name='Workbench runtime setup',daemon=True).start();return status()
+    try:threading.Thread(target=work,name='Workbench runtime setup',daemon=True).start()
+    except Exception as error:
+        _state.update(busy=False,stage='failed',error=str(error));_lock.release()
+        raise
+    return status()
 
 def select():
     if sys.platform=='darwin':

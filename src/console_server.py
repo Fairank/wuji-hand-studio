@@ -33,6 +33,9 @@ PROJECT = HERE.parents[1]
 REPORTS = DATA/'console_reports'
 from runtime_paths import PORT
 ORIGIN = f'http://127.0.0.1:{PORT}'
+REPORT_MEMORY_ITEMS=40
+REPORT_MEMORY_BYTES=32*1024*1024
+REPORT_MEMORY_FILE_BYTES=8*1024*1024
 
 
 def local_file_error(error):
@@ -76,6 +79,7 @@ class Controller:
         self.factory, self.reports = factory, Path(reports)
         if self.reports == REPORTS: initialize()
         self.lock = threading.RLock()
+        self._unsaved_reports=collections.OrderedDict();self._unsaved_report_bytes=0
         from device_termination import TerminationJournal
         self.termination=TerminationJournal(self.reports.parent/'device_termination.json')
         self.session_devices={}
@@ -836,8 +840,13 @@ class Controller:
                     or self.hardware_lease or self.state['recording']['active']):
                     raise ValueError('先停止动作并断开左手，再同步参数；保存本机参数不受此影响')
                 source=self.parameters.begin_sync(command.get('revision'))
-                self.parameter_worker=threading.Thread(target=self.synchronize_parameters,args=(source,),daemon=True)
-                self.parameter_worker.start()
+                try:
+                    self.parameter_worker=threading.Thread(target=self.synchronize_parameters,args=(source,),daemon=True)
+                    self.parameter_worker.start()
+                except Exception as error:
+                    self.parameter_worker=None
+                    self.parameters.finish_sync(source,str(error))
+                    raise
                 return dict(parameters=self.parameters.snapshot())
         if isinstance(command,dict) and command.get('name') in HARDWARE_COMMANDS:
             with self.lock:
@@ -971,6 +980,7 @@ class Controller:
                 if self.state['connection'] in {'connected', 'connecting'}:
                     raise ValueError('已有连接正在进行')
                 self.clear_live()
+                retained_hardware=copy.deepcopy(self.state['hardware']);retained_hardware_generation=self.hardware_generation
                 self.generation += 1
                 generation = self.generation
                 self.session_epochs[generation]=self.termination.new_session();self.hardware_generation=generation
@@ -981,10 +991,19 @@ class Controller:
                 self.state['hardware'] = dict(ready=False, active=False, actions=[], probe_ready=False, reason='正在识别新设备')
                 self.hardware_lease = None
                 self.log('用户请求连接所选设备，仅接收反馈')
-                thread=threading.Thread(target=self.read_session,args=(command,generation),daemon=True)
-                self.feedback_sessions[generation]=dict(serial=command.get('serial'),thread=thread,
-                    worker_closed=False,transport_closed=False,reader_finished=False)
-                thread.start()
+                try:
+                    thread=threading.Thread(target=self.read_session,args=(command,generation),daemon=True)
+                    self.feedback_sessions[generation]=dict(serial=command.get('serial'),thread=thread,
+                        worker_closed=False,transport_closed=False,reader_finished=False)
+                    thread.start()
+                except Exception as error:
+                    # No transport was opened. Retire only this new attempt,
+                    # retaining older records and any uncertain hardware stop.
+                    self.feedback_sessions.pop(generation,None);self.session_epochs.pop(generation,None)
+                    self.hardware_generation=retained_hardware_generation
+                    self.state.update(connection='disconnected',hardware=retained_hardware,
+                        message='反馈任务未启动，请重试 / Feedback task did not start; retry: '+str(error)[:300])
+                    raise
             elif name == 'disconnect':
                 self.generation += 1
                 # Ask the worker to flush recordings; its reader may still save
@@ -1017,16 +1036,61 @@ class Controller:
                     self.send(command)
                 self.log('已请求停止采集并保存记录；此操作不是硬件急停')
 
+    def _report_memory_flag(self,identifier,available):
+        for key in ('sessions','motion_history'):
+            for row in self.state.get(key,[]):
+                if isinstance(row,dict) and row.get('id')==identifier and isinstance(row.get('workbench_storage'),dict):
+                    row['workbench_storage']['memory_available']=available
+
+    def _retain_unsaved_report(self,identifier,content):
+        previous=self._unsaved_reports.pop(identifier,None)
+        if previous is not None:self._unsaved_report_bytes-=len(previous)
+        self._report_memory_flag(identifier,False)
+        if len(content)>min(REPORT_MEMORY_FILE_BYTES,REPORT_MEMORY_BYTES):return False
+        self._unsaved_reports[identifier]=content;self._unsaved_report_bytes+=len(content)
+        while len(self._unsaved_reports)>REPORT_MEMORY_ITEMS or self._unsaved_report_bytes>REPORT_MEMORY_BYTES:
+            old,removed=self._unsaved_reports.popitem(last=False);self._unsaved_report_bytes-=len(removed)
+            self._report_memory_flag(old,False)
+        return identifier in self._unsaved_reports
+
+    def unsaved_report(self,identifier):
+        """Read only the exact current unsaved report; never repair disk on GET."""
+        with self.lock:return getattr(self,'_unsaved_reports',{}).get(identifier)
+
+    def _save_report(self,report,*,motion=False):
+        if not hasattr(self,'_unsaved_reports'):
+            self._unsaved_reports=collections.OrderedDict();self._unsaved_report_bytes=0
+        content=json.dumps(report,ensure_ascii=False,indent=2,allow_nan=False).encode('utf-8')
+        folder=self.reports.parent/'motion_reports' if motion else self.reports
+        path=folder/(report['id']+'.json');pending=folder/(report['id']+'.'+secrets.token_hex(8)+'.pending')
+        try:
+            folder.mkdir(parents=True,exist_ok=True)
+            with pending.open('xb') as stream:stream.write(content);stream.flush();os.fsync(stream.fileno())
+            os.replace(pending,path)
+        except OSError as error:
+            available=self._retain_unsaved_report(report['id'],content)
+            detail=local_file_error(error)
+            self.log(('报告未保存到磁盘；本次原件暂存内存，可立即导出（仅保留最近报告） / Report was not saved to disk; its original is temporarily in memory for immediate export: ' if available else
+                '报告未保存到磁盘，且超过内存保留上限；本次完整原件无法导出 / Report was not saved to disk and exceeds the memory retention limit; its complete original cannot be exported: ')+detail)
+            return dict(saved=False,save_error=detail,memory_available=available)
+        else:
+            old=self._unsaved_reports.pop(report['id'],None)
+            if old is not None:self._unsaved_report_bytes-=len(old)
+            self._report_memory_flag(report['id'],False)
+            return None
+        finally:
+            try:pending.unlink(missing_ok=True)
+            except OSError:pass
+
     def event(self, event, generation):
         with self.lock:
             kind = event.get('type')
             if kind=='motion_report':
                 report=event['report']
                 if not re.fullmatch('[a-f0-9]{32}',report.get('id','')):raise ValueError('Invalid motion report id')
-                destination=self.reports.parent/'motion_reports'
-                destination.mkdir(parents=True,exist_ok=True)
-                (destination/(report['id']+'.json')).write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf-8')
+                storage=self._save_report(report,motion=True)
                 summary=summarize_motion(report)
+                if storage:summary=dict(summary,workbench_storage=storage)
                 self.state['motion_history'].insert(0,summary)
                 self.state['motion_history']=self.state['motion_history'][:20]
                 returned=summary['return_error_deg']
@@ -1037,11 +1101,10 @@ class Controller:
                 report = event['report']
                 if not re.fullmatch('[a-f0-9]{32}', report.get('id', '')):
                     raise ValueError('Invalid report id')
-                self.reports.mkdir(parents=True, exist_ok=True)
-                (self.reports/(report['id']+'.json')).write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
-                self.state['sessions'].insert(0, report)
+                storage=self._save_report(report)
+                self.state['sessions'].insert(0, dict(report,workbench_storage=storage) if storage else report)
                 self.state['sessions'] = self.state['sessions'][:20]
-                self.log(f"采集已保存：{report['frames']}帧，结束原因 {report['reason']}")
+                if not storage:self.log(f"采集已保存：{report['frames']}帧，结束原因 {report['reason']}")
             # Late close acknowledgements still belong to the old serial. They
             # may confirm that stop, but must never revive the new connection.
             if event.get('device_id'):self.session_devices[generation]=event['device_id']
@@ -1413,6 +1476,9 @@ class Handler(BaseHTTPRequestHandler):
             ident = parse_qs(url.query).get('id', [''])[0]
             if not re.fullmatch('[a-f0-9]{32}', ident):
                 return self.reply(400, dict(error='Invalid report'))
+            content=getattr(self.server.controller,'unsaved_report',lambda identifier:None)(ident)
+            if content is not None:
+                return self.reply(200,content,filename='left-hand-'+ident+'.json')
             path = self.server.controller.reports/(ident+'.json')
             try:
                 return self.reply(200, path.read_bytes(), filename='left-hand-'+ident+'.json')

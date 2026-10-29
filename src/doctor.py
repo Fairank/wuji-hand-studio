@@ -1,5 +1,5 @@
 """Explicit official Wuji CLI diagnostics. No update, calibration or motor API."""
-import copy,ipaddress,json,os,queue,re,shlex,shutil,subprocess,threading,time
+import copy,ipaddress,json,os,queue,re,shlex,shutil,subprocess,tempfile,threading,time
 from pathlib import Path,PurePosixPath
 from runtime_paths import DATA
 from bridge_config import load_config,ssh_client
@@ -43,9 +43,11 @@ def local_run(args,timeout=45):
         try:
             while chunk:=stream.read1(8192):chunks.put((index,chunk))
         finally:stream.close();chunks.put((index,None))
-    readers=[threading.Thread(target=read,args=(s,i),daemon=True) for i,s in enumerate((p.stdout,p.stderr))]
-    for reader in readers:reader.start()
+    readers=[];started=[]
     try:
+        for i,stream in enumerate((p.stdout,p.stderr)):
+            reader=threading.Thread(target=read,args=(stream,i),daemon=True)
+            readers.append(reader);reader.start();started.append(reader)
         while closed<2:
             if time.monotonic()>deadline:raise TimeoutError('Official CLI timed out after '+str(timeout)+' seconds')
             try:i,data=chunks.get(timeout=.1)
@@ -56,8 +58,14 @@ def local_run(args,timeout=45):
         code=p.wait(timeout=2)
         return code,*[b.decode('utf-8',errors='replace') for b in output]
     finally:
-        if p.poll() is None:p.kill();p.wait(timeout=3)
-        for reader in readers:reader.join(timeout=3)
+        try:
+            if p.poll() is None:p.kill();p.wait(timeout=3)
+        finally:
+            for reader in readers:
+                if reader in started or reader.ident is not None:reader.join(timeout=3)
+            for index,stream in enumerate((p.stdout,p.stderr)):
+                if index>=len(readers) or readers[index] not in started and readers[index].ident is None:
+                    stream.close()
 
 def remote_run(config,args,timeout=45):
     c=ssh_client(config)
@@ -87,12 +95,20 @@ class Doctor:
         except (OSError,ValueError,TypeError):pass
     def snapshot(self):
         with self.lock:return copy.deepcopy(self.state)
+    def _launch(self,target,args,previous):
+        try:threading.Thread(target=target,args=args,daemon=True).start()
+        except Exception as error:
+            with self.lock:
+                self.state=previous
+                self.state.update(running=False,status='error',error='诊断任务未启动，请重试 / Diagnostic task did not start; retry: '+str(error)[:300])
+            raise
     def start(self,operation,serial='',address=''):
         config=load_config();args=doctor_args(config,operation,serial,address)
         with self.lock:
             if self.state['running']:raise ValueError('Diagnostic already running')
+            previous=copy.deepcopy(self.state)
             self.state=dict(running=True,status='running',report=None,error=None,operation=operation,started=time.time(),target=config['mode'])
-        threading.Thread(target=self.work,args=(config,args,operation),daemon=True).start()
+        self._launch(self.work,(config,args,operation),previous)
         return self.snapshot()
     def start_support(self,days=1,description=''):
         if type(days) is not int or not 1<=days<=30:raise ValueError('Days must be 1–30')
@@ -100,6 +116,7 @@ class Doctor:
         config=load_config()
         with self.lock:
             if self.state['running']:raise ValueError('Official CLI already running')
+            previous_state=copy.deepcopy(self.state)
             previous=copy.deepcopy(self.state.get('report'))
             self.state.update(running=True,status='support_export',operation='support',error=None,support=None)
         def work():
@@ -109,7 +126,7 @@ class Doctor:
                 with self.lock:self.state.update(running=False,status='completed',support=result)
             except Exception as error:
                 with self.lock:self.state.update(running=False,status='error',error=str(error)[:500])
-        threading.Thread(target=work,daemon=True).start()
+        self._launch(work,(),previous_state)
         return self.snapshot()
     def work(self,config,args,operation):
         try:
@@ -130,11 +147,19 @@ class Doctor:
                     report['counts']=counts(report['rows'])
                 except (ValueError,TypeError) as error:report['parse_error']=str(error)
             save_error=None
+            pending=None
             try:
                 DATA.mkdir(parents=True,exist_ok=True)
-                (DATA/'doctor-latest.json').write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf-8')
+                path=DATA/'doctor-latest.json'
+                with tempfile.NamedTemporaryFile(mode='w',encoding='utf-8',dir=DATA,prefix=path.name+'.',suffix='.pending',delete=False) as stream:
+                    pending=Path(stream.name);stream.write(json.dumps(report,ensure_ascii=False,indent=2));stream.flush();os.fsync(stream.fileno())
+                os.replace(pending,path)
             except OSError:
                 save_error='诊断已完成，但报告无法保存；本次原始输出仍可查看 / Diagnostic completed; report could not be saved, but its original output is still available'
+            finally:
+                if pending is not None:
+                    try:pending.unlink(missing_ok=True)
+                    except OSError:pass
             with self.lock:self.state.update(running=False,status='completed',report=report,error=save_error)
         except Exception as error:
             with self.lock:self.state.update(running=False,status='error',error=str(error)[:500])

@@ -70,9 +70,16 @@ def worker_first(address,requests,events,prepared_hand=None,source=None):
             owned=True;disable_confirmed=False
             try:hand.disable();owned=False;disable_confirmed=True
             except Exception as error:reason+='; disable 未确认: '+str(error)
-    def finish_record(message):
-        report=recorder.finish(message,time.monotonic())
-        if report:events.put(dict(type='report',report=report))
+    def finish_record(message,retry=False):
+        if getattr(recorder,'pending_report',None) is not None and not retry:return
+        try:report=recorder.finish(message,time.monotonic())
+        except (OSError,ValueError,TypeError):
+            events.put(dict(type='notice',message='录制摘要尚未保存；已有原始文件保留，请检查存储后点击停止采集重试 / Recording summary is not saved; existing raw files are retained. Check storage, then use Stop recording to retry.'))
+            return
+        if report:
+            if report.get('raw_feedback_flush_confirmed') is False:
+                events.put(dict(type='notice',message='录制摘要已保存，但原始数据写入完整性仍未确认 / Recording summary saved; raw feedback completeness remains unconfirmed.'))
+            events.put(dict(type='report',report=report))
     try:
         if prepared_hand is not None:hand=prepared_hand
         else:
@@ -95,7 +102,7 @@ def worker_first(address,requests,events,prepared_hand=None,source=None):
             except queue.Empty:command=None
             if command:
                 name=command['name']
-                if name=='disconnect':stop('已断开');break
+                if name=='disconnect':stop('已断开');finish_record('disconnected',retry=True);break
                 if name=='hardware_stop':stop('用户停止',force_disable=True)
                 elif name=='hardware_keepalive' and command.get('lease')==lease:last_beat=now
                 elif name=='hardware_pause' and command.get('lease')==lease:paused=True
@@ -122,7 +129,7 @@ def worker_first(address,requests,events,prepared_hand=None,source=None):
                 elif name=='record':
                     if active or owned:events.put(dict(type='notice',message='先停止动作再采集'))
                     else:recorder.start(command['label'],command['seconds'],now)
-                elif name=='stop':finish_record('user_stop')
+                elif name=='stop':finish_record('user_stop',retry=True)
             if active:
                 if now-last>.5 or now-last_beat>2.5:stop('反馈或控制会话已过期')
                 elif now>=next_send:
@@ -141,7 +148,7 @@ def worker_first(address,requests,events,prepared_hand=None,source=None):
                             if elapsed>=duration:stop('动作完成，已请求停用')
                         sent+=1;next_send=now+1/PUB_HZ
                     except Exception as error:stop(str(error))
-            if recorder.active and now-recorder.started>=recorder.seconds:finish_record('completed')
+            if recorder.active and recorder.pending_report is None and now-recorder.started>=recorder.seconds:finish_record('completed')
             if now-last>3:raise RuntimeError('连续3秒无反馈')
             if now-last_emit>=.05:
                 span=recent[-1]['host_s']-recent[0]['host_s'] if len(recent)>1 else 0.

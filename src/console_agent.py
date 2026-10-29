@@ -87,10 +87,13 @@ class Recorder:
         self.seconds = 0
         self.label = 'baseline'
         self.elapsed_s = 0.
+        self.pending_report = None
+        self.summary_error = None
+        self.raw_feedback_error = None
 
     def start(self, label, seconds, now):
-        if self.active:
-            raise ValueError('Recording already active')
+        if self.active or self.pending_report is not None:
+            raise ValueError('Recording already active or its summary is awaiting save')
         validate_command(dict(name='record', label=label, seconds=seconds))
         self.id = uuid.uuid4().hex
         self.path = self.root/self.id
@@ -98,12 +101,14 @@ class Recorder:
         self.label, self.seconds, self.started = label, seconds, now
         self.frames = 0
         self.elapsed_s = 0.
+        self.summary_error = None
+        self.raw_feedback_error = None
         self.host, self.device = [], []
         self.file = (self.path/'feedback.jsonl').open('x', encoding='utf-8', buffering=1024*1024)
         self.active = True
 
     def add(self, row):
-        if not self.active:
+        if not self.active or self.pending_report is not None:
             return
         self.file.write(json.dumps(row, separators=(',', ':'), allow_nan=False)+'\n')
         self.host.append(dict(seq=row['seq'], host_s=row['host_s']))
@@ -116,26 +121,47 @@ class Recorder:
     def finish(self, reason, now):
         if not self.active:
             return None
-        self.file.close()
+        if self.pending_report is None:
+            self.elapsed_s = now-self.started
+            from device_profiles import controller_profile
+            selected = controller_profile()
+            self.pending_report = dict(id=self.id, label=self.label, seconds=self.elapsed_s,
+                requested_seconds=self.seconds, frames=self.frames, reason=reason,
+                side=selected['side'], generation=selected['generation'], read_only=True, recognition_enabled=False, motion_commands_sent=False,
+                annotation_source='human_selection_not_model_prediction',
+                units=dict(position='rad', velocity='rad/s', effort='A' if selected['generation']=='hand2' else 'unavailable'),
+                host_arrival=summarize_timing(self.host),
+                device_timestamp_intervals=summarize_timing(self.device),
+                raw_feedback_location=str(self.path/'feedback.jsonl'))
+        result=self.pending_report
+        try:
+            try:self.file.close()
+            except OSError as error:
+                self.raw_feedback_error=str(error)[:500]
+                result.update(raw_feedback_flush_confirmed=False,raw_feedback_integrity='unconfirmed',raw_feedback_error=self.raw_feedback_error)
+                raise
+            # A second close succeeding cannot recover data lost by an earlier
+            # flush failure. Keep that uncertainty in the eventual report.
+            if not self.raw_feedback_error:result.update(raw_feedback_flush_confirmed=True,raw_feedback_integrity='flushed')
+            # Retain this clearly pending file on failure. A retry writes the
+            # same frozen report; an incomplete write is never summary.json.
+            pending=self.path/'summary.pending.json'
+            with pending.open('w',encoding='utf-8') as stream:
+                stream.write(json.dumps(result,ensure_ascii=False,indent=2));stream.flush();os.fsync(stream.fileno())
+            os.replace(pending,self.path/'summary.json')
+        except OSError as error:
+            self.summary_error=str(error)[:500]
+            raise
         self.active = False
-        self.elapsed_s = now-self.started
-        from device_profiles import controller_profile
-        selected = controller_profile()
-        result = dict(id=self.id, label=self.label, seconds=self.elapsed_s,
-            requested_seconds=self.seconds, frames=self.frames, reason=reason,
-            side=selected['side'], generation=selected['generation'], read_only=True, recognition_enabled=False, motion_commands_sent=False,
-            annotation_source='human_selection_not_model_prediction',
-            units=dict(position='rad', velocity='rad/s', effort='A' if selected['generation']=='hand2' else 'unavailable'),
-            host_arrival=summarize_timing(self.host),
-            device_timestamp_intervals=summarize_timing(self.device),
-            raw_feedback_location=str(self.path/'feedback.jsonl'))
-        (self.path/'summary.json').write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding='utf-8')
+        self.pending_report = None
+        self.summary_error = None
         self.host, self.device = [], []
         return result
 
     def state(self):
         return dict(active=self.active, frames=self.frames, elapsed_s=self.elapsed_s,
-                    label=self.label, seconds=self.seconds)
+                    label=self.label, seconds=self.seconds,summary_pending=self.pending_report is not None,
+                    summary_error=self.summary_error,raw_feedback_integrity='unconfirmed' if self.raw_feedback_error else 'not_finalized' if self.active else 'flushed' if hasattr(self,'file') else 'not_recorded')
 
 
 def worker_auto(address, serial, requests, events):
@@ -174,9 +200,15 @@ def worker(address, requests, events, motion_factory=HardwareShowcase, prepared=
         return worker_first(address,requests,events)
     hand = sub = diagnostics = motion = protocol_route = ownership = None
     recorder = Recorder()
-    def finish(reason):
-        report = recorder.finish(reason, time.monotonic())
+    def finish(reason,retry=False):
+        if recorder.pending_report is not None and not retry:return
+        try:report = recorder.finish(reason, time.monotonic())
+        except (OSError,ValueError,TypeError):
+            events.put(dict(type='notice',message='录制摘要尚未保存；已有原始文件保留，请检查存储后点击停止采集重试 / Recording summary is not saved; existing raw files are retained. Check storage, then use Stop recording to retry.'))
+            return
         if report:
+            if report.get('raw_feedback_flush_confirmed') is False:
+                events.put(dict(type='notice',message='录制摘要已保存，但原始数据写入完整性仍未确认 / Recording summary saved; raw feedback completeness remains unconfirmed.'))
             events.put(dict(type='report', report=report))
     try:
         from wuji_sdk import SdkManager, Handedness, WujiHand2
@@ -278,7 +310,7 @@ def worker(address, requests, events, motion_factory=HardwareShowcase, prepared=
                 name = command['name']
                 if name == 'disconnect':
                     motion.stop('反馈连接断开')
-                    finish('disconnected')
+                    finish('disconnected',retry=True)
                     break
                 if name in HARDWARE_COMMANDS:
                     try:
@@ -293,7 +325,7 @@ def worker(address, requests, events, motion_factory=HardwareShowcase, prepared=
                     events.put(dict(type='notice',message='请先停止实机展示，再进行只读采集'))
                     continue
                 if name == 'stop':
-                    finish('user_stop')
+                    finish('user_stop',retry=True)
                 if name == 'record':
                     if not recent or now-last > .5:
                         events.put(dict(type='notice', message='反馈尚未稳定，未开始采集'))
@@ -319,7 +351,7 @@ def worker(address, requests, events, motion_factory=HardwareShowcase, prepared=
                 report_dir.mkdir(exist_ok=True)
                 (report_dir/(report['id']+'.json')).write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf-8')
                 events.put(dict(type='motion_report',report=report))
-            if recorder.active and now-recorder.started >= recorder.seconds:
+            if recorder.active and recorder.pending_report is None and now-recorder.started >= recorder.seconds:
                 finish('completed')
             if now-last > 3:
                 raise RuntimeError('连续3秒没有收到设备反馈，请检查连接')

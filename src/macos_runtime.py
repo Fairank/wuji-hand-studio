@@ -198,7 +198,10 @@ def start_install():
         finally:
             _state['busy'] = False
             _lock.release()
-    threading.Thread(target=work, name='Mac controller setup', daemon=True).start()
+    try:threading.Thread(target=work, name='Mac controller setup', daemon=True).start()
+    except Exception as error:
+        _state.update(busy=False,stage='failed',error=str(error));_lock.release()
+        raise
     return status()
 
 

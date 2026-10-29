@@ -50,7 +50,21 @@ def export_support(config,days,description,report,run_local,run_remote):
     folder=DATA/'support'/token;folder.mkdir(parents=True)
     output=folder/'official-wuji-support.zip'
     remote='/tmp/hand-workbench-support-'+token+'.zip'
-    destination=str(output) if mode=='local' else remote
+    def collect(transfer):
+        nonlocal collection_error
+        incoming=folder/'official-wuji-support.zip.partial'
+        try:
+            transfer(incoming)
+            if not incoming.is_file() or incoming.stat().st_size>1024**3 or not zipfile.is_zipfile(incoming):
+                raise RuntimeError('Controller copy did not produce a valid ZIP support bundle within 1 GiB')
+            incoming.replace(output)
+        except Exception as error:
+            collection_error=str(error)[:900] or 'Official support ZIP could not be collected from the controller'
+        finally:
+            # A failed/partial transfer never becomes the official attachment.
+            try:incoming.unlink(missing_ok=True)
+            except OSError:pass
+    destination=str(folder/'official-wuji-support.pending.zip') if mode=='local' else remote
     from official_cli import cli_path
     command=sdk_command(config,[cli_path(config),'--json','logs','export','--days',str(days),
                                 '--source','sdk,studio,stderr,cli','--output',destination])
@@ -58,21 +72,24 @@ def export_support(config,days,description,report,run_local,run_remote):
         from managed_runtime import args,check_ready,NAME
         check_ready();code,stdout,stderr=run_local(args(command),timeout=180)
         source=Path('\\\\wsl.localhost')/NAME/'tmp'/Path(remote).name
-        if source.is_file():
+        def transfer(incoming):
+            if not source.is_file():raise FileNotFoundError('Official support ZIP is missing from the controller')
             if source.stat().st_size>1024**3:raise ValueError('Official support bundle exceeds 1 GiB; retained in controller')
-            shutil.copyfile(source,output)
+            shutil.copyfile(source,incoming)
+        collect(transfer)
     elif mode=='ssh':
         from bridge_config import ssh_client
         code,stdout,stderr=run_remote(config,command,timeout=180)
-        client=ssh_client(config)
-        try:
-            files=client.open_sftp()
+        def transfer(incoming):
+            client=ssh_client(config)
             try:
-                if files.stat(remote).st_size>1024**3:raise ValueError('Official support bundle exceeds 1 GiB; retained in controller')
-                files.get(remote,str(output))
-            except FileNotFoundError:pass
-            finally:files.close()
-        finally:client.close()
+                files=client.open_sftp()
+                try:
+                    if files.stat(remote).st_size>1024**3:raise ValueError('Official support bundle exceeds 1 GiB; retained in controller')
+                    files.get(remote,str(incoming))
+                finally:files.close()
+            finally:client.close()
+        collect(transfer)
     elif mode=='macvm':
         from macos_runtime import ensure_running,run,NAME
         from calibration_cli import controller_args
@@ -81,18 +98,10 @@ def export_support(config,days,description,report,run_local,run_remote):
         # Lima copies only the generated, fixed-name artifact from its own VM.
         # A missing official ZIP must not discard the already collected CLI
         # output and the local fault brief, including partial official failures.
-        incoming=folder/'official-wuji-support.zip.partial'
-        try:
-            run('copy',NAME+':'+remote,str(incoming),timeout=90)
-            if not incoming.is_file() or not zipfile.is_zipfile(incoming):
-                raise RuntimeError('Controller copy did not produce a valid ZIP support bundle')
-            incoming.replace(output)
-        except (OSError,RuntimeError,TimeoutError) as error:
-            collection_error=str(error)[:900] or 'Official support ZIP could not be collected from the controller'
-            # A failed transfer may leave a truncated local artifact.
-            try:incoming.unlink(missing_ok=True)
-            except OSError:pass  # Never include a failed transfer in the package.
-    elif mode=='local':code,stdout,stderr=run_local(command,timeout=180)
+        collect(lambda incoming:run('copy',NAME+':'+remote,str(incoming),timeout=90))
+    elif mode=='local':
+        code,stdout,stderr=run_local(command,timeout=180)
+        collect(lambda incoming:Path(destination).replace(incoming))
     else:raise ValueError('Unsupported controller')
     result=dict(id=token,controller=mode,days=days,finished=time.time(),exit_code=code,
                 stdout=stdout,stderr=stderr,motor_commands_sent=False,

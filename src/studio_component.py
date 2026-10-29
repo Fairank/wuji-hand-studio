@@ -173,11 +173,28 @@ class StudioComponent:
         row['verified']=time.time();self.folder.mkdir(parents=True,exist_ok=True)
         stage=self.folder/'installation.pending.json';stage.write_text(json.dumps(row,indent=2),encoding='utf-8');stage.replace(self.folder/'installation.json')
 
+    def _startup_failed(self,error,token=None,*,phase='error'):
+        """Roll back an unlaunched local worker, never a Linux GUI session."""
+        with self.lock:
+            if token is not None and self.token!=token:return
+            self.worker=None;self.state.update(busy=False,phase=phase,error=str(error)[:1000])
+            if token is not None:
+                try:released=self._release()
+                except Exception:released=False
+                if not released:
+                    self.state.update(phase='cleanup_required',cleanup_required=True,
+                        error='Studio 会话记录清理未确认，请稍后核对原会话 / Studio session cleanup is unconfirmed; review the original session')
+            # A metadata worker does not own an earlier retained reservation.
+            # Its startup failure must neither release nor hide that owner.
+            if self.token or self.state.get('cleanup_required'):
+                self.state.update(phase='cleanup_required',cleanup_required=True)
+
     def _background(self,phase,work,reserve=False):
         if sys.platform!='win32':raise ValueError('此嵌入组件用于 Windows；Ubuntu 版直接使用官方 Studio / Windows component only')
         with self.lock:
             if self.state['busy'] or self.state['active']:raise ValueError('请先结束当前 Studio 操作 / Finish the current Studio operation first')
             if reserve:self._reserve(phase)
+            token=self.token if reserve else None
             self.state.update(busy=True,phase=phase,error=None)
         def run():
             try:
@@ -191,7 +208,10 @@ class StudioComponent:
                     self._update(phase='cleanup_required',cleanup_required=True,
                         error='Studio 会话记录清理未确认，请稍后核对原会话 / Studio session cleanup is unconfirmed; review the original session')
                 finally:self._update(busy=False)
-        self.worker=threading.Thread(target=run,name='Official Studio component',daemon=True);self.worker.start()
+        try:self.worker=threading.Thread(target=run,name='Official Studio component',daemon=True);self.worker.start()
+        except Exception as error:
+            self._startup_failed(error,token)
+            raise
         return self.snapshot()
 
     def probe(self):
@@ -320,13 +340,14 @@ class StudioComponent:
             if self.state['busy']:raise ValueError('Studio component is busy')
             selected=validate_version(self.state.get('current'))
             self._reserve('starting')
+            token=self.token
             self.state.update(busy=True,phase='starting',error=None,offline=offline)
             self.cancel.clear()
         # Do not invert the Controller -> Studio snapshot lock order while
         # checking other workspaces. The shared reservation blocks new starts.
         try:self.idle_check()
-        except Exception:
-            self._release();self._update(busy=False,phase='installed');raise
+        except Exception as error:
+            self._startup_failed(error,token,phase='installed');raise
         def run():
             external=False
             try:
@@ -367,11 +388,26 @@ class StudioComponent:
                     except Exception:external=True
                 self.process=None;self.secret=None;self._update(active=external,busy=False)
                 if not external:self._release()
-        self.worker=threading.Thread(target=run,name='Official Ubuntu Studio',daemon=True);self.worker.start()
+        try:self.worker=threading.Thread(target=run,name='Official Ubuntu Studio',daemon=True);self.worker.start()
+        except Exception as error:
+            self._startup_failed(error,token)
+            raise
         return dict(studio=self.snapshot())
+
+    def _stop_owner(self,token):
+        row=lease_state(self.folder)
+        if token is not None and row.get('token')!=token:
+            with self.lock:
+                if self.token in (None,token):
+                    self.state.update(busy=False,phase='cleanup_required',cleanup_required=True,
+                        error='Studio 会话所属已改变，原会话退出仍待核对 / Studio session owner changed; original cleanup remains unconfirmed')
+            raise ValueError('Studio session owner changed; stop in its owning workspace')
+        return row
 
     def stop(self):
         with self.lock:
+            token=self.token
+            self._stop_owner(token)
             if self.state['busy'] and self.state['phase'] not in {'starting'}:raise ValueError('请等待组件操作完成 / Wait for the component operation')
             process=self.process
             self.cancel.set()
@@ -382,14 +418,18 @@ class StudioComponent:
         if self.worker:self.worker.join(timeout=25)
         if self.worker and self.worker.is_alive():raise ValueError('Studio 正在退出，请稍后重试 / Studio is closing; try again shortly')
         if self.state['active'] or self.token or lease_state(self.folder).get('reserved'):
-            row=lease_state(self.folder)
+            row=self._stop_owner(token)
             if row.get('owner_pid')!=os.getpid() and row.get('owner_start') and process_identity(row.get('owner_pid',0))==row['owner_start']:
                 raise ValueError('请在打开 Studio 的工作台中关闭会话 / Close Studio in its owning workbench')
             if not row.get('token'):raise ValueError('Studio 会话记录需要核对 / Studio session record needs verification')
+            if token is None:token=row['token']
+            self._stop_owner(token)
             self._linux('stop',timeout=35)
+            self._stop_owner(token)
             if self._linux('probe').get('active'):raise ValueError('Studio 会话仍在运行 / Studio is still running')
-            self._update(active=False,busy=False,phase='installed')
-            if row.get('token') and lease_state(self.folder).get('token')==row['token']:(self.folder/'lease.json').unlink(missing_ok=True)
+            self._stop_owner(token)
+            (self.folder/'lease.json').unlink(missing_ok=True)
+            self._update(active=False,busy=False,phase='installed',cleanup_required=False)
             self.token=None;self.process=None;self.secret=None
         if self.state['active'] or self.token:raise ValueError('Studio 退出尚未确认，请查看组件状态 / Studio exit is not confirmed')
         return dict(studio=self.snapshot(),component_closed=True,device_disable_confirmed=False)

@@ -60,6 +60,7 @@ class OfficialCLI:
         self.idle_check=idle_check or (lambda:None);self.lock=threading.RLock();self.thread=None
         self.state=dict(phase='unchecked',checking=False,preparing=False,available=False,latest_version=None,checked_at=None,error=None,auto_update=True)
         self.started=False
+        self.initial_check_started=False
         self.monitor=None;self.monitor_stop=threading.Event()
 
     def _native_progress(self,progress):
@@ -94,9 +95,15 @@ class OfficialCLI:
         with self.lock:
             if self.started:return
             self.started=True
-        self.start(check_only=True,automatic=True)
-        self.monitor_stop.clear()
-        self.monitor=threading.Thread(target=self._monitor,name='Official CLI update schedule',daemon=True);self.monitor.start()
+        try:
+            if not self.initial_check_started:
+                if not (self.thread and self.thread.is_alive()):self.start(check_only=True,automatic=True)
+                with self.lock:self.initial_check_started=True
+            self.monitor_stop.clear()
+            self.monitor=threading.Thread(target=self._monitor,name='Official CLI update schedule',daemon=True);self.monitor.start()
+        except Exception:
+            with self.lock:self.started=False;self.monitor=None
+            raise
 
     def _monitor(self):
         while not self.monitor_stop.wait(60):
@@ -116,7 +123,12 @@ class OfficialCLI:
         with self.lock:
             if self.thread and self.thread.is_alive():raise ValueError('CLI 更新检查正在进行 / CLI update already in progress')
             self.closed.clear();self.state.update(phase='checking',checking=True,preparing=False,error=None)
-            self.thread=threading.Thread(target=self._work,args=(check_only,automatic),name='Official CLI update',daemon=True);self.thread.start()
+            try:
+                self.thread=threading.Thread(target=self._work,args=(check_only,automatic),name='Official CLI update',daemon=True);self.thread.start()
+            except Exception as error:
+                self.thread=None
+                self.state.update(phase='error',checking=False,preparing=False,error=str(error)[:700])
+                raise
         return self.snapshot()
 
     def _work(self,check_only,automatic=False):

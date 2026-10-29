@@ -100,7 +100,10 @@ class WorkbenchUpdate:
         with self.lock:
             if self.started:return
             self.started=True
-        self.start('check')
+        try:self.start('check')
+        except Exception:
+            with self.lock:self.started=False
+            raise
 
     def start(self,operation):
         if operation not in ('check','prepare'):raise ValueError('Unknown application update operation')
@@ -118,7 +121,13 @@ class WorkbenchUpdate:
                 self.result_file=None;self.apply_token=None;self.helper=None
             if operation=='prepare':self._retire_completion()
             self.closed.clear();self.state.update(busy=True,error=None,error_stage=None,cancelled=False,progress=None,phase='checking' if operation=='check' else 'downloading')
-            self.thread=threading.Thread(target=self._work,args=(operation,),name='Workbench software update',daemon=True);self.thread.start()
+            try:
+                self.thread=threading.Thread(target=self._work,args=(operation,),name='Workbench software update',daemon=True);self.thread.start()
+            except Exception as error:
+                self.thread=None;self._retire_completion()
+                self.state.update(busy=False,phase='error',error=str(error)[:700],
+                    error_stage='check' if operation=='check' else 'download',cancelled=False)
+                raise
         return self.snapshot()
 
     def _work(self,operation):

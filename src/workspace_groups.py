@@ -22,7 +22,10 @@ class Discovery:
         with self.lock:
             if self.state['running']:return self.snapshot()
             self.state=dict(running=True,devices=[],error='',updated=0.,address=address)
-        threading.Thread(target=self.run,args=(address,),daemon=True,name='Read-only hand discovery').start()
+        try:threading.Thread(target=self.run,args=(address,),daemon=True,name='Read-only hand discovery').start()
+        except Exception as error:
+            with self.lock:self.state.update(running=False,error=str(error)[:700])
+            raise
         return self.snapshot()
 
     def run(self,address):

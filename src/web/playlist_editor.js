@@ -3,7 +3,7 @@
  'use strict';
  const $=id=>document.getElementById(id),L=window.WujiLocale,t=(zh,en)=>L.lang==='en'?en:zh;
  const speeds=[.1,.25,.5,.75,1,1.25,1.5,1.75,2,2.5,3,4];
- let entries=[],catalog=[],state=null,lease=null,runId=null,runEpoch=0,pending=false,starting=false,error='',loadError=false,sheet=null,mode='preview',commandRevision=0,uncertain=false;
+ let entries=[],catalog=[],state=null,lease=null,runId=null,runEpoch=0,pending=false,starting=false,error='',loadError=false,sheet=null,mode='preview',commandRevision=0,uncertain=false,serviceEpoch=0;
  const program=document.createElement('section');program.id='wb-program';program.className='pe-editor';
  program.innerHTML=`<div class="pe-queue">
   <div class="pe-section-heading"><h3 id="pe-queue-title"></h3><span id="wb-program-count"></span></div>
@@ -125,8 +125,8 @@
   if((pending||uncertain)&&name!=='program_stop')return;
   const scoped=['program_pause','program_resume','program_stop'].includes(name),expected=state?.program?.run_id;
   if(scoped){if(typeof expected!=='string'||!expected)return;payload={...payload,expected_run:expected};}
-  const own=++commandRevision;pending=true;error='';if(name==='program_start')runEpoch++;update();
-  try{const v=await request(name,payload);if(own!==commandRevision)return;if(v.program_lease){lease=v.program_lease;runId=typeof v.program_run_id==='string'?v.program_run_id:null;}if(name==='program_stop'){lease=null;runId=null;runEpoch++;starting=false;}
+  const own=++commandRevision,epoch=serviceEpoch;let response=null;pending=true;error='';if(name==='program_start')runEpoch++;update();
+  try{const v=await request(name,payload);if(own!==commandRevision)return;response=v;if(epoch!==serviceEpoch)return;if(v.program_lease){lease=v.program_lease;runId=typeof v.program_run_id==='string'?v.program_run_id:null;}if(name==='program_stop'){lease=null;runId=null;runEpoch++;starting=false;}
    if(name==='program_start'){starting=state?.program?.run_id!==runId||state?.program?.active!==true;$('mode-'+payload.mode)?.click();sheet?.close();}
   }catch(e){if(own===commandRevision)error=e.message;}finally{
    if(own===commandRevision){
@@ -136,6 +136,7 @@
      const current=await window.WujiConnection.refresh();if(own!==commandRevision)return;
      if(!current)throw Error(t('暂时无法核对节目单状态，请稍后重试。','Playlist status is unavailable. Retry shortly.'));
      state=current;uncertain=false;
+     if(epoch!==serviceEpoch&&name==='program_start'&&response?.program_lease){if(current.program?.active===true&&current.program.run_id===response.program_run_id){lease=response.program_lease;runId=response.program_run_id;starting=false;}else if(current.program?.run_id!==response.program_run_id)error=t('节目单已切换，请核对当前播放后重试。','The playlist changed. Check the current run and retry.');}
      if(scoped&&!error&&current.program?.run_id!==expected)error=t('节目单已切换，请核对当前播放后重试。','The playlist changed. Check the current run and retry.');
     }catch(e){if(own===commandRevision){uncertain=true;error=error||e.message;}}
     if(own===commandRevision){pending=false;update();}
@@ -156,9 +157,9 @@
  const ended=(value,id)=>!!id&&value?.program?.run_id===id&&value.program.active===false;
  function releaseRun(){lease=null;runId=null;runEpoch++;starting=false;}
  let beating=null;setInterval(async()=>{
-  if(!lease||beating?.epoch===runEpoch)return;
-  const beat={lease,id:runId,epoch:runEpoch};beating=beat;
-  const current=()=>lease===beat.lease&&runId===beat.id&&runEpoch===beat.epoch;
+  if(!lease||!state?.csrf||beating?.epoch===runEpoch)return;
+  const beat={lease,id:runId,epoch:runEpoch,service:serviceEpoch};beating=beat;
+  const current=()=>lease===beat.lease&&runId===beat.id&&runEpoch===beat.epoch&&serviceEpoch===beat.service;
   try{await request('program_keepalive',{lease:beat.lease},AbortSignal.timeout(2500));}
   catch(e){
    if(!current())return;
@@ -173,7 +174,8 @@
   }finally{if(beating===beat)beating=null;}
  },250);
  window.addEventListener('pagehide',()=>{if(lease)request('program_stop').catch(()=>{});});
- window.addEventListener('console-state',e=>{state=e.detail;uncertain=false;if(runId&&state?.program?.run_id===runId){if(state.program.active===true)starting=false;else if(ended(state,runId)&&!pending)releaseRun();}update();});
+ window.addEventListener('console-state',e=>{state=e.detail;uncertain=false;if(runId&&state?.program?.run_id!==runId)releaseRun();else if(runId&&state?.program?.run_id===runId){if(state.program.active===true)starting=false;else if(ended(state,runId)&&!pending)releaseRun();}update();});
+ window.addEventListener('console-offline',()=>{serviceEpoch++;state=null;uncertain=true;update();});
  function labels(){
   const text={
    'pe-queue-title':['动作列表','Routines'],'pe-add-label':['添加动作','Add a routine'],'wb-dance-add-button':['添加','Add'],'wb-dance-all':['补齐全部动作','Add missing routines'],'pe-autosave':['编辑自动保存','Edits saved automatically'],

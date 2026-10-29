@@ -229,7 +229,13 @@ class GloveBridge:
         self._worker_dispatch_attempted=False
         self._open_intent=None
         self.state=dict(connection='connecting',message='正在连接控制端 / Connecting controller',devices=[],users=[],stream={},hardware={},feedback={})
-        self.thread=threading.Thread(target=self.run,daemon=True);self.thread.start()
+        try:self.thread=threading.Thread(target=self.run,daemon=True);self.thread.start()
+        except Exception:
+            # No reader, transport or SDK worker was launched. Do not leave a
+            # connecting claim or manufacture a controller cleanup ACK.
+            self.thread=None;self._reader_finished=True;self._transport_closed=True
+            self.state.update(connection='error',message='手套会话未能启动，请重试 / Glove session could not start; retry')
+            raise
 
     def _stage_calibration(self,client,context):
         """Reuse this controller's existing bounded file transport and process."""

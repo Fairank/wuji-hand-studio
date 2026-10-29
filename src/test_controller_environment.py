@@ -120,7 +120,7 @@ class DoctorReportRetentionTests(unittest.TestCase):
             with self.subTest(operation=operation),tempfile.TemporaryDirectory() as folder, \
                     patch('doctor.DATA',Path(folder)), \
                     patch('doctor.local_run',return_value=(1,'ORIGINAL_STDOUT','ORIGINAL_STDERR')) as runner, \
-                    patch.object(Path,'write_text',side_effect=PermissionError('synthetic storage failure')):
+                    patch('doctor.os.replace',side_effect=PermissionError('synthetic storage failure')):
                 service=Doctor();service.work(dict(mode='local'),['wuji','--version'],operation)
                 state=service.snapshot()
             self.assertEqual(state['status'],'completed');self.assertFalse(state['running'])

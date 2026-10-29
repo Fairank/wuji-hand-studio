@@ -55,7 +55,10 @@ class OfficialTools:
             if self.check['busy']:raise ValueError('组件检查正在进行 / Component check already running')
             self.check.update(busy=True,status='checking',error=None,available=False,compatible=False,
                               cli_version=None,sdk_version=None,checked_at=None)
-        threading.Thread(target=self.run,name='Official CLI SDK software check',daemon=True).start()
+        try:threading.Thread(target=self.run,name='Official CLI SDK software check',daemon=True).start()
+        except Exception as error:
+            with self.lock:self.check.update(busy=False,status='failed',available=False,compatible=False,error=str(error)[:700])
+            raise
         return self.snapshot()
 
     def run(self):

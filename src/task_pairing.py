@@ -91,9 +91,16 @@ class TaskPairing:
                               source_profile=source['intent'].get('profile_id'),source_user=source['intent'].get('sdk_user'),
                               source_serial=source['devices'].get('glove'))
             self.cancel_event=threading.Event()
-            self.thread = threading.Thread(target=self._work, args=(copy.deepcopy(source),copy.deepcopy(target),self.cancel_event),
-                                           name='Explicit device pairing',daemon=True)
-            self.thread.start()
+            try:
+                self.thread = threading.Thread(target=self._work, args=(copy.deepcopy(source),copy.deepcopy(target),self.cancel_event),
+                                               name='Explicit device pairing',daemon=True)
+                self.thread.start()
+            except Exception as error:
+                # Neither feedback release nor hand preparation was dispatched.
+                # Preserve both real endpoint owners and permit an exact retry.
+                self.thread=None
+                self.state.update(busy=False,phase='error',error=str(error)[:700])
+                raise
         return dict(pairing=self.snapshot())
 
     def _set(self, **values):
