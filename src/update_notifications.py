@@ -45,6 +45,65 @@ def _device_kind(device):
     return {'wuji_glove':'glove','wuji_hand':'hand','wuji_hand_2':'hand'}.get(kind) if isinstance(kind,str) else None
 
 
+def _session(value):
+    return ((type(value) is int and value>=0) or
+            (type(value) is str and 0<len(value)<=128 and not any(ord(c)<32 for c in value)))
+
+
+def _live_firmware_devices(states):
+    """Current handle/session owners only; selections and history are not owners."""
+    live={}
+    def add(sn,kinds):
+        sn=_serial(sn)
+        if sn and kinds:live[sn]=live[sn]&kinds if sn in live else set(kinds)
+    def hand_types(profile,identity):
+        if not isinstance(profile,dict):profile={}
+        if identity.get('profile') and profile.get('id') and identity['profile']!=profile['id']:return set()
+        generation=profile.get('generation')
+        if generation=='hand1':return {'wuji_hand'}
+        if generation=='hand2':return {'wuji_hand_2'}
+        selected=identity.get('profile') or profile.get('id') or ''
+        if isinstance(selected,str) and selected.startswith('hand1_'):return {'wuji_hand'}
+        if isinstance(selected,str) and selected.startswith('hand2_'):return {'wuji_hand_2'}
+        return {'wuji_hand','wuji_hand_2'}
+    if not isinstance(states,(list,tuple)):return live
+    for state in states:
+        if not isinstance(state,dict):continue
+        identity=state.get('identified_device') or {}
+        if (isinstance(identity,dict) and state.get('connection')=='connected'
+                and _session(state.get('session_generation')) and identity.get('source')=='sdk_identity'
+                and identity.get('serial')==state.get('device_id')):
+            add(identity.get('serial'),hand_types(state.get('device_profile'),identity))
+        glove=state.get('glove') or {};glove=glove if isinstance(glove,dict) else {}
+        glove_live=(glove.get('connection')=='receiving' and glove.get('busy') is not False
+                    and _session(glove.get('session_id')) and _serial(glove.get('glove_serial')) is not None)
+        actual=glove.get('identified_glove')
+        if actual is not None and (not isinstance(actual,dict) or actual.get('source')!='sdk_identity'
+                                   or actual.get('serial')!=glove.get('glove_serial')):glove_live=False
+        if glove_live:
+            add(glove.get('glove_serial'),{'wuji_glove'})
+            feedback=glove.get('feedback') or {};feedback=feedback if isinstance(feedback,dict) else {}
+            identity=feedback.get('identified_device') or {}
+            if (feedback.get('connection')=='connected' and isinstance(identity,dict)
+                    and identity.get('source')=='sdk_identity' and identity.get('serial')==feedback.get('device_id')):
+                add(identity.get('serial'),hand_types(state.get('device_profile'),identity))
+        calibration=state.get('calibration') or {};calibration=calibration if isinstance(calibration,dict) else {}
+        if (calibration.get('running') is True and _session(calibration.get('id'))
+                and calibration.get('source') in ('official_tty','official_jsonl_native')):
+            add(calibration.get('serial'),{'wuji_glove'})
+        viewer=state.get('official_viz') or {};viewer=viewer if isinstance(viewer,dict) else {}
+        if viewer.get('active') is True and viewer.get('phase')=='running' and _session(viewer.get('session_id')):
+            device=viewer.get('reported_device') or {};selected=viewer.get('device') or {}
+            if not isinstance(device,dict) or not isinstance(selected,dict):continue
+            sn=device.get('serial') or device.get('sn');selected_sn=selected.get('serial') or selected.get('sn')
+            kinds={selected.get('device_type')} if selected_sn==sn and _device_kind(selected) else set()
+            if not selected and _device_kind(device):kinds={device['device_type']}
+            elif not selected and device.get('kind') in ('hand','glove'):
+                kinds={'wuji_glove'} if device['kind']=='glove' else {'wuji_hand','wuji_hand_2'}
+            add(sn,kinds)
+    return live
+
+
 class UpdateNotifications:
     def __init__(self,*,states,app,cli,sdk,firmware,devices,idle,clock=time.time):
         self.states,self.app,self.cli,self.sdk=states,app,cli,sdk
@@ -55,6 +114,7 @@ class UpdateNotifications:
         self.pending_firmware=None
         self.idle_since=None;self.checked_at=None
         self.user_priority_until=0
+        self._snapshot_epoch=0
 
     def startup(self):
         if (os.environ.get('WUJI_FLEET_ID') or os.environ.get('WUJI_FLEET_PARENT')
@@ -271,6 +331,18 @@ class UpdateNotifications:
         # A just-connected Viewer can expose an already completed exact-SN
         # preflight report immediately, without waiting for the next scheduler
         # tick or starting a second query against the connected device.
+        # Read the complete current fleet outside our lock: Controller.snapshot
+        # invokes observe while holding its own lock. A partial observe callback
+        # is useful history, but cannot decide whether another workspace owns a
+        # live device. Each GET must establish that from the complete provider.
+        with self.lock:
+            self._snapshot_epoch+=1;epoch=self._snapshot_epoch
+        try:
+            states=self.states()
+            live=_live_firmware_devices(states)
+            with self.lock:
+                if epoch==self._snapshot_epoch:self.observe(states)
+        except Exception:live={}
         try:self._ingest_firmware(self.firmware().snapshot(),self.clock())
         except Exception:pass
         items=[]
@@ -292,6 +364,7 @@ class UpdateNotifications:
                 items.append(dict(kind='sdk',version=release['version']))
         except Exception:pass
         with self.lock:
+            if epoch!=self._snapshot_epoch or self.closed.is_set():live={}
             reports=copy.deepcopy(self.reports)
             devices=[{key:copy.deepcopy(value) for key,value in device.items() if not key.startswith('_')}
                      for device in self.known.values()]
@@ -299,7 +372,8 @@ class UpdateNotifications:
         for sn,row in sorted(reports.items()):
             age=self.clock()-(row.get('checked_at') or 0)
             known=next((d for d in devices if d['serial']==sn),{});current=known.get('firmware_version')
-            if (_type_matches(known.get('kind'),row.get('device_type')) and (current is None or current==row.get('current'))
+            if (row.get('device_type') in live.get(sn,set())
+                    and _type_matches(known.get('kind'),row.get('device_type')) and (current is None or current==row.get('current'))
                     and 0<=age<FIRMWARE_INTERVAL and row.get('update_available') is True and _newer(row.get('latest'),row.get('current'))):
                 model={'wuji_glove':'Wuji Glove','wuji_hand':'Wuji Hand','wuji_hand_2':'Wuji Hand 2'}[row['device_type']]
                 items.append(dict(kind='firmware',serial=sn,version=row['latest'],current_version=row['current'],model=model))

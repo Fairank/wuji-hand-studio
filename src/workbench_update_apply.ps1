@@ -46,6 +46,9 @@ try {
     $started=$appProcess.StartTime.ToUniversalTime().Ticks
     $state=Invoke-RestMethod -Uri ($base+'/api/state') -TimeoutSec 10
     $headers=@{'X-Console-Token'=$state.csrf;'Origin'=$base}
+    # Each server request has one 10 s budget, including discovery yielding,
+    # hash/preflight and close cleanup. The client leaves response headroom.
+    # A timeout is a failed attempt; never retry close/install automatically.
     $request=@{operation='prepare_update';version=$plan.version;sha256=$plan.sha256}|ConvertTo-Json -Compress
     $ready=Invoke-RestMethod -Uri ($base+'/api/desktop') -Method Post -Headers $headers -ContentType 'application/json' -Body $request -TimeoutSec 15
     if (-not $ready.ok -or $ready.sha256 -cne $plan.sha256) { throw 'Application update preflight failed' }

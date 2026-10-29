@@ -343,7 +343,7 @@ class SwitchTests(unittest.TestCase):
         for transition in ({'busy':True},{'user_catalog':{'busy':True}},{'cleanup_error':'unknown'}):
             state=dict(connection='disconnected',hardware={'active':False},glove={'busy':False},connection_switch=transition)
             self.assertFalse(idle(state,{}));self.assertTrue(needs_confirmation(state))
-            c=N(snapshot=lambda:state,action=Mock())
+            c=N(snapshot=lambda:state,action=Mock(),doctor=N(snapshot=lambda:{}))
             self.assertFalse(close_sessions(c)['ok']);c.action.assert_not_called()
 
     def test_wearer_metadata_never_switches_user_scans_or_opens_a_device(self):

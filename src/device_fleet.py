@@ -102,17 +102,22 @@ class DeviceFleet:
         return {k: r[k] for k in ('id', 'label', 'port', 'profile')}
 
     @staticmethod
-    def get(r, path):
-        with urlopen(f'http://127.0.0.1:{r["port"]}'+path, timeout=1) as response:
+    def get(r, path, *, timeout=1):
+        with urlopen(f'http://127.0.0.1:{r["port"]}'+path, timeout=timeout) as response:
             return json.load(response)
 
-    def post(self, r, command):
-        state = self.get(r, '/api/state')
+    def post(self, r, command, *, deadline=None, clock=time.monotonic):
+        from desktop_tools import update_remaining
+        state = self.get(r, '/api/state', **(dict(timeout=min(1.,update_remaining(deadline,clock))) if deadline is not None else {}))
         origin = f'http://127.0.0.1:{r["port"]}'
-        request = Request(origin+'/api/action', data=json.dumps(command).encode(),
+        wire=dict(command)
+        if deadline is not None and command.get('name')=='session_close':wire['update_close_deadline']=deadline
+        request = Request(origin+'/api/action', data=json.dumps(wire).encode(),
                           headers={'Content-Type': 'application/json', 'Origin': origin,
                                    'X-Console-Token': state['csrf']})
-        with urlopen(request, timeout=15 if command.get('name')=='session_close' else 4) as response:
+        timeout=15 if command.get('name')=='session_close' else 4
+        if deadline is not None:timeout=min(timeout,update_remaining(deadline,clock))
+        with urlopen(request, timeout=timeout) as response:
             return json.load(response)
 
     def scoped_post(self, r, expected_context, action, payload=None):
@@ -250,7 +255,11 @@ class DeviceFleet:
             self.children.pop(ident)
         return dict(removed=True)
 
-    def close(self):
+    def close(self, *, deadline=None, clock=time.monotonic):
+        from desktop_tools import update_remaining
+        def budget():return update_remaining(deadline,clock) if deadline is not None else None
+        try:budget()
+        except ValueError as error:return dict(ok=False,error=str(error))
         with self.lock:
             if self._closing:
                 return dict(ok=False,error='Workspace shutdown is already in progress') if self.children else dict(ok=True)
@@ -259,19 +268,24 @@ class DeviceFleet:
         try:
             for r in records:
                 try:
-                    response=self.post(r, {'name': 'session_close'})
+                    budget()
+                    response=self.post(r, {'name': 'session_close'}, **(dict(deadline=deadline,clock=clock) if deadline is not None else {}))
                     if not response.get('ok'):return response
                 except (OSError, ValueError) as error:
                     if r['process'].poll() is None:
                         return dict(ok=False,error='设备工作区尚未确认断开 / Workspace disconnect unconfirmed: '+str(error))
             for r in records:
+                budget()
                 process=r['process']
                 if process.poll() is None:
+                    budget()
                     process.terminate()
-                    try:process.wait(timeout=5)
+                    try:process.wait(timeout=min(5.,budget()) if deadline is not None else 5)
                     except subprocess.TimeoutExpired:
-                        process.kill();process.wait(timeout=5)
+                        budget()
+                        process.kill();process.wait(timeout=min(5.,budget()) if deadline is not None else 5)
                 if process.poll() is None:raise ValueError('Workspace process exit was not confirmed')
+            budget()
             with self.lock:
                 if len(self.children)!=len(records) or any(self.children.get(r['id']) is not r for r in records):
                     raise ValueError('Workspace changed while closing; retry')

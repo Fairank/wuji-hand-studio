@@ -289,7 +289,7 @@ class UnpairAndExitTests(unittest.TestCase):
         from desktop_tools import idle,dispatch
         state=dict(connection='disconnected',hardware={'active':False},calibrated_teleoperation={'busy':True},glove={})
         self.assertTrue(needs_confirmation(state));self.assertFalse(idle(state,{}))
-        c=N(snapshot=Mock(return_value=state),calibrated_teleoperation=N(cancel_and_wait=Mock(return_value=False)))
+        c=N(snapshot=Mock(return_value=state),doctor=N(snapshot=lambda:{}),calibrated_teleoperation=N(cancel_and_wait=Mock(return_value=False)))
         self.assertFalse(close_sessions(c)['ok']);c.calibrated_teleoperation.cancel_and_wait.assert_called_once()
         host=N(server=N(controller=N(snapshot=lambda:state,doctor=N(snapshot=lambda:{}))))
         for operation in ('reload_ui','close_idle','prepare_update','preview'):

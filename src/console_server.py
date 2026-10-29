@@ -494,6 +494,18 @@ class Controller:
         self.stdin.flush()
 
     def action(self, command):
+        if isinstance(command,dict) and command.get('name')=='session_close':
+            from desktop_lifecycle import close_block_reason
+            with self.lock:
+                deadline=command.get('update_close_deadline')
+                if deadline is not None:
+                    from desktop_tools import update_remaining
+                    if update_remaining(deadline)>10.:raise ValueError('Invalid application update close budget')
+                blocked=close_block_reason(self.snapshot(),self.doctor.snapshot())
+                if blocked:return dict(ok=False,error=blocked)
+            # A timed update close cannot cancel transitions before its final
+            # preflight. Their owning workflow must finish independently.
+            if deadline is not None:return self._coordinated_action(command)
         if isinstance(command,dict) and command.get('name') in {'connection_switch','connect','official_viz_start','glove_connect','glove_open','glove_scan','calibration_start','calibration_handover','teleoperation_handover','calibrated_teleoperation_continue'}:
             priority=getattr(self,'version_check_priority',None)
             if priority and not priority():raise ValueError('只读版本检查正在结束，请稍候重试 / Finishing the background version check; retry shortly')
@@ -586,17 +598,30 @@ class Controller:
         if isinstance(command,dict) and command.get('name')=='control_tools_check':
             with self.lock:return self.official_tools.start_check()
         if isinstance(command,dict) and command.get('name')=='session_close':
+            deadline=command.get('update_close_deadline')
+            def budget():
+                if deadline is not None:
+                    from desktop_tools import update_remaining
+                    update_remaining(deadline)
             # The reader must acquire this lock to deliver a stop ACK. Reserve
             # the transition, then wait outside the lock while starts are gated.
             with self.lock:
                 if getattr(self,'desktop_closing',False):return dict(ok=False,error='会话正在结束 / Session is already closing')
                 self.desktop_closing=True
             try:
-                from desktop_lifecycle import close_sessions
+                from desktop_lifecycle import close_block_reason,close_sessions
+                budget()
+                with self.lock:
+                    blocked=close_block_reason(self.snapshot(),self.doctor.snapshot())
+                    if blocked:return dict(ok=False,error=blocked)
+                budget()
                 self.program.stop()
+                budget()
                 if self.group.active:self.group.stop('工作区正在关闭 / Workspace closing')
+                budget()
                 self.calibration.cancel()
-                return close_sessions(self)
+                budget()
+                return close_sessions(self,**(dict(deadline=deadline) if deadline is not None else {}))
             finally:
                 with self.lock:self.desktop_closing=False
         if isinstance(command,dict) and command.get('name') in {'connect','runtime_select','bridge_config_save','bridge_password_save','bridge_password_forget','parameters_sync','doctor_version','doctor_run','doctor_support','device_profile_select','glove_connect'}:
@@ -1686,6 +1711,11 @@ class ConsoleHTTPServer(ThreadingHTTPServer):
                 from official_firmware_package import prepare_package, validate_package
                 def guard():
                     if getattr(self.controller, 'desktop_closing', False):raise ValueError('Workbench is closing')
+                    sdk = getattr(self, '_sdk_maintenance', None)
+                    if sdk is not None:
+                        state = sdk.snapshot()
+                        if state.get('recovery_required') or (state.get('busy') and state.get('last_operation') == 'update'):
+                            raise ValueError('Official SDK maintenance must finish first')
                     service = getattr(self, '_firmware', None)
                     if service is not None:
                         state = service.snapshot()
@@ -1800,11 +1830,14 @@ class ConsoleHTTPServer(ThreadingHTTPServer):
     def start_firmware_package_upgrade(self, serial, package_token, confirmed):
         """Fresh device identification occurs only when opening installation."""
         if confirmed is not True:raise ValueError('Explicitly open the official installation')
-        self.firmware_catalog.validate_ready_token(package_token, serial)
+        catalog = self.firmware_catalog
         workflow = self.controller.calibration_handover.workflow_lock
         if not workflow.acquire(blocking=False):raise ValueError('A device task is switching')
+        transfer = None
         try:
             if getattr(self.controller, 'desktop_closing', False):raise ValueError('Workbench is closing')
+            transfer = catalog.begin_transfer(package_token, serial)
+            catalog.guard()
             viewer = self.controller.official_viz
             status = viewer.snapshot()
             if status.get('active') is True:
@@ -1817,15 +1850,23 @@ class ConsoleHTTPServer(ThreadingHTTPServer):
                     with gate(viewer.folder):
                         viewer.connection_record(serial, token, require_glove=True)
                         self.firmware_preview_idle(token)
+                        catalog.validate_transfer(transfer, serial)
+                        catalog.guard()
                     viewer.stop_owned(serial, token, require_glove=True)
+            catalog.validate_transfer(transfer, serial)
+            catalog.guard()
             self.controller.official_cli.idle_check()
             rows = self.controller.calibration_devices()
             if not any((r.get('serial') or r.get('sn')) == serial for r in rows):
                 rows = self.controller.calibration_devices(fresh=True)
             if not any((r.get('serial') or r.get('sn')) == serial for r in rows):
                 raise ValueError('所选设备暂不可见 / Selected device is unavailable')
-            return self.firmware.start_file_upgrade(serial, package_token, confirmed=confirmed)
-        finally:workflow.release()
+            catalog.validate_transfer(transfer, serial)
+            catalog.guard()
+            return self.firmware.start_file_upgrade(serial, transfer, confirmed=confirmed)
+        finally:
+            if transfer is not None:catalog.finish_transfer(transfer)
+            workflow.release()
 
     def check_connect_version(self,serial):
         """A bounded read in an explicit connection, never a mandatory update.
@@ -1862,6 +1903,22 @@ class ConsoleHTTPServer(ThreadingHTTPServer):
 
     def maintenance_action(self,command):
         name=command.get('name')
+        # SDKMaintenance.start does not hold the connection workflow lock.
+        # Serialize its device-affecting dispatch with Viewer-to-firmware
+        # handover, before either side changes ownership or stops a Viewer.
+        workflow = None
+        if name in {'firmware_check','firmware_upgrade','firmware_package_upgrade','firmware_recovery_check',
+                    'sdk_update_prepare','sdk_update_recover'}:
+            workflow = self.controller.calibration_handover.workflow_lock
+            if not workflow.acquire(blocking=False):raise ValueError('A device task is switching')
+        try:return self._priority_maintenance_action(command)
+        finally:
+            if workflow is not None:workflow.release()
+
+    def _priority_maintenance_action(self,command):
+        name=command.get('name')
+        if (name != 'firmware_terminal_input' and getattr(self.controller, 'desktop_closing', False)):
+            raise ValueError('Workbench is closing')
         if name in {'firmware_check','firmware_upgrade','firmware_package_upgrade','firmware_recovery_check',
                     'sdk_release_check','sdk_update_prepare','sdk_update_recover'}:
             # The operator's request yields our read-only discovery first.
@@ -1935,7 +1992,7 @@ class ConsoleHTTPServer(ThreadingHTTPServer):
             return self._update_notifications
 
     def configure_official_cli(self,startup=True):
-        def check_workspaces(check,allow_local_viewer=None,allow_local_device=None,exclude_workspace=None):
+        def check_workspaces(check,allow_local_viewer=None,allow_local_device=None,exclude_workspace=None,allow_local_scan=None):
             from managed_runtime import status as runtime_status
             if runtime_status().get('busy'):raise ValueError('Wait for control environment installation')
             if getattr(self.controller,'desktop_closing',False):raise ValueError('Workbench is closing')
@@ -1970,7 +2027,8 @@ class ConsoleHTTPServer(ThreadingHTTPServer):
                 viewer=state.get('official_viz') or {}
                 owned=viewer.get('active') or viewer.get('busy') or viewer.get('scanning') or viewer.get('session_id') or viewer.get('phase') in ('starting','running','stopping')
                 if owned and not (local and allow_local_viewer and viewer.get('session_id')==allow_local_viewer
-                                  and viewer.get('active') is True and viewer.get('phase')=='running'):
+                                  and viewer.get('active') is True and viewer.get('phase')=='running') and not (
+                        local and allow_local_scan and __import__('desktop_tools').owned_update_scan(self.controller)==allow_local_scan):
                     raise ValueError('请先结束原版画面会话 / Finish the original Viewer session first')
             one(self.controller.snapshot(),self.controller.doctor.snapshot(),True)
             if self.controller.official_tools.snapshot()['check']['busy']:raise ValueError('Wait for official software checks')
@@ -1994,6 +2052,7 @@ class ConsoleHTTPServer(ThreadingHTTPServer):
             if use_native(load_config()):check_workspaces(require_discovery_idle)
             else:all_idle()
         self.controller.official_cli.idle_check=all_idle
+        self.software_update_idle=lambda token:check_workspaces(__import__('studio_component').require_idle,allow_local_scan=token)
         self.switch_siblings_idle=lambda ident:check_workspaces(__import__('studio_component').require_idle,exclude_workspace=ident)
         self.controller.official_viz.idle_check=all_idle
         self.controller.official_viz.scan_check=scan_idle
@@ -2044,8 +2103,23 @@ class ConsoleHTTPServer(ThreadingHTTPServer):
                     catalog = getattr(self, '_firmware_catalog', None)
                     if catalog is not None and catalog.snapshot().get('busy'):
                         raise ValueError('请等待官方固件包准备结束 / Wait for official firmware package preparation')
+                def update_available():
+                    # Availability is a pure status check; GET must not cancel
+                    # discovery, and a known scan never grants install authority.
+                    from cli_coordination import reservation
+                    from desktop_tools import owned_update_scan
+                    token=owned_update_scan(self.controller)
+                    marker=reservation()
+                    if marker and (not token or marker.get('token')!=token or marker.get('kind')!='scan'):
+                        raise ValueError('Finish the official CLI session before updating')
+                    if token:self.software_update_idle(token)
+                    else:self.controller.official_cli.idle_check()
+                    catalog=getattr(self,'_firmware_catalog',None)
+                    if catalog is not None and catalog.snapshot().get('busy'):raise ValueError('Wait for official firmware package preparation')
+                from desktop_tools import update_discovery_priority
                 self._workbench_updates=WorkbenchUpdate(DATA,EDITION,
-                    idle_check=update_idle,desktop=lambda:getattr(self,'desktop',None))
+                    idle_check=update_idle,desktop=lambda:getattr(self,'desktop',None),availability_check=update_available,
+                    priority=lambda **kw:update_discovery_priority(self.controller,**kw))
             return self._workbench_updates
 
     @property

@@ -402,7 +402,7 @@ class DesktopCloseGuardTests(unittest.TestCase):
             def require_held(*_args):
                 self.assertTrue(env.held)
             env.controller.official_cli.idle_check.side_effect = require_held
-            env.close.side_effect = lambda _: require_held() or {'ok':True}
+            env.close.side_effect = lambda _, **kwargs: require_held() or {'ok':True}
             self.assertTrue(env.host.stop_and_close(require_idle=True)['ok'])
             env.controller.official_cli.idle_check.assert_called_once()
             env.fleet.close.assert_called_once()
@@ -423,7 +423,7 @@ class DesktopCloseGuardTests(unittest.TestCase):
         with self.environment() as env:
             env.updates.cancel_and_wait.return_value = False
             self.assertFalse(env.host.stop_and_close(require_idle=True)['ok'])
-            env.controller.official_cli.idle_check.assert_not_called()
+            env.controller.official_cli.idle_check.assert_called_once()
             env.fleet.close.assert_not_called()
             env.close.assert_not_called()
         with self.environment() as env:

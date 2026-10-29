@@ -23,8 +23,13 @@ class NotificationTests(unittest.TestCase):
             sdk=lambda:self.sdk,firmware=lambda:self.firmware,devices=lambda:copy.deepcopy(self.rows),idle=self.idle,clock=lambda:self.now)
 
     def connected(self,sn='SYNTHETIC-GLOVE'):
-        return dict(glove=dict(connection='receiving',glove_serial=sn,
+        return dict(glove=dict(connection='receiving',busy=True,session_id=1,glove_serial=sn,
             device_version=dict(serial=sn,firmware_version='1.0.0',source='sdk_handle_info')))
+
+    def observe(self,states):
+        # The same current fleet is visible to GET and the explicit observer.
+        self.states=copy.deepcopy(states)
+        self.monitor.observe(states)
 
     def fresh(self,sn='SYNTHETIC-GLOVE'):
         return dict(serial=sn,kind='glove',stale=False,selectable=True,conflict=False,in_use=False)
@@ -62,12 +67,12 @@ class NotificationTests(unittest.TestCase):
         self.firmware.start_check.assert_not_called();self.idle.assert_not_called()
 
     def test_stale_different_or_conflicting_device_does_not_open(self):
-        self.monitor.observe([self.connected()]);self.monitor.idle_since=self.now-31
+        self.observe([self.connected()]);self.monitor.idle_since=self.now-31
         self.rows=[self.fresh('ANOTHER-GLOVE'),dict(self.fresh(),stale=True),dict(self.fresh(),conflict=True)]
         self.monitor.tick();self.firmware.start_check.assert_not_called()
 
     def test_cached_official_exact_report_creates_stable_notification(self):
-        self.monitor.observe([self.connected()]);self.monitor.idle_since=self.now-31
+        self.observe([self.connected()]);self.monitor.idle_since=self.now-31
         self.firmware.snapshot.return_value=dict(notification=dict(serial='SYNTHETIC-GLOVE',current='1.0.0',latest='1.1.0',device_type='wuji_glove',update_available=True),checked_at=self.now)
         self.monitor.tick();first=self.monitor.snapshot();second=self.monitor.snapshot()
         self.assertEqual(first['items'],second['items']);self.assertEqual(first['revision'],second['revision'])
@@ -76,7 +81,7 @@ class NotificationTests(unittest.TestCase):
     def test_changed_actual_firmware_invalidates_old_report(self):
         self.test_cached_official_exact_report_creates_stable_notification()
         state=self.connected();state['glove']['device_version']['firmware_version']='1.1.0'
-        self.monitor.observe([state]);self.monitor.tick()
+        self.observe([state]);self.monitor.tick()
         self.assertEqual(self.monitor.snapshot()['items'],[])
 
     def test_expired_report_and_unknown_schema_never_report_latest(self):
@@ -118,12 +123,12 @@ class NotificationTests(unittest.TestCase):
         self.assertEqual(self.monitor.snapshot()['items'],[])
 
     def test_exact_serial_with_conflicting_official_type_is_not_a_notice(self):
-        self.monitor.observe([self.connected()]);self.monitor.idle_since=self.now-31
+        self.observe([self.connected()]);self.monitor.idle_since=self.now-31
         self.firmware.snapshot.return_value=dict(notification=dict(serial='SYNTHETIC-GLOVE',current='1.0.0',latest='1.1.0',device_type='wuji_hand_2',update_available=True),checked_at=self.now)
         self.monitor.tick();self.assertEqual(self.monitor.snapshot()['items'],[])
 
     def test_failed_async_firmware_check_retries_after_backoff_instead_of_a_day(self):
-        self.monitor.observe([self.connected()]);self.monitor.idle_since=self.now-31
+        self.observe([self.connected()]);self.monitor.idle_since=self.now-31
         self.rows=[self.fresh()];self.monitor.pending_firmware=('SYNTHETIC-GLOVE',self.now)
         self.now+=16
         self.firmware.snapshot.return_value=dict(device=dict(sn='SYNTHETIC-GLOVE'),phase='failed',finished_at=self.now,notification=None)
@@ -137,7 +142,7 @@ class NotificationTests(unittest.TestCase):
 
     def test_fresh_discovery_and_connection_history_never_authorize_a_background_query(self):
         from device_inventory import normalize_devices
-        self.monitor.observe([self.connected()]);scanned_at=self.now
+        self.observe([self.connected()]);scanned_at=self.now
         raw=[dict(serial='SYNTHETIC-GLOVE',device_type='wuji_glove',handedness='right')]
         self.monitor.devices=lambda:normalize_devices(raw,source='official_cli',observed_at=scanned_at,now=self.now)['devices']
         self.monitor.tick();self.firmware.start_check.assert_not_called()
@@ -145,7 +150,7 @@ class NotificationTests(unittest.TestCase):
         self.firmware.start_check.assert_not_called()
 
     def test_close_during_idle_callback_does_not_start_a_new_device_query(self):
-        self.monitor.observe([self.connected()]);self.monitor.idle_since=self.now-31;self.rows=[self.fresh()]
+        self.observe([self.connected()]);self.monitor.idle_since=self.now-31;self.rows=[self.fresh()]
         self.idle.side_effect=self.monitor.close
         self.monitor.tick();self.firmware.start_check.assert_not_called()
 
@@ -166,12 +171,12 @@ class NotificationTests(unittest.TestCase):
                     checked_at=self.now,phase='failed',busy=False,locked=False)
 
     def test_real_viewer_shape_remembers_exact_family_without_guessing_serial(self):
-        self.monitor.observe([self.viewer()])
+        self.observe([self.viewer()])
         self.assertEqual(self.monitor.known['SYNTHETIC-GLOVE']['kind'],'glove')
         for changed in (dict(sn='ANOTHER',device_type='wuji_glove'),dict(sn='SYNTHETIC-GLOVE',device_type='unknown'),
                         dict(sn='SYNTHETIC-GLOVE',device_type='wuji_hand_2')):
             self.monitor.known.clear();state=self.viewer();state['official_viz']['device']=changed
-            self.monitor.observe([state])
+            self.observe([state])
             if changed.get('device_type')=='wuji_hand_2':self.assertEqual(self.monitor.known['SYNTHETIC-GLOVE']['kind'],'hand')
             else:self.assertEqual(self.monitor.known,{})
 
@@ -184,7 +189,7 @@ class NotificationTests(unittest.TestCase):
         self.firmware.start_check.assert_not_called()
 
     def test_first_connected_viewer_exposes_completed_preflight_on_next_get_without_tick(self):
-        self.monitor.observe([self.viewer()]);self.firmware.snapshot.return_value=self.real_check()
+        self.observe([self.viewer()]);self.firmware.snapshot.return_value=self.real_check()
         items=self.monitor.snapshot()['items']
         self.assertEqual([(item['current_version'],item['version']) for item in items],[('1.0.0','1.0.3')])
         self.firmware.start_check.assert_not_called();self.app.start.assert_not_called();self.cli.start.assert_not_called()
@@ -199,7 +204,7 @@ class NotificationTests(unittest.TestCase):
 
     def test_user_action_cancels_only_background_read_and_defers_new_checks(self):
         self.firmware.cancel_notification_check.return_value=True
-        self.monitor.observe([self.connected()]);self.monitor.idle_since=self.now-31;self.rows=[self.fresh()]
+        self.observe([self.connected()]);self.monitor.idle_since=self.now-31;self.rows=[self.fresh()]
         self.assertTrue(self.monitor.give_user_priority(timeout=2))
         self.firmware.cancel_notification_check.assert_called_once_with(timeout=2)
         self.monitor.tick();self.firmware.start_check.assert_not_called()
@@ -212,7 +217,7 @@ class NotificationTests(unittest.TestCase):
         self.assertGreater(self.monitor.user_priority_until,self.now)
 
     def test_late_scheduler_dispatch_cannot_overtake_a_user_action(self):
-        self.monitor.observe([self.connected()]);self.monitor.idle_since=self.now-31;self.rows=[self.fresh()]
+        self.observe([self.connected()]);self.monitor.idle_since=self.now-31;self.rows=[self.fresh()]
         self.firmware.cancel_notification_check.return_value=True
         self.monitor.devices=lambda:(self.monitor.give_user_priority() or copy.deepcopy(self.rows))
         # Return rows after the user priority callback occurs inside inventory
@@ -221,7 +226,7 @@ class NotificationTests(unittest.TestCase):
         self.monitor.devices=rows;self.monitor.tick();self.firmware.start_check.assert_not_called()
 
     def test_new_official_check_overrides_old_handle_metadata_after_upgrade(self):
-        self.monitor.observe([self.connected()]);self.firmware.snapshot.return_value=self.real_check()
+        self.observe([self.connected()]);self.firmware.snapshot.return_value=self.real_check()
         self.assertEqual(len(self.monitor.snapshot()['items']),1)
         self.now+=10
         state=self.real_check(current='1.0.3',latest='1.0.3')
@@ -230,13 +235,13 @@ class NotificationTests(unittest.TestCase):
         self.assertEqual(self.monitor.snapshot()['items'],[])
         self.assertEqual(self.monitor.snapshot()['devices'][0]['firmware_version'],'1.0.3')
         for _ in range(3):
-            self.now+=1;self.monitor.observe([self.connected()])
+            self.now+=1;self.observe([self.connected()])
             self.assertEqual(self.monitor.snapshot()['items'],[])
             self.assertEqual(self.monitor.snapshot()['devices'][0]['firmware_version'],'1.0.3')
         self.assertFalse(any(key.startswith('_') for key in self.monitor.snapshot()['devices'][0]))
 
     def test_new_check_can_update_current_and_available_version_over_older_metadata(self):
-        self.monitor.observe([self.connected()]);self.firmware.snapshot.return_value=self.real_check()
+        self.observe([self.connected()]);self.firmware.snapshot.return_value=self.real_check()
         self.monitor.snapshot();self.now+=10
         self.firmware.snapshot.return_value=self.real_check(current='1.0.3',latest='1.0.4')
         items=self.monitor.snapshot()['items']
@@ -244,10 +249,10 @@ class NotificationTests(unittest.TestCase):
 
     def test_new_connection_metadata_invalidates_an_older_contradictory_check(self):
         state=self.connected();state['glove']['session_id']=1
-        self.monitor.observe([state]);self.firmware.snapshot.return_value=self.real_check()
+        self.observe([state]);self.firmware.snapshot.return_value=self.real_check()
         self.monitor.snapshot();self.now+=10
         state['glove']['session_id']=2;state['glove']['device_version']['firmware_version']='1.0.3'
-        self.monitor.observe([state])
+        self.observe([state])
         self.assertEqual(self.monitor.snapshot()['items'],[])
         self.assertEqual(self.monitor.snapshot()['devices'][0]['firmware_version'],'1.0.3')
 

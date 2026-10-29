@@ -23,8 +23,8 @@
  const environmentSummary=document.createElement('summary'),environmentTitle=document.createElement('span');environmentTitle.id='ot-environment-title';environmentSummary.append(environmentTitle,$('ot-state'));environment.append(environmentSummary);
  for(const selector of ['#ot-description','.ot-table','.ot-runtime','#ot-checked-at','#ot-status','#ot-error','.ot-actions'])environment.append(card.querySelector(selector));
  card.append(environment);
- let data=null,fresh=false,pending='',pollPromise=null,transportError='',actionError='',systemMessage='',lastRefresh=0,lastEnvironmentIssue='';
- let cliData=null,cliFresh=false,cliPending='',cliPromise=null,cliTransportError='',cliActionError='',cliLastRefresh=0,cliUnconfirmedPreference=null;
+ let data=null,fresh=false,pending='',pollPromise=null,transportError='',actionError='',systemMessage='',lastRefresh=0,lastEnvironmentIssue='',environmentEpoch=0;
+ let cliData=null,cliFresh=false,cliPending='',cliPromise=null,cliTransportError='',cliActionError='',cliLastRefresh=0,cliUnconfirmedPreference=null,cliEpoch=0;
  function version(value){return typeof value==='string'&&value.trim()?value:t('未检查','Not checked');}
  function timestamp(value){
   if(value===null||value===undefined)return t('尚未检查','Not checked yet');
@@ -32,7 +32,7 @@
   return Number.isFinite(date.getTime())?date.toLocaleString(window.WujiLocale?.lang==='en'?'en-GB':'zh-CN'):t('时间不可用','Time unavailable');
  }
  function render(){
-  const r=data?.runtime||{},check=data?.check||{},target=data?.target||{},busy=!!pending||!!r.busy||!!check.busy;
+  const r=data?.runtime||{},check=data?.check||{},target=data?.target||{},busy=!!pending||fresh&&(!!r.busy||!!check.busy);
   const installed=!!r.installed,mismatch=check.status==='ready'&&!check.compatible,selected=['wsl','macvm'].includes(window.WujiInstallation?.snapshot()?.bridge?.mode);
   const labels={'ot-title':['控制组件','Control components'],'ot-subtitle':['CLI 与遥操作 SDK','CLI and teleoperation SDK'],'ot-environment-title':['控制环境','Controller environment'],
    'ot-description':['内置环境用于设备连接、标定与遥操作。','The built-in environment supports connections, calibration and teleoperation.'],
@@ -48,8 +48,8 @@
   const phaseLabels={checking:['正在校验组件','Verifying components'],importing:['正在安装控制组件','Installing control components'],upgrading:['正在更新至配套版本','Updating to the bundled version'],verifying:['正在验证安装','Verifying installation']};
   $('ot-runtime-state').textContent=!fresh?t('状态待核对','Status unconfirmed'):r.busy?t(...(phaseLabels[r.stage]||['正在准备组件','Preparing components'])):r.ready?t('配套环境已安装','Bundled environment installed'):installed?t('已有环境，待更新','Environment installed; update required'):t('尚未安装','Not installed');
   $('ot-runtime-note').textContent=t('安装状态来自环境记录；上方版本只显示实际软件检查结果。','Installation status comes from environment records. Versions above come only from an actual software check.');
-  const status=!fresh?t('状态待核对','Status unconfirmed'):check.busy?t('正在检查','Checking'):check.status==='ready'?(check.compatible?t('配套版本已确认','Bundled versions verified'):t('检查已完成','Check completed')):check.status==='failed'?t('检查未通过','Check failed'):t('尚未检查','Not checked');
-  $('ot-state').textContent=status;card.dataset.status=!fresh?'unknown':check.busy?'checking':check.status||'unchecked';
+  const status=!fresh?t('状态待核对','Status unconfirmed'):pending==='control_tools_check'||check.busy?t('正在检查','Checking'):check.status==='ready'?(check.compatible?t('配套版本已确认','Bundled versions verified'):t('检查已完成','Check completed')):check.status==='failed'?t('检查未通过','Check failed'):t('尚未检查','Not checked');
+  $('ot-state').textContent=status;card.dataset.status=!fresh?'unknown':pending==='control_tools_check'||check.busy?'checking':check.status||'unchecked';
   $('ot-state').hidden=fresh&&check.status==='ready'&&check.compatible===true&&!busy;
   $('ot-status').textContent=!fresh?(data?t('状态暂不可用，请重新读取。','Status unavailable. Reload to retry.'):t('正在读取组件状态。','Loading component status.')):check.busy?t('正在检查软件版本，不连接设备。','Checking software versions without connecting devices.'):check.status==='ready'&&!check.compatible?t('内置环境需要修复。','The built-in environment needs repair.'):'';
   $('ot-error').textContent=transportError||actionError||check.error||r.error||'';
@@ -65,7 +65,7 @@
   $('ot-system').hidden=!r.supported||r.mode==='macvm';$('ot-system-install').disabled=busy;$('ot-system-status').textContent=systemMessage;renderCli();
  }
  function renderCli(){
-  const u=cliData?.update||{},current=cliData?.current||{},previous=cliData?.previous||{},busy=!!cliPending||cliFresh&&(!!cliData?.busy||!!u.checking||!!u.preparing);
+  const u=cliData?.update||{},current=cliData?.current||{},previous=cliData?.previous||{},busy=!!cliPending||!!pending||cliFresh&&(!!cliData?.busy||!!u.checking||!!u.preparing);
   const managed=u.update_method==='managed_native',phase=cliPending==='official_cli_check'?'checking':cliPending==='official_cli_update'?'checking':cliPending==='official_cli_rollback'?'verifying':u.phase;
   const bundledUpdate=cliFresh&&u.update_method==='workbench'&&u.newer_cli_available===true;
   const phaseLabels={checking:['正在检查更新','Checking for updates'],downloading:['正在下载更新','Downloading update'],verifying:['正在校验更新','Verifying update'],preparing:['正在准备更新','Preparing update'],waiting_idle:['设备使用中，空闲后更新','Waiting for devices to be idle'],ready:['更新已完成','Update complete']};
@@ -89,41 +89,44 @@
   $('ot-cli-release-details-label').textContent=t('版本详情','Version details');
   $('ot-cli-release-details').textContent=[t('当前：','Current: ')+version(current.version)+(current.commit?' · '+String(current.commit).slice(0,12):''),t('最新：','Latest: ')+version(u.latest_version),t('上次检查：','Last checked: ')+timestamp(u.checked_at),t('上一版：','Previous: ')+version(previous.version),u.update_method==='workbench'?t('原版 CLI 随工作台软件更新，设备与标定共用同一版本。','The original CLI updates with the workbench. Discovery and calibration use the same version.'):u.auto_update===true?t('自动更新已开启','Automatic updates enabled'):t('自动更新未开启','Automatic updates not enabled'),u.error||''].filter(Boolean).join('\n');
  }
- async function loadCli(){
-  if(cliPromise)return cliPromise;
-  cliPromise=(async()=>{try{const response=await fetch('/api/official-cli',{cache:'no-store',signal:AbortSignal.timeout(6000)});if(!response.ok)throw Error(t('无法读取 CLI 版本状态。','CLI version status is unavailable.'));const next=await response.json();if(!next||!next.update||!next.current)throw Error(t('CLI 版本状态不完整。','CLI version status is incomplete.'));cliData=next;cliFresh=true;cliTransportError='';cliLastRefresh=Date.now();if(cliUnconfirmedPreference!==null&&next.update.auto_update===cliUnconfirmedPreference){cliUnconfirmedPreference=null;cliActionError='';}}catch(error){cliFresh=false;cliTransportError=error.message;}finally{cliPromise=null;renderCli();}})();return cliPromise;
+ async function loadCli({afterAction=false}={}){
+  if(cliPending&&!afterAction)return;if(cliPromise)return cliPromise;const own=cliEpoch;
+  const request=(async()=>{try{const response=await fetch('/api/official-cli',{cache:'no-store',signal:AbortSignal.timeout(6000)});if(!response.ok)throw Error(t('无法读取 CLI 版本状态。','CLI version status is unavailable.'));const next=await response.json();if(!next||!next.update||!next.current)throw Error(t('CLI 版本状态不完整。','CLI version status is incomplete.'));if(own!==cliEpoch)return;cliData=next;cliFresh=true;cliTransportError='';cliLastRefresh=Date.now();if(cliUnconfirmedPreference!==null&&next.update.auto_update===cliUnconfirmedPreference){cliUnconfirmedPreference=null;cliActionError='';}}catch(error){if(own===cliEpoch){cliFresh=false;cliTransportError=error.message;}}finally{if(cliPromise===request)cliPromise=null;renderCli();}})();cliPromise=request;return request;
  }
  async function cliAction(name,extra={}){
-  if(cliPending)return;cliPending=name;cliActionError='';cliUnconfirmedPreference=null;let rejected=false;renderCli();
-  try{const sr=await fetch('/api/state',{cache:'no-store',signal:AbortSignal.timeout(5000)});if(!sr.ok)throw Error(t('工作台服务未就绪','Workbench service is not ready'));const s=await sr.json();if(!s.csrf)throw Error(t('请重新读取工作台状态','Reload the workbench state'));const response=await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json','X-Console-Token':s.csrf},body:JSON.stringify({name,...extra}),signal:AbortSignal.timeout(15000)}),body=await response.json();if(!response.ok||body.ok===false){rejected=true;throw Error(body.error||t('CLI 版本操作未完成','CLI version action did not complete'));}await loadCli();if(name!=='official_cli_auto_update')await load();}
-  catch(error){await loadCli();const confirmed=name==='official_cli_auto_update'&&cliFresh&&cliData.update.auto_update===extra.enabled;if(name==='official_cli_auto_update'&&!confirmed&&!rejected)cliUnconfirmedPreference=extra.enabled;cliActionError=name==='official_cli_auto_update'?(confirmed?'':rejected?t('自动更新设置未保存，请重试。','Automatic update setting was not saved. Try again.'):t('暂无法确认设置是否保存，请重新读取。','Unable to confirm whether the setting was saved. Reload status.')):error.message;}finally{cliPending='';renderCli();}
+  if(cliPending||!cliFresh)return;const update=cliData?.update||{},busy=cliData?.busy===true||update.checking===true||update.preparing===true;
+  if(name==='official_cli_auto_update'){if(update.update_method!=='managed_native'||typeof extra.enabled!=='boolean')return;}
+  else if(pending||busy||name==='official_cli_update'&&update.available!==true||name==='official_cli_rollback'&&!cliData?.previous?.version)return;
+  const own=++cliEpoch;cliPromise=null;if(name!=='official_cli_auto_update'){environmentEpoch++;pollPromise=null;}cliPending=name;cliActionError='';cliUnconfirmedPreference=null;let rejected=false;renderCli();
+  try{const sr=await fetch('/api/state',{cache:'no-store',signal:AbortSignal.timeout(5000)});if(!sr.ok)throw Error(t('工作台服务未就绪','Workbench service is not ready'));const s=await sr.json();if(own!==cliEpoch)return;if(!s.csrf)throw Error(t('请重新读取工作台状态','Reload the workbench state'));const response=await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json','X-Console-Token':s.csrf},body:JSON.stringify({name,...extra}),signal:AbortSignal.timeout(15000)}),body=await response.json();if(own!==cliEpoch)return;if(!response.ok||body.ok===false){rejected=true;throw Error(body.error||t('CLI 版本操作未完成','CLI version action did not complete'));}await loadCli({afterAction:true});if(own!==cliEpoch)return;if(name==='official_cli_auto_update'&&(!cliFresh||cliData.update.auto_update!==extra.enabled)){cliUnconfirmedPreference=extra.enabled;cliActionError=t('暂无法确认设置是否保存，请重新读取。','Unable to confirm whether the setting was saved. Reload status.');}if(name!=='official_cli_auto_update')await load();}
+  catch(error){if(own!==cliEpoch)return;await loadCli({afterAction:true});if(own!==cliEpoch)return;const confirmed=name==='official_cli_auto_update'&&cliFresh&&cliData.update.auto_update===extra.enabled;if(name==='official_cli_auto_update'&&!confirmed&&!rejected)cliUnconfirmedPreference=extra.enabled;cliActionError=name==='official_cli_auto_update'?(confirmed?'':rejected?t('自动更新设置未保存，请重试。','Automatic update setting was not saved. Try again.'):t('暂无法确认设置是否保存，请重新读取。','Unable to confirm whether the setting was saved. Reload status.')):error.message;}finally{if(own===cliEpoch){cliPending='';renderCli();}}
  }
- async function load(){
-  if(pollPromise)return pollPromise;
-  pollPromise=(async()=>{
+ async function load({afterAction=false}={}){
+  if(pending&&!afterAction)return;if(pollPromise)return pollPromise;const own=environmentEpoch;
+  const request=(async()=>{
    try{
     const response=await fetch('/api/control-tools',{cache:'no-store',signal:AbortSignal.timeout(6000)});
     if(!response.ok)throw Error(t('无法读取 CLI / SDK 状态，请重试。','CLI / SDK status is unavailable. Try again.'));
     const next=await response.json();if(!next||!next.runtime||!next.check||!next.target)throw Error(t('组件状态不完整，请重试。','Component status is incomplete. Try again.'));
-    data=next;fresh=true;transportError='';lastRefresh=Date.now();
-   }catch(error){fresh=false;transportError=error.message||t('组件服务暂不可用','Component service unavailable');}
-   finally{pollPromise=null;render();}
+    if(own!==environmentEpoch)return;data=next;fresh=true;transportError='';lastRefresh=Date.now();
+   }catch(error){if(own===environmentEpoch){fresh=false;transportError=error.message||t('组件服务暂不可用','Component service unavailable');}}
+   finally{if(pollPromise===request)pollPromise=null;render();}
   })();
-  return pollPromise;
+  pollPromise=request;return request;
  }
  async function act(name){
-  if(pending)return;
-  pending=name;actionError='';render();
+  if(pending||!fresh)return;
+  const own=++environmentEpoch;pollPromise=null;pending=name;actionError='';render();
   try{
    const response=await fetch('/api/state',{cache:'no-store',signal:AbortSignal.timeout(5000)});
    if(!response.ok)throw Error(t('工作台服务尚未就绪','Workbench service is not ready'));
-   const state=await response.json();if(!state.csrf)throw Error(t('请重新读取工作台状态','Reload the workbench status'));
+   const state=await response.json();if(own!==environmentEpoch)return;if(!state.csrf)throw Error(t('请重新读取工作台状态','Reload the workbench status'));
    const result=await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json','X-Console-Token':state.csrf},body:JSON.stringify({name}),signal:AbortSignal.timeout(15000)});
-   const body=await result.json();if(!result.ok||body.ok===false)throw Error(body.error||t('操作未完成，请重试','Operation failed; try again'));
-   await load();
+   const body=await result.json();if(own!==environmentEpoch)return;if(!result.ok||body.ok===false)throw Error(body.error||t('操作未完成，请重试','Operation failed; try again'));
+   await load({afterAction:true});if(own!==environmentEpoch)return;
    if(name!=='control_tools_check')await window.WujiInstallation?.refresh();
-  }catch(error){actionError=error.message||t('操作未完成，请重试','Operation failed; try again');}
-  finally{pending='';render();}
+  }catch(error){if(own===environmentEpoch)actionError=error.message||t('操作未完成，请重试','Operation failed; try again');}
+  finally{if(own===environmentEpoch){pending='';render();}}
  }
  function open(){location.hash='#settings';ws.showPage();$('settings-tab-devices')?.click();$('ot-title').focus({preventScroll:true});card.scrollIntoView({block:'start'});load();loadCli();}
  window.WujiOfficialTools={open,refresh:()=>Promise.all([load(),loadCli()])};
@@ -132,12 +135,13 @@
  $('ot-cli-auto').onclick=()=>cliAction('official_cli_auto_update',{enabled:cliData?.update?.auto_update!==true});
  $('ot-install').onclick=()=>act('runtime_install');$('ot-select').onclick=()=>act('runtime_select');
  $('ot-system-install').onclick=async()=>{
-  if(pending)return;pending='system';render();
+  if(pending)return;const own=++environmentEpoch;pollPromise=null;pending='system';render();
   try{if(!window.pywebview?.api?.install_runtime_components)throw Error(t('请在 Windows 软件窗口中操作','Open the Windows application to use this action'));
-   await window.pywebview.api.install_runtime_components();systemMessage=t('已请求安装 Windows 组件。若系统要求重启，重启后返回这里继续。','Windows component setup requested. Return here after any required restart.');
-  }catch(error){systemMessage=error.message;}finally{pending='';render();}
+   await window.pywebview.api.install_runtime_components();if(own!==environmentEpoch)return;systemMessage=t('已请求安装 Windows 组件。若系统要求重启，重启后返回这里继续。','Windows component setup requested. Return here after any required restart.');
+  }catch(error){if(own===environmentEpoch)systemMessage=error.message;}finally{if(own===environmentEpoch){pending='';render();}}
  };
  window.addEventListener('installation-state',render);window.addEventListener('wuji-language',render);
+ window.addEventListener('console-offline',()=>{environmentEpoch++;cliEpoch++;pollPromise=null;cliPromise=null;pending='';cliPending='';fresh=false;cliFresh=false;transportError=cliTransportError=t('工作台服务已离线，请重新读取。','Workbench service is offline. Reload the status.');render();});
  window.addEventListener('workspace-page',event=>{if(event.detail==='settings'&&Date.now()-lastRefresh>1000)load();});
  setInterval(()=>{const visible=card.getClientRects().length>0&&!document.hidden;if(data?.runtime?.busy||data?.check?.busy||(visible&&Date.now()-lastRefresh>6000))load();if(cliData?.busy||cliData?.update?.checking||cliData?.update?.preparing||(visible&&Date.now()-cliLastRefresh>6000))loadCli();},2000);
  render();load();loadCli();

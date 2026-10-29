@@ -27,6 +27,7 @@
  function valid(value){return value&&typeof value==='object'&&!Array.isArray(value)&&field(value.revision,160)&&Array.isArray(value.items)&&value.items.length<=40&&value.items.every(row=>row&&typeof row==='object'&&!Array.isArray(row)&&field(row.id,160)&&kinds.has(row.kind)&&(row.version==null||field(row.version,80))&&(row.kind!=='firmware'||typeof row.serial==='string'&&/^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/.test(row.serial))&&(row.model==null||field(row.model,100)))&&new Set(value.items.map(row=>row.id)).size===value.items.length;}
  function title(row){return row.kind==='workbench'?t('工作台','Workbench'):row.kind==='sdk'?t('遥操作组件','Teleoperation components'):row.kind==='cli'?t('官方 CLI','Official CLI'):row.model||t('设备固件','Device firmware');}
  function render(){
+  if(destroyed)return;
   sheet.setLabels({title:t('可用更新','Available updates'),triggerLabel:t('可用更新','Available updates'),closeLabel:t('关闭','Close')});
   toast.setAttribute('aria-label',t('更新提醒','Update reminder'));
   label.textContent=t('可用更新','Available updates');count.textContent=String(entries.length);trigger.replaceChildren(label,count);trigger.hidden=!online||!entries.length;badge.hidden=trigger.hidden;badge.textContent=entries.length>9?'9+':String(entries.length);
@@ -51,11 +52,21 @@
  }
  async function refresh(){
   if(destroyed||document.hidden)return;if(loading)return loading;lastAttempt=Date.now();const own=epoch;
-  loading=(async()=>{try{const response=await fetch('/api/update-notifications',{cache:'no-store',signal:AbortSignal.timeout(6000)});if(!response.ok)throw Error('Update reminders unavailable');const value=await response.json();if(!valid(value))throw Error('Incomplete update reminders');if(own!==epoch||destroyed)return;entries=value.items;revision=value.revision;online=true;}catch(_){if(own===epoch)online=false;}finally{loading=null;render();}})();return loading;
+  const request=(async()=>{try{const response=await fetch('/api/update-notifications',{cache:'no-store',signal:AbortSignal.timeout(6000)});if(!response.ok)throw Error('Update reminders unavailable');const value=await response.json();if(!valid(value))throw Error('Incomplete update reminders');if(own!==epoch||destroyed)return;entries=value.items;revision=value.revision;online=true;}catch(_){if(own===epoch)online=false;}finally{if(loading===request)loading=null;render();}})();loading=request;return request;
  }
  function visible(){if(!document.hidden&&Date.now()-lastAttempt>=1000)refresh();}
- function stateChanged(event){const s=event?.detail||{},g=s.glove||{},v=s.official_viz||{};const signature=JSON.stringify([s.connection,s.device_id,g.connection,g.glove_serial,v.session_id,v.phase]);if(signature!==ownerSignature){ownerSignature=signature;refresh();}else if(Date.now()-lastAttempt>=15000)refresh();}
- function offline(){epoch++;online=false;render();}
+ function stateChanged(event){
+  const s=event?.detail||{},g=s.glove||{},v=s.official_viz||{},feedback=g.feedback||{},identity=s.identified_device||{},paired=feedback.identified_device||{},calibration=s.calibration||{},run=calibration.run||calibration;
+  const signature=JSON.stringify([s.connection,s.device_id,s.session_generation,identity.source,identity.serial,g.connection,g.glove_serial,g.session_id,feedback.connection,feedback.device_id,paired.source,paired.serial,v.session_id,v.phase,v.active,v.device?.sn||v.device?.serial,v.reported_device?.sn||v.reported_device?.serial,run.id,run.serial,run.running]);
+  if(signature!==ownerSignature){
+   ownerSignature=signature;epoch++;loading=null;
+   // This workspace changed ownership. Its old firmware offers need a new
+   // global snapshot; software offers remain visible. The server owns the
+   // fleet-wide identity set, including other workspaces.
+   entries=entries.filter(row=>row.kind!=='firmware');render();refresh();
+  }else if(Date.now()-lastAttempt>=15000)refresh();
+ }
+ function offline(){epoch++;loading=null;online=false;entries=entries.filter(row=>row.kind!=='firmware');render();}
  const timer=setInterval(()=>{if(Date.now()-lastAttempt>=15000)refresh();},1000);
  window.addEventListener('wuji-language',render);document.addEventListener('visibilitychange',visible);window.addEventListener('console-state',stateChanged);window.addEventListener('console-offline',offline);
  window.WujiUpdateNotifications=Object.freeze({open(){if(online&&entries.length){document.getElementById('desktop-menu')?.close();sheet.open();}},refresh,snapshot:()=>({online,revision,items:entries.map(row=>({...row}))}),destroy(){destroyed=true;epoch++;clearInterval(timer);window.removeEventListener('wuji-language',render);document.removeEventListener('visibilitychange',visible);window.removeEventListener('console-state',stateChanged);window.removeEventListener('console-offline',offline);sheet.destroy();live.remove();toast.remove();badge.remove();menuButton.removeAttribute('aria-describedby');menuButton.classList.remove('un-menu-anchor');}});

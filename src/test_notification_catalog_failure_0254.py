@@ -18,7 +18,9 @@ class NotificationCatalogFailureTests(unittest.TestCase):
         self.now=100000.
         self.app,self.cli,self.sdk,self.firmware=[Mock() for _ in range(4)]
         for service in (self.app,self.cli,self.sdk,self.firmware):service.snapshot.return_value={}
-        self.monitor=UpdateNotifications(states=lambda:[],app=lambda:self.app,cli=lambda:self.cli,
+        self.states=[dict(glove=dict(connection='receiving',busy=True,session_id=1,glove_serial=sn))
+                     for sn in (SN,OTHER)]
+        self.monitor=UpdateNotifications(states=lambda:copy.deepcopy(self.states),app=lambda:self.app,cli=lambda:self.cli,
             sdk=lambda:self.sdk,firmware=lambda:self.firmware,devices=lambda:[],idle=Mock(),clock=lambda:self.now)
         self.monitor._remember(SN,'glove')
         self.monitor._remember(OTHER,'glove')
@@ -117,6 +119,9 @@ class NotificationCatalogFailureTests(unittest.TestCase):
 
     def test_failure_watermark_and_withdrawal_are_scoped_to_exact_hand_generation(self):
         self.monitor._remember(SN,'hand')
+        self.states[0]=dict(connection='connected',device_id=SN,session_generation=1,
+            device_profile=dict(id='hand2_left',generation='hand2'),
+            identified_device=dict(source='sdk_identity',serial=SN,profile='hand2_left'))
         old=self.state(kind='wuji_hand_2')
         old['device'].update(kind='hand',generation='hand2')
         first=self.show(old)

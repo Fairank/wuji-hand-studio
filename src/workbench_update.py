@@ -12,6 +12,7 @@ import tempfile
 import threading
 import time
 import uuid
+from contextlib import nullcontext
 
 from cli_coordination import atomic,gate,reservation
 from workbench_release import WorkbenchRelease,REPOSITORY,_plain,_directory
@@ -20,10 +21,13 @@ APP_ID='44DF38B2-39A0-491F-B154-E587231C83CE'
 
 
 class WorkbenchUpdate:
-    def __init__(self,data_dir,edition,*,idle_check=None,desktop=None,store=None):
+    def __init__(self,data_dir,edition,*,idle_check=None,desktop=None,store=None,availability_check=None,priority=None,clock=time.monotonic):
         self.data=Path(data_dir);self.edition=edition;self.idle_check=idle_check or (lambda:None)
         self.desktop=desktop or (lambda:None)
         self.store=store or WorkbenchRelease(self.data,edition['version'])
+        self.availability_check=availability_check or self._idle
+        self.priority=priority or (lambda **kw:nullcontext())
+        self.clock=clock
         self.lock=threading.RLock();self.closed=threading.Event();self.thread=None;self.latest=None;self.started=False
         self.result_file=None;self.apply_token=None;self.helper=None
         self._completion_reads=0;self._completion_checked_at=0;self._completion_retired=False
@@ -91,7 +95,7 @@ class WorkbenchUpdate:
         result['supported']=sys.platform=='win32' and bool(getattr(sys,'frozen',False)) and self.desktop() is not None
         result['can_apply']=False
         if result['supported'] and result.get('prepared') and not result['busy'] and self._helper_settled():
-            try:self._idle();result['can_apply']=True
+            try:self.availability_check();result['can_apply']=True
             except (ValueError,OSError):pass
         return result
 
@@ -211,16 +215,23 @@ class WorkbenchUpdate:
 
     def apply(self):
         from runtime_paths import RESOURCE
+        from desktop_tools import update_remaining
+        deadline=self.clock()+10.
         if not self.snapshot()['supported']:raise ValueError('请在 Windows 已安装版本中使用软件更新 / Use software update in the installed Windows application')
-        with self.lock,gate():
+        # Discovery must finish outside gate(): its cleanup needs the same gate.
+        with self.priority(deadline=deadline,clock=self.clock),self.lock,gate():
+            update_remaining(deadline,self.clock)
             if self.state['busy'] or not self.state.get('prepared'):raise ValueError('Download and verify the new installer first')
             if not self._helper_settled():raise ValueError('更新助手正在结束，请稍候重试 / Update helper is still finishing; retry shortly')
             self._idle()
+            update_remaining(deadline,self.clock)
             self._retire_completion()
             prepared=copy.deepcopy(self.state['prepared']);installer=self._stage_installer(prepared)
+            update_remaining(deadline,self.clock)
             host=self.desktop();info=host.info()
             if info.get('native') is not True or info.get('edition')!=self.edition['name'] or info.get('pid')!=os.getpid() or Path(info.get('data_dir',''))!=self.data:
                 raise ValueError('Application update host identity changed')
+            update_remaining(deadline,self.clock)
             token=uuid.uuid4().hex;updates=self.data/'updates'
             plan_file=updates/('apply-'+token+'.json');result_file=updates/('apply-'+token+'.result.json')
             plan=dict(schema=1,app_id=APP_ID,repository=REPOSITORY,token=token,data_dir=str(self.data),
@@ -236,6 +247,7 @@ class WorkbenchUpdate:
             env=dict(os.environ)
             for key in tuple(env):
                 if key.upper()=='PSMODULEPATH':env.pop(key)
+            update_remaining(deadline,self.clock)
             self.helper=subprocess.Popen([str(shell),'-NoLogo','-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass',
                 '-File',str(script),'-PlanFile',str(plan_file)],creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0),env=env)
             self.result_file=result_file;self.apply_token=token

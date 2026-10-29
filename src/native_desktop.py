@@ -9,9 +9,10 @@ import socket
 import sys
 import tempfile
 import threading
+import time
 from urllib.parse import urlsplit
 from runtime_paths import DATA, RESOURCE, EDITION
-from desktop_lifecycle import needs_confirmation, close_sessions
+from desktop_lifecycle import needs_confirmation, close_sessions, close_block_reason
 
 class Instance:
     def __init__(self,name,title):
@@ -236,38 +237,79 @@ class NativeDesktop:
     def request_close(self):
         self.window.destroy();return dict(ok=True)
 
-    def stop_and_close(self,require_idle=False):
+    def stop_and_close(self,require_idle=False,*,deadline=None,clock=time.monotonic):
         if require_idle:
             from cli_coordination import gate
-            with gate():return self._stop_and_close(require_idle=True)
+            from desktop_tools import update_discovery_priority,update_remaining
+            if deadline is None:deadline=clock()+10.
+            with update_discovery_priority(self.server.controller,deadline=deadline,clock=clock):
+                update_remaining(deadline,clock)
+                with gate():
+                    update_remaining(deadline,clock)
+                    return self._stop_and_close(require_idle=True,deadline=deadline,clock=clock)
         return self._stop_and_close()
 
-    def _stop_and_close(self,require_idle=False):
+    def _stop_and_close(self,require_idle=False,*,deadline=None,clock=time.monotonic):
+        from desktop_tools import update_remaining
+        if require_idle and deadline is None:deadline=clock()+10.
+        def budget():return update_remaining(deadline,clock) if deadline is not None else None
         if not self.session_lock.acquire(blocking=False):return dict(ok=False,error='正在结束会话 / Closing session')
+        owns_close=False
         try:
-            if hasattr(self.server,'_workbench_updates') and not self.server.updates.cancel_and_wait():
-                return dict(ok=False,error='软件更新下载正在结束，请稍后重试 / Application update download is closing; retry shortly')
             from desktop_tools import idle
+            budget()
             if require_idle:self.server.controller.official_cli.idle_check()
+            budget()
+            with self.server.controller.lock:
+                if getattr(self.server.controller,'desktop_closing',False):
+                    return dict(ok=False,error='会话正在结束 / Session is already closing')
+                # Publish our intent before observing tasks. New catalog/device
+                # work must not start between this preflight and child cleanup.
+                self.server.controller.desktop_closing=True
+                owns_close=True
+                state=self.server.controller.snapshot()
+                doctor=self.server.controller.doctor.snapshot()
+                blocked=close_block_reason(state,doctor)
+                if blocked:return dict(ok=False,error=blocked)
+                if require_idle and not idle(state,doctor):
+                    return dict(ok=False,error='Disconnect devices and finish active work first')
+            remaining=budget()
+            if hasattr(self.server,'_workbench_updates') and not self.server.updates.cancel_and_wait(**(
+                    dict(timeout=remaining) if remaining is not None else {})):
+                return dict(ok=False,error='软件更新下载正在结束，请稍后重试 / Application update download is closing; retry shortly')
+            budget()
             if hasattr(self.server,'_fleet'):
                 if require_idle and any(x.get('connection')!='disconnected' or x.get('hardware') is not False for x in self.server.fleet.snapshot()):
                     return dict(ok=False,error='先断开其他设备工作区 / Disconnect other device workspaces first')
-                fleet_result=self.server.fleet.close()
+                budget()
+                fleet_result=self.server.fleet.close(**(dict(deadline=deadline,clock=clock) if deadline is not None else {}))
                 if not fleet_result['ok']:return fleet_result
+            budget()
             with self.server.controller.lock:
                 if require_idle and not idle(self.server.controller.snapshot(),self.server.controller.doctor.snapshot()):
                     return dict(ok=False,error='Disconnect devices and finish active work first')
-                self.server.controller.desktop_closing=True
-            result=close_sessions(self.server.controller)
+            budget()
+            result=close_sessions(self.server.controller,**(dict(deadline=deadline,clock=clock) if deadline is not None else {}))
             if result['ok']:
+                if deadline is not None and budget() <= .2:raise ValueError('Update close request timed out')
                 self.allow_close=True
-                threading.Timer(.15,self.window.destroy).start()
+                def destroy():
+                    try:budget()
+                    except ValueError:
+                        self.allow_close=False
+                        with self.server.controller.lock:self.server.controller.desktop_closing=False
+                        return
+                    self.window.destroy()
+                threading.Timer(.15,destroy).start()
             return result
+        except ValueError as error:
+            return dict(ok=False,error=str(error))
         except Exception:
             logging.exception('Desktop exit failed')
             return dict(ok=False,error='连接尚未结束，请检查工作台。 / Session has not closed; check the workbench.')
         finally:
-            if not self.allow_close:self.server.controller.desktop_closing=False
+            if owns_close and not self.allow_close:
+                with self.server.controller.lock:self.server.controller.desktop_closing=False
             self.session_lock.release()
 
     def on_closing(self):

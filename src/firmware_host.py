@@ -88,6 +88,8 @@ class FirmwareHost:
         self.query_token = None
         self.query_serial = None
         self.query_exit_confirmed = False
+        self._read_not_started = None
+        self._reader_done = None
         self.package_validator = None
         self.package_releaser = None
         self._package_claim = None
@@ -148,6 +150,7 @@ class FirmwareHost:
             for path in ('serial_number', 'firmware_version'):
                 component = self._component()
                 with self.lock:
+                    self._read_not_started = None
                     self.query_token, self.query_serial = reservation_token, serial
                     self.query_exit_confirmed, self.query_automatic = False, False
                 command = [component['binary'], 'get', path, '--sn', serial, '--json']
@@ -172,6 +175,7 @@ class FirmwareHost:
                 reports[path] = dict(value=value, report=response)
             if self.cli_identity() != before or reservation(self.folder).get('token') != reservation_token:
                 raise ValueError('Official readback identity changed')
+            self._retire_recovered_writer(serial, reservation_token)
             return dict(process_exited=True, identity_verified=True, sn=serial,
                 reservation_token=reservation_token, firmware_version=reports['firmware_version']['value'],
                 source='official_resource_readback', resources=reports)
@@ -217,6 +221,13 @@ class FirmwareHost:
             # Reserve before checking other workspaces: a concurrent start
             # then sees the shared marker before it can reach a device.
             token = reserve(kind, self.folder,metadata=metadata)
+            with self.lock:
+                # This private proof is created before any read dispatch and
+                # invalidated by every query entry. It only covers this exact
+                # never-started reservation, including an idle/release failure.
+                self._read_not_started = ((token, serial) if kind == 'firmware_check'
+                    and self.process is None and self.query_process is None
+                    and self.query_job is None and self.query_cancel is None else None)
             try:self.controller.official_cli.idle_check()
             except BaseException:
                 try:release(token, self.folder)
@@ -234,6 +245,40 @@ class FirmwareHost:
             if callable(self.package_releaser):self.package_releaser(token)
             with self.lock:
                 if self._package_claim and self._package_claim['reservation_token'] == token:self._package_claim=None
+                if self._read_not_started and self._read_not_started[0] == token:self._read_not_started=None
+
+    def _retire_recovered_writer(self, serial, reservation_token):
+        """Retire only our exact dead PTY after its reader has also finished.
+
+        A resource read can prove recovery while the old output channel failed.
+        Keeping that dead process as a possible new writer strands the next
+        task. A live/unknown process, changed owner or pending reader stays held.
+        Caller holds the same filesystem gate as recovery/readback.
+        """
+        with self.lock:
+            process, done = self.process, self._reader_done
+            if process is None:return
+            if (self.session_token != reservation_token or not isinstance(self.session,dict)
+                    or self.session.get('serial') != serial):
+                raise ValueError('Original firmware transport owner changed')
+        marker = reservation(self.folder)
+        pid = getattr(process, 'pid', None)
+        if (marker.get('kind') != 'firmware' or marker.get('token') != reservation_token
+                or marker.get('serial') != serial or type(pid) is not int
+                or marker.get('child_pid') != pid or process.isalive()
+                or process_state(pid, marker.get('child_start')) != 'dead'):
+            raise ValueError('Original firmware transport exit is unconfirmed')
+        if done is not None and not done.is_set():
+            # The writer is already proven dead. Cancel only pending pipe I/O;
+            # never terminate a firmware process or discard an active reader.
+            process.pty.cancel_io()
+            if not done.wait(1):raise ValueError('Original firmware output reader has not finished')
+        with self.lock:
+            if self.process is not process or self.session_token != reservation_token:
+                raise ValueError('Original firmware transport owner changed')
+            self.process = None
+            self._reader_done = None
+            self.session.update(running=False, status='recovered')
 
     def recovery_check(self, serial, *, reservation_token, read_only=False):
         """Confirm exact process exit and actual firmware readback, never retry."""
@@ -243,6 +288,10 @@ class FirmwareHost:
                 if marker.get('kind')!='firmware_check' or marker.get('token')!=reservation_token or marker.get('serial')!=serial:
                     raise ValueError('Version-check recovery ownership changed')
                 with self.lock:
+                    if (self._read_not_started == (reservation_token, serial) and self.process is None
+                            and self.query_process is None and self.query_job is None and self.query_cancel is None):
+                        return dict(read_only=True, no_read_started=True, process_exited=True,
+                            sn=serial, reservation_token=reservation_token)
                     if self.query_token!=reservation_token or self.query_serial!=serial:
                         raise ValueError('Original version-check identity is unavailable')
                     if self.query_job is not None and not self.query_job.close(timeout=1):
@@ -297,6 +346,7 @@ class FirmwareHost:
             if observed is None:raise ValueError('设备身份与固件版本尚未读回 / Device identity and firmware version are not yet verified')
             version=observed['current']
             if reservation(self.folder).get('token')!=reservation_token:raise ValueError('Firmware recovery ownership changed')
+            self._retire_recovered_writer(serial, reservation_token)
             return dict(process_exited=True,identity_verified=True,sn=serial,
                         reservation_token=reservation_token,firmware_version=version,
                         verification_report=report)
@@ -338,9 +388,10 @@ class FirmwareHost:
             else:self.process.setwinsize(command['rows'], command['cols'])
         return dict(submitted=True)
 
-    def _append(self, text):
+    def _append(self, text, run_id=None):
         if not isinstance(text, str):raise ValueError('Invalid official terminal output')
         with self.lock:
+            if run_id is not None and (not self.session or self.session.get('id') != run_id):return
             for at in range(0, len(text), 4096):
                 self.sequence += 1
                 self.chunks.append(dict(sequence=self.sequence, text=text[at:at+4096]))
@@ -368,6 +419,7 @@ class FirmwareHost:
         cancelled=threading.Event()
         with self.lock:
             if self.query_cancel is not None:raise ValueError('A background firmware check is already running')
+            self._read_not_started=None
             self.query_cancel=cancelled
         process=None;owned=None;startup_unknown=False
         def stop_read():
@@ -449,6 +501,7 @@ class FirmwareHost:
         if not interactive:
             marker=reservation(self.folder)
             with self.lock:
+                self._read_not_started=None
                 self.query_token=marker.get('token') if marker.get('kind') in {'firmware_check','firmware'} and marker.get('serial')==serial else None
                 self.query_serial=serial;self.query_exit_confirmed=False;self.query_automatic=background
         try:component = self._component()
@@ -522,16 +575,21 @@ class FirmwareHost:
         with self.lock:
             self.session['status']='running'
         done = threading.Event()
+        with self.lock:self._reader_done = done
         errors = []
         def read():
             try:
                 while True:
                     value = process.read(4096)
-                    if value:self._append(value)
+                    if value:self._append(value, run_id)
             except EOFError:pass
             except Exception as error:errors.append(str(error)[:400])
             finally:done.set()
-        threading.Thread(target=read, name='Official firmware output', daemon=True).start()
+        reader=threading.Thread(target=read, name='Official firmware output', daemon=True)
+        try:reader.start()
+        except BaseException:
+            if reader.ident is None:done.set()
+            raise
         try:
             while process.isalive():time.sleep(.05)
             # Cancel only pending I/O after real process exit, never the flash.

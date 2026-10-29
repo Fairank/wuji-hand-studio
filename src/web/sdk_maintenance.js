@@ -24,6 +24,7 @@
  }
  function explain(issue){
   if(state?.recovery_required)return t('上次更新的退出状态未确认，请先核对组件。','The previous update has not been verified. Verify components before continuing.');
+  if(/workbench service is offline|工作台服务已离线/i.test(issue))return t('工作台服务已离线，请重新读取。','Workbench service is offline. Reload the status.');
   if(/^\[SDK_CATALOG_(LOCAL|CACHE)\]/.test(issue))return t('版本检查遇到本地文件问题，请修复软件后重试。','The version check encountered a local file problem. Repair the software and retry.');
   if(/^\[SDK_CATALOG_CERTIFICATE\]/.test(issue))return t('无法验证更新连接，请检查系统时间与证书后重试。','The update connection could not be verified. Check the system clock and certificates, then retry.');
   if(/^\[SDK_CATALOG_TLS\]/.test(issue))return t('无法建立安全更新连接，请重试；具体原因已保留在版本详情。','A secure update connection could not be established. Retry; the cause is saved in Version details.');
@@ -37,17 +38,20 @@
   return t('本次检查未完成，请重试；详细原因已保留在版本详情。','This check did not complete. Try again; the cause is saved in Version details.');
  }
  async function load({explicit=false}={}){
-  if(loading)return loading;
+  if(pending)return;if(loading)return loading;
   const version=epoch;
-  loading=(async()=>{try{const r=await fetch('/api/sdk-maintenance',{cache:'no-store',signal:AbortSignal.timeout(6000)});if(!r.ok)throw Error(t('无法读取组件状态','Component status is unavailable'));const s=await r.json();if(!s||typeof s.busy!=='boolean'||typeof s.phase!=='string')throw Error('Incomplete component status');if(version!==epoch)return;state=s;fresh=true;if(explicit||failureKind!=='action'){failure='';failureKind='';}}catch(e){if(version===epoch){fresh=false;failure=e.message;failureKind='load';}}finally{loading=null;render();}})();return loading;
+  const request=(async()=>{try{const r=await fetch('/api/sdk-maintenance',{cache:'no-store',signal:AbortSignal.timeout(6000)});if(!r.ok)throw Error(t('无法读取组件状态','Component status is unavailable'));const s=await r.json();if(!s||typeof s.busy!=='boolean'||typeof s.phase!=='string')throw Error('Incomplete component status');if(version!==epoch)return;state=s;fresh=true;if(explicit||failureKind!=='action'){failure='';failureKind='';}}catch(e){if(version===epoch){fresh=false;failure=e.message;failureKind='load';}}finally{if(loading===request)loading=null;render();}})();loading=request;return request;
  }
  async function act(name){
-  if(pending)return;pending=name;epoch++;failure='';failureKind='';render();
-  try{const r=await fetch('/api/state',{cache:'no-store',signal:AbortSignal.timeout(5000)});if(!r.ok)throw Error('Workbench state is unavailable');const s=await r.json();if(!s.csrf)throw Error('Reload workbench state');const response=await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json','X-Console-Token':s.csrf},body:JSON.stringify({name}),signal:AbortSignal.timeout(12000)}),body=await response.json();if(!response.ok||body.ok===false)throw Error(body.error||'Component maintenance did not complete');if(!body.sdk_maintenance||typeof body.sdk_maintenance.busy!=='boolean'||typeof body.sdk_maintenance.phase!=='string')throw Error('Incomplete component status');state=body.sdk_maintenance;fresh=true;}catch(e){fresh=false;failure=e.message;failureKind='action';}finally{pending='';render();if(fresh)load();}
+  if(pending||!fresh||state?.busy===true)return;
+  if(name==='sdk_update_prepare'&&(state?.can_update!==true||state?.recovery_required===true))return;
+  const version=++epoch;loading=null;pending=name;failure='';failureKind='';render();
+  try{const r=await fetch('/api/state',{cache:'no-store',signal:AbortSignal.timeout(5000)});if(!r.ok)throw Error('Workbench state is unavailable');const s=await r.json();if(version!==epoch)return;if(!s.csrf)throw Error('Reload workbench state');const response=await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json','X-Console-Token':s.csrf},body:JSON.stringify({name}),signal:AbortSignal.timeout(12000)}),body=await response.json();if(version!==epoch)return;if(!response.ok||body.ok===false)throw Error(body.error||'Component maintenance did not complete');if(!body.sdk_maintenance||typeof body.sdk_maintenance.busy!=='boolean'||typeof body.sdk_maintenance.phase!=='string')throw Error('Incomplete component status');state=body.sdk_maintenance;fresh=true;}catch(e){if(version===epoch){fresh=false;failure=e.message;failureKind='action';}}finally{if(version===epoch){pending='';render();if(fresh)load();}}
  }
  check.onclick=()=>fresh&&!failure?act(state?.recovery_required?'sdk_update_recover':'sdk_release_check'):load({explicit:true});update.onclick=()=>act('sdk_update_prepare');
  window.WujiSDKMaintenance=Object.freeze({open(){location.hash='#settings';window.WujiWorkspace?.showPage();document.getElementById('settings-tab-devices')?.click();title.focus({preventScroll:true});card.scrollIntoView({block:'start'});load();},refresh:load});
  window.addEventListener('wuji-language',render);
+ window.addEventListener('console-offline',()=>{epoch++;loading=null;pending='';fresh=false;failure=t('工作台服务已离线，请重新读取。','Workbench service is offline. Reload the status.');failureKind='load';render();});
  setInterval(()=>{if(state?.busy||card.getClientRects().length&&!document.hidden)load();},2000);
  render();load();
 })();

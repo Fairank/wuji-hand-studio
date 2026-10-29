@@ -308,9 +308,11 @@ class FirmwareService:
                               operation='check',automatic=notification_only,mode='official_confirmation')
         try:
             device, cli = self._device(sn), _identity(self.cli_identity())
+            # Acquire can retain a never-started read reservation if its final
+            # idle check and release both fail. Recovery still needs the exact
+            # server-observed device in that case.
+            with self.lock:self.state['device'] = copy.deepcopy(device)
             self._reserve('firmware_check')
-            with self.lock:
-                self.state['device'] = device
             self._launch(self._check, device, cli, notification_only)
         except Exception as error:
             self._finish('check_failed', str(error)[:800])
@@ -625,7 +627,10 @@ class FirmwareService:
                 raise ValueError('没有待核验的固件会话 / No firmware session needs verification')
             if self.recovery_check is None:
                 raise ValueError('需要核验官方进程与设备 / Verify the official process and actual device first')
-            sn = self.state['device']['sn']
+            device = self.state.get('device')
+            if not isinstance(device, dict) or not isinstance(device.get('sn'), str):
+                raise ValueError('原设备标识尚未确认，维护仍保留 / Original device identity is unavailable; maintenance is retained')
+            sn = _serial(device['sn'])
             self.state['busy'] = True
         try:
             with self.lock:
@@ -637,7 +642,8 @@ class FirmwareService:
                         or result.get('read_only') is not True or result.get('sn')!=sn
                         or result.get('reservation_token')!=token):
                     raise ValueError('版本检查进程尚未确认退出 / Version-check process exit remains unconfirmed')
-                with self.lock:self.state['result']=dict(verdict='readonly_query_exited',sn=sn)
+                with self.lock:self.state['result']=dict(
+                    verdict='readonly_query_not_started' if result.get('no_read_started') is True else 'readonly_query_exited',sn=sn)
                 self._finish('checked')
                 return self.snapshot()
             result = self.recovery_check(sn, reservation_token=token)

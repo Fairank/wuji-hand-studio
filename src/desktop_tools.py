@@ -1,6 +1,10 @@
 """Bounded, local code interface for inspecting this app and preparing updates."""
 import hashlib
+import math
+import os
 import re
+import time
+from contextlib import contextmanager
 from pathlib import Path
 from device_termination import unconfirmed
 from desktop_lifecycle import calibration_cleanup_required
@@ -9,6 +13,50 @@ PAGES = ('home', 'library', 'feedback', 'parameters', 'connection', 'glove', 'do
          'interaction', 'capture', 'records', 'settings', 'devices', 'control-tools', 'official-viz','official-viz-device')
 OPERATIONS = ('inspect', 'capture', 'page', 'resize', 'appearance', 'menu',
               'viewer', 'close_idle', 'prepare_update', 'import_model', 'preview', 'picker', 'connection_panel', 'reload_ui')
+
+
+def update_remaining(deadline, clock=time.monotonic):
+    """One absolute budget, shared by the update request and its close steps."""
+    if type(deadline) not in (int, float) or not math.isfinite(deadline):
+        raise ValueError('Invalid application update deadline')
+    remaining = deadline-clock()
+    if not math.isfinite(remaining) or remaining <= 0:
+        raise ValueError('更新请求已超时，请重试 / Update request timed out; retry')
+    return remaining
+
+
+def owned_update_scan(controller):
+    """Pure status: only this process's ordinary discovery may yield on apply."""
+    from cli_coordination import identity, reservation, root_folder
+    from official_visualization import OfficialVisualization
+    viewer = getattr(controller, 'official_viz', None)
+    if not isinstance(viewer, OfficialVisualization):return None
+    with viewer.lock:
+        state = viewer.snapshot()
+        token = viewer.scan_token
+        if (state.get('active') is not False or state.get('busy') is not True or state.get('scanning') is not True
+                or state.get('scan_cleanup_required') or state.get('error') or state.get('session_id')
+                or viewer.token is not None or viewer.scan_job is not None or viewer.scan_needs_close
+                or type(token) is not str or re.fullmatch('[a-f0-9]{32}', token) is None
+                or Path(viewer.folder).resolve() != root_folder().resolve()):return None
+        marker = reservation(viewer.folder)
+        if (marker.get('kind') != 'scan' or marker.get('token') != token
+                or marker.get('pid') != os.getpid() or marker.get('start') != identity(os.getpid())):return None
+        return token
+
+
+@contextmanager
+def update_discovery_priority(controller, *, deadline, clock=time.monotonic):
+    """Explicit requests yield only local discovery; enter before the CLI gate."""
+    from official_visualization import OfficialVisualization
+    viewer = getattr(controller, 'official_viz', None)
+    remaining = update_remaining(deadline, clock)
+    if not isinstance(viewer, OfficialVisualization):
+        yield
+        return
+    with viewer.discovery_priority(timeout=min(2., remaining)):
+        update_remaining(deadline, clock)
+        yield
 
 
 def idle(state, doctor):
@@ -69,12 +117,23 @@ def verify_update(data_dir, edition, version, digest):
                 installer=str(path), restart_required=True)
 
 
-def dispatch(host, payload):
+def dispatch(host, payload, *, clock=time.monotonic):
     if not isinstance(payload, dict):
         raise ValueError('Expected a JSON object')
     op = payload.get('operation')
     if op not in OPERATIONS:
         raise ValueError('Unsupported desktop operation')
+    if op in ('prepare_update', 'close_idle'):
+        deadline = clock()+10.
+        with update_discovery_priority(host.server.controller, deadline=deadline, clock=clock):
+            update_remaining(deadline, clock)
+            if not idle(host.server.controller.snapshot(), host.server.controller.doctor.snapshot()):
+                raise ValueError('Disconnect devices and finish active work before closing or updating by code')
+            if op == 'close_idle':
+                return host.stop_and_close(require_idle=True, deadline=deadline, clock=clock)
+            result = verify_update(host.data_dir, host.edition, payload.get('version'), payload.get('sha256'))
+            update_remaining(deadline, clock)
+            return result
     if op == 'inspect':
         return host.inspect()
     if op == 'connection_panel':
@@ -129,8 +188,4 @@ def dispatch(host, payload):
         if path.resolve()!=path or not path.is_file() or path.stat().st_size>6_000_000:raise ValueError('Invalid staged model pack')
         if hashlib.sha256(path.read_bytes()).hexdigest()!=digest:raise ValueError('Model pack hash mismatch')
         return install(path,root)
-    if not idle(host.server.controller.snapshot(), host.server.controller.doctor.snapshot()):
-        raise ValueError('Disconnect devices and finish active work before closing or updating by code')
-    if op == 'close_idle':
-        return host.stop_and_close(require_idle=True)
-    return verify_update(host.data_dir, host.edition, payload.get('version'), payload.get('sha256'))
+    raise ValueError('Unsupported desktop operation')

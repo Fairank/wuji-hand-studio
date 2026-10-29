@@ -40,11 +40,11 @@ class FirmwareRecoveryStatusTests(unittest.TestCase):
         services=[Mock() for _ in range(4)]
         for service in services:service.snapshot.return_value={}
         app,cli,sdk,firmware=services;firmware.snapshot.side_effect=self.service.snapshot
-        mon=UpdateNotifications(states=lambda:[],app=lambda:app,cli=lambda:cli,sdk=lambda:sdk,
-            firmware=lambda:firmware,devices=lambda:[],idle=lambda:None,clock=lambda:self.host.now)
         connected=dict(connection='connected',device_id=SN,session_generation=1,
             identified_device=dict(serial=SN,source='sdk_identity'),
             device_version=dict(serial=SN,firmware_version='2.5.0',source='sdk_handle_info'))
+        mon=UpdateNotifications(states=lambda:[copy.deepcopy(connected)],app=lambda:app,cli=lambda:cli,sdk=lambda:sdk,
+            firmware=lambda:firmware,devices=lambda:[],idle=lambda:None,clock=lambda:self.host.now)
         mon.observe([connected]);mon._ingest_firmware(initial,self.host.now)
         self.assertEqual(mon.snapshot()['items'][0]['current_version'],'2.5.0')
         return mon,connected
