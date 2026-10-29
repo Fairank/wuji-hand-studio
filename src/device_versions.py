@@ -90,6 +90,47 @@ def parse_official_check_json(text, expected_sn, expected_type=None):
                 update_available=available)
 
 
+def observe_official_check_failure(text, expected_sn, expected_type):
+    """Keep exact-device facts from a failed check, never update authority.
+
+    A catalog failure can coexist with a valid current firmware read. This
+    separate observation must not enter the success/reminder/recovery parsers.
+    In particular, a missing latest version cannot mean "up to date".
+    """
+    if (not _plain(expected_sn, 128) or type(expected_type) is not str or expected_type not in _DEVICE_TYPES
+            or type(text) is not str or len(text) > 262144):
+        return None
+    def unique(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:raise ValueError('Duplicate official report field')
+            result[key] = value
+        return result
+    def invalid(value):raise ValueError('Non-finite official report value')
+    try:
+        value = json.loads(text, object_pairs_hook=unique, parse_constant=invalid)
+    except (TypeError, ValueError, RecursionError):
+        return None
+    if type(value) is not dict or set(value) != {'devices'}:
+        return None
+    rows = value['devices']
+    if type(rows) is not list or len(rows) != 1 or type(rows[0]) is not dict:
+        return None
+    row = rows[0]
+    if (set(row) != {'sn', 'device_type', 'current_version', 'latest_version', 'status', 'error'}
+            or row['sn'] != expected_sn or row['device_type'] != expected_type
+            or row['status'] != 'failed'):
+        return None
+    current, latest, error = row['current_version'], row['latest_version'], row['error']
+    if (current is not None and (type(current) is not str or _VERSION.fullmatch(current) is None)
+            or latest is not None and (type(latest) is not str or _VERSION.fullmatch(latest) is None)
+            or type(error) is not str or not error.strip() or len(error) > 8192
+            or any(ord(c) < 32 and c not in '\n\t' or ord(c) == 127 for c in error)):
+        return None
+    return dict(serial=expected_sn, device_type=expected_type, current=current,
+                latest=None, status='failed', error=error, catalog_available=False)
+
+
 def parse_official_check_report(text, expected_sn, expected_type=None):
     """Read the verified JSON or the publicly documented human table only."""
     return (parse_official_check_json(text, expected_sn, expected_type)

@@ -146,6 +146,7 @@ class FirmwareService:
                           result=None, error=None, events=[], checked_at=None, verification_report=None,
                           finished_at=None, recovery_required=False,
                           notification=None, current_version=None, target_version=None,
+                          check_observation=None, catalog_error=None,
                           operation=None, automatic=False,
                           mode='official_confirmation', machine_write_supported=False)
 
@@ -277,6 +278,7 @@ class FirmwareService:
             self.thread = None
             self.state.update(preview=None, check_report=None, catalog_report=None, device=None,
                               notification=None,checked_at=None,current_version=None,target_version=None,
+                              check_observation=None,catalog_error=None,
                               operation='check',automatic=notification_only)
         try:
             device, cli = self._device(sn), _identity(self.cli_identity())
@@ -317,15 +319,22 @@ class FirmwareService:
             with self.lock:
                 if notification_only and self._cancelled:raise ValueError('Background check deferred')
             sn = device['sn']
-            from device_versions import parse_official_check_report
+            from device_versions import parse_official_check_report, observe_official_check_failure
             check = self._query(['upgrade', '--sn', sn, '--check', '--json'], automatic=notification_only)
             with self.lock:
                 self.state['check_report'] = check
-            if check['returncode']:
-                raise ValueError((check['stderr'] or check['stdout'] or '暂时无法检查设备更新 / Device update check is unavailable')[:800])
             if _identity(self.cli_identity()) != cli:
                 raise ValueError('官方 CLI 已变化，请重新检查 / Official CLI changed; check again')
             expected_type='wuji_glove' if device.get('kind')=='glove' else 'wuji_hand_2' if device.get('generation')=='hand2' else 'wuji_hand' if device.get('generation')=='hand1' else None
+            failed = observe_official_check_failure(check['stdout'],sn,expected_type) if expected_type else None
+            if failed is not None:
+                with self.lock:
+                    self.state.update(check_observation=failed,catalog_error=failed['error'],
+                        current_version=failed['current'],target_version=None,checked_at=self._now(),notification=None)
+                self._finish('check_failed',failed['error'][:800])
+                return
+            if check['returncode']:
+                raise ValueError((check['stderr'] or check['stdout'] or '暂时无法检查设备更新 / Device update check is unavailable')[:800])
             report = parse_official_check_report(check['stdout'],sn,expected_type) if expected_type else None
             now, token = self._now(), secrets.token_urlsafe(24)
             public = dict(token=token, sn=sn, device=copy.deepcopy(device),
@@ -437,8 +446,23 @@ class FirmwareService:
             # Human-mode exit zero includes No/cancel/no-change. Read the same
             # device while retaining the lease, and bind success to the target
             # from this operation's verified preflight, never to terminal text.
-            if code:
+            from device_versions import observe_official_check_failure
+            expected_type='wuji_glove' if device.get('kind')=='glove' else 'wuji_hand_2' if device.get('generation')=='hand2' else 'wuji_hand' if device.get('generation')=='hand1' else None
+            failed=observe_official_check_failure(out,device['sn'],expected_type) if expected_type else None
+            if code or failed is not None:
                 detail=official_failure_detail(out,device['sn'])
+                if failed is not None:
+                    # The exited process result remains history, but facts
+                    # from a changed/unverified component are not published.
+                    try:unchanged=_identity(self.cli_identity())==preview['cli']
+                    except Exception:unchanged=False
+                    if not unchanged:
+                        self._finish('failed','官方 CLI 已变化，当前版本尚未核对 / Official CLI changed; the current version is unverified')
+                        return
+                    detail=failed['error']
+                    with self.lock:
+                        self.state.update(check_observation=failed,catalog_error=detail,
+                            current_version=failed['current'],target_version=None,notification=None,checked_at=self._now())
                 with self.lock:self.state['result']['official_error']=detail
                 self._finish('failed', (err or detail or '官方升级未完成 / Official upgrade did not complete')[:800])
                 return
@@ -449,11 +473,12 @@ class FirmwareService:
                          unknown=attempted)
 
     def _verify_upgrade(self, device, preview):
-        from device_versions import parse_official_check_report
+        from device_versions import parse_official_check_report, observe_official_check_failure
         before=preview.get('checked_device')
         expected_type='wuji_glove' if device.get('kind')=='glove' else 'wuji_hand_2' if device.get('generation')=='hand2' else 'wuji_hand' if device.get('generation')=='hand1' else None
         with self.lock:
-            self.state.update(phase='verifying',notification=None,current_version=None,checked_at=None)
+            self.state.update(phase='verifying',notification=None,current_version=None,checked_at=None,
+                              check_observation=None,catalog_error=None)
         if _identity(self.cli_identity())!=preview['cli']:
             self._finish('completed','官方流程已结束，但组件已变化，设备版本尚未确认 / The official flow ended, but the component changed; verify the device version')
             return
@@ -461,7 +486,17 @@ class FirmwareService:
         with self.lock:self.state['verification_report']=check
         report=(parse_official_check_report(check['stdout'],device['sn'],expected_type)
                 if check['returncode']==0 and expected_type else None)
-        if _identity(self.cli_identity())!=preview['cli']:report=None
+        failed=observe_official_check_failure(check['stdout'],device['sn'],expected_type) if expected_type else None
+        if _identity(self.cli_identity())!=preview['cli']:report=None;failed=None
+        if failed is not None:
+            with self.lock:
+                self.state.update(check_observation=failed,catalog_error=failed['error'],
+                    current_version=failed['current'],target_version=None,checked_at=self._now())
+                self.state['result'].update(sn=device['sn'],firmware_version=failed['current'],
+                    expected_version=before['latest'] if before else None,
+                    version_verified=False,verdict='catalog_unavailable')
+            self._finish('completed','官方流程已结束，但兼容固件列表尚未确认，请重新检查 / The official flow ended; compatible firmware could not be checked. '+failed['error'][:500])
+            return
         if report is None:
             detail=(check['stderr'] or '设备身份与版本未通过核对 / Device identity and version were not verified')[:500]
             self._finish('completed','官方流程已结束，但未能读回设备版本，请重新检查 / The official flow ended; check the device version again. '+detail)

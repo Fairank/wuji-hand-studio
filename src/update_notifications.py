@@ -185,6 +185,36 @@ class UpdateNotifications:
                 if known is not None and recovered_at>=known.get('firmware_observed_at',0):
                     known.update(firmware_version=recovery['firmware_version'],firmware_observed_at=recovered_at,
                         firmware_version_source='official_cli_recovery')
+        # A newer failed catalog query supersedes an older availability alert.
+        # Keep the old successful version fact as timestamped history, but do
+        # not present its update offer as current after an explicit failure.
+        # The service publishes this observation only after checking its CLI
+        # identity. Reparse the matching raw row as an additional identity and
+        # schema guard; raw failure text alone is never sufficient authority.
+        failure=state.get('check_observation');checked=state.get('checked_at')
+        if (isinstance(failure,dict) and recovered_sn in self.known
+                and type(checked) in (int,float) and 0<=now-checked<FIRMWARE_INTERVAL):
+            known=self.known[recovered_sn]
+            expected=('wuji_glove' if known['kind']=='glove' else
+                'wuji_hand_2' if device.get('generation')=='hand2' else
+                'wuji_hand' if device.get('generation')=='hand1' else None)
+            if (expected and device.get('kind')==known['kind']
+                    and device.get('device_type',expected)==expected
+                    and failure.get('serial')==recovered_sn and failure.get('device_type')==expected
+                    and state.get('current_version')==failure.get('current')):
+                from device_versions import observe_official_check_failure
+                originals=(state.get('check_report'),state.get('verification_report'),state.get('result'))
+                matches=any(isinstance(raw,dict) and type(raw.get('returncode')) is int
+                    and observe_official_check_failure(raw.get('stdout'),recovered_sn,expected)==failure
+                    for raw in originals)
+                if matches:
+                    with self.lock:
+                        failures=known.setdefault('_failed_check_at_by_type',{})
+                        failures[expected]=max(checked,failures.get(expected,0))
+                        previous=self.reports.get(recovered_sn)
+                        if (previous and previous.get('device_type')==expected
+                                and previous.get('checked_at',0)<=checked):
+                            self.reports.pop(recovered_sn,None)
         report=state.get('notification')
         if not isinstance(report,dict):
             # A host may prove the actual version without a current catalog.
@@ -208,7 +238,8 @@ class UpdateNotifications:
                 report=copy.deepcopy(report);report['checked_at']=checked
                 with self.lock:
                     previous=self.reports.get(report['serial']) or {}
-                    if checked>=previous.get('checked_at',0):
+                    if (checked>=previous.get('checked_at',0)
+                            and checked>known.get('_failed_check_at_by_type',{}).get(report.get('device_type'),-1)):
                         self.reports[report['serial']]=report
                         if checked>=observed:
                             known.update(firmware_version=report['current'],firmware_observed_at=checked,firmware_version_source='official_cli_check')
