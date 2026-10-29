@@ -76,7 +76,7 @@ class ConnectionSwitch:
         self.controller=controller;self.workflow_lock=controller.calibration_handover.workflow_lock
         self.lock=threading.RLock();self._thread=None;self.viewer_token=None;self.cancelled=False
         self.clock=clock;self.sleep=sleep;self.resume=None;self.resume_config=None;self.deadline=None
-        self.state=dict(busy=False,phase='idle',attempt_id=None,error=None,receipt=None,target=None,source=None,
+        self.state=dict(busy=False,phase='idle',attempt_id=None,error=None,receipt=None,target=None,source=None,cancel_requested=False,
                         automatically_follows=False,automatically_enables=False)
         self.catalog=dict(busy=False,status='idle',users=[],error=None,checked_at=None)
         self.catalog_config=None;self.requests=set();self.catalog_cleanup_error=None
@@ -94,8 +94,21 @@ class ConnectionSwitch:
         with self.lock:
             if self.state['busy'] and not self.internal:self.cancelled=True
 
+    def cancel(self,command):
+        if (not isinstance(command,dict) or set(command)!={'name','request_id','attempt_id'}
+                or command.get('name')!='connection_switch_cancel'
+                or any(not isinstance(command[k],str) or not re.fullmatch('[0-9a-f]{32}',command[k])
+                       for k in ('request_id','attempt_id'))):
+            raise ValueError('Invalid connection switch cancellation')
+        with self.lock:
+            if (self.state.get('busy') is not True or self.state.get('phase') not in ('preflight','stopping','connecting')
+                    or any(command[k]!=self.state.get(k) for k in ('request_id','attempt_id'))):
+                raise ValueError('切换已完成或任务已变化，请核对当前设备任务 / Switch finished or changed; review the current device task')
+            self.cancelled=True;self.state['cancel_requested']=True
+        return dict(connection_switch=self.snapshot(self.controller.snapshot()))
+
     def _check_cancel(self):
-        if self.cancelled:raise ValueError('切换已停止，未接入新设备 / Switch stopped; no new device was opened')
+        if self.cancelled:raise ValueError('已请求取消本次切换；请核对当前设备会话 / Switch cancellation requested; review the current device session')
         if self.deadline is not None and self.clock()>=self.deadline:raise ValueError('切换等待超时，未继续接入 / Switch time budget expired; no further connection was started')
 
     def check_parent(self):
@@ -439,7 +452,7 @@ class ConnectionSwitch:
             with self.lock:
                 begun=True;self._thread=threading.get_ident();self.cancelled=False;self.viewer_token=None
                 self.deadline=self.clock()+45
-                self.state.update(busy=True,phase='preflight',source=copy.deepcopy(source),
+                self.state.update(busy=True,phase='preflight',source=copy.deepcopy(source),cancel_requested=False,
                     target=dict(mode='calibration',serial=source['serial']),source_released=False,
                     request_id=secrets.token_hex(16),attempt_id=secrets.token_hex(16),
                     error=None,cleanup_error=None,receipt=None)
@@ -502,14 +515,14 @@ class ConnectionSwitch:
             self.requests.add(request_id)
             if same:
                 self._set(busy=False,phase='connected',unchanged=True,request_id=request_id,attempt_id=secrets.token_hex(16),
-                    target=copy.deepcopy(target),source=copy.deepcopy(source),receipt=None,error=None,cleanup_error=None,source_released=False)
+                    target=copy.deepcopy(target),source=copy.deepcopy(source),receipt=None,error=None,cleanup_error=None,source_released=False,cancel_requested=False)
                 return dict(connection_switch=self.snapshot(state))
             with self.lock:
                 attempt_started=True
                 self._thread=threading.get_ident();self.cancelled=False
                 self.deadline=self.clock()+45
                 self.viewer_token=source['session'] if source and source['mode']=='official' else None
-                self.state.update(busy=True,phase='preflight',request_id=request_id,error=None,cleanup_error=None,
+                self.state.update(busy=True,phase='preflight',request_id=request_id,error=None,cleanup_error=None,cancel_requested=False,
                     unchanged=False,source_released=False,receipt=None,attempt_id=secrets.token_hex(16),
                     source=copy.deepcopy(source),target={k:v for k,v in target.items() if not k.startswith('_')})
             from studio_component import enforce_session_owner
@@ -627,7 +640,9 @@ class ConnectionSwitch:
                 target_task_id=task_id(kind,target['serial']),expected_owner=command['expected_owner'],
                 after_context=_owner_context(after),target=copy.deepcopy(self.state['target']),
                 sdk_session=(after.get('glove') or {}).get('session_id') if target['mode']=='teleoperation' else None)
-            self._set(phase='connected',receipt=receipt)
+            with self.lock:
+                self._check_cancel()
+                self.state.update(phase='connected',receipt=receipt)
             return dict(connection_switch={**self.snapshot(after),'busy':False},connection_switch_receipt=receipt)
         except Exception as error:
             if not attempt_started:raise

@@ -167,6 +167,15 @@ class Controller:
 
     def _start_calibrated_session(self,bundle):
         config=self.connection_switch._config()
+        # Windows native discovery and a managed Linux controller can be on
+        # different broadcast domains. Carry only this freshly observed exact
+        # glove endpoint; the SDK still checks its serial/side before use.
+        from bridge_config import load_config
+        from official_device_discovery import use_native
+        if use_native(load_config()):
+            from calibration_transport import route_from_discovery
+            route=route_from_discovery(self.calibration_devices(fresh=True),bundle['serial'])
+            if route is not None:bundle={**bundle,'glove_route':route}
         session=self.glove.start_calibrated(bundle,self._continuation_model_ready,expected_profile=self._continuation_profile)
         self.sdk_session_configs[session]=config
         return session
@@ -337,6 +346,25 @@ class Controller:
         self.state['log'].append(dict(time=datetime.now().strftime('%H:%M:%S'), text=text))
         self.state['log'] = self.state['log'][-60:]
 
+    def _demonstration_scope(self):
+        with self.lock:
+            if not hasattr(self,'demonstrations'):
+                from demonstration_scope import DemonstrationScope
+                self.demonstrations=DemonstrationScope()
+            return self.demonstrations
+
+    def _demonstration_action(self,command):
+        with self.lock:
+            if getattr(self,'desktop_closing',False) and command.get('name')!='demo_stop':
+                raise ValueError('会话正在结束，请稍候 / Session is closing; please wait')
+            return self._demonstration_scope().command(command)
+
+    def demonstration_snapshot(self,profile_id,display=None):
+        from demonstration_scope import demonstration_state,display_profile
+        profile_id=display_profile(profile_id)['id']
+        with self.lock:
+            return demonstration_state(self.snapshot(),profile_id,self._demonstration_scope().snapshot(profile_id),display)
+
     def snapshot(self):
         with self.lock:
             result = copy.deepcopy(self.state)
@@ -379,6 +407,7 @@ class Controller:
                     joint.update(host_hz=None, device_hz=None, status='stale')
             result['csrf'] = self.csrf
             result['playback'] = self.player.snapshot()
+            result['demonstration_playback'] = self._demonstration_scope().snapshot()
             result['parameter_sync']=dict(self.parameters.sync_status)
             result['glove']=self.glove.snapshot()
             result['glove']['controller_config']=getattr(self,'sdk_session_configs',{}).get(result['glove'].get('session_id'))
@@ -495,7 +524,38 @@ class Controller:
         self.stdin.write(json.dumps(command)+'\n')
         self.stdin.flush()
 
-    def action(self, command):
+    def _validate_glove_intent(self,command):
+        from glove_bridge import session_intent
+        from glove_protocol import CancellationNotDispatched
+        expected,revision,_=session_intent(command)
+        with self.glove.lock:
+            if expected!=self.glove.session or revision!=self.glove.action_revision:
+                raise CancellationNotDispatched('手套会话已改变，原操作未发送 / Glove session changed; the original command was not sent')
+            if command.get('name')=='glove_open':self.glove._require_openable()
+    def _scoped_glove_stop(self,command,*,workflow_held=False):
+        if command.get('name') not in ('glove_stop','glove_disconnect'):raise ValueError('Invalid scoped glove stop')
+        self._validate_glove_intent(command)
+        # A local stop of the old SDK owner must not cancel or release the
+        # source of a newer handover. Its exact Cancel has separate tokens.
+        workflow=self.calibration_handover.workflow_lock
+        if not workflow_held and not workflow.acquire(blocking=False):
+            raise ValueError('设备正在切换，请使用当前任务的取消按钮 / A device task is switching; use its Cancel button')
+        try:
+            with self.lock,self.glove.lock:
+                result=self.glove.action(command)
+                return dict(result or {},session_id=self.glove.session,action_revision=self.glove.action_revision)
+        finally:
+            if not workflow_held:workflow.release()
+
+    def action(self, command,*,_workflow_held=False):
+        if isinstance(command,dict) and ('expected_session' in command
+                or command.get('name') in ('glove_stop','glove_disconnect','glove_follow','glove_open') and 'expected_revision' in command):
+            if command.get('name') in ('glove_stop','glove_disconnect'):return self._scoped_glove_stop(command)
+            self._validate_glove_intent(command)
+        if isinstance(command,dict) and command.get('name')=='connection_switch_cancel':
+            return self.connection_switch.cancel(command)
+        if isinstance(command,dict) and 'display_profile' in command:
+            return self._demonstration_action(command)
         if isinstance(command,dict) and command.get('name')=='session_close':
             from desktop_lifecycle import close_block_reason
             with self.lock:
@@ -564,6 +624,7 @@ class Controller:
         if name=='calibration_handover':return handover.start(command)
         if name in {'calibration_cancel','official_viz_stop','session_close'}:handover.request_cancel()
         if not workflow_action(command):return self._workflow_action(command)
+        if _workflow_held:return self._workflow_action(command)
         if not handover.workflow_lock.acquire(blocking=False):
             raise ValueError('设备任务正在切换，请等待本次操作完成 / A device task transition is in progress')
         try:return self._workflow_action(command)
@@ -654,6 +715,12 @@ class Controller:
     def _action(self, command):
         if not isinstance(command,dict):raise ValueError('Invalid request')
         name=command.get('name','')
+        if 'display_profile' in command:return self._demonstration_action(command)
+        if name in ('glove_follow','glove_open') and {'expected_session','expected_revision'}&set(command):
+            self._validate_glove_intent(command)
+        from demonstration_scope import require_expected_profile
+        if name=='hardware_trial' and {'expected_profile','expected_serial'}&set(command):
+            require_expected_profile(command,self.state['device_profile']['id'],self.state.get('device_id'))
         if name in {'program_pause','program_resume','program_stop'} and 'expected_run' in command:
             # _coordinated_action holds the controller lock through validation
             # and dispatch. A late UI command must not affect a replacement run
@@ -790,8 +857,12 @@ class Controller:
             return dict(mapping=self.retarget.context(self.state['device_profile']))
         if name=='glove_open':
             from glove_protocol import validate
-            validate(command)
-            context=self.retarget.open_glove(command,self.state['device_profile'],self.glove.snapshot().get('user') or {})
+            opening=command
+            if {'expected_session','expected_revision'}&set(command):
+                from glove_bridge import session_intent
+                _,_,opening=session_intent(command)
+            validate(opening)
+            context=self.retarget.open_glove(opening,self.state['device_profile'],self.glove.snapshot().get('user') or {})
             tuning=self.tuning.context(context['binding'])
             if tuning['engine']!='sdk':self.tuning.select_engine(context['binding'],'sdk')
             command=dict(command,retarget=context['settings'],solver=dict(engine='sdk',values=tuning['values']))
@@ -934,6 +1005,8 @@ class Controller:
                             from phrase_text import normalize_phrase
                             outgoing['text']=normalize_phrase(command.get('text'))
                         if command.get('action')=='clock':outgoing['clock_at']=datetime.now().astimezone().isoformat()
+                    if name=='hardware_trial' and {'expected_profile','expected_serial'}&set(command):
+                        require_expected_profile(command,self.state['device_profile']['id'],self.state.get('device_id'))
                     self.hardware_lease=secrets.token_hex(16)
                     outgoing['lease']=self.hardware_lease
                     self.player.command(dict(name='demo_stop'))
@@ -1478,18 +1551,44 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == '/api/parameters':
             return self.reply(200,self.server.controller.parameter_snapshot())
         if url.path == '/api/catalog':
-            return self.reply(200,catalog())
+            query=parse_qs(url.query,keep_blank_values=True)
+            try:
+                from demonstration_scope import query_profile,display_profile
+                if set(query)-{'profile'}:raise ValueError('Unknown demonstration catalog selector')
+                selected=query_profile(query)
+                result=catalog()
+                if selected is not None:result=dict(result,device_profile=display_profile(selected))
+                return self.reply(200,result)
+            except (ValueError,TypeError) as error:return self.reply(400,dict(error=str(error)))
         if url.path == '/api/performance':
             from performance_export import export_program
-            query=parse_qs(url.query)
+            query=parse_qs(url.query,keep_blank_values=True)
             try:
                 action=query.get('action',[''])[0];text=query.get('text',['WUJI TECH'])[0];fmt=query.get('format',['json'])[0]
-                profile_id=self.server.controller.state['device_profile']['id']
+                from demonstration_scope import query_profile
+                profile_id=query_profile(query,default=self.server.controller.state['device_profile']['id'])
                 body=export_program(action,text,profile_id,fmt)
                 return self.reply(200,body,'text/csv; charset=utf-8' if fmt=='csv' else 'application/json; charset=utf-8',filename=f'{profile_id}-{action}-nominal.{fmt}')
             except (ValueError,TypeError) as error:return self.reply(400,dict(error=str(error)))
         if url.path == '/api/view':
-            jpeg, meta = self.server.pose.get()
+            query=parse_qs(url.query,keep_blank_values=True)
+            if query:
+                if query=={'teleoperation':['preview']}:
+                    jpeg,meta=self.server.pose.get(teleoperation='preview')
+                elif set(query) in ({'profile'},{'profile','display'}) and len(query['profile'])==1:
+                    try:
+                        from device_profiles import profile as hand_profile
+                        selected=hand_profile(query['profile'][0])['id']
+                        display=query.get('display',[None])
+                        if len(display)!=1 or display[0] not in (None,'feedback','preview'):
+                            raise ValueError('Unknown demonstration display source')
+                    except (ValueError,TypeError):
+                        return self.reply(400,dict(error='Unknown demonstration profile'))
+                    if display[0] is None:jpeg,meta=self.server.pose.get(profile=selected)
+                    else:jpeg,meta=self.server.pose.get(profile=selected,display=display[0])
+                else:
+                    return self.reply(400,dict(error='Unknown display selector'))
+            else:jpeg, meta = self.server.pose.get()
             return self.reply(200, dict(meta=meta, image='data:image/jpeg;base64,'+base64.b64encode(jpeg).decode('ascii') if jpeg else None))
         if url.path in {'/api/joints', '/api/joint-reference'}:
             from joint_reference import catalog as joint_catalog, image_path
@@ -1621,6 +1720,10 @@ class Handler(BaseHTTPRequestHandler):
             payload=json.loads(self.rfile.read(length))
             if not isinstance(payload,dict):raise ValueError('JSON object required')
             task_scope=self._task_view_headers()
+            if (self.path=='/api/action' and task_scope is None
+                    and payload.get('name') in ('glove_open','glove_follow','glove_stop','glove_disconnect')):
+                from glove_bridge import session_intent
+                session_intent(payload)
             if str(payload.get('name','')).startswith(('firmware_','sdk_update','sdk_release_')):
                 if self.path!='/api/action' or task_scope is not None or os.environ.get('WUJI_FLEET_PARENT'):
                     raise ValueError('设备维护请在主窗口操作 / Use device maintenance in the main window')

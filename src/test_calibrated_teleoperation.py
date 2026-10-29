@@ -9,6 +9,7 @@ import queue
 import sys
 import tempfile
 import threading
+import time
 from types import SimpleNamespace as N
 import unittest
 from unittest.mock import Mock,patch
@@ -51,7 +52,8 @@ class ContinuationTests(unittest.TestCase):
             bundle=e.start.call_args.args[0]
             self.assertEqual(bundle['serial'],'WG-SYNTHETIC');self.assertEqual(bundle['source_profile'],'Alice')
             state=e.service.snapshot();self.assertFalse(state['can_continue']);self.assertFalse(state['connected'])
-            e.glove.update(connection='receiving',glove_serial=bundle['serial'],model_provenance=bundle)
+            e.glove.update(connection='receiving',glove_serial=bundle['serial'],model_provenance=bundle,
+                stream={'fresh':True,'solver':{'engine':'sdk','applied':True}})
             self.assertEqual(e.service.snapshot()['phase'],'preview')
             self.assertTrue(e.service.snapshot()['connected'])
             self.assertFalse(e.service.snapshot()['automatically_follows'])
@@ -146,7 +148,9 @@ class ContinuationTests(unittest.TestCase):
                 def completed_before_destination(session,**kwargs):
                     with bridge.lock:
                         bridge.state.update(connection='receiving',glove_serial=bundle['serial'],model_provenance=bundle,
-                            hardware={'active':following},feedback={'device_id':'HAND'} if following else {})
+                            hardware={'active':following},feedback={'device_id':'HAND'} if following else {},
+                            stream={'fresh':True,'age_ms':0,'timeout_ms':250,'solver':{'engine':'sdk','applied':True}})
+                        bridge.last_update=time.monotonic()
                     return bridge.disconnect_session(session,**kwargs)
                 e.stop.side_effect=completed_before_destination
                 with self.assertRaises(CancellationNotDispatched):
@@ -189,7 +193,8 @@ class ContinuationTests(unittest.TestCase):
             before=e.service.snapshot();bundle=e.start.call_args.args[0]
             def reject_after_worker_can_observe(session,**kwargs):
                 self.assertEqual((session,kwargs),(17,dict(pending_only=True)))
-                e.glove.update(connection='receiving',glove_serial=bundle['serial'],model_provenance=bundle)
+                e.glove.update(connection='receiving',glove_serial=bundle['serial'],model_provenance=bundle,
+                    stream={'fresh':True,'solver':{'engine':'sdk','applied':True}})
                 resume.set();self.finish(e)
                 raise CancellationNotDispatched('synthetic completed before destination check')
             e.stop.side_effect=reject_after_worker_can_observe

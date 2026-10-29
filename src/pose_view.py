@@ -218,20 +218,78 @@ class GloveCollisionPreview:
             return dict(base,status='error',message=self.error)
 
 
+class VirtualPoseSource:
+    """Display-only snapshot; no controller/device methods are exposed."""
+    def __init__(self,controller):self.controller=controller
+
+    def snapshot(self):
+        state=self.controller.snapshot();glove=state.get('glove') or {}
+        idle=not glove.get('busy') and glove.get('connection') in (None,'disconnected','error')
+        return {**state,'view_source':'glove','teleoperation_view_mode':'target',
+                'virtual_preview_idle':idle,'latest':None,'stale':True,'mapping':[]}
+
+
+class DemonstrationPoseSource:
+    """One display model, independently scoped from the SDK owner."""
+    def __init__(self,controller,profile_id,display=None):
+        from device_profiles import profile
+        self.profile_id=profile(profile_id)['id']
+        if display not in (None,'feedback','preview'):raise ValueError('Unknown demonstration display source')
+        self.display=display
+        self.controller=controller
+
+    def snapshot(self):
+        return (self.controller.demonstration_snapshot(self.profile_id) if self.display is None
+                else self.controller.demonstration_snapshot(self.profile_id,display=self.display))
+
+
 class PoseView:
     def __init__(self, controller):
         self.controller = controller
         self.lock = threading.Lock()
         self.jpeg = None
+        self.virtual_view=None
+        self.demonstration_views={}
         self.demand=threading.Event();self.requested_until=0.
         self.meta = dict(ready=False, mode='loading', message='正在载入原生左手模型', joints=[], render_hz=0)
         threading.Thread(target=self.run, daemon=True).start()
 
-    def get(self):
+    def get(self,*,teleoperation=None,profile=None,display=None):
+        if display is not None and (profile is None or display not in ('feedback','preview')):
+            raise ValueError('Unknown demonstration display selector')
+        if profile is not None:
+            from device_profiles import profile as hand_profile
+            profile_id=hand_profile(profile)['id']
+            if teleoperation is not None:raise ValueError('Choose one display selector')
+            key=(profile_id,display)
+            with self.lock:
+                if key not in self.demonstration_views:
+                    self.demonstration_views[key]=PoseView(DemonstrationPoseSource(self.controller,profile_id,display))
+                viewer=self.demonstration_views[key]
+            return viewer.get()
+        if teleoperation is not None:
+            if teleoperation!='preview':raise ValueError('Unknown teleoperation display selector')
+            with self.lock:
+                if self.virtual_view is None:self.virtual_view=PoseView(VirtualPoseSource(self.controller))
+                viewer=self.virtual_view
+            return viewer.get()
         with self.lock:
             self.requested_until=time.monotonic()+.5
             self.demand.set()
             meta = dict(self.meta)
+            if meta.get('ready') and isinstance(self.controller,DemonstrationPoseSource):
+                current=self.controller.snapshot()
+                def playback_scope(value):
+                    playback=value.get('playback') or {}
+                    if value.get('view_source')=='preview' and playback.get('active') is True:
+                        return playback.get('run_id'),True,playback.get('running') is True
+                    return None,False,False
+                expected=((current.get('device_profile') or {}).get('id'),current.get('device_id'),
+                          current.get('demonstration_display'),current.get('view_source'),playback_scope(current))
+                rendered=(meta.get('device_profile'),meta.get('device_id'),
+                          meta.get('demonstration_display'),meta.get('view_source'),playback_scope(meta))
+                if rendered!=expected:
+                    meta.update(ready=False,mode='loading',message='设备已切换，等待新画面 / Device changed; waiting for a new view')
             if meta.get('ready') and time.monotonic()-meta.get('rendered_monotonic', 0) > 1:
                 meta.update(ready=False, mode='stale', message='三维渲染已中断，画面不再代表当前姿态')
             meta.pop('rendered_monotonic', None)
@@ -316,7 +374,7 @@ class PoseView:
                     for marker in markers:marker.update(status='unmapped',hz=None)
                 glove_display=None
                 collision_result=collision.update(state,now=tick)
-                if state.get('view_source')=='glove':
+                if state.get('view_source')=='glove' and not state.get('virtual_preview_idle'):
                     from glove_view import pose as glove_pose,channel_ids
                     glove_generation=state.get('device_profile',{}).get('generation')
                     glove_channels=channel_ids(glove_generation)
@@ -378,13 +436,16 @@ class PoseView:
                     message=(f'{active}/20关节由实测反馈驱动' if state.get('mapping_verified') else f'{active}/20实机角度预览 · 关节对应待核对') if active else '模型预览 · 等待连接与关节对应核对',
                     active_joints=active, joints=markers,
                     source_seq=latest['seq'] if latest else None,
-                    feedback=dict(latest=latest, joint_rates=state.get('joint_rates', []),
+                    feedback=dict(device_id=state.get('device_id'),latest=latest, joint_rates=state.get('joint_rates', []),
                                   stale=state['stale'], metrics=state['metrics']),
                     render_hz=(len(render_times)-1)/max(.001,render_times[-1]-render_times[0]) if len(render_times)>1 else None,
                     rendered_monotonic=time.monotonic(),
                     camera=view,camera_revision=state.get('camera_revision',0),
                     view_source=state.get('view_source','feedback'),
-                    no_physics_step=True, no_motion_commands=True,device_profile=profile_id)
+                    no_physics_step=True, no_motion_commands=True,device_profile=profile_id,device_id=state.get('device_id'))
+                if state.get('demonstration_profile'):
+                    meta.update(demonstration_profile=state['demonstration_profile'],
+                                demonstration_display=state.get('demonstration_display'))
                 if show_preview:
                     meta.update(mode='demo',message='仿真动作预览 · '+playback['label']+' · '+('播放中' if playback['running'] else '已暂停或完成'),
                                 source_seq=None,playback=playback,feedback=dict(latest=None,joint_rates=[],stale=True,metrics={}))
@@ -414,6 +475,10 @@ class PoseView:
                             time.sleep(max(0,.05-(time.monotonic()-tick)));continue
                         meta.update(message=info['message'],collision_preview=info,preview_only=True,
                                     no_physics_step=True,source_seq=None,active_joints=0)
+                if state.get('virtual_preview_idle'):
+                    meta.update(mode='virtual_idle',message='虚拟手 · 等待手套数据 / Virtual hand; waiting for glove data',
+                        preview_only=True,source_seq=None,active_joints=0,
+                        feedback=dict(latest=None,joint_rates=[],stale=True,metrics={}))
                 with self.lock:
                     self.jpeg, self.meta = output.getvalue(), meta
                 time.sleep(max(0, .05-(time.monotonic()-tick)))

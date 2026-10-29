@@ -106,7 +106,8 @@ class IndependentRecoveryTests(unittest.TestCase):
             observations.append(controller.calibration_handover.workflow_lock._is_owned())
             return snapshot()
         controller.snapshot=read
-        def action(command):
+        def action(command,*,_workflow_held=False):
+            self.assertTrue(_workflow_held)
             self.assertTrue(controller.calibration_handover.workflow_lock._is_owned())
             state['glove']['session_id']=8
             return {'glove':copy.deepcopy(state['glove']),'task_receipt':{'forged':True}}

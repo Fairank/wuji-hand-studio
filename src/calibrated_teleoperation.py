@@ -95,7 +95,9 @@ class CalibratedTeleoperation:
                 elif (glove.get('connection')=='receiving' and receipt.get('source_run_id')==state.get('run_id')
                         and receipt.get('model_sha256')==state.get('model_sha256')
                         and glove.get('glove_serial')==state.get('serial')):
-                    state.update(busy=False,phase='preview',connected=True)
+                    stream=glove.get('stream') or {};solver=stream.get('solver') or {}
+                    fresh=(stream.get('fresh') is True and solver.get('engine')=='sdk' and solver.get('applied') is True)
+                    state.update(busy=not fresh,phase='preview' if fresh else 'connecting',connected=fresh)
                     offered['can_continue']=False
                 elif glove.get('connection')=='error':
                     state.update(busy=False,phase='error',connected=False,error=glove.get('message') or 'Controller continuation failed')

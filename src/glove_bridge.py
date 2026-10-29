@@ -11,6 +11,18 @@ from glove_protocol import validate, validate_cleanup, cleanup_confirmed, Cancel
 SDK_SOLVER_REQUIRED='请切回官方 SDK 映射预览后再接入或启动灵巧手 / Switch preview to the official SDK before preparing or following a real hand'
 
 
+def session_intent(command):
+    """Local browser ownership metadata; never part of the SDK command."""
+    if (not isinstance(command,dict) or command.get('name') not in ('glove_stop','glove_disconnect','glove_follow','glove_open')
+            or not {'name','expected_session','expected_revision'}<=set(command)
+            or type(command.get('expected_session')) is not int or not 1<=command['expected_session']<=2**53-1
+            or type(command.get('expected_revision')) is not int or not 0<=command['expected_revision']<=2**53-1):
+        raise ValueError('手套操作归属无效，请重新核对当前会话 / Invalid glove operation owner; review the current session')
+    plain={key:value for key,value in command.items() if key not in ('expected_session','expected_revision')}
+    validate(plain)
+    return command['expected_session'],command['expected_revision'],plain
+
+
 def _actual_sdk_solver(state):
     solver=(state.get('stream') or {}).get('solver') or {}
     return solver.get('engine')=='sdk' and solver.get('applied') is True
@@ -19,6 +31,7 @@ class GloveBridge:
     def __init__(self,factory,termination=None,release_resolver=None):
         self.factory=factory;self.lock=threading.RLock();self.thread=None;self.termination=termination;self.session=termination.new_session() if termination else 0
         self.client=self.stdin=None;self.stopping=False;self.last_update=0.;self.lease=None
+        self.action_revision=0
         self.state=dict(connection='disconnected',message='',devices=[],users=[],stream={},hardware={},feedback={})
         self._continuation=None;self._on_model_ready=None
         self._unpair_pending=False
@@ -29,9 +42,11 @@ class GloveBridge:
         self._follow_sdk_requirement=None;self._follow_sdk_proof=None
         self._follow_sdk_session=None
         self._cleanup_ack=None;self._cleanup_error=None
+        self._session_error=None
         self._reader_finished=False;self._transport_closed=False
         self._worker_dispatch_attempted=False
         self._open_intent=None
+        self._open_pending=False
         self._expected_profile=None
 
     @property
@@ -62,6 +77,10 @@ class GloveBridge:
             s=copy.deepcopy(self.state);age=max(0,time.monotonic()-self.last_update)*1000
             s['busy']=self.busy;s['transport_age_ms']=age if self.last_update else None
             s['session_id']=self.session
+            s['action_revision']=self.action_revision
+            s['open_pending']=self._open_pending
+            if self._open_pending and s.get('connection') in ('connecting','ready'):
+                s.update(connection='connecting',message='正在接入所选手套，请等待当前请求 / Opening the selected glove; wait for the current request')
             s['session_cleanup']=dict(session_id=self.session,acknowledged=self._cleanup_ack is not None,
                 cleanup_confirmed=bool(self._cleanup_ack is not None and cleanup_confirmed(self._cleanup_ack)
                     and self._reader_finished and self._transport_closed and not self.busy
@@ -114,8 +133,15 @@ class GloveBridge:
                 self._follow_unconfirmed=False;self._follow_reason=''
 
     def send(self,c):
-        if not self.stdin:raise ValueError('控制端尚未就绪 / Controller not ready')
-        self.stdin.write(json.dumps(c)+'\n');self.stdin.flush()
+        with self.lock:
+            if not self.stdin:raise ValueError('控制端尚未就绪 / Controller not ready')
+            if c.get('name') in {'glove_open','glove_prepare','glove_unpair','glove_follow','glove_stop',
+                    'glove_disconnect','glove_retarget','glove_solver','disconnect'}:
+                if self.action_revision>=2**53-1:raise ValueError('Glove control revision exhausted; end this session')
+                # Once write is attempted, its result may be uncertain. A late
+                # browser action must not reuse the pre-dispatch control intent.
+                self.action_revision+=1
+            self.stdin.write(json.dumps(c)+'\n');self.stdin.flush()
 
     def disconnect_session(self,session,*,pending_only=False):
         """A handover cancellation must never disconnect a replacement session."""
@@ -135,7 +161,9 @@ class GloveBridge:
         command may supply a bundle, path, user ID or bootstrap context.
         """
         from calibration_portability import CONTEXT_FIELDS,validate_continuation,file_digest,MAX_BUNDLE
-        context=validate_continuation({k:bundle[k] for k in CONTEXT_FIELDS|{'bundle_path'}},path=True)
+        private={k:bundle[k] for k in CONTEXT_FIELDS|{'bundle_path'}}
+        if 'glove_route' in bundle:private['glove_route']=copy.deepcopy(bundle['glove_route'])
+        context=validate_continuation(private,path=True)
         if not callable(on_model_ready):raise ValueError('Continuation requires a workspace binding callback')
         if file_digest(context['bundle_path'],MAX_BUNDLE)!=(context['bundle_sha256'],context['bundle_bytes']):
             raise ValueError('Calibration bundle changed before controller startup')
@@ -220,6 +248,7 @@ class GloveBridge:
         self._require_previous_cleanup()
         self.remember_termination();self.session=self.termination.new_session() if self.termination else self.session+1
         self.stopping=False;self.lease=None;self.last_update=0.
+        self.action_revision=0
         self._unpair_pending=False
         self.seen_active=False;self._follow_unconfirmed=False
         self._follow_device=None;self._follow_session=None;self._follow_reason=''
@@ -227,9 +256,11 @@ class GloveBridge:
         self._follow_sdk_requirement=None;self._follow_sdk_proof=None
         self._follow_sdk_session=None
         self._cleanup_ack=None;self._cleanup_error=None
+        self._session_error=None
         self._reader_finished=False;self._transport_closed=False
         self._worker_dispatch_attempted=False
         self._open_intent=None
+        self._open_pending=False
         self.state=dict(connection='connecting',message='正在连接控制端 / Connecting controller',devices=[],users=[],stream={},hardware={},feedback={})
         try:self.thread=threading.Thread(target=self.run,daemon=True);self.thread.start()
         except Exception:
@@ -309,15 +340,22 @@ class GloveBridge:
         with self.lock:
             if not self.stopping:self._send_open(command)
 
+    def _require_openable(self):
+        if self._open_pending or self._open_intent is not None or self.state.get('connection')=='receiving':
+            raise ValueError('这只手套正在接入或已连接，请勿重复连接 / This glove is opening or already connected; do not connect it again')
+
     def _send_open(self,command):
         # Bind an acquired-but-not-yet-published candidate to this exact command
         # and reader epoch. A failed/partial write remains uncertain; an ACK may
         # confirm only the requested identity, never an arbitrary worker claim.
+        self._require_openable()
+        if not self.stdin:raise ValueError('控制端尚未就绪 / Controller not ready')
         profile=self.state.get('profile')
         if profile is None and self._continuation is not None:
             profile=self._expected_profile
         self._open_intent=dict(session=self.session,serial=command['serial'],
             user_id=command.get('user_id',(self.state.get('user') or {}).get('user_id')),profile=profile)
+        self._open_pending=True
         self.send(command)
 
     def verify_follow_sdk(self):
@@ -362,9 +400,14 @@ class GloveBridge:
         verify_proof(self._sdk_proof,expected)
 
     def action(self,c):
+        expected=revision=None
+        if isinstance(c,dict) and {'expected_session','expected_revision'}&set(c):expected,revision,c=session_intent(c)
         validate(c)
         with self.lock:
+            if expected is not None and (expected!=self.session or revision!=self.action_revision):
+                raise CancellationNotDispatched('手套会话已改变，原操作未发送 / Glove session changed; the original command was not sent')
             name=c['name']
+            if name=='glove_open':self._require_openable()
             if name=='glove_session':raise ValueError('Use scan to open a session')
             if self._cleanup_error and name not in {'glove_disconnect','glove_stop','glove_keepalive'}:
                 raise ValueError(self._cleanup_error)
@@ -420,9 +463,11 @@ class GloveBridge:
                 except Exception:
                     self._mark_follow_unconfirmed('启动请求结果未确认，请先结束并核对会话 / Follow request is unconfirmed; end and review this session')
                     self.lease=None;self.remember_termination();raise
-                return dict(lease=self.lease)
+                return dict(lease=self.lease,lease_session=self.session,lease_revision=self.action_revision)
             if name=='glove_keepalive' and c.get('lease')!=self.lease:raise ValueError('Expired control lease')
-            if name=='glove_open':self._send_open(c)
+            if name=='glove_open':
+                self._send_open(c)
+                if expected is not None:return dict(session_id=self.session,action_revision=self.action_revision,open_pending=True)
             else:self.send(c)
 
     def receive(self,event,session=None):
@@ -431,6 +476,7 @@ class GloveBridge:
             kind=event.get('type')
             if kind=='glove_state':
                 self.state=copy.deepcopy(event['state']);self.last_update=time.monotonic()
+                if self.state.get('connection')=='receiving':self._open_pending=False
                 if self.state.get('hand_unpaired') is True:self._unpair_pending=False
                 active=self.state['hardware'].get('active')
                 if self.lease:
@@ -455,7 +501,9 @@ class GloveBridge:
                 self.lease=None;self.state['message']=str(event.get('message',''))[:400]
             elif kind in ('glove_error','glove_notice','notice'):
                 self.state['message']=str(event.get('message',''))[:400]
-                if kind=='glove_error':self.state['connection']='error'
+                if kind=='glove_error':
+                    self._session_error=str(event.get('message',''))[:700]
+                    self.state['connection']='error'
             elif kind=='glove_closed':
                 if type(session) is int:
                     try:
@@ -471,7 +519,10 @@ class GloveBridge:
                                     or ack['sdk_user_id']!=(self.state.get('user') or {}).get('user_id')) and not pending):
                             raise ValueError('Glove cleanup identity differs from the owning session')
                         self._cleanup_ack=ack
-                        self._cleanup_error=None if cleanup_confirmed(ack) else '手套资源退出未确认，未切换会话 / Glove resource cleanup is unconfirmed; session was not switched'
+                        if cleanup_confirmed(ack):self._cleanup_error=None
+                        else:
+                            reason='手套资源退出未确认，未切换会话 / Glove resource cleanup is unconfirmed; session was not switched'
+                            self._cleanup_error=(reason+(': '+self._session_error if self._session_error else ''))[:900]
                     except ValueError as error:
                         self._cleanup_ack=None;self._cleanup_error=str(error)
                 failed=self._continuation is not None and self.state.get('connection')=='error'

@@ -130,7 +130,8 @@ class TaskViewTests(unittest.TestCase):
 
     def test_receipt_binds_only_a_successful_same_task_owner_transition(self):
         c=Controller(self.glove());ident=task('glove','WG-A');before=scope(c,ident)['owner_context']
-        def action(command):
+        def action(command,*,_workflow_held=False):
+            self.assertTrue(_workflow_held)
             c.state['glove']['session_id']=8
             return dict(calibration_connection={'busy':False},task_receipt={'forged':True})
         c.action=action

@@ -2,7 +2,12 @@
   'use strict';
   const $=id=>document.getElementById(id), L=window.WujiLocale, ws=window.WujiWorkspace;
   const text=(zh,en)=>L.lang==='en'?en:zh;
-  let catalog=null,state=null,mode='hardware',restored=false,catalogRevision=0,catalogLoading=false,catalogError='';
+  const displayProfile=()=>window.WujiDemonstration?.profile()||'hand2_left';
+  const previewState=()=>state?.demonstration_playback?.[displayProfile()]||{active:false};
+  const matchingHand=()=>state?.device_profile?.id===displayProfile()&&(!window.WujiDemonstration?.selectedHand||state?.device_id===window.WujiDemonstration.selectedHand());
+  const catalogReady=()=>catalog?.device_profile?.id===displayProfile();
+  window.WujiDemonstrationCatalog={ready:catalogReady,retry:()=>loadCatalog(),snapshot:()=>({profile:displayProfile(),ready:catalogReady(),loading:!!catalogLoading,error:catalogError})};
+  let catalog=null,state=null,mode='hardware',restored=false,catalogRevision=0,catalogLoading=false,catalogError='',intentRevision=0,previewRequest=0;
   const tools=document.createElement('div');tools.className='studio-tools';
   const language=document.createElement('select');language.setAttribute('aria-label','语言 / Language');
   language.add(new Option('中文','zh'));language.add(new Option('English','en'));language.value=L.lang;
@@ -52,10 +57,11 @@
   const desktop=document.createElement('button');desktop.id='studio-desktop';desktop.type='button';ws.views.connection.querySelector('section').append(desktop);
   desktop.addEventListener('click',async()=>{try{const d=await post({name:'desktop_open'});if(!d.native_opened)throw Error(text('未找到桌面窗口运行环境，请继续使用网页。','Desktop runtime not found. Continue in the browser.'));}catch(e){notice(e);}});
   function setMode(next){
-    mode=next;$('real-motion-panel').hidden=mode!=='hardware';previewFold.hidden=mode!=='preview';
+    const changed=mode!==next;if(changed)intentRevision++;mode=next;$('real-motion-panel').hidden=mode!=='hardware';previewFold.hidden=mode!=='preview';
     picker.setPreview(mode==='preview');
     $('mode-hardware').setAttribute('aria-pressed',String(mode==='hardware'));$('mode-preview').setAttribute('aria-pressed',String(mode==='preview'));
     if(mode==='preview'){$('play-action').value=picker.selected;$('play-action').dispatchEvent(new Event('change'));}
+    updatePickerBusy();if(changed)window.dispatchEvent(new Event('demonstration-mode'));
   }
   window.WujiWorkbench={
     picker:kind=>{
@@ -65,8 +71,10 @@
     },
     async preview(action,speed){
       if(!catalog?.actions.some(x=>x.id===action))throw Error('Action is not available in this picker');
-      const result=await post({name:'demo_start',action,speed,cycles:0,...picker.payload});
-      picker.restore(action);selectMotion(action);setMode('preview');$('play-speed').value=String(speed);$('play-cycles').value='0';location.hash='library';
+      if(!catalogReady())throw Error(text('所选手型的动作尚未载入，请重试。','Actions for this model are not loaded. Retry.'));
+      const profile=displayProfile(),intent=intentRevision,request=++previewRequest,entry=location.hash;
+      const result=await post({name:'demo_start',display_profile:profile,action,speed,cycles:0,...picker.payload});
+      if(request===previewRequest&&intent===intentRevision&&profile===displayProfile()&&location.hash===entry){picker.restore(action);selectMotion(action);setMode('preview');$('play-speed').value=String(speed);$('play-cycles').value='0';location.hash='library';}
       return {ok:true,hardware_motion:false,action,speed};
     }
   };
@@ -93,11 +101,12 @@
   }
   function restorePlayback(){
     if(restored||!catalog||!state)return;restored=true;
-    const running=state.hardware?.active?state.hardware:state.playback?.active?state.playback:null;
+    const preview=previewState(),hardware=matchingHand()&&state.hardware?.active;
+    const running=hardware?state.hardware:preview.active?preview:null;
     if(running&&catalog.actions.some(x=>x.id===running.action)){
       picker.restore(running.action,running.text);selectMotion(running.action);
-      setMode(state.hardware?.active?'hardware':'preview');
-      if(!state.hardware?.active){$('play-speed').value=String(running.speed);$('play-cycles').value=String(running.cycles);}
+      setMode(hardware?'hardware':'preview');
+      if(!hardware){$('play-speed').value=String(running.speed);$('play-cycles').value=String(running.cycles);}
     }
   }
   function touchState(){
@@ -126,8 +135,9 @@
     $('touch-flow-note').textContent=text('流程预览仅为编排姿态：没有探棒碰撞、没有模型判断，不驱动实机。','Sequence preview is scripted kinematics: no probe collision, no model decision, no hardware movement.');
     for(const [id,isPreview] of [['trial-action',false],['play-action',true]]){
       const select=$(id),value=select.value;if(!catalog)continue;
-      for(const item of catalog.actions){let o=[...select.options].find(o=>o.value===item.id);if(!o){o=new Option('',item.id);select.add(o);}o.textContent=L.lang==='en'?item.en:item.zh;}
-      select.value=value;
+      const items=isPreview?catalog.actions:catalog.actions.filter(item=>item.hardware!==false);
+      select.replaceChildren(...items.map(item=>new Option(L.lang==='en'?item.en:item.zh,item.id)));
+      select.value=items.some(item=>item.id===value)?value:items[0]?.id||'';
     }
     if(catalog)picker.setCatalog([...catalog.actions,...[['joints','逐关节活动','Joint preview'],['thumb','拇指活动','Thumb preview'],['index','食指活动','Index preview'],['middle','中指活动','Middle preview'],['ring','无名指活动','Ring preview'],['little','小指活动','Little finger preview']].map(([id,zh,en])=>({id,zh,en,group:'preview',hardware:false}))]);touchState();modeLabels();
     if(catalog){$('official-list').replaceChildren(...catalog.official_inventory.map(item=>{const li=document.createElement('li');const a=node('a',item.name);a.href=item.url;a.target='_blank';a.rel='noopener';li.append(a,node('p',item.detail));return li;}));}
@@ -239,22 +249,26 @@
   async function speedSummary(){try{const p=await(await fetch('/api/parameters',{cache:'no-store'})).json();const v=p.values;const peak=Math.min(v.PATH_SPEED_RAD_S,v.COMMAND_SPEED_RAD_S);speedSummaryLabel.textContent=text('当前速度与频率说明','Current speed and rate');speedBody.textContent=text(`当前轨迹峰值设定 ${peak} rad/s ≈ ${(peak*180/Math.PI).toFixed(1)}°/s（1×档）。规划速度与指令变化速率取较小者；还受最短过渡 ${v.MIN_TRANSITION_S}s 和停留影响。数值框没有额外速度上限，但这不代表电机可达到任意速度；官方未在控制指南给出最高关节速度。1000Hz是发送频率。`,`Configured trajectory peak ${peak} rad/s ≈ ${(peak*180/Math.PI).toFixed(1)}°/s at 1×. The lower of planning/command speed applies, with ${v.MIN_TRANSITION_S}s minimum transition and pose holds. There is no additional speed cap in the input, but this is not an achievable motor-speed guarantee. The control guide does not specify a maximum joint speed. 1000 Hz is the command rate.`);}catch{speedBody.textContent=text('速度设置读取失败','Could not read speed settings');}}
   window.addEventListener('wuji-language',()=>{render();viewerLabels();speedSummary();});
   window.addEventListener('workspace-page',()=>{L.apply();staticEnglish();if(location.hash==='#parameters')speedSummary();if(location.hash==='#library'&&!catalog)loadCatalog();});
-  window.addEventListener('console-state',e=>{state=e.detail;restorePlayback();picker.setBusy($('trial-action').disabled);picker.update(state);$('warning-policy').dataset.hasWarnings=String(state.connection==='connected'&&!!state.hardware?.warnings?.length);if(location.hash==='#interaction')touchState();staticEnglish();});
+  window.addEventListener('console-state',e=>{state=e.detail;restorePlayback();updatePickerBusy();picker.update({...state,playback:previewState(),hardware:matchingHand()?state.hardware:{active:false}});$('warning-policy').dataset.hasWarnings=String(state.connection==='connected'&&!!state.hardware?.warnings?.length);if(location.hash==='#interaction')touchState();staticEnglish();});
   window.addEventListener('console-offline',()=>{state=null;touchState();});
+  function updatePickerBusy(){picker.setBusy(!catalogReady()||(mode==='hardware'?$('trial-action').disabled:$('play-start').dataset.pending==='true'));}
+  window.addEventListener('demonstration-pending',updatePickerBusy);
+  window.addEventListener('demonstration-target',()=>{intentRevision++;updatePickerBusy();});
   function acceptCatalog(data){
-    if(!Array.isArray(data?.actions)||!Array.isArray(data.official_inventory))return false;
-    catalogRevision++;catalog=data;render();restorePlayback();
+    if(data?.device_profile?.id!==displayProfile()||!Array.isArray(data.actions)||!Array.isArray(data.official_inventory))return false;
+    catalogRevision++;catalog=data;render();if(!catalog.actions.some(item=>item.id===picker.selected)){const first=catalog.actions.find(item=>item.hardware!==false)||catalog.actions[0];if(first){picker.restore(first.id);selectMotion(first.id);}}restorePlayback();
     if(catalogError&&$('service-error').textContent===catalogError){$('service-error').textContent='';$('service-error').hidden=true;}catalogError='';return true;
   }
   async function loadCatalog(){
-    if(catalogLoading)return;catalogLoading=true;const own=catalogRevision;
-    try{const r=await fetch('/api/catalog',{cache:'no-store',signal:AbortSignal.timeout(6000)});if(!r.ok)throw Error('Action catalog unavailable');const data=await r.json();if(own!==catalogRevision)return;if(!acceptCatalog(data))throw Error('Action catalog is incomplete');}
+    const profile=displayProfile(),own=++catalogRevision;catalogLoading=own;window.dispatchEvent(new Event('demonstration-catalog'));
+    try{const r=await fetch('/api/catalog?profile='+encodeURIComponent(profile),{cache:'no-store',signal:AbortSignal.timeout(6000)});if(!r.ok)throw Error(text('动作载入失败，请重试。','Actions could not be loaded. Retry.'));const data=await r.json();if(own!==catalogRevision||profile!==displayProfile())return;if(!acceptCatalog(data))throw Error(text('动作目录与所选手型不符，请重新载入。','The action catalog differs from this model. Reload it.'));}
     catch(e){if(own===catalogRevision){catalogError=e.message;notice(e);}}
-    finally{catalogLoading=false;}
+    finally{if(catalogLoading===own)catalogLoading=false;window.dispatchEvent(new Event('demonstration-catalog'));}
   }
   // The playlist's explicit retry restores the same action catalog here too.
   // Updating choices does not issue a preview or motor command.
   window.addEventListener('workbench-catalog',e=>acceptCatalog(e.detail));
+  window.addEventListener('demonstration-profile',()=>{intentRevision++;catalogRevision++;catalog=null;if(catalogError&&$('service-error').textContent===catalogError){$('service-error').textContent='';$('service-error').hidden=true;}catalogError='';restored=false;for(const id of ['trial-action','play-action'])$(id).replaceChildren();picker.setCatalog([]);picker.setBusy(true);loadCatalog();});
   loadCatalog();
   render();viewerLabels();amplitudeLabels();speedSummary();ws.showPage();
 })();

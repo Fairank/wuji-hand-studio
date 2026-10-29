@@ -18,20 +18,33 @@
   let state = null, selected = null, mappingKey = '', mappingPending = false, decodedImage = null,serviceOffline=false;
   let hasImage=false,lastImageMode=null,lastImageScope=null,sourceScope=null,viewStatus={kind:'loading',message:'正在载入原生手部模型'};
   const sourceKind=mode=>mode==='glove_constrained_unavailable'?'glove_constrained':mode;
+  const virtualTeleoperation=()=>location.hash==='#virtual-glove';
+  const demonstrationProfile=()=>document.body.dataset.page==='library'?window.WujiDemonstration?.profile()||null:null;
+  const demonstrationMode=()=>document.getElementById('mode-preview')?.getAttribute('aria-pressed')==='true'?'preview':'feedback';
   function stateScope(value){
     if(!value)return null;const g=value.glove||{},feedback=g.feedback||{};
-    return JSON.stringify([value.view_source||'feedback',value.teleoperation_view_mode||'automatic',value.device_profile?.id||null,
+    const desired=demonstrationProfile();if(desired){const mode=demonstrationMode(),run=value.demonstration_playback?.[desired];return JSON.stringify(['demonstration',desired,mode,run?.run_id,mode==='feedback'?[window.WujiDemonstration?.selectedHand?.(),value.device_id,value.device_profile?.id,value.connection]:null]);}
+    return JSON.stringify([virtualTeleoperation(),value.view_source||'feedback',value.teleoperation_view_mode||'automatic',value.device_profile?.id||null,
       value.device_id||null,g.profile||null,g.session_id??null,g.glove_serial||null,g.user?.user_id??null,
       feedback.device_id||null,feedback.connection==='disconnected',g.model_provenance?.model_sha256||null,
       value.view_source==='glove'?g.connection==='disconnected':value.view_source!=='preview'&&value.connection==='disconnected']);
   }
   function payloadMatches(meta){
     if(!state)return false;const g=state.glove||{},proof=meta.collision_preview||{},kind=sourceKind(meta.mode);
+    const desired=demonstrationProfile();if(desired){
+      if(meta.ready===true&&meta.device_profile!==desired||meta.device_profile!=null&&meta.device_profile!==desired||kind?.startsWith('glove_')||kind==='virtual_idle')return false;
+      const mode=demonstrationMode();if(meta.ready===true&&(meta.view_source!==mode||meta.demonstration_profile!==desired||meta.demonstration_display!==mode))return false;
+      const selected=window.WujiDemonstration?.selectedHand?.();
+      if(kind==='live'&&(mode!=='feedback'||state.connection!=='connected'||state.stale!==false||state.device_profile?.id!==desired||selected!==state.device_id||meta.device_id!==selected||meta.feedback?.device_id!==selected||meta.feedback?.stale!==false))return false;
+      if(kind==='demo'){const run=state.demonstration_playback?.[desired];if(mode!=='preview'||run?.active!==true||typeof run.run_id!=='string'||!run.run_id||meta.playback?.run_id!==run.run_id||meta.playback?.display_profile!==desired||meta.playback?.active!==true||typeof run.running!=='boolean'||meta.playback?.running!==run.running)return false;}
+      return mode!=='feedback'||kind!=='demo';
+    }
+    if(virtualTeleoperation()&&['glove_live','live','demo'].includes(kind))return false;
     if(kind?.startsWith('glove_')&&g.connection==='disconnected')return false;
     if(kind==='glove_live'&&(g.feedback?.connection==='disconnected'||meta.feedback?.connection==='disconnected'))return false;
     if(kind==='live'&&state.connection==='disconnected')return false;
     const matches=(value,current)=>value==null||value===current;
-    return matches(meta.device_profile,state.device_profile?.id)&&matches(meta.view_source,state.view_source)
+    return matches(meta.device_profile,state.device_profile?.id)&&matches(meta.view_source,virtualTeleoperation()?'glove':state.view_source)
       &&matches(proof.profile,g.profile)&&matches(proof.bridge_session_id,g.session_id)&&matches(proof.glove_serial,g.glove_serial)
       &&matches(meta.feedback?.device_id,kind==='glove_live'?g.feedback?.device_id:state.device_id);
   }
@@ -97,6 +110,7 @@
       !ready?(hasImage?text('画面过期 · 不代表当前姿态','Stale image · Not the current pose'):viewStatus.kind==='loading'?text('正在准备画面','Preparing view'):text('尚无画面','No image received')):
       meta.mode==='demo'?text('动作预览 · 非实测反馈','Action preview · Not measured feedback'):meta.source_seq==null?text('模型预览 · 未接收实机姿态','Model preview · No measured hand pose'):
       english()?`Hand feedback frame ${meta.source_seq} · Chart and pose use the same frame`:`实机反馈帧 ${meta.source_seq} · 图表与姿态使用同一帧`;
+    if(virtualTeleoperation()&&state?.glove?.stream?.fresh!==true)byId('pose-frame').textContent=text('虚拟手 · 未收到手套数据','Virtual hand · No glove data received');
   }
   function clearVisual(message,kind='error',meta=null) {
     // Stale frames belong to an exact source scope, never just a display mode.
@@ -192,12 +206,13 @@
     if(viewPolling||!visible()){syncView();return;}
     viewPolling=true;const revision=viewRevision,scope=sourceScope,controller=new AbortController();viewRequest=controller;
     const timeout=setTimeout(()=>controller.abort(),2500),current=()=>!serviceOffline&&revision===viewRevision&&scope===sourceScope&&visible();
-    try{const r=await fetch('/api/view',{cache:'no-store',signal:controller.signal});if(!r.ok){let detail='';try{detail=(await r.json()).error||'';}catch{}throw Error('HTTP '+r.status+(detail?' · '+detail:''));}const payload=await r.json();if(current())await showFrame(payload,current);}
+    try{const desired=demonstrationProfile(),url=desired?'/api/view?profile='+encodeURIComponent(desired)+'&display='+demonstrationMode():virtualTeleoperation()?'/api/view?teleoperation=preview':'/api/view';const r=await fetch(url,{cache:'no-store',signal:controller.signal});if(!r.ok){let detail='';try{detail=(await r.json()).error||'';}catch{}throw Error('HTTP '+r.status+(detail?' · '+detail:''));}const payload=await r.json();if(current())await showFrame(payload,current);}
     catch(error){if(current())clearVisual(error.name==='AbortError'?'画面请求超时，请检查本机控制服务':String(error.message||'画面连接中断，请检查本机控制服务'));}
     finally{clearTimeout(timeout);if(viewRequest===controller)viewRequest=null;viewPolling=false;if(visible())scheduleView(revision===viewRevision?50:0);else syncView();}
   }
-  const updateVisibility=()=>queueMicrotask(syncView);
+  const updateVisibility=()=>queueMicrotask(()=>{syncSource(state);syncView();});
   window.addEventListener('workspace-page',updateVisibility);window.addEventListener('workbench-session-visibility',updateVisibility);
+  for(const event of ['demonstration-profile','demonstration-target','demonstration-mode'])window.addEventListener(event,updateVisibility);
   window.addEventListener('hashchange',updateVisibility);window.addEventListener('resize',updateVisibility);document.addEventListener('visibilitychange',syncView);
   new ResizeObserver(updateVisibility).observe(host);
   window.addEventListener('message',event=>{

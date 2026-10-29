@@ -65,7 +65,7 @@
   const title=document.querySelector('.top p');title.hidden=true;
   let current='library',beforePresentation='library';
   function showPage(){
-    const requested=location.hash.slice(1);current=requested==='motion'?'library':views[requested]?requested:'library';
+    const requested=location.hash.slice(1);current=requested==='virtual-glove'&&views.glove?'glove':requested==='motion'?'library':views[requested]?requested:'library';
     const selected=['capture','interaction','records'].includes(current)?'settings':current;
     for(const key of Object.keys(views)){get('page-'+key).hidden=key!==current;const a=nav.querySelector(`[data-page="${key}"]`);if(key===selected)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current');}
     document.body.dataset.page=current;const more=nav.querySelector('details');if(more){const tool=['feedback','parameters','doctor'].includes(current);more.classList.toggle('is-current',tool);if(window.innerWidth>700&&tool)more.open=true;else if(window.innerWidth<=700)more.open=false;}

@@ -4,7 +4,7 @@
  const names={pinch_index:['拇指与食指指尖接触','Thumb–index fingertip contact'],pinch_middle:['拇指与中指指尖接触','Thumb–middle fingertip contact'],pinch_ring:['拇指与无名指指尖接触','Thumb–ring fingertip contact'],pinch_pinky:['拇指与小指指尖接触','Thumb–little fingertip contact'],four_finger_bend_90:['四指弯曲约 90°','Four fingers bent about 90°'],flat_open:['四指伸平','Four fingers flat']};
  const text=(value,max=400)=>typeof value==='string'?value.slice(0,max):'';
  const officialResult=value=>!!value&&typeof value==='object'&&value.schema_version===2&&value.calibration==='hand_model'&&(value.event==='result'||value.type==='result');
- function completed(run){return run.running===false&&run.status==='completed'&&run.exit_code===0&&officialResult(run.event);}
+ function completed(run){return run.running===false&&run.status==='completed'&&run.exit_code===0&&(officialResult(run.result)||officialResult(run.event));}
  function step(run,language){
   const name=text(run.step_name,240).trim();
   if(name)return names[name]?.[language==='en'?1:0]||name;

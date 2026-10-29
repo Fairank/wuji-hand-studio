@@ -474,6 +474,7 @@ class SwitchTests(unittest.TestCase):
             def start(bundle):
                 opened.append(bundle);e.sdk(SN,USER);e.gs['session_id']+=1
                 e.gs['model_provenance']=dict(bundle,owner_user_id=USER)
+                e.gs['stream']={'fresh':True,'solver':{'engine':'sdk','applied':True}}
                 return e.gs['session_id']
             export=Mock(side_effect=lambda proof,**kw:{**bundle_context(e.folder/'bundle',side='left'),**proof})
             continuation=CalibratedTeleoperation(lambda:copy.deepcopy(calibration),start,Mock(),e.c.glove.snapshot,
@@ -603,7 +604,7 @@ class SwitchTests(unittest.TestCase):
                 original(command)
                 if command['name']=='glove_scan':e.service.cancelled=True
             e.c.action.side_effect=start
-            with self.assertRaisesRegex(ValueError,'Switch stopped'):e.service.start(self.command(e,'teleoperation',user_id=USER))
+            with self.assertRaisesRegex(ValueError,'cancellation requested'):e.service.start(self.command(e,'teleoperation',user_id=USER))
             e.c.glove.disconnect_session.assert_called_once_with(5,pending_only=True)
             self.assertFalse(any(c['name']=='glove_open' for c in e.calls))
             self.assertEqual(e.gs['connection'],'disconnected')

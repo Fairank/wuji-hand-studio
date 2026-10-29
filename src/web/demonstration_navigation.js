@@ -25,6 +25,55 @@
     const setText = (element, value) => {
       if (element && element.textContent !== value) element.textContent = value;
     };
+    const sources = document.createElement('section');sources.className='demonstration-sources';
+    const modelSlot=document.createElement('div');modelSlot.className='demonstration-model';
+    const handField=document.createElement('div');handField.className='demonstration-hand';
+    const handLabel=document.createElement('label'),handSelect=document.createElement('select'),connect=document.createElement('button'),status=document.createElement('p');
+    handSelect.id='demonstration-hand';handLabel.htmlFor=handSelect.id;connect.id='demonstration-connect';connect.type='button';status.id='demonstration-connection-status';status.setAttribute('role','status');status.hidden=true;
+    const retryCatalog=document.createElement('button');retryCatalog.id='demonstration-catalog-retry';retryCatalog.type='button';retryCatalog.hidden=true;retryCatalog.onclick=()=>window.WujiDemonstrationCatalog?.retry();
+    handField.append(handLabel,handSelect);sources.append(modelSlot,handField,connect,status);
+    sources.append(retryCatalog);
+    let consoleState=null,online=false,connecting=false,wantedHand=null,sourceEpoch=0,sourceError='',sourceOptions='';
+    const serial=row=>row?.serial||row?.sn||'',desired=()=>window.WujiDemonstration?.profile()||'hand2_left';
+    const compatible=row=>row?.kind==='hand'&&row.generation+'_'+row.side===desired();
+    const matching=value=>value?.connection==='connected'&&value.stale===false&&value.device_id===handSelect.value&&value.device_profile?.id===desired();
+    if(window.WujiDemonstration){window.WujiDemonstration.selectedHand=()=>handSelect.value;window.WujiDemonstration.connectionMatches=matching;}
+    function renderSources(){
+      const inventory=window.WujiDeviceInventory?.snapshot(),rows=(Array.isArray(inventory?.devices)?inventory.devices:[]).filter(row=>row.kind==='hand'&&serial(row));
+      const active=consoleState?.connection==='connected'&&consoleState.device_profile?.id===desired()?consoleState.device_id:'';
+      const selected=wantedHand!==null?wantedHand:active||handSelect.value;
+      const options=[new Option(text('选择灵巧手','Choose a hand'),'')];
+      for(const row of rows){const okay=compatible(row),option=new Option(serial(row)+(okay?'':text(' · 型号或左右手不匹配',' · Model or side mismatch')),serial(row));option.disabled=!okay||row.selectable!==true||row.stale===true;options.push(option);}
+      if(active&&!rows.some(row=>serial(row)===active))options.push(new Option(active+text(' · 当前连接',' · Connected'),active));
+      const key=JSON.stringify(options.map(option=>[option.text,option.value,option.disabled]));if(key!==sourceOptions){sourceOptions=key;handSelect.replaceChildren(...options);}const choice=options.some(option=>option.value===selected)?selected:'';if(handSelect.value!==choice)handSelect.value=choice;
+      const row=rows.find(row=>serial(row)===handSelect.value),current=online&&matching(consoleState);
+      const canConnect=online&&!connecting&&!current&&row?.selectable===true&&row.stale!==true&&compatible(row)&&consoleState?.connection_switch?.can_switch===true&&consoleState.connection_switch.busy!==true;
+      handSelect.disabled=connecting;connect.disabled=!canConnect;connect.textContent=connecting?text('正在连接…','Connecting…'):current?text('已连接','Connected'):text('连接灵巧手','Connect hand');
+      handLabel.textContent=text('实机目标','Physical hand');connect.title=canConnect||current?'':consoleState?.connection_switch?.blocked_reason||text('选择同型号、同侧的可用灵巧手。','Choose an available hand with the matching model and side.');
+      const catalog=window.WujiDemonstrationCatalog?.snapshot();retryCatalog.textContent=text('重新载入动作','Reload actions');retryCatalog.hidden=!catalog?.error;retryCatalog.disabled=!!catalog?.loading;
+      status.textContent=sourceError||catalog?.error||'';status.hidden=!status.textContent;
+    }
+    handSelect.onchange=()=>{wantedHand=handSelect.value;sourceEpoch++;sourceError='';renderSources();window.dispatchEvent(new Event('demonstration-target'));};
+    connect.onclick=async()=>{
+      if(connect.disabled)return;const selected=handSelect.value,model=desired(),own=++sourceEpoch;connecting=true;sourceError='';renderSources();
+      try{
+        await window.WujiDeviceInventory?.refresh();
+        const row=window.WujiDeviceInventory?.snapshot()?.devices?.find(row=>serial(row)===selected);
+        if(!online||own!==sourceEpoch||desired()!==model||handSelect.value!==selected||!row||row.selectable!==true||row.stale===true||!compatible(row))throw Error(text('设备或所选手型已改变，请重新选择。','The device or model changed. Select it again.'));
+        const result=await window.WujiConnectionSwitch.run({mode:'hand',serial:selected});
+        if(result.routed||!online||own!==sourceEpoch)return;consoleState=result.state;
+        if(!matching(consoleState))throw Error(text('实际灵巧手与所选手型不一致，未允许开始动作。','The connected hand differs from the selected model. Starting is blocked.'));
+      }catch(error){if(own===sourceEpoch)sourceError=error?.message||text('连接未完成','Connection incomplete');}
+      finally{connecting=false;renderSources();window.dispatchEvent(new Event('demonstration-target'));}
+    };
+    window.addEventListener('console-state',event=>{consoleState=event.detail;online=true;renderSources();});
+    window.addEventListener('console-offline',()=>{sourceEpoch++;consoleState=null;online=false;renderSources();});
+    window.addEventListener('device-inventory-update',renderSources);
+    window.addEventListener('demonstration-catalog',renderSources);
+    const refreshSources=()=>window.WujiDeviceInventory?.refresh()?.catch(()=>{});
+    window.addEventListener('workspace-page',event=>{if(event.detail==='library')refreshSources();});
+    setInterval(()=>{if(document.body.dataset.page==='library'&&!document.hidden)refreshSources();},5000);
+    window.addEventListener('demonstration-profile',()=>{sourceEpoch++;wantedHand=null;handSelect.value='';sourceError='';renderSources();window.dispatchEvent(new Event('demonstration-target'));});
     const activeRoute = () => document.body.dataset.page || location.hash.slice(1);
 
     function select(option, focus) {
@@ -85,6 +134,7 @@
         heading?.removeAttribute('data-i18n');
         setText(heading, title);
       }
+      renderSources();
       const multiHeading = multiPage?.querySelector('#wsx-title');
       // This title is now owned by the shared navigation, not the old page label.
       multiHeading?.removeAttribute('data-wsx-t');
@@ -127,6 +177,7 @@
     window.addEventListener('experience-mode', sync);
     // Mount while another page is active too, so its DOM identity is stable.
     singlePage.querySelector(':scope > .page-heading')?.after(group);
+    group.after(sources);window.WujiDemonstration?.mount(modelSlot);renderSources();refreshSources();
     sync();
   }
 

@@ -2,7 +2,7 @@
 (()=>{'use strict';
  window.WujiTaskFrames={create({frames=new Map(),embedded=false,translate,locale}={}){
  const taskFrames=frames,t=translate||((zh,en)=>window.WujiLocale?.lang==='en'?en:zh),L=locale||window.WujiLocale;
- const taskPages=new Set(['home','library','feedback','parameters','connection','glove','records','devices','official-viz','calibration']);
+ const taskPages=new Set(['home','library','feedback','parameters','connection','glove','virtual-glove','records','devices','official-viz','calibration']);
  const notifyFrame=(frame,visible)=>frame.contentWindow?.postMessage({type:'wb-visibility',visible},new URL(frame.src).origin);
  function taskFrameSpec(task){
   if(!task||typeof task.task_id!=='string'||!/^[A-Za-z0-9_-]{1,80}$/.test(task.task_id)||!task.view||typeof task.view.url!=='string')throw Error(t('任务画面地址尚未核对','Task view address is unverified'));

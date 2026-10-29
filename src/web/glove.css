@@ -4,7 +4,15 @@ html #page-glove>.page-heading{display:grid;grid-template-columns:minmax(0,1fr) 
 html #page-glove>.page-heading h2{font-size:25px;line-height:1.25;letter-spacing:-.5px;margin:0}
 html #page-glove>.page-heading p{font-size:12px;line-height:1.6;margin:0;color:var(--wb-sub);grid-column:1}
 html #page-glove>.page-heading #wb-glove-settings-link{grid-column:2;grid-row:1;align-self:center;margin:0;padding:7px 10px;border:1px solid var(--wb-line);border-radius:9px;color:var(--wb-ink);background:var(--wb-card);font-size:11px;line-height:1.4}
+html #page-glove>.glove-modes{width:max-content;max-width:100%;box-sizing:border-box;margin:0 0 18px;padding:4px;gap:3px;border-radius:12px;background:var(--wb-group);--nm-radius:9px}
+html #page-glove>.glove-modes>button{min-width:116px;min-height:34px;padding:7px 16px;border:0;border-radius:9px;background:transparent;color:var(--wb-sub);font-size:12px;font-weight:500;white-space:nowrap;box-shadow:none}
+html #page-glove>.glove-modes>button[aria-selected=true]{background:var(--wb-card);color:var(--wb-ink);box-shadow:0 1px 4px #00000012}
+@media(max-width:700px){html #page-glove>.glove-modes{width:100%}html #page-glove>.glove-modes>button{flex:1;min-width:0;padding-inline:10px}}
 #page-glove #glove-subtitle{display:none}
+#page-glove [hidden]{display:none!important}
+#page-glove[data-teleop-mode=virtual] #pose-console .pose-screen{height:clamp(360px,calc(100dvh - 335px),760px)}
+#page-glove[data-teleop-mode=virtual] .glove-source-heading h3{font-size:14px}
+.glove-applied-model{margin:10px 0 0;font-size:12px;line-height:1.5;color:var(--wb-ink)}
 #page-glove .page-body{max-width:none;min-width:0}
 .glove-layout{display:grid;grid-template-columns:minmax(0,1fr);gap:12px;min-width:0}
 .glove-controls{min-width:0;padding:14px 16px;border:1px solid var(--wb-line);border-radius:16px;background:var(--wb-group);box-shadow:none}

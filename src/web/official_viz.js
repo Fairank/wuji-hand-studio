@@ -21,8 +21,10 @@
   displayActions.prepend(root.querySelector('.ov-session'));root.querySelector('.ov-session').append($('ov-state'));
   const t=(zh,en)=>window.WujiLocale?.lang==='en'?en:zh;
   let state=null,fresh=false,loading=null,pending='',sequence=0,readEpoch=0,transportError='',actionError='',viewerError='',frame=null,frameUrl='',frameLoaded=false,focus=false,destroyed=false,lastVisible=null,optionKey='',savedScroll=0;
-  let viewMode='device',task='view',calibrationLayer=null,calibrationMeta={},offline=null,offlineError='',offlineLoading=null,frameReady=false,consoleState=null,wantedSerial='',calibrationRunning=false,calibrationBusy=false,calibrationVerified=true;
+  let viewMode='device',task='view',calibrationLayer=null,calibrationMeta={},offline=null,offlineError='',offlineLoading=null,frameReady=false,consoleState=null,wantedSerial='',calibrationRunning=false,calibrationBusy=false,calibrationVerified=true,previewErrorOwner=null;
   const previewOnly=s=>s?.connection==='disconnected'&&s?.hardware?.active===false&&s?.glove?.busy===true&&!s.glove.feedback?.device_id&&s.glove.hardware?.active!==true&&s.glove.hardware?.active!==null&&!(s.unconfirmed_devices||[]).length;
+  const previewIntent=s=>typeof s?.csrf==='string'&&s.csrf&&Number.isSafeInteger(s.glove?.session_id)&&s.glove.session_id>0&&Number.isSafeInteger(s.glove.action_revision)&&s.glove.action_revision>=0?{csrf:s.csrf,session:s.glove.session_id,revision:s.glove.action_revision}:null;
+  const samePreviewIntent=(owner,s,closed=false)=>!!owner&&owner.csrf===s?.csrf&&owner.session===s?.glove?.session_id&&Number.isSafeInteger(s.glove?.action_revision)&&s.glove.action_revision>=owner.revision&&s.glove.action_revision<=owner.revision+(closed?1:0);
   const theme=()=>document.documentElement.dataset.theme==='dark'?'dark':'light';
   const visible=()=>!document.hidden&&host.getClientRects().length>0&&getComputedStyle(host).visibility!=='hidden';
   function setText(id,value){if($(id).textContent!==value)$(id).textContent=value;}
@@ -116,16 +118,16 @@
    catch(error){offlineError=error.message;}finally{offlineLoading=null;if(!destroyed)render();}})();return offlineLoading;
   }
   async function act(name,extra={},endPreview=false){
-   if(pending&&name!=='official_viz_stop')return;readEpoch++;const own=++sequence;pending=name;actionError='';render();window.dispatchEvent(new CustomEvent('official-viz-update'));
+   if(pending&&name!=='official_viz_stop')return;const endingPreview=endPreview&&name==='official_viz_scan'?previewIntent(consoleState):null;if(endPreview&&name==='official_viz_scan'&&!endingPreview)return;readEpoch++;const own=++sequence;pending=name;actionError='';previewErrorOwner=null;render();window.dispatchEvent(new CustomEvent('official-viz-update'));
    try{const sr=await fetch('/api/state',{cache:'no-store',signal:AbortSignal.timeout(5000)});if(!sr.ok)throw Error(t('工作台服务未就绪','Workbench service is not ready'));let s=await sr.json();if(!s.csrf)throw Error(t('请重新读取工作台状态','Reload the workbench state'));
     if(endPreview&&name==='official_viz_scan'&&s.glove?.busy){
-     if(!previewOnly(s))throw Error(t('设备会话已改变，请先在原工作区结束。','The device session changed. End it in its owning workspace.'));
-     const close=await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json','X-Console-Token':s.csrf},body:JSON.stringify({name:'glove_disconnect'}),signal:AbortSignal.timeout(15000)}),closed=await close.json();if(!close.ok||closed.ok===false)throw Error(closed.error||t('手套预览未关闭','Glove preview did not close'));
-     for(let i=0;i<40&&s.glove?.busy;i++){await new Promise(resolve=>setTimeout(resolve,250));const poll=await fetch('/api/state',{cache:'no-store',signal:AbortSignal.timeout(5000)});if(!poll.ok)throw Error(t('无法确认预览退出','Cannot confirm preview exit'));s=await poll.json();}
+     if(!previewOnly(s)||!samePreviewIntent(endingPreview,s)||!samePreviewIntent(endingPreview,consoleState))throw Error(t('设备会话已改变，请先在原工作区结束。','The device session changed. End it in its owning workspace.'));
+     const close=await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json','X-Console-Token':s.csrf},body:JSON.stringify({name:'glove_disconnect',expected_session:s.glove.session_id,expected_revision:s.glove.action_revision}),signal:AbortSignal.timeout(15000)}),closed=await close.json();if(!close.ok||closed.ok===false)throw Error(closed.error||t('手套预览未关闭','Glove preview did not close'));
+     for(let i=0;i<40&&s.glove?.busy;i++){await new Promise(resolve=>setTimeout(resolve,250));const poll=await fetch('/api/state',{cache:'no-store',signal:AbortSignal.timeout(5000)});if(!poll.ok)throw Error(t('无法确认预览退出','Cannot confirm preview exit'));s=await poll.json();if(!samePreviewIntent(endingPreview,s,true)||!samePreviewIntent(endingPreview,consoleState,true))return;}
      if(s.glove?.busy)throw Error(t('手套预览仍在退出，请稍后重试。','Glove preview is still closing. Retry shortly.'));
     }
-    const r=await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json','X-Console-Token':s.csrf},body:JSON.stringify({name,...extra}),signal:AbortSignal.timeout(name==='official_viz_stop'?45000:15000)}),body=await r.json();if(!r.ok||body.ok===false)throw Error(body.error||t('操作未完成','Operation did not complete'));await refresh();if(name==='official_viz_scan')options.onDiscovery?.();}
-   catch(error){if(own===sequence)actionError=error.message;}
+    if(endingPreview&&(!samePreviewIntent(endingPreview,s,true)||!samePreviewIntent(endingPreview,consoleState,true)))return;const r=await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json','X-Console-Token':s.csrf},body:JSON.stringify({name,...extra}),signal:AbortSignal.timeout(name==='official_viz_stop'?45000:15000)}),body=await r.json();if(!r.ok||body.ok===false)throw Error(body.error||t('操作未完成','Operation did not complete'));await refresh();if(name==='official_viz_scan')options.onDiscovery?.();}
+   catch(error){if(own===sequence&&(!endingPreview||samePreviewIntent(endingPreview,consoleState,true))){actionError=error.message;previewErrorOwner=endingPreview;}}
    finally{if(own===sequence)pending='';if(!destroyed){render();window.dispatchEvent(new CustomEvent('official-viz-update'));}}
   }
   function syncVisibility(){if(destroyed)return;const now=visible();if(!now){setFocus(false);detach();}if(now!==lastVisible){lastVisible=now;if(now){refresh();if(viewMode==='offline'&&!offline&&!offlineError)loadOffline();}}syncFrame();}
@@ -147,7 +149,7 @@
   const onEscape=e=>{if(e.key==='Escape'&&focus){setFocus(false);$('ov-focus').focus();}},onLanguage=()=>render(),onTheme=()=>{render();if(visible()||state?.active)refresh();};
   const onReady=event=>{if(frame&&frameUrl&&event.source===frame.contentWindow&&event.origin===new URL(frameUrl).origin&&event.data==='READY'){frameReady=true;renderFrameStatus();}};
   window.addEventListener('message',onReady);
-  const onConsole=event=>{consoleState=event.detail;render();};window.addEventListener('console-state',onConsole);
+  const onConsole=event=>{consoleState=event.detail;if(previewErrorOwner&&!samePreviewIntent(previewErrorOwner,consoleState,true)){actionError='';previewErrorOwner=null;}render();};window.addEventListener('console-state',onConsole);
   window.addEventListener('connection-switch-update',render);
   document.addEventListener('keydown',onEscape);document.addEventListener('visibilitychange',syncVisibility);window.addEventListener('workspace-page',syncVisibility);window.addEventListener('hashchange',syncVisibility);window.addEventListener('wuji-language',onLanguage);
   const observer=new MutationObserver(syncVisibility);for(let node=host;node;node=node.parentElement)observer.observe(node,{attributes:true,attributeFilter:['hidden','class','style','data-page','data-hub-tab']});

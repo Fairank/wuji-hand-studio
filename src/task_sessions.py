@@ -103,6 +103,7 @@ def context_digest(state):
     value = dict(hand=state.get('device_id'), identity=state.get('identified_device'),
                  generation=state.get('session_generation'), profile=profile.get('id'),
                  glove=glove.get('glove_serial'), session=glove.get('session_id'),glove_profile=glove.get('profile'),
+                 glove_action_revision=glove.get('action_revision'),
                  cleanup_identity=object_value(glove.get('session_cleanup')).get('identity')
                     if object_value(glove.get('session_cleanup')).get('retryable') is True else None,
                  user=object_value(glove.get('user')).get('user_id'),

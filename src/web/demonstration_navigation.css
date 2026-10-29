@@ -1,4 +1,13 @@
 /* A quiet native-style choice; the shared motion layer supplies one moving fill. */
+.demonstration-sources{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.25fr) auto;gap:14px;align-items:end;margin:0 0 20px;padding:14px 16px;border:1px solid var(--wb-line);border-radius:14px;background:var(--wb-group)}
+html body .demonstration-sources .device-profile-control{display:grid;gap:6px;margin:0;padding:0;border:0}
+.demonstration-hand{display:grid;gap:6px;min-width:0}
+.demonstration-sources label{font-size:12px;line-height:1.5;color:var(--wb-ink)}
+html body .demonstration-sources select{box-sizing:border-box;width:100%;min-width:0;min-height:36px;padding:7px 30px 7px 10px;border:1px solid var(--wb-line);border-radius:9px;background:var(--wb-card);color:var(--wb-ink);font-size:12px}
+html body .demonstration-sources button{min-height:36px;padding:7px 12px;border:1px solid var(--wb-line);border-radius:9px;background:var(--wb-card);color:var(--wb-ink);font-size:12px;white-space:nowrap;box-shadow:none}
+.demonstration-sources #demonstration-connection-status{grid-column:1/-1;margin:0;font-size:12px;line-height:1.5;color:var(--wb-danger,#a43c32)}
+.demonstration-sources #demonstration-catalog-retry{grid-column:1/-1;justify-self:start}
+@media(max-width:700px){.demonstration-sources{grid-template-columns:minmax(0,1fr) auto;gap:12px}.demonstration-model{grid-column:1/-1}.demonstration-hand{grid-column:1}}
 /* The shared moving fill owns the selected outline. Older material rules added
    a 1px border and a heavier font only on selection, stealing two label pixels
    and changing the row height. Keep the actual navigation boxes identical. */

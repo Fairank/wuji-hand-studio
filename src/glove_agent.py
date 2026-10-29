@@ -142,6 +142,7 @@ def worker_glove(requests,events,continuation=None,sdk_requirement=None):
     mapping=OutputMapping(defaults())
     sdk_q=None;latest_kp=None;glove_ownership=None;profile_lease=None;solver_engine='sdk';selected_user_active=False
     model_receipt=None;model_provenance=None;opened_user_id='';selection_lease_released=True;selection_lease=None
+    glove_disconnect_needs_retry=False
     hand_unpairing=False;hand_unpaired=False;hand_scan_error=''
     bootstrap_commands=collections.deque()
     class BootstrapCancelled(Exception):pass
@@ -194,10 +195,14 @@ def worker_glove(requests,events,continuation=None,sdk_requirement=None):
             # Discovery must never open even a temporary device handle. A
             # direct-address connection belongs only to an explicit connect.
             return scan_gloves(manager,sdk,all_devices)
-        devices=scan();devices_at=time.time();state='ready';message='选择手套和标定用户 / Select glove and SDK user'
+        # A verified continuation already carries the user's exact glove and
+        # model choice. Let SDK connect(sn=...) perform its own resolution;
+        # one preliminary broadcast snapshot cannot disprove that target.
+        # Ordinary discovery/selection still never opens a device handle.
+        devices=scan() if continuation is None else []
+        devices_at=time.time();state='ready';message='选择手套和标定用户 / Select glove and SDK user'
         if continuation is not None:
-            if not any(d['serial']==continuation['serial'] for d in devices):
-                raise ValueError('未找到刚才标定的这只手套，未接入其它设备 / The calibrated glove was not found; no other device was opened')
+            bootstrap_not_cancelled()
             events.put(dict(type='calibrated_ready',receipt=copy.deepcopy(model_provenance)))
         while True:
             now=time.monotonic()
@@ -205,6 +210,7 @@ def worker_glove(requests,events,continuation=None,sdk_requirement=None):
             except queue.Empty:c=None
             if c:
                 follow_dispatch_attempted=False
+                open_acquire_started=False
                 try:
                     name=c['name']
                     if name in ('disconnect','glove_disconnect'):break
@@ -218,12 +224,14 @@ def worker_glove(requests,events,continuation=None,sdk_requirement=None):
                         message='灵巧手查找完成，请选择后连接 / Hand search completed; choose a hand to connect'
                     elif name=='glove_open':
                         if glove is not None:raise ValueError('手套已连接，修改配置请先断开')
-                        if c['serial'] not in {d['serial'] for d in devices}:raise ValueError('请先扫描并选择手套')
+                        if continuation is None and c['serial'] not in {d['serial'] for d in devices}:
+                            raise ValueError('请先扫描并选择手套')
                         user_id=c.get('user_id',current['user_id'])
                         if user_id not in {u['user_id'] for u in users}:raise ValueError('Unknown SDK user')
                         if continuation is not None and (c['serial']!=continuation['serial'] or user_id!=model_receipt['owner_user_id']):
                             raise ValueError('Continuation device or SDK user differs from the saved calibration')
                         candidate=None;selection_lease=None;switched=False
+                        open_acquire_started=True
                         try:
                             if sys.platform.startswith('linux'):
                                 from sdk_session import ProfileLease
@@ -239,8 +247,21 @@ def worker_glove(requests,events,continuation=None,sdk_requirement=None):
                             if continuation is not None and (current.get('user_id')!=user_id or current.get('is_default') is not False
                                     or current.get('display_name')!=continuation['source_profile']):
                                 raise ValueError('Controller did not confirm the calibrated SDK user')
-                            from glove_discovery import connect_glove
-                            candidate=connect_glove(manager,next(d for d in devices if d['serial']==c['serial']))
+                            from glove_discovery import connect_glove,GloveCleanupUnconfirmed
+                            target=(dict(serial=continuation['serial'],source='calibration_continuation')
+                                    if continuation is not None else next(d for d in devices if d['serial']==c['serial']))
+                            if continuation is not None and continuation.get('glove_route') is not None:
+                                from calibration_transport import validate_glove_route
+                                route=validate_glove_route(continuation['glove_route'],continuation['serial'])
+                                target=dict(serial=route['serial'],address=route['address'],source='official_address')
+                            try:candidate=connect_glove(manager,target)
+                            except Exception as error:
+                                if isinstance(error,GloveCleanupUnconfirmed):
+                                    candidate=error.handle;glove_disconnect_needs_retry=True
+                                if continuation is None:raise
+                                raise ValueError('未能接入这只手套，请确认电源和控制端网络后点击继续；标定资料已保留 / '
+                                    'Check glove power and controller network, then retry; saved calibration is retained. SDK: '
+                                    +str(error)[:300]) from error
                             if continuation is not None and not isinstance(candidate,sdk.WujiGlove):
                                 raise ValueError('Selected calibration continuation is not a typed Wuji Glove')
                             actual=str(candidate.hand_side().get()).lower()
@@ -332,10 +353,10 @@ def worker_glove(requests,events,continuation=None,sdk_requirement=None):
                             events.put(dict(type='glove_follow_rejected',device_id=serial,
                                 lease=nonce,message=str(e)[:400]))
                     message=str(e);events.put(dict(type='glove_notice',message=message))
-                    if c.get('name')=='glove_open' and any((glove is not None,sub is not None,session is not None,
+                    if c.get('name')=='glove_open' and open_acquire_started and any((glove is not None,sub is not None,session is not None,
                             selected_user_active,glove_ownership is not None,profile_lease is not None,selection_lease is not None)):
                         raise
-                    if continuation is not None and c.get('name')=='glove_open':raise
+                    if continuation is not None and c.get('name')=='glove_open' and glove is None:raise
             if glove is not None and now>=next_map:
                 next_map=now+1/120
                 try:
@@ -428,7 +449,7 @@ def worker_glove(requests,events,continuation=None,sdk_requirement=None):
                     if sub.close() is False:raise ValueError('Subscription close was not acknowledged')
                     subscription_closed=True
                 except Exception:pass
-            if not glove_disconnected:
+            if not glove_disconnected and not glove_disconnect_needs_retry:
                 try:
                     if glove.disconnect() is False:raise ValueError('Glove disconnect was not acknowledged')
                     glove_disconnected=True
@@ -507,7 +528,9 @@ def worker_glove(requests,events,continuation=None,sdk_requirement=None):
             # glove, change users, map, or enable a hand in this cleanup phase.
             while True:
                 command=requests.get()
-                if command.get('name') in ('disconnect','glove_disconnect'):break
+                if command.get('name') in ('disconnect','glove_disconnect'):
+                    glove_disconnect_needs_retry=False
+                    break
                 if command.get('name')=='glove_stop' and hand_thread is not None and hand_thread.is_alive():
                     hand_requests.put(command);continue
                 events.put(dict(type='glove_notice',message='原手套资源仍在退出，请重试结束原会话 / Original glove cleanup is pending; retry ending its owning session'))

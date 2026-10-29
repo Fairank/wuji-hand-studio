@@ -166,8 +166,8 @@ CONTEXT_FIELDS={'source_run_id','source_workspace','serial','side','source_profi
 
 
 def validate_continuation(value, *, path=False):
-    allowed=CONTEXT_FIELDS|({'bundle_path'} if path else set())
-    if not isinstance(value,dict) or set(value)!=allowed:raise ValueError('Invalid private calibration continuation')
+    required=CONTEXT_FIELDS|({'bundle_path'} if path else set())
+    if not isinstance(value,dict) or not required<=set(value) or set(value)-required-{'glove_route'}:raise ValueError('Invalid private calibration continuation')
     if (not isinstance(value['source_run_id'],str) or not RUN.fullmatch(value['source_run_id'])
             or not isinstance(value['serial'],str) or not IDENT.fullmatch(value['serial'])
             or not isinstance(value['source_workspace'],str) or not 1<=len(value['source_workspace'])<=100
@@ -181,6 +181,9 @@ def validate_continuation(value, *, path=False):
     if path and (not isinstance(value['bundle_path'],str) or len(value['bundle_path'])>1024
                  or not Path(value['bundle_path']).is_absolute()):
         raise ValueError('Invalid private calibration bundle path')
+    if 'glove_route' in value:
+        from calibration_transport import validate_glove_route
+        validate_glove_route(value['glove_route'],value['serial'])
     if len(json.dumps(value).encode())>4096:raise ValueError('Private calibration context exceeds its limit')
     return copy.deepcopy(value)
 
@@ -292,50 +295,100 @@ def prepare_controller_model(manager, context, *, folder=None, receipt_folder=No
     receipt_root=Path(receipt_folder or Path.home()/'.local/share/hand-workbench/calibration-receipts')
     _private_directory(receipt_root)
     receipt_path=receipt_root/(hashlib.sha256(owner.encode()).hexdigest()+'.json')
+    def receipt_digest():
+        try:return file_digest(receipt_path,4*1024*1024)[0]
+        except ValueError:
+            if not receipt_path.exists():return None
+            raise
     try:
-        if receipt_path.stat().st_size>4*1024*1024:raise ValueError('Managed calibration receipt exceeds its limit')
-        prior=json.loads(receipt_path.read_text(encoding='utf-8'))
-    except FileNotFoundError:prior=None
+        prior_digest=receipt_digest()
+        prior=json.loads(receipt_path.read_text(encoding='utf-8')) if prior_digest is not None else None
     except (OSError,ValueError):raise ValueError('Managed calibration receipt is unverified; no data was imported') from None
-    users=manager.list_users()
-    if not isinstance(users,list):raise ValueError('Cannot verify controller SDK users')
-    exists=any(isinstance(u,dict) and u.get('user_id')==owner for u in users)
-    if exists:
-        matches=[u for u in users if isinstance(u,dict) and u.get('user_id')==owner]
-        if len(matches)!=1 or matches[0].get('display_name')!=context['source_profile'] or matches[0].get('is_default') is True:
-            raise ValueError('控制端的佩戴者身份已改变，未覆盖 / Controller wearer identity changed; no data was overwritten')
-        if not isinstance(prior,dict) or prior.get('owner_user_id')!=owner or prior.get('source_profile')!=context['source_profile']:
-            raise ValueError('控制端已有未由工作台托管的佩戴者资料，未覆盖；请先核对资料来源 / Controller has unmanaged wearer data; no data was overwritten')
-        owned=prior.get('components')
-        if not isinstance(owned,dict) or model_key not in owned:raise ValueError('Managed hand model receipt is incomplete')
-        for entry in owned.values():
-            if not isinstance(entry,dict) or _path_signature(entry.get('path',''))!=entry.get('signature'):
-                raise ValueError('控制端标定资料已在外部改变，未覆盖 / Controller calibration changed outside this task; no data was overwritten')
-        # Export is a local SDK read. Verify the owner's *current* managed
-        # model through the SDK, rather than trusting an old file path alone.
+    binding=dict(owner_user_id=owner,source_profile=context['source_profile'],source_run_id=context['source_run_id'],
+        source_workspace=context['source_workspace'],bundle_sha256=context['bundle_sha256'],
+        bundle_bytes=context['bundle_bytes'],model_sha256=context['model_sha256'],model_bytes=context['model_bytes'],
+        side=context['side'],prior_receipt_sha256=prior_digest)
+    def audit_current():
         audit=receipt_root/(uuid.uuid4().hex+'.zip')
         try:
             try:
                 report=manager.export_user_data(owner,str(audit))
-                if file_digest(audit,MAX_BUNDLE)[1]<=0:raise ValueError()
+                file_digest(audit,MAX_BUNDLE)
                 audit_preview=manager.preview_user_data(str(audit))
             except Exception:raise ValueError('Cannot verify existing controller calibration; no data was overwritten') from None
-            if report.get('owner_user_id')!=owner or audit_preview.get('owner_user_id')!=owner:
+            if (not isinstance(report,dict) or not isinstance(audit_preview,dict)
+                    or report.get('owner_user_id')!=owner or audit_preview.get('owner_user_id')!=owner
+                    or audit_preview.get('owner_display_name')!=context['source_profile']):
                 raise ValueError('Controller calibration owner changed; no data was overwritten')
-            actual=_components(audit_preview)
-            if model_key not in actual or _bundle_signature(audit,actual[model_key])!=owned[model_key]['signature']:
-                raise ValueError('Controller SDK model differs from its managed receipt; no data was overwritten')
-            # An unchanged model needs no profile write and preserves unrelated data.
-            prior_model=owned[model_key]
-            same=file_digest(prior_model['path'])==(context['model_sha256'],context['model_bytes'])
-            if same:return dict(context,owner_user_id=owner,model_path=prior_model['path'],imported=False)
-            if set(actual)!=set(owned) or any(_bundle_signature(audit,actual[k])!=v['signature'] for k,v in owned.items()):
-                raise ValueError('Controller contains additional unmanaged calibration data; no data was overwritten')
+            return {key:_bundle_signature(audit,row) for key,row in _components(audit_preview).items()}
         finally:
-            # Only this transaction's random audit export is temporary. Keep
-            # the source transfer bundle, installed SDK data and receipt intact.
             try:audit.unlink(missing_ok=True)
             except OSError:raise ValueError('临时资料包清理未确认，请检查控制端本地存储 / Temporary calibration archive cleanup is unconfirmed; review controller storage') from None
+    def valid_owned(value):
+        try:
+            return (isinstance(value,dict) and value.get('owner_user_id')==owner
+                and value.get('source_profile')==context['source_profile'] and isinstance(value.get('components'),dict)
+                and 1<=len(value['components'])<=512 and all(isinstance(key,str) and isinstance(row,dict)
+                    and _path_signature(row.get('path',''))==row.get('signature') for key,row in value['components'].items()))
+        except (OSError,ValueError,TypeError):return False
+    users=manager.list_users()
+    if not isinstance(users,list):raise ValueError('Cannot verify controller SDK users')
+    exists=any(isinstance(u,dict) and u.get('user_id')==owner for u in users)
+    preserved={};actual={}
+    if exists:
+        matches=[u for u in users if isinstance(u,dict) and u.get('user_id')==owner]
+        if len(matches)!=1 or matches[0].get('display_name')!=context['source_profile'] or matches[0].get('is_default') is True:
+            raise ValueError('控制端的佩戴者身份已改变，未覆盖 / Controller wearer identity changed; no data was overwritten')
+        # A completed import whose receipt commit failed keeps its exact local
+        # candidate. An explicit retry may verify it using the SDK, then commit
+        # that same receipt. Preparing/failed imports never grant this proof.
+        pending=list(receipt_root.glob(receipt_path.stem+'.*.pending'))
+        if len(pending)>64:raise ValueError('待核对的标定保存记录过多，请先检查本地存储 / Too many pending calibration receipts; review local storage')
+        candidates=[]
+        for path in pending:
+            try:
+                file_digest(path,4*1024*1024)
+                candidate=json.loads(path.read_text(encoding='utf8'))
+            except (OSError,ValueError):continue
+            commit=candidate.get('_commit') if isinstance(candidate,dict) else None
+            if isinstance(commit,dict) and commit==dict(binding,state='verified'):candidates.append((path,candidate))
+        if len(candidates)>1:raise ValueError('标定保存记录不唯一，请核对后重试 / Calibration receipt recovery is ambiguous; review it first')
+        if candidates:
+            path,candidate=candidates[0]
+            if not valid_owned(candidate) or model_key not in candidate['components']:
+                raise ValueError('待保存的标定资料已变化，未接入设备 / Pending calibration data changed; no device was opened')
+            current=audit_current();owned=candidate['components']
+            if (set(current)!=set(owned) or any(current[key]!=row['signature'] for key,row in owned.items())
+                    or file_digest(owned[model_key]['path'])!=(context['model_sha256'],context['model_bytes'])
+                    or receipt_digest()!=prior_digest):
+                raise ValueError('待保存的标定资料与官方档案不一致 / Pending calibration receipt differs from official data')
+            try:path.replace(receipt_path)
+            except OSError:raise ValueError('标定资料已验证但保存记录未完成，请检查存储后重试 / Calibration data verified; receipt save is incomplete. Check storage and retry') from None
+            return dict(context,owner_user_id=owner,model_path=owned[model_key]['path'],imported=False)
+        if not isinstance(prior,dict) or prior.get('owner_user_id')!=owner or prior.get('source_profile')!=context['source_profile']:
+            raise ValueError('控制端已有未由工作台托管的佩戴者资料，未覆盖；请先核对资料来源 / Controller has unmanaged wearer data; no data was overwritten')
+        owned=prior.get('components')
+        if not isinstance(owned,dict) or not owned:raise ValueError('Managed hand model receipt is incomplete')
+        if not valid_owned(prior):
+            raise ValueError('控制端标定资料已在外部改变，未覆盖 / Controller calibration changed outside this task; no data was overwritten')
+        actual=audit_current()
+        if any(key not in actual or actual[key]!=row['signature'] for key,row in owned.items()):
+            raise ValueError('Controller SDK model differs from its managed receipt; no data was overwritten')
+        prior_model=owned.get(model_key)
+        if prior_model and file_digest(prior_model['path'])==(context['model_sha256'],context['model_bytes']):
+            return dict(context,owner_user_id=owner,model_path=prior_model['path'],imported=False)
+        if set(actual)!=set(owned):
+            raise ValueError('Controller contains additional unmanaged calibration data; no data was overwritten')
+        preserved=copy.deepcopy(owned)
+        for key,row in rows.items():
+            if key!=model_key and key in actual and _bundle_signature(bundle,row)!=actual[key]:
+                raise ValueError('资料包含有另一侧或其它标定的旧版本；请重新导出当前档案 / Bundle contains older calibration data for another side or component; export the current profile again')
+    if file_digest(bundle,MAX_BUNDLE)!=(context['bundle_sha256'],context['bundle_bytes']):
+        raise ValueError('Calibration transfer changed before import')
+    pending=receipt_path.with_suffix('.'+uuid.uuid4().hex+'.pending')
+    try:
+        with pending.open('x',encoding='utf8') as output:json.dump(dict(_commit=dict(binding,state='preparing')),output,sort_keys=True);output.flush();os.fsync(output.fileno())
+    except OSError:raise ValueError('无法保存标定接续记录，未导入资料；请检查存储后重试 / Cannot stage calibration receipt; nothing was imported. Check storage and retry') from None
     try:imported=manager.import_user_data(str(bundle))
     except Exception:raise ValueError('官方资料导入未确认，未接入手套；请先检查控制端资料 / Official import is unconfirmed; glove was not opened. Review controller data before retrying') from None
     if not isinstance(imported,dict) or imported.get('owner_user_id')!=owner:
@@ -345,13 +398,24 @@ def prepare_controller_model(manager, context, *, folder=None, receipt_folder=No
     model_path=installed[model_key].get('path')
     if file_digest(model_path)!=(context['model_sha256'],context['model_bytes']):
         raise ValueError('Imported hand model differs from this calibration; glove was not opened')
-    components={key:dict(path=row.get('path'),signature=_path_signature(row.get('path',''))) for key,row in installed.items()}
+    components=copy.deepcopy(preserved)
+    for key,row in preserved.items():
+        if key!=model_key and _path_signature(row['path'])!=row['signature']:
+            raise ValueError('导入后其它标定资料已变化，未接入手套 / Other calibration data changed during import; glove was not opened')
+    for key,row in installed.items():
+        signature=_path_signature(row.get('path',''))
+        expected=_bundle_signature(bundle,rows[key]) if key in rows else actual.get(key)
+        if expected is None or signature!=expected:raise ValueError('Imported calibration component differs from the verified bundle')
+        components[key]=dict(path=row.get('path'),signature=signature)
+    if any(key not in installed for key in rows):raise ValueError('Official SDK did not confirm every imported calibration component')
     receipt=dict(schema=1,owner_user_id=owner,source_profile=context['source_profile'],
         source_workspace=context['source_workspace'],source_run_id=context['source_run_id'],
-        components=components)
-    pending=receipt_path.with_suffix('.'+uuid.uuid4().hex+'.pending')
-    with pending.open('x',encoding='utf-8') as output:json.dump(receipt,output,sort_keys=True)
-    pending.replace(receipt_path)
+        components=components,_commit=dict(binding,state='verified'))
+    try:
+        with pending.open('w',encoding='utf-8') as output:json.dump(receipt,output,sort_keys=True);output.flush();os.fsync(output.fileno())
+        if receipt_digest()!=prior_digest:raise ValueError('Managed calibration receipt changed during import')
+        pending.replace(receipt_path)
+    except OSError:raise ValueError('官方资料已导入，但保存记录尚未完成；请检查存储后重试 / Official data imported; receipt save is incomplete. Check storage and retry') from None
     return dict(context,owner_user_id=owner,model_path=model_path,imported=True)
 
 

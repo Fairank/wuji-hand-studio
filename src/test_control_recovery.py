@@ -26,6 +26,7 @@ sys.path.insert(0, str(ROOT/'src'))
 from device_termination import TerminationJournal, unconfirmed
 from glove_bridge import GloveBridge
 from glove_agent import prepare_permission
+from glove_discovery import GloveCleanupUnconfirmed
 from desktop_lifecycle import close_sessions
 from calibration_handover import CalibrationHandover
 
@@ -394,7 +395,8 @@ def glove_worker_fixture(disconnect_error=False, solver_close_error=False, wrong
         'device_profiles': module(controller_profile=lambda: dict(id='hand2_right', generation='hand2', side='right')),
         'retarget_settings': module(OutputMapping=Mapping, defaults=lambda: {}),
         'device_discovery': module(candidates=lambda items: []),
-        'glove_discovery': module(scan_gloves=lambda *args, **kwargs: [dict(serial='SYNTHETIC')], connect_glove=connect),
+        'glove_discovery': module(scan_gloves=lambda *args, **kwargs: [dict(serial='SYNTHETIC')],
+                                  connect_glove=connect,GloveCleanupUnconfirmed=GloveCleanupUnconfirmed),
         'zenoh_route': module(managed_wsl=lambda: False),
         'sdk_session': module(ProfileLease=Lease),
         'device_ownership': module(DeviceOwnership=lambda *args: NS(close=lambda: None)),
@@ -443,6 +445,7 @@ class GloveProfileCrosscheck(unittest.TestCase):
     def test_normal_session_keeps_selected_user_until_disconnected_then_restores_under_leases(self):
         result = glove_worker_fixture()
         self.assertIsNone(result.raised)
+        self.assertEqual([e for e in result.events if e['type']=='glove_error'], [])
         self.assertEqual([c['user'] for c in result.calls if c['call'] == 'solver'], ['B', 'B'])
         restore = [c for c in result.calls if c['call'] == 'switch' and c['user'] == 'A']
         self.assertEqual(len(restore), 1)

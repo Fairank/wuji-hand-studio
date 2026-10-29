@@ -116,7 +116,7 @@ def scope(controller,task_id,*,read_groups=None):
 def _command(command,resource):
     if not isinstance(command,dict) or not isinstance(command.get('name'),str):raise ValueError('Invalid task command')
     name=command['name']
-    if resource.get('recovery') and name not in ('glove_stop','glove_disconnect','hardware_stop','connection_switch','connection_switch_users'):
+    if resource.get('recovery') and name not in ('glove_stop','glove_disconnect','hardware_stop','connection_switch','connection_switch_users','connection_switch_cancel'):
         raise ValueError('手套会话需要先结束，请在原任务中暂停或断开 / Pause or disconnect the failed glove session first')
     if resource['kind']=='ensemble':
         if name not in GROUP_ACTIONS or command.get('workspace')!=resource['group_id']:
@@ -155,7 +155,7 @@ def execute(controller,task_id,expected_context,command,*,read_groups=None,group
             or not isinstance(expected_context,str) or not CONTEXT.fullmatch(expected_context)):
         raise ValueError('Invalid task view context')
     command=copy.deepcopy(command)
-    def checked(groups=None,*,receipt=True):
+    def checked(groups=None,*,receipt=True,workflow_owned=False):
         state=controller.snapshot()
         if not isinstance(state,dict):raise ValueError('Task owner state is unavailable')
         current,resource=_scope(state,task_id,groups)
@@ -166,7 +166,12 @@ def execute(controller,task_id,expected_context,command,*,read_groups=None,group
             if not callable(group_action):raise ValueError('Ensemble task dispatch is unavailable')
             result=group_action(command)
         else:
-            result=controller.action(command)
+            if (workflow_owned and command.get('name') in ('glove_stop','glove_disconnect')
+                    and {'expected_session','expected_revision'}&set(command)):
+                result=controller._scoped_glove_stop(command,workflow_held=True)
+            elif workflow_owned and command.get('name') in ('glove_follow','glove_open'):
+                result=controller.action(command,_workflow_held=True)
+            else:result=controller.action(command)
         # A successful operation may replace its own owner epoch (Viewer ->
         # calibration -> SDK). Bind that one response to both epochs while we
         # still hold the corresponding workflow/catalog lock. A later browser
@@ -206,6 +211,10 @@ def execute(controller,task_id,expected_context,command,*,read_groups=None,group
         # Viewer teardown owns the same workflow lock. The handover service's
         # exact-attempt CAS and bridge pending-only check own this cancellation.
         return checked(receipt=False)
+    if (isinstance(command,dict) and set(command)=={'name','request_id','attempt_id'}
+            and command.get('name')=='connection_switch_cancel'
+            and all(isinstance(command[k],str) and re.fullmatch('[0-9a-f]{32}',command[k]) for k in ('request_id','attempt_id'))):
+        return checked(receipt=False)
     # WorkspaceGroups already takes its catalog lock before posting to a
     # member's workflow lock. Never invert that order here. Only an ensemble
     # candidate takes the catalog lock; device checks below are purely local.
@@ -218,5 +227,5 @@ def execute(controller,task_id,expected_context,command,*,read_groups=None,group
             finally:group_lock.release()
     lock=controller.calibration_handover.workflow_lock
     if not lock.acquire(blocking=False):raise ValueError('Another device task is switching')
-    try:return checked()
+    try:return checked(workflow_owned=True)
     finally:lock.release()

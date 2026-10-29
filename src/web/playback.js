@@ -1,4 +1,7 @@
 (() => {
+  const displayProfile=()=>window.WujiDemonstration?.profile()||'hand2_left';
+  const displayPlayback=(value=state)=>{const profile=displayProfile(),run=value?.demonstration_playback?.[profile];return run?.display_profile===profile?run:{active:false,display_profile:profile};};
+  const matchesDisplayHand=()=>{const target=window.WujiDemonstration?.selectedHand?.();return typeof target==='string'&&!!target&&state?.device_profile?.id===displayProfile()&&state?.device_id===target;};
   const panel=document.createElement('section');panel.className='panel';panel.id='playback-panel';
   panel.innerHTML=`<h2>动作展示与循环</h2><p class="hint">编排动作预览，不是已学会的轻扣策略。</p><label for="play-action">动作</label><select id="play-action"><option value="all">整套展示</option><option value="open">张开</option><option value="fist">握拳</option><option value="opposition">依次对指</option><option value="splay">左右侧摆</option><option value="wave">逐指屈伸</option><option value="joints">逐关节活动</option><option value="thumb">拇指活动</option><option value="index">食指活动</option><option value="middle">中指活动</option><option value="ring">无名指活动</option><option value="little">小指活动</option></select><div class="field-row"><label for="play-speed">速度</label><select id="play-speed"><option value="0.25">0.25 ×</option><option value="0.5" selected>0.5 ×</option><option value="1">1 ×</option></select></div><div class="field-row"><label for="play-cycles">循环</label><select id="play-cycles"><option value="1">1次</option><option value="3">3次</option><option value="10">10次</option><option value="0">持续循环</option></select></div><div class="button-row"><button id="play-start" class="primary" disabled>播放仿真动作</button><button id="play-pause" disabled>暂停</button></div><button id="play-stop" disabled>停止并回到实机反馈</button><p id="play-status" class="hint" role="status">未播放</p><p class="hint">实机动作需先完成关节方向、限位与轨迹核验。仿真播放不会使真实手运动。</p>`;
   const get=id=>document.getElementById(id);let state=null,pending=false;
@@ -138,7 +141,7 @@
     get('probe-status').textContent=!connected?'实机未连接':h?.active?`实机执行中 · ${h.reason}`:h?.probe_reason||'等待完整反馈与诊断';
     const r=h?.probe_result;
     get('probe-result').textContent=r?`${r.accepted?'已观测到往返动作':'试动未通过'} · 实际最大变化 ${r.peak_actual_delta_deg.toFixed(2)}° · 返回误差 ${r.return_error_deg.toFixed(2)}° · ${r.stop_confirmed?'停用请求已确认':'停用待确认'} · ${r.reason}`:'';
-    get('trial-start').disabled=!connected||!h?.trial_ready||h?.active!==false||ownedLease||state?.recording?.active||hardwarePending||!get('trial-clear').checked;
+    get('trial-start').disabled=!connected||!matchesDisplayHand()||!h?.trial_ready||h?.active!==false||ownedLease||state?.recording?.active||hardwarePending||!get('trial-clear').checked;
     get('trial-status').textContent=!connected?'未连接；连接后由你选择启动':h?.active&&h?.source==='supervised_low_current_trial'?`${h.paused?'暂停':'试运行'} · 第${h.cycle}/${h.cycles}轮 · ${h.trial_phase} · ${h.elapsed_s.toFixed(1)}秒 / 计划${Math.ceil(h.planned_duration_s||0)}秒`:h?.probe_reason||'等待完整反馈与诊断';
     const tr=h?.trial_result;
     get('trial-result').textContent=tr?`${tr.accepted?'指令与回位检查通过':'本次试运行未通过'} · 完成${tr.finished_cycles}/${tr.requested_cycles}轮 · 实测峰值电流${tr.peak_current_A.toFixed(3)} A · ${returnText(tr)} · ${stopExplanation(tr.reason)} · 指尖接触尚待观察`:'';
@@ -155,16 +158,18 @@
         get('motion-history').append(item);}}
     get('hardware-status').textContent=pendingStops().length&&h?.active!==true?pendingStopNote():!connected?'实机未连接，不能同步执行':h?.active?`${h.paused?'暂停':'执行中'} · ${h.trial_phase||h.action} · ${h.elapsed_s.toFixed(1)}秒 · ${h.reason}`:!h?.ready?(h?.reason||'等待实机动作校准'):!supported?'所选动作尚未完成实机核验':h.reason||'已就绪';
     get('runtime-mode').textContent=h?.active?'当前模式：实机展示':h?.active===null||pendingStops().length?'当前模式：实机状态待确认':'当前模式：只读';
-    if(h?.active)get('play-start').disabled=true;
+    // Local demonstration preview has its own player and never drives this hand.
     renderMotionPanel(h,connected);
+    if(connected&&!matchesDisplayHand())get('motion-blocker').textContent=window.WujiLocale?.lang==='en'?'The selected model or device differs from this hand. Choose the matching hand and connect.':'所选手型或设备与当前灵巧手不一致，请选择对应设备并连接。';
   }
   async function hardwareAction(name){
     if(!state||(hardwarePending&&name!=='hardware_stop'))return;
+    if(name==='hardware_trial'&&!matchesDisplayHand()){get('motion-blocker').textContent=tr('所选手型或设备与当前灵巧手不一致。','The selected model or device differs from this hand.');return;}
     const generation=++hardwareGeneration;hardwarePending=true;renderHardware();
     const body={name,lease:ownedLease};
     if(name==='hardware_start')Object.assign(body,{action:get('play-action').value,speed:Number(get('play-speed').value),cycles:Number(get('play-cycles').value)});
     if(name==='hardware_probe')Object.assign(body,{index:Number(get('probe-joint').value),direction:Number(get('probe-direction').value),workspace_clear:get('probe-clear').checked});
-    if(name==='hardware_trial')Object.assign(body,{action:get('trial-action').value,amplitude:Number(get('trial-amplitude').value),speed:Number(get('trial-speed').value),cycles:Number(get('trial-cycles').value),workspace_clear:get('trial-clear').checked},window.WujiPerformancePayload?.()||{});
+    if(name==='hardware_trial')Object.assign(body,{expected_profile:displayProfile(),expected_serial:window.WujiDemonstration.selectedHand(),action:get('trial-action').value,amplitude:Number(get('trial-amplitude').value),speed:Number(get('trial-speed').value),cycles:Number(get('trial-cycles').value),workspace_clear:get('trial-clear').checked},window.WujiPerformancePayload?.()||{});
     try{
       const result=await hardwarePost(body);
       if(generation!==hardwareGeneration){if(result.lease)await hardwarePost({name:'hardware_stop'});return;}
@@ -188,10 +193,11 @@
     finally{setTimeout(beat,200);}
   }
   beat();
-  function render(){const p=state?.playback;get('play-start').disabled=!state||pending;get('play-pause').disabled=!p?.active||pending;get('play-stop').disabled=!p?.active||pending;get('play-pause').textContent=p?.running?'暂停':'继续';get('play-status').textContent=p?.active?`${p.label} · 第${p.cycle}${p.cycles?'/'+p.cycles:''}轮 · ${p.running?'播放中':'暂停或完成'} · ${p.elapsed_s.toFixed(1)}秒`:'当前显示实机反馈或静态预览';}
+  function render(){const p=displayPlayback(),control=get('play-start'),next=String(pending),changed=control.dataset.pending!==next;control.dataset.pending=next;if(changed)window.dispatchEvent(new Event('demonstration-pending'));get('play-start').disabled=!state||pending||!get('play-action').value||window.WujiDemonstrationCatalog?.ready()!==true;get('play-pause').disabled=!p?.active||pending;get('play-stop').disabled=!p?.active||pending;get('play-stop').textContent=tr('停止预览','Stop preview');get('play-pause').textContent=p?.running?'暂停':'继续';get('play-status').textContent=p?.active?`${p.label} · 第${p.cycle}${p.cycles?'/'+p.cycles:''}轮 · ${p.running?'播放中':'暂停或完成'} · ${p.elapsed_s.toFixed(1)}秒`:'当前显示实机反馈或静态预览';}
   async function send(body){
     if(!state||pending)return;
-    const scoped=['demo_pause','demo_resume','demo_stop'].includes(body.name),run=state.playback?.run_id;
+    const profile=displayProfile(),scoped=['demo_pause','demo_resume','demo_stop'].includes(body.name),run=displayPlayback().run_id;
+    if(body.name==='demo_start'&&window.WujiDemonstrationCatalog?.ready()!==true)return;body={...body,display_profile:profile};
     if(scoped){if(typeof run!=='string'||!run)return;body={...body,expected_run:run};}
     pending=true;render();let error='';
     try{const r=await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json','X-Console-Token':state.csrf},body:JSON.stringify(body),signal:AbortSignal.timeout(4000)});const d=await r.json();if(!r.ok||!d.ok)throw Error(d.error||'播放操作失败');}
@@ -204,15 +210,19 @@
           const current=await window.WujiConnection.refresh();
           if(!current){state=null;throw Error(tr('播放状态暂时无法核对，请恢复连接后重试。','Preview status is unavailable. Reconnect and retry.'));}
           state=current;
-          if(!error&&current.playback?.run_id!==run)error=tr('预览已切换，请核对当前动作后重试。','The preview changed. Check the current routine and retry.');
+          if(!error&&profile===displayProfile()&&displayPlayback(current).run_id!==run)error=tr('预览已切换，请核对当前动作后重试。','The preview changed. Check the current routine and retry.');
         }catch(e){state=null;error=error||e.message;}
       }
-      pending=false;render();if(error)document.getElementById('service-error').textContent=error;document.getElementById('service-error').hidden=!error;
+      pending=false;render();if(profile===displayProfile()){if(error)document.getElementById('service-error').textContent=error;document.getElementById('service-error').hidden=!error;}
     }
   }
   get('play-start').addEventListener('click',()=>send({name:'demo_start',action:get('play-action').value,speed:Number(get('play-speed').value),cycles:Number(get('play-cycles').value),...(window.WujiPerformancePayload?.()||{})}));
-  get('play-pause').addEventListener('click',()=>send({name:state.playback.running?'demo_pause':'demo_resume'}));
+  get('play-pause').addEventListener('click',()=>send({name:displayPlayback().running?'demo_pause':'demo_resume'}));
   get('play-stop').addEventListener('click',()=>send({name:'demo_stop'}));
   window.addEventListener('console-state',e=>{state=e.detail;if(state.hardware?.active)leaseSeenActive=true;else if(ownedLease&&(leaseSeenActive||performance.now()>leaseDeadline))ownedLease=null;render();renderHardware();});
   window.addEventListener('console-offline',()=>{state=null;ownedLease=null;render();renderHardware();});
+  window.addEventListener('demonstration-profile',()=>{get('trial-clear').checked=false;render();renderHardware();});
+  window.addEventListener('demonstration-target',()=>{get('trial-clear').checked=false;renderHardware();});
+  window.addEventListener('demonstration-catalog',render);
+  window.addEventListener('wuji-language',render);
 })();

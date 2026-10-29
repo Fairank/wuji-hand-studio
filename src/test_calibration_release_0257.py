@@ -63,7 +63,7 @@ class CalibrationReleaseTests(unittest.TestCase):
             def stop(*args,**kw):
                 result=original(*args,**kw);e.service.cancelled=True;return result
             e.c.glove.stop_session_confirmed.side_effect=stop
-            with self.assertRaisesRegex(ValueError,'Switch stopped'):e.service.release_for_calibration(self.command())
+            with self.assertRaisesRegex(ValueError,'cancellation requested'):e.service.release_for_calibration(self.command())
             self.assertTrue(e.service.state['source_released']);e.c.action.assert_not_called()
 
     def test_empty_hardware_is_safe_only_when_no_hand_has_been_paired(self):

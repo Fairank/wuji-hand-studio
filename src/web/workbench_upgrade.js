@@ -140,7 +140,7 @@
  $('wb-theme').onchange=()=>{themeChoice=$('wb-theme').value;try{localStorage.setItem('wuji-workbench-theme',themeChoice);}catch{}themeApply(themeChoice)};
  matchMedia('(prefers-color-scheme: dark)').addEventListener('change',()=>themeApply(themeChoice));
  window.addEventListener('message',event=>{if(embedded&&document.referrer&&event.origin===new URL(document.referrer).origin&&event.data?.type==='wb-theme')themeApply(event.data.value)});
- const taskPages=new Set(['home','library','feedback','parameters','connection','glove','records','devices','official-viz','calibration']);
+ const taskPages=new Set(['home','library','feedback','parameters','connection','glove','virtual-glove','records','devices','official-viz','calibration']);
  window.addEventListener('message',event=>{
   if(!taskView||event.source!==window.parent||!document.referrer||event.origin!==new URL(document.referrer).origin||event.data?.task_id!==taskViewId)return;
   const value=event.data;

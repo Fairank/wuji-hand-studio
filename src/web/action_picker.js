@@ -61,6 +61,7 @@
       const exportable=selected==='text_sequence'||selected==='letter_J'||selected==='letter_Z'||item?.group==='dance';
       const link=$('performance-export');link.hidden=!exportable;link.textContent=text('下载关节轨迹 · 1000 Hz CSV','Download joint trajectory · 1000 Hz CSV');
       link.href='/api/performance?action='+encodeURIComponent(selected)+'&text='+encodeURIComponent(phrase)+'&format=csv';
+      if(root.closest('#page-library')&&window.WujiDemonstration?.profile())link.href+='&profile='+encodeURIComponent(window.WujiDemonstration.profile());
       $('phrase-strip').replaceChildren(...(selected==='text_sequence'?[...phrase].map(c=>{const s=document.createElement('span');s.textContent=c===' '?'·':c;s.dataset.space=String(c===' ');return s;}):[]));
       if(dialog.open)dialogLabels();
     }

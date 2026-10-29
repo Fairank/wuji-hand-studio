@@ -55,7 +55,7 @@
   for(const key of ['interaction','capture','records']){
    const link=nav.querySelector(`[data-page="${key}"]`);if(link)link.hidden=true;
   }
-  for(const key of ['library','devices','glove','connection']){
+  for(const key of ['library','devices','virtual-glove','glove','connection']){
    const link=nav.querySelector(`[data-page="${key}"]`);if(link)nav.insertBefore(link,nav.querySelector('.nav-advanced'));
   }
   // Keep secondary tools below every primary destination, including Settings.
@@ -82,11 +82,9 @@
   }
   modes.addEventListener('click',e=>{
    mode();
-   if(!e.target.closest('button'))return;
-   const source=controls.dataset.playback==='preview'?'preview':'feedback';
-   document.querySelector(`.view-sources [data-source="${source}"]`)?.click();
   });
-  // Mode controls select the source only through the existing display control, never a motor command.
+  // This local choice is rendered through the scoped display GET. It must
+  // never click the global feedback/preview control used by other workspaces.
   const observer=new MutationObserver(mode);observer.observe($('mode-preview'),{attributes:true,attributeFilter:['aria-pressed']});
   window.addEventListener('console-state',e=>{
    const hardware=e.detail?.hardware||{};
