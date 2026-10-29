@@ -80,3 +80,14 @@ body[data-official-viz-focus=true] .ov-root[data-view-mode=offline] #ov-message{
 @media(max-width:960px){.ov-device-field{flex-basis:220px}.ov-display-actions{margin:10px 0 14px}.ov-session{flex-basis:180px}}
 @media(max-width:600px){.ov-device-field{flex-basis:calc(100% - 110px)}html #page-connection .ov-toolbar #ov-scan{flex:0 0 auto}html #page-connection .ov-toolbar>.ov-task-choice{flex:1 1 auto}html #page-connection .ov-toolbar>:is(#ov-start,#ov-calibrate){flex:1 1 auto;min-width:112px}.ov-display-actions{justify-content:flex-start;gap:8px}.ov-session{flex-basis:100%;order:2}#ov-shared-stage.ov-stage{height:56dvh;min-height:300px}html body #page-connection #ov-shared-stage[data-task=calibration]>#hub-calibration>.hub-calibration{padding:18px}.ov-root[data-guided=true] .ov-display-actions .ov-session{flex-basis:100%}}
 @media(forced-colors:active){html #page-connection .ov-task-choice>button[aria-pressed=true]{outline:1px solid Highlight;background:Highlight;color:HighlightText}html #page-connection .ov-toolbar button.primary,html #page-connection #ov-connect-device{background:ButtonFace;color:ButtonText;border:1px solid ButtonText}}
+
+/* Medium windows reserve a complete identity row before task actions. */
+@media(min-width:701px) and (max-width:1100px){
+ html #page-connection .ov-toolbar{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px}
+ html #page-connection .ov-device-field{grid-column:1;min-width:0}
+ html #page-connection .ov-toolbar>#ov-scan{grid-column:2;grid-row:1}
+ html #page-connection .ov-toolbar>.ov-task-choice{grid-column:1;grid-row:2;justify-self:start}
+ html #page-connection .ov-toolbar>:is(#ov-start,#ov-calibrate){grid-column:2;grid-row:2}
+}
+/* Preparation remains a single comfortable column within the shared stage. */
+html body #page-connection #hub-calibration[data-guided-native=true] .hub-calibration-workspace{max-width:600px;margin-inline:auto}

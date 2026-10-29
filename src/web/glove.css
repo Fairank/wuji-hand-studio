@@ -63,3 +63,16 @@ html[data-theme=dark] #page-glove #pose-console .pose-screen{background:#1c1d20}
 html[data-reduce-motion=true] #page-glove button{transition:none}
 @media(prefers-reduced-motion:reduce){#page-glove button{transition:none!important}}
 @media(forced-colors:active){.glove-controls,.glove-display,.glove-actionbar{border:1px solid CanvasText}html #page-glove .primary{background:Highlight;color:HighlightText}}
+
+/* Shared source controls keep a readable scale across preview and real follow. */
+html #page-glove .glove-source-fields label,
+html #page-glove .glove-model-field label{font-size:12px;line-height:1.5}
+html #page-glove :is(select,input:not([type=checkbox])){min-height:38px;font-size:13px}
+html #page-glove .glove-model-field select{font-size:12px;min-height:34px}
+html #page-glove #glove-scan{font-size:12px;min-height:34px}
+html #page-glove .glove-main-actions>button{font-size:13px;min-height:38px}
+/* Narrow layouts retain the same DOM and keyboard order as the operation bar. */
+@media(max-width:700px){
+ #page-glove .glove-layout[data-action-first=true] .glove-actionbar{grid-row:1}
+ #page-glove .glove-layout[data-action-first=true] .glove-controls{grid-row:2}
+}

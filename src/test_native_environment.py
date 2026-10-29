@@ -75,7 +75,7 @@ def capture_launch(point, folder, *, rejected=False):
             stack.enter_context(patch.object(calibration, 'reservation', return_value=dict(token=TOKEN)))
             stack.enter_context(patch.object(calibration, 'atomic'))
             stack.enter_context(patch.object(calibration.threading, 'Thread', DeferredThread))
-            owner = N(lock=threading.RLock(), metadata_check=Mock(), run=dict(running=False), process=None, thread=None)
+            owner = N(lock=threading.RLock(), metadata_check=Mock(), run=dict(running=False), process=None, thread=None,reports=None)
             owner.snapshot = lambda **kwargs: dict(owner.run)
             service = calibration.NativeCalibration(owner)
             stack.enter_context(patch.object(service, 'recover'))

@@ -65,3 +65,10 @@
 @media(prefers-reduced-motion:reduce){.oc-run,.oc-run *{animation:none!important;transition:none!important}}
 html[data-reduce-motion=true] .oc-run,html[data-reduce-motion=true] .oc-run *{animation:none!important;transition:none!important}
 @media(forced-colors:active){.oc-run[data-view=error]>.oc-heading h4,.oc-run[data-view=error] #hub-calib-status,.oc-feedback dd[data-state=ready]{color:CanvasText}.oc-progress-row progress{border:1px solid CanvasText}.oc-details{border-color:CanvasText}}
+
+/* Backup recovery stays within the existing detail disclosure. */
+.oc-backup{display:flex;align-items:center;flex-wrap:wrap;gap:8px 12px;padding:14px 0;margin:0 0 14px;border-bottom:1px solid var(--wb-line);font-size:13px;line-height:1.5}
+.oc-backup>span{flex:1 1 200px;overflow-wrap:anywhere}
+.oc-backup>a{color:var(--wb-accent,#007aff);text-decoration:none}
+html body #page-connection .oc-backup>button{min-height:32px;padding:5px 10px;font-size:12px;border:1px solid var(--wb-line);border-radius:8px;background:var(--wb-card);color:var(--wb-ink)}
+.oc-backup>p{flex-basis:100%;margin:0!important;font-size:12px!important}

@@ -163,11 +163,17 @@ class NativeTests(unittest.TestCase):
             env.query.assert_not_called()
             env.spawn.assert_called_once()
 
-    def test_spawn_error_releases_only_own_reservation(self):
+    def test_spawn_error_retains_unknown_owned_job_until_explicit_cleanup(self):
         with self.environment() as env:
             env.spawn.side_effect = OSError('synthetic job assignment failure')
             with self.assertRaisesRegex(OSError, 'assignment'):
                 env.service.start_human(SN, 'left', 900)
+            marker=cli_coordination.reservation(env.folder)
+            self.assertEqual(marker['token'],env.service.token)
+            self.assertTrue(env.owner.run['running'])
+            with patch('windows_process_job.recover_viz_job',return_value=True) as recover:
+                env.service.cancel()
+                recover.assert_called_once_with(marker['job_name'],timeout=7)
             self.assertEqual(cli_coordination.reservation(env.folder), {})
             self.assertIsNone(env.service.token)
 

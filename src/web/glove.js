@@ -57,6 +57,17 @@
  const sameBinding=(a,b)=>sameSource(a,b)&&a.hand_serial===b.hand_serial;
  function sourceIdentity(){const g=state?.glove||{},h=state?.teleoperation_connection||{},model=g.model_provenance||{};return JSON.stringify([g.session_id,g.glove_serial,g.user?.user_id,g.profile,state?.device_profile?.id,model.source_run_id,model.model_sha256,model.owner_user_id,h.viewer_token,h.attempt_id,h.sdk_session]);}
  function retrySource(){const g=state?.glove||{},cleanup=g.session_cleanup||{};if(g.busy!==true||g.connection!=='error'||cleanup.retryable!==true)return null;const identity=cleanup.identity;if(identity&&(cleanup.session_id!==g.session_id||g.glove_serial&&g.glove_serial!==identity.glove_serial))return null;const sn=identity?.glove_serial||g.glove_serial,user=identity?identity.sdk_user_id:g.user?.user_id,model=identity?.profile||g.profile;if(typeof sn!=='string'||!sn||typeof user!=='string'||model!==state?.device_profile?.id)return null;return {mode:'teleoperation',serial:sn,user_id:user,profile:model};}
+ // Keep the same controls in visual and keyboard order; never recreate them.
+ const gloveLayout=page.querySelector('.glove-layout'),sourceControls=page.querySelector('.glove-controls'),operationBar=page.querySelector('.glove-actionbar');
+ function syncOperationOrder(){
+  const first=window.innerWidth<=700&&!$('glove-stop').hidden,next=first?sourceControls:null;
+  if(gloveLayout.dataset.actionFirst!==String(first))gloveLayout.dataset.actionFirst=String(first);
+  if(first?operationBar.nextElementSibling===sourceControls:operationBar===gloveLayout.lastElementChild)return;
+  const focused=document.activeElement;
+  if(typeof gloveLayout.moveBefore==='function')gloveLayout.moveBefore(operationBar,next);
+  else{gloveLayout.insertBefore(operationBar,next);if(focused&&operationBar.contains(focused)&&document.activeElement!==focused)focused.focus({preventScroll:true});}
+ }
+ window.addEventListener('resize',syncOperationOrder);
  function render(){
   const virtual=virtualMode();page.dataset.teleopMode=virtual?'virtual':'real';
   $('glove-title').textContent=t('遥操作','Teleoperation');for(const [mode,id] of [['virtual','glove-mode-virtual'],['real','glove-mode-real']]){const selected=virtual===(mode==='virtual');$(id).setAttribute('aria-selected',String(selected));$(id).tabIndex=selected?0:-1;}$('glove-mode-panel').setAttribute('aria-labelledby',virtual?'glove-mode-virtual':'glove-mode-real');
@@ -156,6 +167,7 @@
   if(profile.generation==='hand1')$('glove-parameters').textContent=`LowPass ${f(hw.lowpass_cutoff_hz)} Hz · ${f(hw.current_limit_A,2)} A · ${hw.command_timing?.requested_hz??'—'} Hz`;
   const runtime=transition.runtime;$('glove-runtime-note').textContent=runtime?.label||'';$('glove-command-status').textContent=lastMessage||transition.error||g.message||hw.reason||'';
   if(lease){if(hw.active===true)seen=true;else if(hw.active===false&&(seen||Date.now()-leaseAt>5000))releaseLease();}
+  syncOperationOrder();
   if($('glove-details').open){const tbody=$('glove-joint-rows');tbody.replaceChildren();const readings=new Map(array(feedback.latest?.joints).map(j=>[j.nid,j.position_rad]));for(let i=0;i<20;i++){const tr=document.createElement('tr'),nid=profile.generation==='hand1'?i:Math.floor(i/4)*5+i%4+1;for(const text of [String(i+1),f(online&&stream.fresh?stream.sdk_q?.[i]:null,3),f(online&&stream.fresh?stream.q?.[i]:null,3),...virtual?[]:[f(online&&hw.active?hw.applied_target_rad?.[i]:null,3),f(online&&feedback.stale===false?readings.get(nid):null,3)]]){const td=document.createElement('td');td.textContent=text;tr.append(td);}tbody.append(tr);}}
  }
  async function post(command){if(!online||!state?.csrf)throw Error(t('服务未就绪','Service not ready'));const response=await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json','X-Console-Token':state.csrf},body:JSON.stringify(command),signal:AbortSignal.timeout(20000)}),data=await response.json();if(!response.ok||data.ok===false)throw Error(data.error||t('操作未完成','Operation did not complete'));return data;}

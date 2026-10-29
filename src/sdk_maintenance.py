@@ -29,6 +29,7 @@ class SDKMaintenance:
         from cli_coordination import root_folder
         self.folder=Path(folder or root_folder());self.recoverer=recoverer;self.expected=None;self.config_digest=None
         self.checked_config_digest=None
+        self._not_started_owner=None
         self.check_generation=0
         self.lock=threading.RLock();self.thread=None;self.token=None
         self.state=dict(busy=False,phase='unchecked',release=None,proof=None,error=None,
@@ -92,6 +93,7 @@ class SDKMaintenance:
             raise ValueError('Invalid SDK maintenance owner')
         with self.lock:
             self.check_generation+=1
+            self._not_started_owner=None
             self.token=marker['token'];self.state.update(busy=False,phase='unknown',recovery_required=True,
                 compatible=False,can_update=False,last_operation='update',
                 error='组件更新退出状态未确认，请核对组件 / Component update exit is unconfirmed; verify components')
@@ -121,12 +123,18 @@ class SDKMaintenance:
                 self.idle();config=self.config()
                 pending=marker.get('stage')=='pending'
                 if pending:
-                    if not _owner_exited(marker):raise ValueError('Original maintenance process exit is unconfirmed')
+                    # Only this failed start can prove that its live local
+                    # owner never dispatched a worker. A restored record or a
+                    # changed marker still needs the original process to exit.
+                    if self._not_started_owner is not None and marker!=self._not_started_owner:
+                        raise ValueError('SDK maintenance start ownership changed')
+                    known_not_started=self._not_started_owner is not None
+                    if not known_not_started and not _owner_exited(marker):raise ValueError('Original maintenance process exit is unconfirmed')
                 elif not self.expected or self._config_digest(config)!=self.config_digest:
                     raise ValueError('Controller configuration changed; restore its original configuration before verification')
             result=dict(ok=True) if pending else (self.recoverer or recover_owned)(config,self.expected,operation_token=self.token)
             if not isinstance(result,dict) or result.get('ok') is not True:raise ValueError('SDK maintenance exit remains unconfirmed')
-            self.release(self.token);self.token=None
+            self.release(self.token);self.token=None;self._not_started_owner=None
             proof=result.get('sdk_proof')
             with self.lock:self.state.update(busy=False,phase='unchecked',recovery_required=False,error=None,proof=proof,compatible=False,can_update=False)
         except Exception as error:
@@ -144,6 +152,7 @@ class SDKMaintenance:
             self.check_generation+=1
             generation=self.check_generation
             self.state.update(busy=True,phase='checking' if operation=='check' else 'updating',error=None,last_operation=operation)
+        thread=None
         try:
             # A check imports the selected interpreter and reads release metadata.
             # It neither owns nor opens a device, and must not ask users to close
@@ -151,11 +160,41 @@ class SDKMaintenance:
             if operation=='update':self.token=self.acquire('sdk_update')
             target=self._check_work if operation=='check' else self._work
             arguments=(generation,) if operation=='check' else (operation,)
-            self.thread=threading.Thread(target=target,args=arguments,name='Official SDK maintenance',daemon=True)
-            self.thread.start()
+            thread=threading.Thread(target=target,args=arguments,name='Official SDK maintenance',daemon=True)
+            self.thread=thread
+            thread.start()
         except BaseException as error:
-            if operation=='update' and self.token:self.release(self.token);self.token=None
-            with self.lock:self.state.update(busy=False,phase='error',compatible=False,can_update=False,error=str(error)[:900])
+            from firmware_service import FirmwareReservationHeld
+            held=operation=='update' and isinstance(error,FirmwareReservationHeld)
+            not_started=held or thread is None
+            if thread is not None:
+                try:not_started=thread.ident is None and not thread.is_alive()
+                except (AttributeError,RuntimeError):not_started=False
+            uncertain=False;detail=str(error)
+            if held:
+                # acquire() reserved this token but could not release it after
+                # refusing idle. The assignment above never returned its token.
+                detail='组件更新准备占用释放未确认，请核对组件 / Component update preparation release is unconfirmed; verify components'
+                error.args=(detail,)
+                self.token=error.token;uncertain=True
+            elif operation=='update' and self.token:
+                if not not_started:
+                    uncertain=True;detail+='; SDK maintenance worker start is unconfirmed'
+                else:
+                    try:self.release(self.token);self.token=None
+                    except Exception as release_error:
+                        uncertain=True;detail+='; SDK maintenance release is unconfirmed: '+str(release_error)
+            if uncertain and not_started:
+                from cli_coordination import gate,reservation
+                try:
+                    with gate(self.folder):marker=reservation(self.folder)
+                    if (marker.get('kind')=='sdk_update' and marker.get('token')==self.token
+                            and marker.get('stage')=='pending' and marker.get('pid')==os.getpid()
+                            and isinstance(marker.get('start'),str) and marker['start']):
+                        self._not_started_owner=copy.deepcopy(marker)
+                except (OSError,ValueError):pass
+            with self.lock:self.state.update(busy=False,phase='unknown' if uncertain else 'error',
+                compatible=False,can_update=False,recovery_required=uncertain,error=detail[:900])
             raise
         return self.snapshot()
 

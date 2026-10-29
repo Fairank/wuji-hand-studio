@@ -286,6 +286,21 @@ class CalibrationCLI:
         if not exists:raise ValueError('未找到佩戴者 / Unknown SDK user')
         return validate_profile(cli_json(config,'user','show',profile),profile,side,replace)
 
+    def restore_backup(self,backup_id,expected_sha256):
+        if not isinstance(expected_sha256,str) or not re.fullmatch('[0-9a-f]{64}',expected_sha256):
+            raise ValueError('Invalid calibration backup digest')
+        from cli_coordination import gate
+        with gate():
+            with self.lock:
+                if self.run.get('running'):raise ValueError('Finish the current official session before restoring')
+            self.metadata_check()
+            from official_device_discovery import use_native
+            if not use_native(load_config()):raise ValueError('Profile restore is available through the native official CLI')
+            from native_calibration import NativeCalibration
+            native=NativeCalibration(self)
+            with self.lock:self.native=native
+            return native.start_restore(backup_id,expected_sha256)
+
     def start(self, side, serial, replace=False, timeout_s=900, *, interface='guided', connected=None, profile=None, create_profile=False, cancel_check=None):
         config=load_config()
         from official_device_discovery import use_native

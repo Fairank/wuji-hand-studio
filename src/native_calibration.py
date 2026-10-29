@@ -45,8 +45,9 @@ def worker_main(arguments):
     try:
         if len(arguments) not in (4,7):raise ValueError('Invalid internal calibration request')
         token,serial,expected_side,timeout=arguments[:4]
-        guided=len(arguments)==7
-        user=arguments[5] if guided else None
+        restoring=len(arguments)==7 and arguments[4]=='restore'
+        guided=len(arguments)==7 and not restoring
+        user=arguments[5] if len(arguments)==7 else None
         replace=guided and arguments[6]=='replace'
         if guided and (arguments[4]!='guided' or arguments[6] not in ('replace','keep')):
             raise ValueError('Invalid internal guided request')
@@ -63,18 +64,26 @@ def worker_main(arguments):
                     or identity(marker.get('pid'))!=marker.get('start') or marker.get('serial')!=serial
                     or marker.get('side')!=(None if expected_side=='auto' else expected_side)):
                 raise ValueError('Calibration ownership changed before capture')
-            if guided:
+            if restoring:
+                from calibration_backups import CalibrationBackups
+                backup_id=arguments[6]
+                if marker.get('interface')!='restore' or marker.get('user')!=user or marker.get('backup_id')!=backup_id:
+                    raise ValueError('Profile restore ownership changed')
+                backup,archive=CalibrationBackups().verify_current_owner(backup_id,marker.get('backup_sha256'))
+                if backup['profile']!=user or backup['serial']!=serial or backup['side']!=expected_side:
+                    raise ValueError('Profile restore backup identity differs')
+            elif guided:
                 from calibration_guided import validate_profile
                 from calibration_identity import read_current_sdk_user,require_sdk_user
                 if marker.get('interface')!='guided' or marker.get('user')!=user or marker.get('replace') is not replace:
                     raise ValueError('Guided calibration ownership changed')
                 validate_profile(json_command('user','show'),user,expected_side,replace)
                 require_sdk_user(read_current_sdk_user(user),marker.get('sdk_user'),user)
-            elif marker.get('interface')=='guided':raise ValueError('Guided worker cannot start an interactive terminal')
+            elif marker.get('interface') in ('guided','restore'):raise ValueError('Owned worker mode cannot become an unrelated interactive terminal')
             # The official skill specifies the exact top-level typed value.
             # Missing, numeric or unknown values do not establish handedness.
-            hand=json_command('get','hand_side','--sn',serial)
-            side=hand.get('value') if isinstance(hand,dict) else None
+            hand={} if restoring else json_command('get','hand_side','--sn',serial)
+            side=expected_side if restoring else hand.get('value') if isinstance(hand,dict) else None
             if side not in ('left','right') or expected_side!='auto' and side!=expected_side:
                 raise ValueError('Selected glove hand side could not be verified / 手套左右手核对失败')
             device=hand.get('device')
@@ -85,9 +94,10 @@ def worker_main(arguments):
             if component['version']!=marker.get('cli_version'):raise ValueError('Official CLI changed before capture')
         if guided:from native_jsonl_worker import run
         else:from native_terminal_worker import run
-        print(json.dumps(dict(type='ready',source='official_jsonl_native' if guided else 'official_tty',serial=serial,side=side)),flush=True)
+        print(json.dumps(dict(type='ready',source='official_user_import_tty' if restoring else 'official_jsonl_native' if guided else 'official_tty',serial=serial,side=side)),flush=True)
         # Human mode owns its original user/overwrite prompts, pose art and result.
         # A single exact SN selector is used; side is independently verified above.
+        if restoring:return run([component['binary'],'user','import',str(archive)])
         return run([component['binary'],*(['--jsonl'] if guided else []),'calib','hand-model','--sn',serial,'--timeout-s',timeout])
     except Exception as error:
         print(json.dumps(dict(type='error',message=str(error)[:700])),flush=True)
@@ -113,6 +123,7 @@ class NativeCalibration:
         self.frames=deque();self.sequence=0;self.size=0;self.cancel_requested=False
         self.finished=threading.Event();self.cancel_timer=False;self.forced_stop=False
         self.launching=False
+        self.failed_start_run=None;self.spawn_attempted=False
 
     def start_human(self,serial,expected_side=None,timeout=900,*,cancel_check=None):
         """The original Human TTY owns user selection and overwrite prompts."""
@@ -122,12 +133,37 @@ class NativeCalibration:
         from calibration_guided import validate_profile
         from calibration_identity import read_current_sdk_user
         from native_cli import json_command
-        validate_profile(json_command('user','show'),user,side,replace)
+        if cancel_check is not None:
+            original_cancel_check=cancel_check
+            def cancel_check():
+                try:original_cancel_check()
+                except BaseException:
+                    self.cancel_requested=True
+                    raise
+        profile=validate_profile(json_command('user','show'),user,side,replace)
         sdk_user=read_current_sdk_user(user)
-        if cancel_check is not None:cancel_check()
-        return self._start(serial,side,timeout,user=user,replace=replace,sdk_user=sdk_user,cancel_check=cancel_check)
+        run_id=uuid.uuid4().hex;backup=None
+        if replace and profile[side+'_hand']['calibrated'] is True:
+            from calibration_backups import CalibrationBackups
+            from native_cli import prepare
+            backup=CalibrationBackups().create(user,side,serial,sdk_user,run_id,
+                cli_version=prepare(strict=True)['version'],cancel_check=cancel_check)
+        try:
+            if cancel_check is not None:cancel_check()
+            return self._start(serial,side,timeout,user=user,replace=replace,sdk_user=sdk_user,cancel_check=cancel_check,run_id=run_id,backup=backup)
+        except BaseException as error:
+            if backup and self.owner.run.get('id')!=run_id:
+                self._start_failure(error,run_id,serial,side,user,sdk_user,backup,False,False)
+            raise
 
-    def _start(self,serial,expected_side,timeout,user=None,replace=False,sdk_user=None,cancel_check=None):
+    def start_restore(self,backup_id,expected_sha256,timeout=900):
+        from calibration_backups import CalibrationBackups
+        value,_=CalibrationBackups().verify_current_owner(backup_id,expected_sha256)
+        return self._start(value['serial'],value['side'],timeout,user=value['profile'],sdk_user=value['sdk_user'],
+            backup=CalibrationBackups.summary(value),restoring=True)
+
+    def _start(self,serial,expected_side,timeout,user=None,replace=False,sdk_user=None,cancel_check=None,run_id=None,backup=None,restoring=False):
+        run_id=run_id or uuid.uuid4().hex
         if (not isinstance(serial,str) or not re.fullmatch('[A-Za-z0-9][A-Za-z0-9_-]{0,79}',serial)
                 or expected_side not in (None,'left','right') or type(timeout) is not int or not 60<=timeout<=1800):
             raise ValueError('Invalid selected glove or human terminal options')
@@ -141,11 +177,14 @@ class NativeCalibration:
             if cancel_check is not None:cancel_check()
             self.token=reserve('calibration',self.folder)
             with owner.lock:self.launching=True
+            spawn_attempted=False
             try:
                 marker=reservation(self.folder)
                 marker.update(backend='windows_native',cli_version=component['version'],
-                    job_name='Local\\HandWorkbench-OfficialCalibration-'+self.token,serial=serial,side=expected_side)
-                if user is not None:
+                    job_name='Local\\HandWorkbench-OfficialCalibration-'+self.token,serial=serial,side=expected_side,run_id=run_id,launch_stage='reserved')
+                if restoring:
+                    marker.update(interface='restore',user=user,sdk_user=sdk_user,backup_id=backup['id'],backup_sha256=backup['sha256'])
+                elif user is not None:
                     from calibration_identity import sdk_user_identity
                     sdk_user=sdk_user_identity(sdk_user,user)
                     marker.update(interface='guided',user=user,replace=replace,sdk_user=sdk_user)
@@ -153,34 +192,111 @@ class NativeCalibration:
                 command=[sys.executable]
                 if not getattr(sys,'frozen',False):command.append(str(Path(__file__).with_name('desktop.py')))
                 command.extend(['--native-calibration-worker',self.token,serial,expected_side or 'auto',str(timeout)])
-                if user is not None:command.extend(['guided',user,'replace' if replace else 'keep'])
+                if restoring:command.extend(['restore',user,backup['id']])
+                elif user is not None:command.extend(['guided',user,'replace' if replace else 'keep'])
                 if cancel_check is not None:cancel_check()
                 if self.cancel_requested:raise ValueError('Calibration startup was cancelled')
                 options={}
                 if user is not None and sys.platform=='win32':
                     startup=subprocess.STARTUPINFO();startup.dwFlags|=subprocess.STARTF_USESHOWWINDOW;startup.wShowWindow=0
                     options['startupinfo']=startup
+                environment=official_cli_environment()
+                marker['launch_stage']='starting';atomic(self.folder/'session.json',marker);spawn_attempted=True
                 self.job=OwnedProcess(command,job_name=marker['job_name'],stdin=subprocess.PIPE,
                     stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,encoding='utf-8',errors='strict',bufsize=1,
-                    env=official_cli_environment(),**options)
-            except BaseException:
-                with owner.lock:self.launching=False
-                release(self.token,self.folder);self.token=None;raise
+                    env=environment,**options)
+            except BaseException as error:
+                self._start_failure(error,run_id,serial,expected_side,user,sdk_user,backup,spawn_attempted,restoring)
+                raise
             with owner.lock:
                 owner.process=self.job.process
-                owner.run=dict(running=True,status='cancelling' if self.cancel_requested else 'starting',id=uuid.uuid4().hex,user=user,serial=serial,side=None,
+                owner.run=dict(running=True,status='cancelling' if self.cancel_requested else 'starting',id=run_id,user=user,serial=serial,side=None,
                     expected_side=expected_side,
                     started=time.time(),event=None,result=None,error=None,exit_code=None,step=None,progress=None,
-                    source='official_jsonl_native' if user else 'official_tty',terminal=user is None,
-                    interface='guided' if user else 'terminal',sdk_user=copy.deepcopy(sdk_user),
+                    source='official_user_import_tty' if restoring else 'official_jsonl_native' if user else 'official_tty',terminal=restoring or user is None,
+                    interface='restore' if restoring else 'guided' if user else 'terminal',sdk_user=copy.deepcopy(sdk_user),backup=copy.deepcopy(backup),
                     phase='preflight',event_count=0,captured_poses=[],pose_index=None,cli_version=component['version'],
                     cli_binary_sha256=component.get('binary_sha256'),cli_archive_sha256=component.get('archive_sha256'))
-                owner.thread=threading.Thread(target=self._collect,name='Official calibration terminal',daemon=True)
                 self.launching=False
-            owner.thread.start()
+            try:
+                owner.thread=threading.Thread(target=self._collect,name='Official calibration terminal',daemon=True)
+                owner.thread.start()
+            except BaseException as error:
+                self._start_failure(error,run_id,serial,expected_side,user,sdk_user,backup,True,restoring)
+                raise
             if self.cancel_requested:
                 try:self._send(dict(type='cancel'))
                 except (OSError,ValueError):pass
+        return owner.snapshot(refresh=False)
+
+    def _start_failure(self,error,run_id,serial,side,user,sdk_user,backup,spawn_attempted,restoring):
+        """Never abandon a possibly running private Job or a retained lease."""
+        owner=self.owner;self.failed_start_run=run_id;self.spawn_attempted=spawn_attempted
+        clean=not spawn_attempted;released=self.token is None;cleanup_error=None
+        if self.job is not None:
+            try:clean=self.job.close(timeout=7) is True
+            except Exception:clean=False
+        if clean and self.token is not None:
+            try:
+                marker=reservation(self.folder)
+                if marker and (marker.get('kind')!='calibration' or marker.get('token')!=self.token or marker.get('run_id') not in (None,run_id)):
+                    raise ValueError('Calibration cleanup owner changed')
+                release(self.token,self.folder)
+                if reservation(self.folder):raise ValueError('Calibration reservation remains unconfirmed')
+                self.token=None;released=True
+            except Exception as failure:cleanup_error=str(failure)[:300]
+        if not clean or not released:
+            cleanup_error='启动未完成，进程或占用待结束核对 / Startup did not complete; process or reservation cleanup is unconfirmed'+(': '+cleanup_error if cleanup_error else '')
+        with owner.lock:
+            self.launching=False
+            prior=owner.run if owner.run.get('id')==run_id else {}
+            cancelled=clean and released and self.cancel_requested
+            owner.run=dict(prior,id=run_id,user=user,serial=serial,side=None,expected_side=side,
+                source='official_user_import_tty' if restoring else 'official_jsonl_native' if user else 'official_tty',
+                terminal=restoring or user is None,interface='restore' if restoring else 'guided' if user else 'terminal',
+                sdk_user=copy.deepcopy(sdk_user),backup=copy.deepcopy(backup),status='cancelled' if cancelled else 'error',running=not clean,
+                error=None if cancelled else str(error)[:700],startup_error=str(error)[:700],cancel_reason=str(error)[:700] if cancelled else None,
+                cleanup_confirmed=clean and released,cleanup_error=cleanup_error,
+                result=None,event=None,exit_code=None,event_count=0,step=None,progress=None,ended=time.time())
+            owner.process=None if clean else getattr(self.job,'process',None)
+            record=copy.deepcopy(owner.run)
+        if clean:self.finished.set()
+        if owner.reports:
+            try:
+                owner.reports.mkdir(parents=True,exist_ok=True)
+                (owner.reports/(run_id+'.json')).write_text(json.dumps(record,ensure_ascii=False,indent=2),encoding='utf-8')
+            except OSError:pass
+
+    def _cleanup_failed_start(self):
+        """Explicit retry only; recover this private Job if construction was uncertain."""
+        owner=self.owner
+        with owner.lock:token=self.token;run_id=owner.run.get('id');job=self.job
+        if not token or self.failed_start_run!=run_id:raise ValueError('Calibration startup cleanup owner changed')
+        with gate(self.folder):
+            marker=reservation(self.folder);expected='Local\\HandWorkbench-OfficialCalibration-'+token
+            if (marker and (marker.get('kind')!='calibration' or marker.get('token')!=token
+                    or marker.get('run_id') not in (None,run_id))):
+                raise ValueError('Calibration startup cleanup owner changed')
+            if self.spawn_attempted and job is None and (not marker or marker.get('job_name')!=expected):
+                raise ValueError('Calibration startup Job ownership is unverified')
+        if job is not None:
+            if job.close(timeout=7) is not True:raise ValueError('Calibration startup process cleanup remains unconfirmed')
+        elif self.spawn_attempted:
+            from windows_process_job import recover_viz_job
+            if recover_viz_job(expected,timeout=7) is not True:
+                raise ValueError('Calibration startup process cleanup remains unconfirmed')
+        with gate(self.folder):
+            with owner.lock:
+                if self.token!=token or owner.run.get('id')!=run_id or self.job is not job:
+                    raise ValueError('Calibration startup cleanup owner changed')
+            marker=reservation(self.folder)
+            if marker and (marker.get('kind')!='calibration' or marker.get('token')!=token):
+                raise ValueError('Calibration startup cleanup owner changed')
+            release(token,self.folder)
+            if reservation(self.folder):raise ValueError('Calibration startup reservation remains unconfirmed')
+            with owner.lock:
+                self.token=None;owner.process=None;owner.run.update(running=False,cleanup_confirmed=True,cleanup_error=None)
+            self.finished.set()
         return owner.snapshot(refresh=False)
 
     def recover(self):
@@ -235,6 +351,8 @@ class NativeCalibration:
 
     def cancel(self):
         owner=self.owner
+        if not self.launching and self.token and self.failed_start_run==owner.run.get('id'):
+            return self._cleanup_failed_start()
         # Never wait on the global gate or a Job while holding the run lock:
         # startup holds that gate and needs this lock to publish its state.
         with owner.lock:
@@ -290,6 +408,7 @@ class NativeCalibration:
         owner=self.owner;process=owner.process;child_exit=None;transport_error=None
         token=self.token;job=self.job;run_id=owner.run.get('id');serial=owner.run.get('serial')
         guided=owner.run.get('source')=='official_jsonl_native';ready=False;exit_seen=False
+        restoring=owner.run.get('source')=='official_user_import_tty' and owner.run.get('interface')=='restore'
         pending_transport=None
         from calibration_guided import OfficialEvents
         decoder=OfficialEvents(owner.run['serial'],owner.run.get('expected_side'),owner.run.get('user'),owner.run.get('sdk_user')) if guided else None
@@ -313,8 +432,9 @@ class NativeCalibration:
             try:
                 for _ in process.stderr:pass
             except (OSError,ValueError):pass
-        reader=threading.Thread(target=drain,daemon=True);reader.start()
+        reader=None;reader_started=False
         try:
+            reader=threading.Thread(target=drain,daemon=True);reader.start();reader_started=True
             for line in process.stdout:
                 pending_transport=line
                 if len(line)>128*1024:raise ValueError('Terminal transport record exceeds its limit')
@@ -359,7 +479,9 @@ class NativeCalibration:
         finally:
             try:clean=job.close(timeout=7)
             except Exception:clean=False
-            reader.join(timeout=1)
+            if reader_started:
+                try:reader.join(timeout=1)
+                except (RuntimeError,OSError):pass
             model_values={}
             with owner.lock:
                 status='error' if transport_error or not clean or self.forced_stop else 'cancelled' if child_exit==9 else 'stopped' if self.cancel_requested else 'session_ended' if child_exit==0 else 'error'
@@ -374,6 +496,15 @@ class NativeCalibration:
                         status='error'
                         transport_error='官方流程已结束，但保存的手型无法核对 / Saved hand model could not be verified after calibration: '+str(error)[:350]
                         append_output('\n[Saved model verification failed] '+transport_error+'\n')
+            if restoring and clean and ready and status=='session_ended':
+                try:
+                    from calibration_backups import CalibrationBackups
+                    backup=owner.run.get('backup') or {}
+                    verified=CalibrationBackups().verify_restored(backup.get('id'),backup.get('sha256'))
+                    model_values.update(restore_verified=verified,restore_error=None if verified else '官方流程已结束，SDK档案内容尚未与备份完整匹配 / Official import ended; SDK contents do not yet exactly match the backup')
+                except Exception as error:
+                    model_values.update(restore_verified=False,restore_error=str(error)[:600])
+                status='restore_verified' if model_values.get('restore_verified') else 'restore_unconfirmed'
             released=False;cleanup_error=None
             if clean:
                 try:
@@ -397,6 +528,7 @@ class NativeCalibration:
                 owner.run.update(running=not clean,status='error' if cleanup_error else status,exit_code=child_exit,ended=time.time(),
                     error=transport_error or owner.run.get('error') or cleanup_error or (None if clean and status!='error' else 'Official CLI did not confirm a complete calibration result; inspect details'),
                     cleanup_confirmed=clean and released,**model_values)
+                if restoring and (not clean or not released):owner.run['restore_verified']=False
                 if cleanup_error:owner.run['cleanup_error']=cleanup_error
                 owner.process=None if clean else process;owner.cache=None
                 report=copy.deepcopy(owner.run)

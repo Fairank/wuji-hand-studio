@@ -3,6 +3,7 @@ import collections
 import base64
 import os
 import copy
+import hashlib
 import errno
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -184,7 +185,7 @@ class Controller:
         # No discovery, user refresh or SDK access in this read-only view.
         with self.calibration.lock:
             run=copy.deepcopy(self.calibration.run)
-        return dict(run=run,cleanup_required=(run.get('source') in ('official_tty','official_jsonl_native')
+        return dict(run=run,cleanup_required=(run.get('source') in ('official_tty','official_jsonl_native','official_user_import_tty')
             and run.get('running') is False and run.get('id') is not None and run.get('cleanup_confirmed') is not True))
 
     def _continuation_idle(self):
@@ -419,7 +420,7 @@ class Controller:
             result['group']=self.group.snapshot()
             with self.calibration.lock:
                 result['calibration']={k:self.calibration.run.get(k) for k in ('running','status','side','user','id','serial','source','phase','cleanup_confirmed','interface')}
-                result['calibration']['cleanup_required']=(self.calibration.run.get('source') in ('official_tty','official_jsonl_native')
+                result['calibration']['cleanup_required']=(self.calibration.run.get('source') in ('official_tty','official_jsonl_native','official_user_import_tty')
                     and self.calibration.run.get('running') is False and self.calibration.run.get('id') is not None
                     and self.calibration.run.get('cleanup_confirmed') is not True)
             result['calibration_connection']=self.calibration_handover.snapshot()
@@ -772,13 +773,16 @@ class Controller:
         if name=='calibration_terminal_input':
             if self.calibration.native is None:raise ValueError('No official terminal is active')
             return self.calibration.native.input(command)
-        if name in {'calibration_profile_create','calibration_profile_switch','calibration_start'}:
+        if name in {'calibration_profile_create','calibration_profile_switch','calibration_start','calibration_backup_restore'}:
             if self.program.snapshot()['active'] or self.glove.busy or self.state['connection']!='disconnected' or self.state['hardware'].get('active') is not False or self.doctor.snapshot()['running']:
                 raise ValueError('End glove, hand and diagnostic sessions before calibration / 标定前请结束手套、灵巧手和诊断会话')
             if name=='calibration_profile_create':
                 return dict(calibration=self.calibration.profile('create',command.get('profile')))
             if name=='calibration_profile_switch':
                 return dict(calibration=self.calibration.profile('switch',command.get('profile')))
+            if name=='calibration_backup_restore':
+                if set(command)!={'name','backup_id','expected_sha256'}:raise ValueError('Invalid calibration backup restore request')
+                return dict(calibration=self.calibration.restore_backup(command['backup_id'],command['expected_sha256']))
             return dict(calibration=self.calibration.start(command.get('side'),command.get('serial'),command.get('replace',False)))
         if name=='retarget_context':
             return dict(mapping=self.retarget.context(self.state['device_profile']))
@@ -1490,6 +1494,16 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(200,result if url.path.endswith('/context') else result['settings'])
         if url.path == '/api/calibration':
             return self.reply(200,self.server.controller.calibration.snapshot(refresh=parse_qs(url.query).get('refresh')==['1']))
+        if url.path == '/api/calibration-backup':
+            try:
+                from calibration_backups import CalibrationBackups
+                query=parse_qs(url.query)
+                if set(query)!={'backup_id'} or len(query['backup_id'])!=1:raise ValueError('Invalid calibration backup request')
+                record,path=CalibrationBackups().load(query['backup_id'][0])
+                body=path.read_bytes()
+                if hashlib.sha256(body).hexdigest()!=record['sha256']:raise ValueError('Calibration backup changed while reading')
+                return self.reply(200,body,mime='application/zip',filename='calibration-backup-'+record['id']+'.zip')
+            except (ValueError,OSError,TypeError,KeyError):return self.reply(404,dict(error='Calibration backup is unavailable or unverified'))
         if url.path == '/api/workbench-update':
             return self.reply(200,self.server.updates.snapshot())
         if url.path == '/api/calibration-terminal':
