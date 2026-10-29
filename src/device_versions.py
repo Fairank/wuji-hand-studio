@@ -131,6 +131,28 @@ def observe_official_check_failure(text, expected_sn, expected_type):
                 latest=None, status='failed', error=error, catalog_available=False)
 
 
+def parse_official_resource_json(text, expected_path):
+    """Strict string-valued Glove resource response; never accepts a catalog."""
+    if type(text) is not str or len(text) > 4096 or expected_path not in ('serial_number', 'firmware_version'):
+        return None
+    def unique(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:raise ValueError('Duplicate resource field')
+            result[key] = value
+        return result
+    def invalid(value):raise ValueError('Non-finite resource field')
+    try:value = json.loads(text, object_pairs_hook=unique, parse_constant=invalid)
+    except (ValueError, TypeError, RecursionError):return None
+    if type(value) is not dict or set(value) != {'path', 'value'} or value['path'] != expected_path:
+        return None
+    result = value['value']
+    if not _plain(result, 128):return None
+    if expected_path == 'serial_number':
+        return result if re.fullmatch(r'WG1[JK][A-Z0-9]{12}', result) else None
+    return result if _VERSION.fullmatch(result) else None
+
+
 def parse_official_check_report(text, expected_sn, expected_type=None):
     """Read the verified JSON or the publicly documented human table only."""
     return (parse_official_check_json(text, expected_sn, expected_type)

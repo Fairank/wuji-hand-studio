@@ -48,6 +48,7 @@ def process_state(pid, expected_start):
         code=w.DWORD()
         if not kernel.GetExitCodeProcess(handle,ctypes.byref(code)):return 'unknown'
         if code.value!=259:return 'dead'
+        if not isinstance(expected_start, str) or not expected_start:return 'unknown'
         values=[w.FILETIME() for _ in range(4)]
         if not kernel.GetProcessTimes(handle,*map(ctypes.byref,values)):return 'unknown'
         actual=str((values[0].dwHighDateTime<<32)|values[0].dwLowDateTime)
@@ -87,6 +88,93 @@ class FirmwareHost:
         self.query_token = None
         self.query_serial = None
         self.query_exit_confirmed = False
+        self.package_validator = None
+        self.package_releaser = None
+        self._package_claim = None
+
+    def validate_package_claim(self, archive):
+        """Pin a private verified ZIP to this exact firmware reservation."""
+        from firmware_service import FirmwareNotStarted, FirmwareWriterUnconfirmed
+        no_writer = False
+        try:
+            if not callable(self.package_validator):raise ValueError('Official package validation is unavailable')
+            with gate(self.folder):
+                marker = reservation(self.folder)
+                with self.lock:
+                    no_writer = (marker.get('writer_stage') == 'reserved' and 'child_pid' not in marker
+                        and 'child_start' not in marker and self.process is None and self.query_process is None
+                        and self.query_job is None and self.query_cancel is None)
+                if not no_writer:raise FirmwareWriterUnconfirmed('Official writer launch or exit is already unconfirmed')
+                if (type(archive) is not dict or marker.get('kind') != 'firmware'
+                        or marker.get('serial') != archive.get('serial') or not marker.get('token')
+                        or archive.get('reservation_token') != marker['token']):
+                    raise ValueError('Official package firmware ownership changed')
+                verified = self.package_validator(archive)
+                if verified != archive:raise ValueError('Official package changed')
+                with self.lock:
+                    previous = self._package_claim
+                    if (previous and previous['reservation_token'] == marker['token']
+                            and previous['archive'] != archive):
+                        raise ValueError('Official package target changed')
+                    self._package_claim = dict(reservation_token=marker['token'], archive=copy.deepcopy(archive))
+                marker.update(package_mode='official_file_confirmation', package_version=archive['version'], package_sha256=archive['sha256'])
+                atomic(self.folder/'session.json', marker)
+                return copy.deepcopy(verified)
+        except Exception as error:
+            if no_writer:raise FirmwareNotStarted(str(error)) from error
+            raise
+
+    def file_readback(self, serial, *, reservation_token):
+        """Read exact Glove identity/version after a confirmed writer exit."""
+        from device_versions import parse_official_resource_json
+        if not isinstance(serial, str) or not re.fullmatch(r'WG1[JK][A-Z0-9]{12}', serial):
+            raise ValueError('Official package readback supports Glove 1 only')
+        with gate(self.folder):
+            marker = reservation(self.folder)
+            if (marker.get('kind') != 'firmware' or marker.get('token') != reservation_token
+                    or marker.get('serial') != serial or marker.get('command') != 'official-interactive-file-upgrade'):
+                raise ValueError('Official package readback ownership changed')
+            with self.lock:
+                if self.process is not None and self.process.isalive():raise ValueError('Official writer is still running')
+                known_exit = (self.session_token == reservation_token and self.process is None
+                    and isinstance(self.session, dict) and self.session.get('serial') == serial
+                    and self.session.get('running') is False and self.session.get('status') == 'finished'
+                    and type(self.session.get('exitstatus')) is int)
+            pid, start = marker.get('child_pid'), marker.get('child_start')
+            if not known_exit and (type(pid) is not int or pid <= 0 or process_state(pid, start) != 'dead'):
+                raise ValueError('Original official writer exit is unconfirmed')
+            before = self.cli_identity()
+            reports = {}
+            for path in ('serial_number', 'firmware_version'):
+                component = self._component()
+                with self.lock:
+                    self.query_token, self.query_serial = reservation_token, serial
+                    self.query_exit_confirmed, self.query_automatic = False, False
+                command = [component['binary'], 'get', path, '--sn', serial, '--json']
+                if self.runner is None:
+                    response = self._background_query(command, firmware_environment(), lambda:False)
+                else:
+                    try:
+                        run = self.runner(command, stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                            encoding='utf-8', errors='replace', timeout=40, env=firmware_environment(),
+                            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+                        response = dict(exited=True, returncode=run.returncode, stdout=run.stdout, stderr=run.stderr)
+                    finally:
+                        with self.lock:self.query_exit_confirmed=True
+                if response.get('exited') is not True or type(response.get('returncode')) is not int:
+                    from firmware_service import ReadOnlyQueryUnconfirmed
+                    raise ReadOnlyQueryUnconfirmed('Official resource query exit is unconfirmed')
+                if response['returncode'] != 0:
+                    raise ValueError('Official resource read did not succeed')
+                value = parse_official_resource_json(response.get('stdout'), path)
+                if value is None or path == 'serial_number' and value != serial:
+                    raise ValueError('Official resource identity or format is unverified')
+                reports[path] = dict(value=value, report=response)
+            if self.cli_identity() != before or reservation(self.folder).get('token') != reservation_token:
+                raise ValueError('Official readback identity changed')
+            return dict(process_exited=True, identity_verified=True, sn=serial,
+                reservation_token=reservation_token, firmware_version=reports['firmware_version']['value'],
+                source='official_resource_readback', resources=reports)
 
     def _component(self):
         # Until another OS has the same verified interactive transport, do not
@@ -124,13 +212,17 @@ class FirmwareHost:
                 with self.lock:serial=self.pending_serial
                 if not serial:raise ValueError('Select the exact device before reserving firmware maintenance')
                 metadata=dict(serial=serial)
+                if kind == 'firmware':metadata['writer_stage'] = 'reserved'
             elif kind=='sdk_update':metadata=dict(stage='pending')
             # Reserve before checking other workspaces: a concurrent start
             # then sees the shared marker before it can reach a device.
             token = reserve(kind, self.folder,metadata=metadata)
             try:self.controller.official_cli.idle_check()
             except BaseException:
-                release(token, self.folder)
+                try:release(token, self.folder)
+                except Exception:
+                    from firmware_service import FirmwareReservationHeld
+                    raise FirmwareReservationHeld(token) from None
                 raise
             return token
 
@@ -139,6 +231,9 @@ class FirmwareHost:
             current=reservation(self.folder)
             if current and current.get('token')!=token:raise ValueError('Maintenance ownership changed')
             release(token, self.folder)
+            if callable(self.package_releaser):self.package_releaser(token)
+            with self.lock:
+                if self._package_claim and self._package_claim['reservation_token'] == token:self._package_claim=None
 
     def recovery_check(self, serial, *, reservation_token, read_only=False):
         """Confirm exact process exit and actual firmware readback, never retry."""
@@ -163,14 +258,22 @@ class FirmwareHost:
             if marker.get('kind')!='firmware' or marker.get('token')!=reservation_token or marker.get('serial')!=serial:
                 raise ValueError('Firmware recovery ownership changed')
             with self.lock:
+                never_started = (marker.get('writer_stage') == 'reserved' and 'child_pid' not in marker
+                    and 'child_start' not in marker and self.process is None and self.query_process is None
+                    and self.query_job is None and self.query_cancel is None)
+            if never_started:
+                return dict(no_write_started=True, process_exited=True, sn=serial, reservation_token=reservation_token)
+            with self.lock:
                 if self.session and self.session.get('running') and self.process is not None:
                     if self.process.isalive():raise ValueError('官方升级进程仍在运行 / The official update process is still running')
             pid,start=marker.get('child_pid'),marker.get('child_start')
-            if type(pid) is not int or pid<=0 or not isinstance(start,str) or not start:
-                raise ValueError('原升级进程标识未保存，暂不能自动解除维护 / The original update process identity is unavailable; maintenance cannot be cleared automatically')
-            observation=process_state(pid,start)
-            if observation!='dead':
-                raise ValueError('原升级进程尚未确认退出 / The original update process exit is not verified')
+            file_mode = marker.get('command') == 'official-interactive-file-upgrade'
+            if not file_mode:
+                if type(pid) is not int or pid<=0 or not isinstance(start,str) or not start:
+                    raise ValueError('原升级进程标识未保存，暂不能自动解除维护 / The original update process identity is unavailable; maintenance cannot be cleared automatically')
+                observation=process_state(pid,start)
+                if observation!='dead':
+                    raise ValueError('原升级进程尚未确认退出 / The original update process exit is not verified')
             # Reuse the exact-SN JSON contract captured from the pinned CLI.
             # `get` help documents a value, but does not establish an identity
             # envelope; guessing sn/device/value could strand real recovery.
@@ -185,6 +288,8 @@ class FirmwareHost:
                     if self.query_process is None or type(self.query_process.poll()) is not int:
                         raise ValueError('版本核验进程退出尚未确认 / Version-verification process exit remains unconfirmed')
                     self.query_process=None;self.query_job=None;self.query_cancel=None
+            if file_mode:
+                return self.file_readback(serial, reservation_token=reservation_token)
             report=self(['upgrade','--sn',serial,'--check','--json'])
             from device_versions import parse_official_check_json
             observed=(parse_official_check_json(report.get('stdout'),serial)
@@ -324,8 +429,21 @@ class FirmwareHost:
                 or (cancelled is not None and (not background or not callable(cancelled)))):
             raise ValueError('Unsupported official firmware command')
         serial = argv[2]
+        file_mode = interactive and len(argv) == 5 and argv[3] == '--file'
         if interactive:
-            if background or not mutating or argv != ['upgrade', '--sn', serial]:raise ValueError('Firmware confirmation must remain with the official CLI')
+            if background or not mutating or not (argv == ['upgrade', '--sn', serial] or file_mode):raise ValueError('Firmware confirmation must remain with the official CLI')
+            if file_mode:
+                from firmware_service import FirmwareNotStarted, FirmwareWriterUnconfirmed
+                with gate(self.folder), self.lock:
+                    marker, claim = reservation(self.folder), self._package_claim
+                    if (marker.get('writer_stage') != 'reserved' or 'child_pid' in marker
+                            or 'child_start' in marker or self.process is not None):
+                        raise FirmwareWriterUnconfirmed('Official writer launch or exit is already unconfirmed')
+                    if (not claim or marker.get('kind') != 'firmware' or marker.get('serial') != serial
+                            or marker.get('token') != claim['reservation_token']
+                            or claim['archive']['serial'] != serial or claim['archive']['path'] != argv[4]):
+                        raise FirmwareNotStarted('Official package is not owned by this firmware task')
+                    self.validate_package_claim(claim['archive'])
         elif mutating or argv[3:] not in (['--check', '--json'], ['--check']):
             raise ValueError('Unsupported firmware read operation')
         if not interactive:
@@ -337,6 +455,9 @@ class FirmwareHost:
         except Exception:
             if not interactive:
                 with self.lock:self.query_exit_confirmed=True
+            if file_mode:
+                from firmware_service import FirmwareNotStarted
+                raise FirmwareNotStarted('Official CLI preparation failed') from None
             raise
         command = [component['binary'], *argv]
         env = firmware_environment()
@@ -364,7 +485,20 @@ class FirmwareHost:
         with gate(self.folder):
             marker = reservation(self.folder)
             if marker.get('kind') != 'firmware':raise ValueError('Firmware ownership is unverified')
-            marker.update(serial=serial, command='official-interactive-upgrade')
+            file_mode = len(command) == 6 and command[-2] == '--file'
+            if file_mode:
+                claim = self._package_claim
+                if (marker.get('writer_stage') != 'reserved' or 'child_pid' in marker
+                        or 'child_start' in marker or self.process is not None):
+                    from firmware_service import FirmwareWriterUnconfirmed
+                    raise FirmwareWriterUnconfirmed('Official writer launch or exit is already unconfirmed')
+                if (not claim or claim['reservation_token'] != marker.get('token')
+                        or claim['archive']['serial'] != serial or claim['archive']['path'] != command[-1]):
+                    from firmware_service import FirmwareNotStarted
+                    raise FirmwareNotStarted('Official package ownership changed before spawn')
+                self.validate_package_claim(claim['archive'])
+                marker.update(package_sha256=claim['archive']['sha256'], package_version=claim['archive']['version'])
+            marker.update(serial=serial, command='official-interactive-file-upgrade' if file_mode else 'official-interactive-upgrade', writer_stage='starting')
             atomic(self.folder / 'session.json', marker)
         from native_terminal_worker import _spawn
         process = (self.spawn or _spawn)(command,env=firmware_environment() if env is None else env)
@@ -383,7 +517,7 @@ class FirmwareHost:
                 # Never interrupt a child which may already be writing.
                 raise ValueError('Firmware ownership changed after launch')
             pid=getattr(process,'pid',None)
-            current.update(child_pid=pid,child_start=identity(pid) if type(pid) is int else None)
+            current.update(child_pid=pid,child_start=identity(pid) if type(pid) is int else None, writer_stage='running')
             atomic(self.folder / 'session.json',current)
         with self.lock:
             self.session['status']='running'

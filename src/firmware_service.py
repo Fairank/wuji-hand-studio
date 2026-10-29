@@ -36,6 +36,21 @@ class ReadOnlyQueryUnconfirmed(ValueError):
     """The host retained a read-only child whose actual exit is not proven."""
 
 
+class FirmwareNotStarted(ValueError):
+    """The host proved no mutating child was started for this request."""
+
+
+class FirmwareWriterUnconfirmed(ValueError):
+    """A possible existing writer must keep its original reservation."""
+
+
+class FirmwareReservationHeld(ValueError):
+    """An acquire failure retained this exact never-started reservation."""
+    def __init__(self, token):
+        super().__init__('固件准备占用释放未确认 / Firmware preparation release is unconfirmed')
+        self.token = token
+
+
 def _text(value, limit=1024):
     return value if isinstance(value, str) and len(value) <= limit and not any(ord(c) < 32 for c in value) else None
 
@@ -120,7 +135,8 @@ class FirmwareService:
 
     def __init__(self, executor, cli_identity, idle_check, acquire, release,
                  device_provider, *, recovery_check=None, clock=time.time,
-                 preview_ttl=120, freshness_ttl=30, cancel_query=None):
+                 preview_ttl=120, freshness_ttl=30, cancel_query=None,
+                 claim_package=None, validate_package=None, file_readback=None):
         if not all(callable(value) for value in (executor, cli_identity, idle_check, acquire, release, device_provider, clock)):
             raise TypeError('Firmware host callbacks are required')
         if not _finite(preview_ttl) or not 1 <= preview_ttl <= 600:
@@ -131,10 +147,14 @@ class FirmwareService:
             raise TypeError('Invalid firmware recovery callback')
         if cancel_query is not None and not callable(cancel_query):
             raise TypeError('Invalid read-only cancellation callback')
+        if any(value is not None for value in (claim_package, validate_package, file_readback)) and not all(
+                callable(value) for value in (claim_package, validate_package, file_readback)):
+            raise TypeError('All official package callbacks are required')
         self.executor, self.cli_identity = executor, cli_identity
         self.idle_check, self.acquire, self.release = idle_check, acquire, release
         self.device_provider, self.recovery_check = device_provider, recovery_check
         self.cancel_query = cancel_query
+        self.claim_package, self.validate_package, self.file_readback = claim_package, validate_package, file_readback
         self.clock, self.preview_ttl, self.freshness_ttl = clock, float(preview_ttl), float(freshness_ttl)
         self.lock = threading.RLock()
         self.thread = None
@@ -148,6 +168,7 @@ class FirmwareService:
                           notification=None, current_version=None, target_version=None,
                           check_observation=None, catalog_error=None,
                           operation=None, automatic=False,
+                          operation_generation=0,
                           mode='official_confirmation', machine_write_supported=False)
 
     def _now(self):
@@ -208,11 +229,16 @@ class FirmwareService:
             if self.state['busy'] or self.state['locked'] or self._reservation is not None:
                 raise ValueError('固件操作尚未结束 / Firmware operation has not finished')
             self.state.update(busy=True, phase=phase, error=None, result=None, verification_report=None,
-                              events=[], finished_at=None, recovery_required=False)
+                              events=[], finished_at=None, recovery_required=False,
+                              operation_generation=self.state.get('operation_generation', 0)+1)
 
     def _reserve(self, kind='firmware'):
         self.idle_check()
-        token = self.acquire(kind)
+        try:token = self.acquire(kind)
+        except FirmwareReservationHeld as error:
+            if type(error.token) is str and 0 < len(error.token) <= 256:
+                with self.lock:self._reservation = error.token
+            raise
         if token is None or token == '':
             raise ValueError('无法锁定固件操作 / Cannot reserve firmware operation')
         with self.lock:
@@ -279,7 +305,7 @@ class FirmwareService:
             self.state.update(preview=None, check_report=None, catalog_report=None, device=None,
                               notification=None,checked_at=None,current_version=None,target_version=None,
                               check_observation=None,catalog_error=None,
-                              operation='check',automatic=notification_only)
+                              operation='check',automatic=notification_only,mode='official_confirmation')
         try:
             device, cli = self._device(sn), _identity(self.cli_identity())
             self._reserve('firmware_check')
@@ -400,6 +426,46 @@ class FirmwareService:
             return copy.deepcopy(preview['device'])
         return self._device(preview['device']['sn'])
 
+    def start_file_upgrade(self, sn, package_token, *, confirmed=False):
+        """Open the official ZIP flow; its confirmation is never auto-answered."""
+        _serial(sn)
+        if confirmed is not True or self.claim_package is None:
+            raise ValueError('请明确打开官方安装流程 / Explicitly open the official installation')
+        if not isinstance(package_token, str) or not 1 <= len(package_token) <= 256:
+            raise ValueError('Invalid official package token')
+        self._begin('preparing')
+        with self.lock:
+            self._preview = None
+            self.state.update(operation='upgrade', automatic=False, mode='official_file_confirmation',
+                device=None, preview=None, notification=None, check_report=None, catalog_report=None,
+                check_observation=None, catalog_error=None, current_version=None, target_version=None, checked_at=None)
+        try:
+            device, cli = self._device(sn), _identity(self.cli_identity())
+            if device.get('kind') != 'glove':raise ValueError('Official package mode is available for Glove 1 only')
+            with self.lock:self.state['device'] = copy.deepcopy(device)
+            self._reserve('firmware')
+            archive = self.claim_package(package_token, sn, reservation_token=self._reservation)
+            fields = {'claim_id', 'reservation_token', 'serial', 'device_type', 'version', 'sha256', 'size', 'path', 'entry_id'}
+            if (type(archive) is not dict or set(archive) != fields or archive['serial'] != sn
+                    or archive['reservation_token'] != self._reservation
+                    or archive['device_type'] != 'wuji_glove' or not _text(archive['claim_id'], 256)
+                    or type(archive['version']) is not str or re.fullmatch(r'(?:0|[1-9][0-9]{0,8})(?:\.(?:0|[1-9][0-9]{0,8})){2}', archive['version']) is None
+                    or type(archive['sha256']) is not str or re.fullmatch('[a-f0-9]{64}', archive['sha256']) is None
+                    or type(archive['size']) is not int or not 0 < archive['size'] <= 512*1024*1024
+                    or not _text(archive['path'], 4096) or not _text(archive['entry_id'], 80)):
+                raise ValueError('Invalid server-owned official package')
+            if self.validate_package(archive) != archive:raise ValueError('Official package changed')
+            preview = dict(device=copy.deepcopy(device), cli=cli, archive=copy.deepcopy(archive), checked_device=None)
+            with self.lock:
+                self.state.update(device=device, target_version=archive['version'],
+                    catalog_report=dict(source='official_package', version=archive['version'], sha256=archive['sha256']))
+            self._launch(self._upgrade, device, preview)
+        except Exception as error:
+            uncertain = isinstance(error, FirmwareWriterUnconfirmed)
+            self._finish('unknown' if uncertain else 'failed', str(error)[:800], unknown=uncertain)
+            raise
+        return self.snapshot()
+
     def start_upgrade(self, preview_token, *, confirmed=False):
         if confirmed is not True:
             raise ValueError('请主动打开官方升级流程 / Explicitly open the official upgrade flow')
@@ -412,7 +478,7 @@ class FirmwareService:
                 self._preview = None
                 raise ValueError('固件预览已过期，请重新检查 / Firmware preview expired; check again')
             self._begin('upgrading')
-            self.state.update(operation='upgrade',automatic=False)
+            self.state.update(operation='upgrade',automatic=False,mode='official_confirmation')
             # One use even when idle check subsequently refuses the action.
             self._preview = None
         try:
@@ -436,8 +502,13 @@ class FirmwareService:
             if self._preview_device(preview) != device or _identity(self.cli_identity()) != preview['cli']:
                 self._finish('failed', '设备或官方 CLI 已变化 / Device or official CLI changed')
                 return
+            archive = preview.get('archive')
+            if archive is not None and self.validate_package(archive) != archive:
+                raise ValueError('Official package changed before launch')
+            argv = ['upgrade', '--sn', device['sn']]
+            if archive is not None:argv += ['--file', archive['path']]
             attempted = True
-            value = self.executor(['upgrade', '--sn', device['sn']], mutating=True,
+            value = self.executor(argv, mutating=True,
                                   interactive=True, on_event=self._event)
             code, out, err = self._response(value)
             with self.lock:
@@ -466,11 +537,42 @@ class FirmwareService:
                 with self.lock:self.state['result']['official_error']=detail
                 self._finish('failed', (err or detail or '官方升级未完成 / Official upgrade did not complete')[:800])
                 return
-            self._verify_upgrade(device, preview)
+            if archive is not None:self._verify_file_upgrade(device, preview)
+            else:self._verify_upgrade(device, preview)
         except Exception as error:
+            if isinstance(error, FirmwareNotStarted):attempted = False
+            if isinstance(error, FirmwareWriterUnconfirmed):attempted = True
             self._finish('unknown' if attempted else 'failed',
                          '固件升级结束状态未确认，请核验设备 / Firmware completion is unconfirmed; verify the device' if attempted else str(error)[:800],
                          unknown=attempted)
+
+    def _verify_file_upgrade(self, device, preview):
+        """Read identity/version through official resources, not the catalog."""
+        with self.lock:self.state.update(phase='verifying', notification=None)
+        try:
+            if _identity(self.cli_identity()) != preview['cli']:raise ValueError('Official CLI changed')
+            observed = self.file_readback(device['sn'], reservation_token=self._reservation)
+            if _identity(self.cli_identity()) != preview['cli']:raise ValueError('Official CLI changed')
+            if (type(observed) is not dict or observed.get('process_exited') is not True
+                    or observed.get('identity_verified') is not True or observed.get('sn') != device['sn']
+                    or observed.get('reservation_token') != self._reservation
+                    or type(observed.get('firmware_version')) is not str
+                    or re.fullmatch(r'(?:0|[1-9][0-9]{0,8})(?:\.(?:0|[1-9][0-9]{0,8})){2}', observed['firmware_version']) is None):
+                raise ValueError('Official device version readback is unverified')
+            current, target = observed['firmware_version'], preview['archive']['version']
+            matched = current == target
+            with self.lock:
+                public_report = {key:copy.deepcopy(observed[key]) for key in ('source', 'sn', 'firmware_version', 'resources') if key in observed}
+                self.state.update(current_version=current, checked_at=self._now(), verification_report=public_report)
+                self.state['result'].update(sn=device['sn'], firmware_version=current, expected_version=target,
+                    version_verified=matched, source='official_resource_readback',
+                    verdict='target_version_verified' if matched else 'version_not_matched')
+            self._finish('verified' if matched else 'completed', None if matched else
+                '设备版本已读回，但未匹配本次目标 / Device version was read but does not match this target')
+        except ReadOnlyQueryUnconfirmed:
+            raise
+        except Exception as error:
+            self._finish('completed', '官方安装流程已结束，设备版本尚未核对 / Official installation ended; device version is unverified: '+str(error)[:400])
 
     def _verify_upgrade(self, device, preview):
         from device_versions import parse_official_check_report, observe_official_check_failure
@@ -539,6 +641,12 @@ class FirmwareService:
                 self._finish('checked')
                 return self.snapshot()
             result = self.recovery_check(sn, reservation_token=token)
+            if (type(result) is dict and set(result) == {'no_write_started', 'process_exited', 'sn', 'reservation_token'}
+                    and result['no_write_started'] is True and result['process_exited'] is True
+                    and result['sn'] == sn and result['reservation_token'] == token):
+                with self.lock:self.state['result'] = dict(verdict='official_write_not_started', sn=sn)
+                self._finish('completed', '官方安装尚未启动，可以重新准备 / Official installation did not start; prepare again')
+                return self.snapshot()
             if (not isinstance(result, dict) or result.get('process_exited') is not True or
                     result.get('identity_verified') is not True or result.get('sn') != sn or
                     result.get('reservation_token') != token or
@@ -558,6 +666,9 @@ class FirmwareService:
             with self.lock:
                 self.state['result'] = dict(verdict='recovery_verified', sn=sn,
                                             firmware_version=result['firmware_version'])
+                if result.get('source') == 'official_resource_readback':
+                    self.state['result']['source'] = 'official_resource_readback'
+                    verification = {key:copy.deepcopy(result[key]) for key in ('source', 'sn', 'firmware_version', 'resources') if key in result}
                 # A recovered write is a new actual observation. Do not let
                 # the preflight version or reminder masquerade as this read.
                 self.state.update(current_version=result['firmware_version'],checked_at=self._now(),
@@ -587,5 +698,12 @@ class FirmwareService:
             self._preview = None
             self.state.update(busy=False, locked=True, phase='unknown', device=dict(sn=sn),
                               preview=None, result=None, recovery_required=True,
+                              operation='upgrade',
                               error='上次固件操作结束状态待核验 / Previous firmware completion needs verification')
+            if (marker.get('command') == 'official-interactive-file-upgrade' or marker.get('package_mode') == 'official_file_confirmation'):
+                self.state['mode'] = 'official_file_confirmation'
+                if re.fullmatch(r'WG1[JK][A-Z0-9]{12}', sn):self.state['device'].update(kind='glove', generation='glove1')
+                target = marker.get('package_version')
+                if type(target) is str and re.fullmatch(r'(?:0|[1-9][0-9]{0,8})(?:\.(?:0|[1-9][0-9]{0,8})){2}', target):
+                    self.state['target_version'] = target
         return self.snapshot()

@@ -83,7 +83,8 @@ def reserve(kind, folder=None, *, metadata=None):
     if reservation(root):raise ValueError('请先结束官方可视化或组件切换 / Finish the official CLI session first')
     row=dict(kind=kind,pid=os.getpid(),start=identity(os.getpid()),token=secrets.token_hex(16),created=time.time())
     if metadata is not None:
-        if (not isinstance(metadata,dict) or set(metadata)-{'serial','stage'}
+        if (not isinstance(metadata,dict) or set(metadata)-{'serial','stage','writer_stage'}
+                or 'writer_stage' in metadata and (kind != 'firmware' or metadata['writer_stage'] != 'reserved')
                 or any(not isinstance(value,str) or not value or len(value)>100 or any(ord(c)<32 for c in value) for value in metadata.values())):
             raise ValueError('Invalid reservation metadata')
         row.update(metadata)

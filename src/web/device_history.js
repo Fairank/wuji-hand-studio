@@ -20,14 +20,16 @@
   const age=Date.now()-time,ttl=Number(inventory.ttl_s)||30;return Number.isFinite(age)&&age>=0&&age<ttl*1000?found:null;
  }
  function name(row){return (row.kind==='hand'?'Wuji Hand':'Wuji Glove')+(row.generation==='hand2'?' 2':row.generation==='hand1'||row.generation==='glove1'?' 1':'')+(row.side?' · '+(row.side==='left'?t('左','Left'):t('右','Right')):'');}
+ const catalogOnly=row=>row?.kind==='glove'&&/^WG1[JK][A-Z0-9]{12}$/.test(row.serial)&&(row.generation===null||row.generation==='glove1');
  function render(){
   setText(title,t('最近连接','Recent connections'));setText(note,storageFailed?t('本机记录暂时无法保存','Local history could not be saved'):t('仅保存在此工作台','Stored on this workbench'));
   const retained=new Set();for(const [index,row]of records.entries()){
    const identity=id(row);retained.add(identity);let card=cards.get(identity);
-   if(!card){const button=document.createElement('button');button.type='button';button.className='dh-device';const heading=document.createElement('strong'),sn=document.createElement('span'),meta=document.createElement('small');button.append(heading,sn,meta);button.onclick=()=>{const current=records.find(item=>id(item)===identity);if(current&&detected(current))window.WujiDeviceInventory?.select(current.serial);};card={button,heading,sn,meta};cards.set(identity,card);}
+   if(!card){const button=document.createElement('button');button.type='button';button.className='dh-device';const heading=document.createElement('strong'),sn=document.createElement('span'),meta=document.createElement('small');button.append(heading,sn,meta);button.onclick=()=>{const current=records.find(item=>id(item)===identity);if(current&&detected(current))window.WujiDeviceInventory?.select(current.serial);else if(catalogOnly(current))window.WujiDeviceMaintenance?.open(current.serial);};card={button,heading,sn,meta};cards.set(identity,card);}
    const present=!!detected(row),s=consoleState||{},v=s.official_viz||{},g=s.glove||{},viewerSN=serial((v.reported_device||v.device)?.sn||(v.reported_device||v.device)?.serial),sessionRetained=viewerSN===row.serial&&(v.active===true||v.reserved===true)||s.device_id===row.serial&&s.connection!=='disconnected'||g.glove_serial===row.serial&&(g.busy===true||g.connection==='receiving');
-   setText(card.heading,name(row));setText(card.sn,row.serial);setText(card.meta,present?t('本次已检测到','Detected now'):sessionRetained?t('会话保留在设备任务中','Session retained in Device tasks'):t('等待再次发现','Awaiting rediscovery'));
-   card.button.disabled=!present;card.button.title=t('本机记录时间：','Recorded locally: ')+new Date(row.recorded_at).toLocaleString(window.WujiLocale?.lang==='en'?'en-US':'zh-CN');card.button.dataset.present=String(present);if(list.children[index]!==card.button)list.insertBefore(card.button,list.children[index]||null);
+   const readonlyCatalog=!present&&catalogOnly(row);
+   setText(card.heading,name(row));setText(card.sn,row.serial);setText(card.meta,present?t('本次已检测到','Detected now'):readonlyCatalog?t('检查官方固件目录','Check official firmware catalog'):sessionRetained?t('会话保留在设备任务中','Session retained in Device tasks'):t('等待再次发现','Awaiting rediscovery'));
+   card.button.disabled=!present&&!readonlyCatalog;card.button.title=t('本机记录时间：','Recorded locally: ')+new Date(row.recorded_at).toLocaleString(window.WujiLocale?.lang==='en'?'en-US':'zh-CN');card.button.dataset.present=String(present);card.button.dataset.catalogOnly=String(readonlyCatalog);if(list.children[index]!==card.button)list.insertBefore(card.button,list.children[index]||null);
   }
   for(const [identity,card]of cards)if(!retained.has(identity)){card.button.remove();cards.delete(identity);}
   empty.hidden=records.length>0;setText(empty,t('成功接入设备后，记录会显示在这里。','Successfully connected devices appear here.'));

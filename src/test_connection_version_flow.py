@@ -18,6 +18,7 @@ class ConnectionVersionFlowTests(unittest.TestCase):
             official_cli=N(idle_check=Mock()),calibration_devices=Mock(return_value=[dict(serial=self.sn)]))
         self.service=Mock();self.service.snapshot.return_value=dict(busy=False,locked=False)
         self.server=N(controller=self.controller,firmware=self.service,firmware_transport=N(folder=self.viewer.folder),firmware_preview_idle=Mock())
+        self.server.firmware_catalog=N(snapshot=Mock(return_value=dict(busy=False,phase='idle')))
 
     def invoke(self):return ConsoleHTTPServer.firmware_check_from_viewer(self.server,self.sn,self.token)
 
@@ -91,6 +92,12 @@ class ConnectionVersionFlowTests(unittest.TestCase):
         with patch('bridge_config.load_config',return_value={}),patch('official_device_discovery.use_native',return_value=True),patch('native_cli.resolve'),patch('console_server.time.time',return_value=110.):
             ConsoleHTTPServer.check_connect_version(self.server,self.sn)
         self.service.start_check.assert_not_called()
+
+    def test_glove_connection_does_not_open_an_extra_firmware_or_catalog_query(self):
+        ConsoleHTTPServer.check_connect_version(self.server, 'WG1J000000000001')
+        self.service.start_check.assert_not_called()
+        self.server.firmware_catalog.snapshot.assert_not_called()
+        self.controller.calibration_devices.assert_not_called()
 
     def test_confirmed_read_timeout_yields_to_connection_without_an_update(self):
         self.service.snapshot.return_value=dict(busy=True,locked=False)

@@ -349,6 +349,10 @@ class Controller:
             marker=reservation()
             result['maintenance']=dict(busy=marker.get('kind') in {'firmware_check','firmware','sdk_check','sdk_update','unknown'},
                 kind=marker.get('kind'),serial=marker.get('serial'))
+            catalog_observer = getattr(self, 'firmware_catalog_observer', None)
+            if catalog_observer is not None:
+                catalog_state = catalog_observer()
+                result['maintenance']['catalog_busy'] = catalog_state.get('busy') is True
             # The user explicitly requested a live visual preview before full
             # calibration. This observed node-group profile is provisional and
             # display-only; it must never authorize hardware command mapping.
@@ -1674,6 +1678,46 @@ class ConsoleHTTPServer(ThreadingHTTPServer):
     allow_reuse_port = False
 
     @property
+    def firmware_catalog(self):
+        with self.controller.lock:
+            if not hasattr(self, '_firmware_catalog'):
+                from firmware_catalog_service import FirmwareCatalogService
+                from official_firmware_catalog import fetch_catalog
+                from official_firmware_package import prepare_package, validate_package
+                def guard():
+                    if getattr(self.controller, 'desktop_closing', False):raise ValueError('Workbench is closing')
+                    service = getattr(self, '_firmware', None)
+                    if service is not None:
+                        state = service.snapshot()
+                        if state.get('busy') or state.get('locked'):raise ValueError('Official firmware task must finish first')
+                        return state['operation_generation']
+                    return 0
+                self._firmware_catalog = FirmwareCatalogService(fetch_catalog,
+                    lambda entry, sn, kind, **kw:prepare_package(entry, sn, kind, DATA/'firmware-packages'/secrets.token_hex(16), **kw),
+                    validate_package, self.firmware_observed_version, guard)
+                self.controller.firmware_catalog_observer = self._firmware_catalog.snapshot
+            return self._firmware_catalog
+
+    def firmware_observed_version(self, serial):
+        """Only already-observed version facts; never scans or opens a device."""
+        service = getattr(self, '_firmware', None)
+        if service is not None:
+            state = service.snapshot()
+            device = state.get('device') or {}
+            if ((device.get('sn') or device.get('serial')) == serial and device.get('kind') == 'glove'
+                    and state.get('current_version') and state.get('checked_at')):
+                return dict(serial=serial, device_type='wuji_glove', version=state['current_version'],
+                    observed_at=state['checked_at'], source='official_cli_observation')
+        monitor = getattr(self, '_update_notifications', None)
+        if monitor is not None:
+            with monitor.lock:
+                row = copy.deepcopy(monitor.known.get(serial))
+            if row and row.get('kind') == 'glove' and row.get('firmware_version') and row.get('firmware_observed_at'):
+                return dict(serial=serial, device_type='wuji_glove', version=row['firmware_version'],
+                    observed_at=row['firmware_observed_at'], source=row.get('firmware_version_source', 'sdk_handle_info'))
+        return None
+
+    @property
     def firmware_transport(self):
         with self.controller.lock:
             if not hasattr(self,'_firmware_transport'):
@@ -1687,8 +1731,12 @@ class ConsoleHTTPServer(ThreadingHTTPServer):
             if not hasattr(self,'_firmware'):
                 from firmware_service import FirmwareService
                 host=self.firmware_transport
+                host.package_validator = self.firmware_catalog.validate_claim
+                host.package_releaser = self.firmware_catalog.release_owner
                 service=FirmwareService(host,host.cli_identity,self.controller.official_cli.idle_check,
-                    host.acquire,host.release,host.device,recovery_check=host.recovery_check,cancel_query=host.cancel_background_check)
+                    host.acquire,host.release,host.device,recovery_check=host.recovery_check,cancel_query=host.cancel_background_check,
+                    claim_package=self.firmware_catalog.claim_package, validate_package=host.validate_package_claim,
+                    file_readback=host.file_readback)
                 from cli_coordination import reservation
                 marker=reservation(host.folder)
                 if marker.get('kind')=='firmware':service.restore_unknown(marker)
@@ -1706,6 +1754,7 @@ class ConsoleHTTPServer(ThreadingHTTPServer):
         result['run']=run if (result.get('operation')=='upgrade' and isinstance(run,dict)
             and run.get('serial')==(device.get('sn') or device.get('serial'))) else None
         result['supported']=use_native(load_config())
+        result['official_catalog'] = self.firmware_catalog.snapshot()
         viewer=self.controller.official_viz.snapshot()
         result['viewer']=dict(active=viewer.get('active') is True,phase=viewer.get('phase'),
             serial=(viewer.get('reported_device') or {}).get('sn'),session_id=viewer.get('session_id'))
@@ -1748,6 +1797,36 @@ class ConsoleHTTPServer(ThreadingHTTPServer):
             return self.firmware.start_check(serial)
         finally:workflow.release()
 
+    def start_firmware_package_upgrade(self, serial, package_token, confirmed):
+        """Fresh device identification occurs only when opening installation."""
+        if confirmed is not True:raise ValueError('Explicitly open the official installation')
+        self.firmware_catalog.validate_ready_token(package_token, serial)
+        workflow = self.controller.calibration_handover.workflow_lock
+        if not workflow.acquire(blocking=False):raise ValueError('A device task is switching')
+        try:
+            if getattr(self.controller, 'desktop_closing', False):raise ValueError('Workbench is closing')
+            viewer = self.controller.official_viz
+            status = viewer.snapshot()
+            if status.get('active') is True:
+                reported = status.get('reported_device') or {}
+                if (reported.get('sn') or reported.get('serial')) == serial:
+                    token = status.get('session_id')
+                    if not isinstance(token, str) or re.fullmatch('[a-f0-9]{32}', token) is None:
+                        raise ValueError('Official preview ownership is unverified')
+                    from cli_coordination import gate
+                    with gate(viewer.folder):
+                        viewer.connection_record(serial, token, require_glove=True)
+                        self.firmware_preview_idle(token)
+                    viewer.stop_owned(serial, token, require_glove=True)
+            self.controller.official_cli.idle_check()
+            rows = self.controller.calibration_devices()
+            if not any((r.get('serial') or r.get('sn')) == serial for r in rows):
+                rows = self.controller.calibration_devices(fresh=True)
+            if not any((r.get('serial') or r.get('sn')) == serial for r in rows):
+                raise ValueError('所选设备暂不可见 / Selected device is unavailable')
+            return self.firmware.start_file_upgrade(serial, package_token, confirmed=confirmed)
+        finally:workflow.release()
+
     def check_connect_version(self,serial):
         """A bounded read in an explicit connection, never a mandatory update.
 
@@ -1756,6 +1835,10 @@ class ConsoleHTTPServer(ThreadingHTTPServer):
         lease. An uncertain exit never permits a competing device connection.
         """
         if not isinstance(serial,str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_-]{0,79}',serial):return
+        # Glove firmware metadata has its own manual HTTPS route. Opening a
+        # view/teleoperation session must not open a second device handle or
+        # wait for a catalog whose availability is unrelated to connection.
+        if re.fullmatch(r'WG1[JK][A-Z0-9]{12}', serial):return
         from bridge_config import load_config
         from official_device_discovery import use_native
         if not use_native(load_config()):return
@@ -1779,7 +1862,7 @@ class ConsoleHTTPServer(ThreadingHTTPServer):
 
     def maintenance_action(self,command):
         name=command.get('name')
-        if name in {'firmware_check','firmware_upgrade','firmware_recovery_check',
+        if name in {'firmware_check','firmware_upgrade','firmware_package_upgrade','firmware_recovery_check',
                     'sdk_release_check','sdk_update_prepare','sdk_update_recover'}:
             # The operator's request yields our read-only discovery first.
             # No Viewer, calibration, teleoperation or firmware write is stopped.
@@ -1796,6 +1879,15 @@ class ConsoleHTTPServer(ThreadingHTTPServer):
             return dict(sdk_maintenance=self.sdk_maintenance.start('check' if name=='sdk_release_check' else 'update'))
         if name=='sdk_update_recover' and set(command)=={'name'}:
             return dict(sdk_maintenance=self.sdk_maintenance.recover())
+        if name=='firmware_catalog_check' and set(command)=={'name','serial'}:
+            self.firmware_catalog.start_check(command['serial'])
+            return dict(device_maintenance=self.maintenance_snapshot())
+        if name=='firmware_package_prepare' and set(command)=={'name','serial','catalog_token'}:
+            self.firmware_catalog.start_prepare(command['serial'], command['catalog_token'])
+            return dict(device_maintenance=self.maintenance_snapshot())
+        if name=='firmware_package_upgrade' and set(command)=={'name','serial','package_token','confirmed'}:
+            self.start_firmware_package_upgrade(command['serial'], command['package_token'], command['confirmed'])
+            return dict(device_maintenance=self.maintenance_snapshot())
         if name=='firmware_check' and set(command)=={'name','serial','viewer_token'}:
             self.firmware_check_from_viewer(command['serial'],command['viewer_token'])
         elif name=='firmware_check' and set(command)=={'name','serial'}:
@@ -1947,8 +2039,13 @@ class ConsoleHTTPServer(ThreadingHTTPServer):
             if not hasattr(self,'_workbench_updates'):
                 from workbench_update import WorkbenchUpdate
                 from runtime_paths import EDITION
+                def update_idle():
+                    self.controller.official_cli.idle_check()
+                    catalog = getattr(self, '_firmware_catalog', None)
+                    if catalog is not None and catalog.snapshot().get('busy'):
+                        raise ValueError('请等待官方固件包准备结束 / Wait for official firmware package preparation')
                 self._workbench_updates=WorkbenchUpdate(DATA,EDITION,
-                    idle_check=lambda:self.controller.official_cli.idle_check(),desktop=lambda:getattr(self,'desktop',None))
+                    idle_check=update_idle,desktop=lambda:getattr(self,'desktop',None))
             return self._workbench_updates
 
     @property
