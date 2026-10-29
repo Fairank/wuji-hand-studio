@@ -65,9 +65,11 @@ def worker_main(arguments):
                 raise ValueError('Calibration ownership changed before capture')
             if guided:
                 from calibration_guided import validate_profile
+                from calibration_identity import read_current_sdk_user,require_sdk_user
                 if marker.get('interface')!='guided' or marker.get('user')!=user or marker.get('replace') is not replace:
                     raise ValueError('Guided calibration ownership changed')
                 validate_profile(json_command('user','show'),user,expected_side,replace)
+                require_sdk_user(read_current_sdk_user(user),marker.get('sdk_user'),user)
             elif marker.get('interface')=='guided':raise ValueError('Guided worker cannot start an interactive terminal')
             # The official skill specifies the exact top-level typed value.
             # Missing, numeric or unknown values do not establish handedness.
@@ -118,12 +120,14 @@ class NativeCalibration:
 
     def start_guided(self,serial,side,user,replace=False,timeout=900,*,cancel_check=None):
         from calibration_guided import validate_profile
+        from calibration_identity import read_current_sdk_user
         from native_cli import json_command
         validate_profile(json_command('user','show'),user,side,replace)
+        sdk_user=read_current_sdk_user(user)
         if cancel_check is not None:cancel_check()
-        return self._start(serial,side,timeout,user=user,replace=replace,cancel_check=cancel_check)
+        return self._start(serial,side,timeout,user=user,replace=replace,sdk_user=sdk_user,cancel_check=cancel_check)
 
-    def _start(self,serial,expected_side,timeout,user=None,replace=False,cancel_check=None):
+    def _start(self,serial,expected_side,timeout,user=None,replace=False,sdk_user=None,cancel_check=None):
         if (not isinstance(serial,str) or not re.fullmatch('[A-Za-z0-9][A-Za-z0-9_-]{0,79}',serial)
                 or expected_side not in (None,'left','right') or type(timeout) is not int or not 60<=timeout<=1800):
             raise ValueError('Invalid selected glove or human terminal options')
@@ -141,7 +145,10 @@ class NativeCalibration:
                 marker=reservation(self.folder)
                 marker.update(backend='windows_native',cli_version=component['version'],
                     job_name='Local\\HandWorkbench-OfficialCalibration-'+self.token,serial=serial,side=expected_side)
-                if user is not None:marker.update(interface='guided',user=user,replace=replace)
+                if user is not None:
+                    from calibration_identity import sdk_user_identity
+                    sdk_user=sdk_user_identity(sdk_user,user)
+                    marker.update(interface='guided',user=user,replace=replace,sdk_user=sdk_user)
                 atomic(self.folder/'session.json',marker)
                 command=[sys.executable]
                 if not getattr(sys,'frozen',False):command.append(str(Path(__file__).with_name('desktop.py')))
@@ -165,7 +172,7 @@ class NativeCalibration:
                     expected_side=expected_side,
                     started=time.time(),event=None,result=None,error=None,exit_code=None,step=None,progress=None,
                     source='official_jsonl_native' if user else 'official_tty',terminal=user is None,
-                    interface='guided' if user else 'terminal',
+                    interface='guided' if user else 'terminal',sdk_user=copy.deepcopy(sdk_user),
                     phase='preflight',event_count=0,captured_poses=[],pose_index=None,cli_version=component['version'],
                     cli_binary_sha256=component.get('binary_sha256'),cli_archive_sha256=component.get('archive_sha256'))
                 owner.thread=threading.Thread(target=self._collect,name='Official calibration terminal',daemon=True)
@@ -261,6 +268,7 @@ class NativeCalibration:
                             raise ValueError('Calibration cleanup owner changed')
                         self.token=None
                         owner.run['cleanup_confirmed']=True
+                        if 'cleanup_error' in owner.run:owner.run['cleanup_error']=None
             return owner.snapshot(refresh=False)
         if schedule:
             def deadline():
@@ -280,9 +288,16 @@ class NativeCalibration:
 
     def _collect(self):
         owner=self.owner;process=owner.process;child_exit=None;transport_error=None
+        token=self.token;job=self.job;run_id=owner.run.get('id');serial=owner.run.get('serial')
         guided=owner.run.get('source')=='official_jsonl_native';ready=False;exit_seen=False
+        pending_transport=None
         from calibration_guided import OfficialEvents
-        decoder=OfficialEvents(owner.run['serial'],owner.run.get('expected_side'),owner.run.get('user')) if guided else None
+        decoder=OfficialEvents(owner.run['serial'],owner.run.get('expected_side'),owner.run.get('user'),owner.run.get('sdk_user')) if guided else None
+        def append_output(text):
+            # Keep the original bounded output even when its structured result
+            # is rejected. Recording it does not establish calibration success.
+            self.sequence+=1;self.frames.append((self.sequence,text));self.size+=len(text)
+            while self.size>2*1024*1024 and len(self.frames)>1:self.size-=len(self.frames.popleft()[1])
         def accept(text,final=False):
             from calibration_cli import record_progress
             for event in decoder.feed(text,final):
@@ -301,6 +316,7 @@ class NativeCalibration:
         reader=threading.Thread(target=drain,daemon=True);reader.start()
         try:
             for line in process.stdout:
+                pending_transport=line
                 if len(line)>128*1024:raise ValueError('Terminal transport record exceeds its limit')
                 event=json.loads(line)
                 if not isinstance(event,dict):raise ValueError('Invalid terminal transport event')
@@ -319,40 +335,72 @@ class NativeCalibration:
                     elif kind in ('output','diagnostic'):
                         text=event.get('text')
                         if not isinstance(text,str) or len(text)>65536:raise ValueError('Invalid terminal output')
+                        append_output(text)
+                        pending_transport=None
                         if guided and kind=='output':accept(text)
                         elif not guided and not self.cancel_requested:owner.run.update(status='terminal',phase='official_tty')
-                        self.sequence+=1;self.frames.append((self.sequence,text));self.size+=len(text)
-                        while self.size>2*1024*1024 and len(self.frames)>1:self.size-=len(self.frames.popleft()[1])
                     elif kind=='exit':
                         exit_seen=True
                         child_exit=event.get('exitstatus')
                         if child_exit is not None and type(child_exit) is not int:raise ValueError('Invalid terminal exit status')
                     elif kind=='error':transport_error=str(event.get('message') or 'Terminal transport failed')[:700]
+                    pending_transport=None
             if guided:
                 with owner.lock:accept('',final=True)
             worker_code=process.wait(timeout=10)
             if worker_code or child_exit is None:
                 transport_error=transport_error or 'Official terminal exit could not be verified'
-        except Exception as error:transport_error=str(error)[:700]
+        except Exception as error:
+            transport_error=str(error)[:700]
+            with owner.lock:
+                if pending_transport is not None:
+                    append_output('\n[Rejected terminal transport record; bounded prefix]\n'+pending_transport[:65536])
+                append_output('\n[Terminal transport error] '+transport_error+'\n')
         finally:
-            try:clean=self.job.close(timeout=7)
+            try:clean=job.close(timeout=7)
             except Exception:clean=False
             reader.join(timeout=1)
+            model_values={}
             with owner.lock:
                 status='error' if transport_error or not clean or self.forced_stop else 'cancelled' if child_exit==9 else 'stopped' if self.cancel_requested else 'session_ended' if child_exit==0 else 'error'
                 if guided and status=='session_ended':
                     status='completed' if ready and decoder.terminal=='result' and decoder.result is not None else 'error'
-                owner.run.update(running=not clean,status=status,exit_code=child_exit,ended=time.time(),
-                    error=transport_error or owner.run.get('error') or (None if clean and status!='error' else 'Official CLI did not confirm a complete calibration result; inspect details'),
-                    cleanup_confirmed=clean)
-                owner.process=None if clean else process;owner.cache=None
-                report=copy.deepcopy(owner.run)
-                transcript=''.join(text for _,text in self.frames)
+                if guided and status=='completed':
+                    try:
+                        from calibration_portability import file_digest
+                        digest,size=file_digest(decoder.result['result']['calibrated_urdf'])
+                        model_values=dict(model_sha256=digest,model_bytes=size)
+                    except (OSError,ValueError,TypeError) as error:
+                        status='error'
+                        transport_error='官方流程已结束，但保存的手型无法核对 / Saved hand model could not be verified after calibration: '+str(error)[:350]
+                        append_output('\n[Saved model verification failed] '+transport_error+'\n')
+            released=False;cleanup_error=None
             if clean:
-                with gate(self.folder):release(self.token,self.folder);self.token=None
+                try:
+                    with gate(self.folder):
+                        with owner.lock:
+                            if self.token!=token or self.job is not job or owner.run.get('id')!=run_id:
+                                raise ValueError('Calibration cleanup owner changed')
+                        marker=reservation(self.folder)
+                        if marker and (marker.get('kind')!='calibration' or marker.get('token')!=token or marker.get('serial')!=serial):
+                            raise ValueError('Calibration cleanup owner changed')
+                        release(token,self.folder)
+                        if reservation(self.folder):raise ValueError('Calibration reservation remains unconfirmed')
+                        self.token=None;released=True
+                except Exception as error:
+                    cleanup_error='标定进程已结束，但设备占用尚未释放；请点击结束重试 / Calibration ended but its reservation was not released; end the session to retry: '+str(error)[:250]
+                    with owner.lock:append_output('\n[Calibration cleanup unconfirmed] '+cleanup_error+'\n')
                 for stream in (process.stdin,process.stdout,process.stderr):
                     try:stream.close()
                     except (OSError,ValueError):pass
+            with owner.lock:
+                owner.run.update(running=not clean,status='error' if cleanup_error else status,exit_code=child_exit,ended=time.time(),
+                    error=transport_error or owner.run.get('error') or cleanup_error or (None if clean and status!='error' else 'Official CLI did not confirm a complete calibration result; inspect details'),
+                    cleanup_confirmed=clean and released,**model_values)
+                if cleanup_error:owner.run['cleanup_error']=cleanup_error
+                owner.process=None if clean else process;owner.cache=None
+                report=copy.deepcopy(owner.run)
+                transcript=''.join(text for _,text in self.frames)
             self.finished.set()
             if owner.reports:
                 try:

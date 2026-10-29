@@ -10,6 +10,10 @@
 .official-terminal-screen{min-width:640px;width:100%;height:var(--terminal-viewport-height,616px)}
 .official-terminal-screen .xterm{padding:0}
 .official-terminal-screen .xterm-viewport{border-radius:0;scrollbar-gutter:auto}
+/* The terminal owns this invisible keyboard/IME caret. Application form
+   styling must not add padding or a minimum height outside its cell grid. */
+html body .official-terminal .xterm .xterm-helper-textarea{min-height:0;min-width:0;padding:0;border:0;margin:0;border-radius:0;box-shadow:none;outline:none;font-family:Consolas,"Cascadia Mono",monospace;font-size:13px;line-height:1.24}
+html body .official-terminal .xterm .xterm-helper-textarea:focus-visible{outline:none;outline-offset:0}
 .official-terminal-error{margin:0;font-size:13px;line-height:1.6;color:var(--wb-sub);overflow-wrap:anywhere}
 .official-terminal-error:empty{display:none}
 .oc-run[data-source=official_tty] .oc-step,.oc-run[data-source=official_tty] .oc-progress-row,.oc-run[data-source=official_tty] .oc-feedback{display:none!important}

@@ -344,7 +344,7 @@ class NativeCaptureAdapterTests(unittest.TestCase):
 
     def test_native_discovery_alone_never_opens_or_calibrates(self):
         with self.environment() as e:
-            with self.assertRaisesRegex(ValueError,'Connect the selected Viewer'):
+            with self.assertRaisesRegex(ValueError,'Start calibration for the selected glove'):
                 e.service.start('left', SERIAL)
             e.native.assert_not_called(); e.command.assert_not_called(); e.spawn.assert_not_called()
 
@@ -425,7 +425,7 @@ class NativeCaptureAdapterTests(unittest.TestCase):
                      [dict(original,selectable=True)],[dict(original),dict(original)]]:
             with self.subTest(rows=rows),self.environment() as e:
                 e.service.device_provider=Mock(return_value=rows)
-                with self.assertRaisesRegex(ValueError,'Connect the selected Viewer'):e.service.start('left',SERIAL)
+                with self.assertRaisesRegex(ValueError,'Start calibration for the selected glove'):e.service.start('left',SERIAL)
                 e.service.device_provider.assert_not_called();e.native.assert_not_called();e.command.assert_not_called();e.spawn.assert_not_called()
 
     def test_non_native_capture_retains_serial_and_handedness_flags(self):

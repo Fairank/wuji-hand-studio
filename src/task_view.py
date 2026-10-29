@@ -136,7 +136,7 @@ def _command(command,resource):
         # Cross-device selection is validated by the transaction, after this
         # exact source task/context has been checked under workflow_lock.
         return
-    if name in ('connect','official_viz_start','calibration_start','calibration_handover','teleoperation_handover'):
+    if name in ('connect','official_viz_start','calibration_start','calibration_begin','calibration_handover','teleoperation_handover'):
         if command.get('serial')!=resource['serial']:raise ValueError('Task command selects another device')
     if name=='glove_open' and (resource['kind']!='glove' or command.get('serial')!=resource['serial']):
         raise ValueError('Task command selects another glove')

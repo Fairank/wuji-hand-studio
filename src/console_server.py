@@ -220,12 +220,14 @@ class Controller:
             expected={k:proof[k] for k in ('source_run_id','source_workspace','source_profile','serial','side','model_sha256')}
             if (not isinstance(receipt,dict) or any(receipt.get(k)!=v for k,v in expected.items())
                     or not isinstance(receipt.get('owner_user_id'),str) or not IDENT.fullmatch(receipt['owner_user_id'])
+                    or receipt.get('owner_user_id')!=proof.get('source_user_id')
                     or type(receipt.get('imported')) is not bool
                     or file_digest(proof['model_path'])!=(proof['model_sha256'],proof['model_bytes'])):
                 raise ValueError('标定接续证明已变化，未打开手套 / Calibration continuation identity changed; glove was not opened')
             with self.glove.lock:
                 context=self.glove._continuation or {}
-                if self.glove.stopping or any(context.get(k)!=v for k,v in expected.items()):
+                if (self.glove.stopping or context.get('source_user_id')!=proof.get('source_user_id')
+                        or any(context.get(k)!=v for k,v in expected.items())):
                     raise ValueError('Calibration controller session changed')
             profile=self.state['device_profile']
             binding=self.retarget.context(profile)['binding']
@@ -506,7 +508,7 @@ class Controller:
             # A timed update close cannot cancel transitions before its final
             # preflight. Their owning workflow must finish independently.
             if deadline is not None:return self._coordinated_action(command)
-        if isinstance(command,dict) and command.get('name') in {'connection_switch','connect','official_viz_start','glove_connect','glove_open','glove_scan','calibration_start','calibration_handover','teleoperation_handover','calibrated_teleoperation_continue'}:
+        if isinstance(command,dict) and command.get('name') in {'connection_switch','connect','official_viz_start','glove_connect','glove_open','glove_scan','calibration_start','calibration_begin','calibration_handover','teleoperation_handover','calibrated_teleoperation_continue'}:
             priority=getattr(self,'version_check_priority',None)
             if priority and not priority():raise ValueError('只读版本检查正在结束，请稍候重试 / Finishing the background version check; retry shortly')
         if isinstance(command,dict) and command.get('name')=='official_viz_start':
@@ -558,6 +560,7 @@ class Controller:
             if set(command)!={'name','viewer_token','attempt_id'}:raise ValueError('Invalid teleoperation cancellation')
             return self.teleoperation_handover.cancel({k:command[k] for k in ('viewer_token','attempt_id')})
         if teleoperation is not None and name in {'glove_disconnect','official_viz_stop','session_close'}:teleoperation.request_cancel()
+        if name=='calibration_begin':return handover.begin(command)
         if name=='calibration_handover':return handover.start(command)
         if name in {'calibration_cancel','official_viz_stop','session_close'}:handover.request_cancel()
         if not workflow_action(command):return self._workflow_action(command)
@@ -1627,7 +1630,7 @@ class Handler(BaseHTTPRequestHandler):
                 from task_view import execute
                 if self.path!='/api/action':raise ValueError('Task pages cannot manage the desktop')
                 if (os.environ.get('WUJI_FLEET_PARENT') and payload.get('name') in {
-                        'official_viz_start','calibration_start','calibration_handover',
+                        'official_viz_start','calibration_start','calibration_begin','calibration_handover',
                         'calibration_profile_create','calibration_profile_switch','official_cli_update','official_cli_rollback','official_cli_auto_update'}):
                     raise ValueError('请在主工作台执行官方标定任务 / Open official calibration in the main workbench')
                 result=execute(self.server.controller,*task_scope,payload,**self._task_view_options())
@@ -1642,7 +1645,7 @@ class Handler(BaseHTTPRequestHandler):
                 if os.environ.get('WUJI_FLEET_PARENT'):raise ValueError('Use tasks in the main window')
                 result=self.server.tasks.action(payload)
             elif (os.environ.get('WUJI_FLEET_PARENT') and payload.get('name') in {
-                    'official_viz_start','calibration_start','calibration_handover',
+                    'official_viz_start','calibration_start','calibration_begin','calibration_handover',
                     'calibration_profile_create','calibration_profile_switch','official_cli_update','official_cli_rollback','official_cli_auto_update'}):
                 raise ValueError('请在主工作台执行官方标定任务 / Open official calibration in the main workbench')
             elif str(payload.get('name','')).startswith('official_studio_'):

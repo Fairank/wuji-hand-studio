@@ -162,6 +162,8 @@ class GloveBridge:
             if type(session) is not int or session!=self.session:
                 raise CancellationNotDispatched('遥操作会话已改变 / Teleoperation session changed')
             state=self.snapshot();hardware=state.get('hardware') or {}
+            if (state.get('feedback') or {}).get('device_id') and type(hardware.get('active')) is not bool:
+                raise ValueError('已配对灵巧手的停用状态未知，未断开手套 / Paired hand disable state is unknown; glove was not disconnected')
             if (self.lease or self._follow_unconfirmed or hardware.get('active',False) is not False
                     or hardware.get('stop_confirmed') is False):
                 raise ValueError('先确认灵巧手已暂停，再切换会话 / Confirm hand disable before switching sessions')
@@ -292,6 +294,7 @@ class GloveBridge:
                 or receipt.get('source_profile')!=context['source_profile']
                 or receipt.get('source_workspace')!=context['source_workspace']
                 or not isinstance(receipt.get('owner_user_id'),str) or not IDENT.fullmatch(receipt['owner_user_id'])
+                or receipt.get('owner_user_id')!=context.get('source_user_id')
                 or type(receipt.get('imported')) is not bool
                 or set(receipt)!={'source_run_id','source_workspace','source_profile','serial','side','model_sha256','owner_user_id','imported'}):
             raise ValueError('Controller calibration identity differs from this task')

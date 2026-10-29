@@ -5,6 +5,7 @@ transaction. The shared file gate is deliberately released while joining the
 Viewer: its reader needs that same gate to finish releasing its marker.
 """
 import copy
+from contextlib import ExitStack
 import re
 import threading
 import time
@@ -84,7 +85,101 @@ class CalibrationHandover:
         return {**result,'connected':False,'device_owned':False,
                 'phase':'error' if result.get('error') else 'disconnected'}
 
-    def start(self,command):
+    def begin(self,command):
+        """One explicit Start works with or without this glove's live Viewer.
+
+        Merely selecting the calibration tab does not call this transaction.
+        The browser cannot supply the internal connection/discovery receipt.
+        """
+        allowed={'name','serial','side','profile','replace','create_profile','interface'}
+        serial=command.get('serial');side=command.get('side')
+        interface=command.get('interface','guided')
+        replace=command.get('replace',False);create=command.get('create_profile',False)
+        if (set(command)-allowed or not isinstance(serial,str) or not _SERIAL.fullmatch(serial)
+                or side not in (None,'left','right') or interface not in ('guided','terminal')
+                or type(replace) is not bool or type(create) is not bool
+                or create and interface!='guided'):
+            raise ValueError('Invalid explicit calibration request')
+        if not self.workflow_lock.acquire(blocking=False):
+            raise ValueError('设备任务正在切换，请等待本次操作完成 / A device task transition is in progress')
+        viewer=self.controller.official_viz;pauses=ExitStack()
+        try:
+            # Publish the cancellable intent before any snapshot, metadata
+            # read or wait. A Stop during those operations must not be lost.
+            with self.lock:
+                self._thread=threading.get_ident();self._cancel=False;self.viewer_token=None
+                self.state.update(busy=True,phase='validating',serial=serial,viewer_token=None,
+                    interface=interface,connected=False,device_owned=False,error=None)
+            from studio_component import enforce_session_owner
+            enforce_session_owner(command)
+            with gate(viewer.folder):
+                current=viewer.snapshot()
+                if current.get('active') is True:
+                    reported=current.get('reported_device') or {}
+                    if (reported.get('sn') or reported.get('serial'))!=serial:
+                        raise ValueError('请先结束另一设备的画面 / Another device owns the Viewer')
+                    token=current.get('session_id')
+                    if not isinstance(token,str) or not _TOKEN.fullmatch(token):
+                        raise ValueError('Official Viewer ownership is unverified')
+                else:token=None
+            self._not_cancelled()
+            # The existing exact-owner handover joins its reader outside the
+            # global gate. Do not wrap that join in the gate above.
+            if token is not None:
+                return self.start({**command,'name':'calibration_handover','viewer_token':token,
+                                   'interface':interface},_continuing=True)
+            # Pause only this Viewer object's finite read-only discovery. Wait
+            # outside the CLI gate so its reader can release its own marker.
+            priority=getattr(viewer,'discovery_priority',None)
+            if priority is not None:pauses.enter_context(priority(timeout=20))
+            self._not_cancelled()
+            switch=getattr(self.controller,'connection_switch',None)
+            if switch is not None:switch.release_for_calibration(command,cancel_check=self._not_cancelled)
+            self._not_cancelled()
+            with gate(viewer.folder):
+                self.idle_check()
+                if reservation(viewer.folder):
+                    raise ValueError('请先结束已有官方会话 / Finish the active official session first')
+                self._not_cancelled()
+                # A stale selection is refreshed only after the final explicit
+                # Start. Discovery never opens a streaming connection.
+                rows=self.controller.calibration_devices(fresh=True)
+                from calibration_cli import is_glove_device
+                matches=[row for row in rows if isinstance(row,dict)
+                         and (row.get('sn') or row.get('serial'))==serial and is_glove_device(row)]
+                if len(matches)!=1:
+                    raise ValueError('所选手套暂不可见，请重新查找 / The selected glove is unavailable')
+                actual=str(matches[0].get('handedness') or matches[0].get('side') or '').lower().removeprefix('handedness.')
+                if actual in ('left','right'):
+                    if side is not None and side!=actual:raise ValueError('所选手套左右手不一致 / Selected glove side does not match')
+                    side=actual
+                if side not in ('left','right'):
+                    raise ValueError('请确认所选手套的左右手 / Confirm the selected glove hand side')
+                self._not_cancelled();self.idle_check()
+                from cli_coordination import identity
+                import os
+                record=dict(source='explicit_calibration',serial=serial,side=side,
+                            owner_pid=os.getpid(),owner_start=identity(os.getpid()),checked_at=time.time())
+                self._set(phase='starting')
+                state=self.controller.calibration.start(side,serial,replace,interface=interface,
+                    connected=record,profile=command.get('profile'),create_profile=create,
+                    cancel_check=self._not_cancelled)
+                with self.lock:cancelled=self._cancel
+                if cancelled:
+                    self._set(phase='cancelling')
+                    state=self.controller.calibration.cancel()
+                else:self._set(phase='calibration',device_owned=True,run_id=(state.get('run') or {}).get('id'))
+                return dict(calibration=state,calibration_connection={**self.snapshot(),'busy':False})
+        except Exception as error:
+            self._set(phase='error',error=str(error)[:900],failed_at=time.time())
+            raise
+        finally:
+            try:pauses.close()
+            finally:
+                with self.lock:self.state['busy']=False;self._thread=None;self.viewer_token=None
+                self.workflow_lock.release()
+
+    def start(self,command,*,_continuing=False):
         serial=command.get('serial');token=command.get('viewer_token')
         interface=command.get('interface');requested_side=command.get('side')
         profile=command.get('profile');replace=command.get('replace',False)
@@ -100,9 +195,14 @@ class CalibrationHandover:
         viewer=self.controller.official_viz;stopped=False;record=None
         try:
             with self.lock:
-                self._thread=threading.get_ident();self._cancel=False;self.viewer_token=token
+                if _continuing:
+                    if not self.internal or not self.state['busy'] or self.state.get('serial')!=serial:
+                        raise ValueError('Calibration start intent changed')
+                else:self._thread=threading.get_ident();self._cancel=False
+                self.viewer_token=token
                 self.state.update(busy=True,phase='validating',serial=serial,viewer_token=token,
                     interface=interface,connected=True,device_owned=True,error=None)
+            self._not_cancelled()
             from studio_component import enforce_session_owner
             enforce_session_owner(command)
             with gate(viewer.folder):

@@ -20,7 +20,7 @@
   sourceInfo.append($('ov-message'),connectDevice);displayActions.after(sourceInfo);
   displayActions.prepend(root.querySelector('.ov-session'));root.querySelector('.ov-session').append($('ov-state'));
   const t=(zh,en)=>window.WujiLocale?.lang==='en'?en:zh;
-  let state=null,fresh=false,loading=null,pending='',sequence=0,transportError='',actionError='',viewerError='',frame=null,frameUrl='',frameLoaded=false,focus=false,destroyed=false,lastVisible=null,optionKey='',savedScroll=0;
+  let state=null,fresh=false,loading=null,pending='',sequence=0,readEpoch=0,transportError='',actionError='',viewerError='',frame=null,frameUrl='',frameLoaded=false,focus=false,destroyed=false,lastVisible=null,optionKey='',savedScroll=0;
   let viewMode='device',task='view',calibrationLayer=null,calibrationMeta={},offline=null,offlineError='',offlineLoading=null,frameReady=false,consoleState=null,wantedSerial='',calibrationRunning=false,calibrationBusy=false,calibrationVerified=true;
   const previewOnly=s=>s?.connection==='disconnected'&&s?.hardware?.active===false&&s?.glove?.busy===true&&!s.glove.feedback?.device_id&&s.glove.hardware?.active!==true&&s.glove.hardware?.active!==null&&!(s.unconfirmed_devices||[]).length;
   const theme=()=>document.documentElement.dataset.theme==='dark'?'dark':'light';
@@ -64,6 +64,14 @@
    // A mounted task already has a verified owner. Show that existing session
    // even when its earlier discovery advertisement has expired; never start it.
    if(ownedSN&&!devices.some(d=>d.sn===ownedSN))devices.push({...ownedDevice,sn:ownedSN});
+   // A live SDK stream is selectable without creating a second connection.
+   // Selection grants no handover permission; calibration rechecks its exact
+   // owner/session and the backend alone releases it on the final Start.
+   const sdk=consoleState?.glove||{},sdkSN=sdk.glove_serial;
+   if(sdk.busy===true&&sdk.connection==='receiving'&&typeof sdkSN==='string'&&/^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/.test(sdkSN)&&Number.isInteger(sdk.session_id)&&typeof sdk.user?.user_id==='string'&&sdk.profile===consoleState?.device_profile?.id&&!devices.some(d=>d.sn===sdkSN)){
+    const row=window.WujiDeviceInventory?.snapshot()?.devices?.find(d=>(d.sn||d.serial)===sdkSN);
+    devices.push({...row,sn:sdkSN,kind:'glove',device_type:'wuji_glove',model:row?.model||'Wuji Glove'});
+   }
    const key=JSON.stringify([devices,ownedSN,window.WujiLocale?.lang]);
    if(key!==optionKey){optionKey=key;const selected=wantedSerial||ownedSN||$('ov-device').value;$('ov-device').replaceChildren(new Option(t('选择设备','Select a device'),''),...devices.map(d=>new Option([text(d.model||d.device_type,100),d.sn,(d.handedness||d.side)==='left'?t('左','Left'):(d.handedness||d.side)==='right'?t('右','Right'):''].filter(Boolean).join(' · '),d.sn)));if(devices.some(d=>d.sn===selected))$('ov-device').value=selected;}
    // Reduce routine chrome only for the exact, verified session we own.
@@ -92,15 +100,15 @@
    setText('ov-error',transportError||actionError||text(s.error)||viewerError);setText('ov-empty-title',!fresh?t('状态未核对','Status unverified'):s.supported===false?t('当前环境不支持','Not supported in this environment'):active?t('等待画面','Waiting for the Viewer'):t('选择设备，打开实时画面','Select a device for live visualization'));
    setText('ov-empty-message',!fresh?t('重新读取状态后可恢复画面。','The view can resume after status is verified.'):active?t('CLI 可能仍在运行，停止会话请使用上方按钮。','The CLI may still be running. Use the button above to stop its session.'):t('查找并选择设备，原版界面将在此处显示。','Find and select a device. The original interface will appear here.'));
    if(blank){setText('ov-error',offlineError||viewerError);setText('ov-empty-title',t('正在打开原版 Viewer','Opening original Viewer'));setText('ov-empty-message',offlineError||t('本地资源正在准备，无需连接设备。','Preparing local resources. No device connection needed.'));}
-   if(calibrating){setText('ov-description',t('选好设备，在同一工作区查看或标定。','Choose a device to view or calibrate in this workspace.'));setText('ov-state',text(calibrationMeta.status)||t('标定','Calibration'));setText('ov-message',text(calibrationMeta.reason,2000));setText('ov-version',text(calibrationMeta.runtime,200));root.querySelector('.ov-session').hidden=false;setText('ov-identity','');}
+   if(calibrating){setText('ov-description',t('选好手套和佩戴者，开始标定。','Choose the glove and wearer, then start calibration.'));setText('ov-state',text(calibrationMeta.status));setText('ov-message',text(calibrationMeta.reason,2000));setText('ov-version',text(calibrationMeta.runtime,200));root.querySelector('.ov-session').hidden=!calibrationRunning&&!calibrationBusy;setText('ov-identity','');}
    if(liveOwned)setText('ov-message','');sourceInfo.hidden=!$('ov-message').textContent&&connectDevice.hidden;
    setText('ov-logs-label',t('详细日志','Detailed log'));renderLogs();syncFrame();renderFrameStatus();$('ov-focus').disabled=calibrating?calibrationMeta.terminal!==true:!frame;
   }
   async function refresh(){
    if(destroyed||loading)return loading;
-   loading=(async()=>{try{const r=await fetch('/api/official-viz?theme='+theme(),{cache:'no-store',signal:AbortSignal.timeout(6000)});if(!r.ok)throw Error(t('无法读取可视化状态，请重试。','Visualization status is unavailable. Retry.'));const next=await r.json();if(!next||typeof next.active!=='boolean'||typeof next.supported!=='boolean'||typeof next.phase!=='string')throw Error(t('可视化状态不完整。','Incomplete visualization state.'));state=next;fresh=true;transportError='';}
-    catch(error){fresh=false;transportError=error.message;}
-    finally{loading=null;if(!destroyed){render();window.dispatchEvent(new CustomEvent('official-viz-update',{detail:{state,fresh}}));}}})();return loading;
+   const epoch=readEpoch;loading=(async()=>{try{const r=await fetch('/api/official-viz?theme='+theme(),{cache:'no-store',signal:AbortSignal.timeout(6000)});if(!r.ok)throw Error(t('无法读取可视化状态，请重试。','Visualization status is unavailable. Retry.'));const next=await r.json();if(!next||typeof next.active!=='boolean'||typeof next.supported!=='boolean'||typeof next.phase!=='string')throw Error(t('可视化状态不完整。','Incomplete visualization state.'));if(epoch!==readEpoch)return;state=next;fresh=true;transportError='';}
+    catch(error){if(epoch===readEpoch){fresh=false;transportError=error.message;}}
+    finally{loading=null;if(!destroyed){render();window.dispatchEvent(new CustomEvent('official-viz-update',{detail:{state,fresh}}));if(epoch!==readEpoch&&(visible()||state?.active))queueMicrotask(refresh);}}})();return loading;
   }
   async function loadOffline(){
    if(offlineLoading)return offlineLoading;
@@ -108,7 +116,7 @@
    catch(error){offlineError=error.message;}finally{offlineLoading=null;if(!destroyed)render();}})();return offlineLoading;
   }
   async function act(name,extra={},endPreview=false){
-   if(pending&&name!=='official_viz_stop')return;const own=++sequence;pending=name;actionError='';render();window.dispatchEvent(new CustomEvent('official-viz-update'));
+   if(pending&&name!=='official_viz_stop')return;readEpoch++;const own=++sequence;pending=name;actionError='';render();window.dispatchEvent(new CustomEvent('official-viz-update'));
    try{const sr=await fetch('/api/state',{cache:'no-store',signal:AbortSignal.timeout(5000)});if(!sr.ok)throw Error(t('工作台服务未就绪','Workbench service is not ready'));let s=await sr.json();if(!s.csrf)throw Error(t('请重新读取工作台状态','Reload the workbench state'));
     if(endPreview&&name==='official_viz_scan'&&s.glove?.busy){
      if(!previewOnly(s))throw Error(t('设备会话已改变，请先在原工作区结束。','The device session changed. End it in its owning workspace.'));
@@ -122,7 +130,7 @@
   }
   function syncVisibility(){if(destroyed)return;const now=visible();if(!now){setFocus(false);detach();}if(now!==lastVisible){lastVisible=now;if(now){refresh();if(viewMode==='offline'&&!offline&&!offlineError)loadOffline();}}syncFrame();}
   async function switchTo(target){
-   if(pending)return;const own=++sequence;pending='connection_switch';actionError='';render();
+   if(pending)return;readEpoch++;const own=++sequence;pending='connection_switch';actionError='';render();
    try{if(!window.WujiConnectionSwitch)throw Error(t('切换入口尚未就绪，请稍后重试。','Connection switching is not ready. Retry shortly.'));const result=await window.WujiConnectionSwitch.run(target);if(result.routed)return;await refresh();if(target.mode==='teleoperation'){location.hash='#glove';window.WujiWorkspace?.showPage();}}
    catch(error){if(own===sequence)actionError=error.message;}
    finally{if(own===sequence)pending='';if(!destroyed){render();window.dispatchEvent(new CustomEvent('official-viz-update'));}}
@@ -145,9 +153,9 @@
   const observer=new MutationObserver(syncVisibility);for(let node=host;node;node=node.parentElement)observer.observe(node,{attributes:true,attributeFilter:['hidden','class','style','data-page','data-hub-tab']});
   const themeObserver=new MutationObserver(onTheme);themeObserver.observe(document.documentElement,{attributes:true,attributeFilter:['data-theme']});
   const sizeObserver=new ResizeObserver(syncVisibility);sizeObserver.observe(host);const timer=setInterval(()=>{syncVisibility();if(visible()||state?.active)refresh();},1000);
-  function selection(){const serial=$('ov-device').value;return {serial,device:(Array.isArray(state?.devices)?state.devices:[]).find(d=>(d.sn||d.serial)===serial)||null};}
+  function selection(){const serial=$('ov-device').value,sdk=consoleState?.glove||{};let device=(Array.isArray(state?.devices)?state.devices:[]).find(d=>(d.sn||d.serial)===serial)||null;if(!device&&sdk.busy===true&&sdk.connection==='receiving'&&sdk.glove_serial===serial&&Number.isInteger(sdk.session_id)&&typeof sdk.user?.user_id==='string'&&sdk.profile===consoleState?.device_profile?.id){const row=window.WujiDeviceInventory?.snapshot()?.devices?.find(d=>(d.sn||d.serial)===serial);device={...row,sn:serial,kind:'glove',device_type:'wuji_glove'};}return {serial,device};}
   function selectDevice(serial){wantedSerial=serial||'';optionKey='';render();options.onDeviceChange?.(wantedSerial,selection().device);}
-  function setCalibrationState(value){const running=value?.running===true,busy=value?.busy===true,verified=value?.verified===true,meta={ready:value?.ready===true,human:value?.human===true,reason:text(value?.reason),runtime:text(value?.runtime,200),status:text(value?.status,100),terminal:value?.terminal===true,actionLabel:text(value?.actionLabel,80),guided:value?.guided===true};if(running===calibrationRunning&&busy===calibrationBusy&&verified===calibrationVerified&&JSON.stringify(meta)===JSON.stringify(calibrationMeta))return;calibrationRunning=running;calibrationBusy=busy;calibrationVerified=verified;calibrationMeta=meta;render();}
+  function setCalibrationState(value){const running=value?.running===true,busy=value?.busy===true,verified=value?.verified===true,meta={ready:value?.ready===true,human:value?.human===true,reason:text(value?.reason),runtime:text(value?.runtime,200),status:text(value?.status,100),terminal:value?.terminal===true,actionLabel:text(value?.actionLabel,80),guided:value?.guided===true};if(running===calibrationRunning&&busy===calibrationBusy&&verified===calibrationVerified&&JSON.stringify(meta)===JSON.stringify(calibrationMeta))return;if(running!==calibrationRunning||busy!==calibrationBusy)readEpoch++;calibrationRunning=running;calibrationBusy=busy;calibrationVerified=verified;calibrationMeta=meta;render();}
   const onSelection=event=>{const serial=event.detail?.device?.sn||event.detail?.device?.serial||'';selectDevice(serial);};
   window.addEventListener('device-inventory-selection',onSelection);
   const api={refresh,syncVisibility,showDeviceMode,selectDevice,selection,setFocus,setTask,attachCalibration(node){calibrationLayer=node;stage.append(node);render();},setCalibrationState,snapshot:()=>({state,fresh,pending,task}),destroy(){destroyed=true;clearInterval(timer);observer.disconnect();themeObserver.disconnect();sizeObserver.disconnect();document.removeEventListener('keydown',onEscape);document.removeEventListener('visibilitychange',syncVisibility);window.removeEventListener('workspace-page',syncVisibility);window.removeEventListener('hashchange',syncVisibility);window.removeEventListener('wuji-language',onLanguage);window.removeEventListener('message',onReady);window.removeEventListener('console-state',onConsole);window.removeEventListener('device-inventory-selection',onSelection);window.removeEventListener('connection-switch-update',render);setFocus(false);detach();root.remove();mounted=null;}};

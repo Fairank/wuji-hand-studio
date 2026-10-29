@@ -38,8 +38,8 @@
    if(cleanup){label=t('待结束核对','Session end unverified');message=[text(data.cleanup_error)||t('上次会话尚未完整退出，请结束并核对。','The previous session has not fully exited. End and verify it.'),error].filter((value,index,all)=>value&&all.indexOf(value)===index).join(' · ');tone='unknown';}
    else if(!fresh){label=t('状态未核对','Status unverified');message=error||t('无法读取当前状态。上次事件仍保留，刷新后再核对。','Current status is unavailable. Previous events remain; refresh to verify.');tone='unknown';}
    else if(context.error){label=t('操作未完成','Operation incomplete');message=error;tone='error';}
-   else if(error||status==='error'||Number.isInteger(run.exit_code)&&run.exit_code!==0&&status!=='cancelled'){label=t('标定失败','Calibration failed');message=error||t('CLI 未正常结束，请查看详细记录。','The CLI did not finish normally. Review the detailed log.');tone='error';}
-   else if(done){label=t('标定完成','Calibration completed');message=t('官方 result 已返回，CLI 退出代码为 0。','The official result was received and the CLI exited with code 0.');tone='completed';}
+   else if(error||status==='error'||Number.isInteger(run.exit_code)&&run.exit_code!==0&&status!=='cancelled'){label=t('标定失败','Calibration failed');message=/EMF data stream closed|0x4102/.test(error)?t('手套采集数据中断，请检查连接后重试。','Glove capture was interrupted. Check the connection and retry.'):error||t('标定未完成，请查看详细记录。','Calibration did not finish. Review the detailed log.');tone='error';}
+   else if(done){label=t('标定完成','Calibration completed');message=t('手型已保存，可以进入遥操作。','Hand model saved. You can continue to teleoperation.');tone='completed';}
    else if(status==='completed'||status==='unconfirmed'){label=t('结果未确认','Result unconfirmed');message=t('等待官方 result 与正常退出结果，尚不能确认完成。','Completion requires the official result and a normal CLI exit.');tone='unknown';}
    else if(native&&status==='session_ended'){label=t('原版会话已结束','Official session ended');message=t('CLI 已正常退出。标定结果请查看下方原版界面与刷新后的用户模型状态。','The CLI exited normally. Review the original output below and refresh the user model status for calibration results.');}
    else if(native&&status==='stopped'){label=t('会话已停止','Session stopped');message=t('本次终端会话已停止，不代表标定完成。','The terminal session has stopped. This does not confirm a completed calibration.');}
@@ -83,7 +83,7 @@
    host.querySelector('.oc-result').hidden=view!=='completed';$('oc-result-meta').hidden=view!=='completed';write('oc-result-label',t('手型已保存','Hand model saved'));
    write('oc-result-user',[text(run.user,80),run.side==='left'?t('左手','Left hand'):run.side==='right'?t('右手','Right hand'):'',text(run.serial,80)].filter(Boolean).join(' · '));
    const location=text(payload.calibrated_urdf||payload.path||payload.model_path||payload.output_path,400);write('oc-result-location',location);$('oc-result-location').hidden=!location;
-   write('oc-result-note',t('结果保存在当前官方控制端的用户档案中。其他环境的 Viewer 档案不会自动同步。','Saved to the current official controller user profile. Viewer profiles in other environments are not synchronized automatically.'));
+   write('oc-result-note',t('已保存到所选佩戴者的档案。进入遥操作时会核对此次手型。','Saved to the selected wearer’s profile. Teleoperation verifies this model before opening.'));
    write('oc-details-label',t('详细记录','Detailed log'));raw();
    const nextVisualKey=[view,run.id||'',view==='collecting'?run.step_name||run.step:''].join('|');
    if(nextVisualKey!==visualKey){host.dataset.visualKey=nextVisualKey;const canAnimate=visualKey&&!native&&host.getClientRects().length&&document.documentElement.dataset.reduceMotion!=='true'&&!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches&&!window.matchMedia?.('(forced-colors: active)').matches;visualKey=nextVisualKey;if(canAnimate&&typeof host.animate==='function')host.animate([{opacity:.55,transform:'translateY(4px)'},{opacity:1,transform:'translateY(0)'}],{duration:150,easing:'ease-out'});}

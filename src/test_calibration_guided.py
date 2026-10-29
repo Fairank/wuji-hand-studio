@@ -20,6 +20,7 @@ import native_cli
 
 SN = 'WG_SYNTHETIC_GUIDED'
 USER = 'Synthetic'
+SDK_USER = dict(user_id='owner-guided-0257',display_name=USER)
 COMPONENT = dict(version='2026.10.12', binary='C:/synthetic/wuji.exe')
 
 
@@ -29,10 +30,10 @@ def profile(name=USER, calibrated=False):
 
 
 def record(kind='progress', **fields):
-    value=dict(schema_version=2, calibration='hand_model', operation='calibrate', event=kind)
+    value=dict(schema_version=2, calibration='hand_model', operation='calibrate', event=kind,user=copy.deepcopy(SDK_USER))
     value.update(fields)
     if kind == 'result' and 'result' not in fields:
-        value.update(status='ok', result=dict(sdk_user=USER, handedness='left',
+        value.update(status='ok', result=dict(sdk_user=copy.deepcopy(SDK_USER), handedness='left',
                     calibrated_urdf='/synthetic/left_hand.urdf', sn=SN))
     return value
 
@@ -80,6 +81,8 @@ def temporary_root():
 @contextmanager
 def native_environment(events=(), code=0, clean=True):
     with temporary_root() as folder, ExitStack() as stack:
+        stack.enter_context(patch('calibration_identity.read_current_sdk_user',return_value=copy.deepcopy(SDK_USER)))
+        stack.enter_context(patch('calibration_portability.file_digest',return_value=('d'*64,32)))
         stack.enter_context(patch.dict(os.environ, WUJI_OFFICIAL_CLI_DATA=str(folder)))
         identity=lambda pid:'synthetic-live' if pid == os.getpid() else None
         stack.enter_context(patch.object(cli_coordination, 'identity', side_effect=identity))
@@ -127,7 +130,7 @@ class ProfileContractTests(unittest.TestCase):
 
 
 class OfficialEventTests(unittest.TestCase):
-    def decoder(self): return OfficialEvents(SN,'left',USER)
+    def decoder(self): return OfficialEvents(SN,'left',USER,SDK_USER)
 
     def test_arbitrary_character_chunks_and_final_unterminated_line(self):
         events=[record(progress=dict(step_name='pinch_index',progress=.4)),record('result')]
@@ -155,12 +158,12 @@ class OfficialEventTests(unittest.TestCase):
                     with self.assertRaisesRegex(ValueError,'terminal event'):decoder.feed(line(later))
 
     def test_result_requires_exact_user_side_success_and_path(self):
-        mutations=[dict(status='error'),dict(result=None),dict(result={}),
-            dict(result=dict(sdk_user='Other',handedness='left',calibrated_urdf='x')),
-            dict(result=dict(sdk_user=USER,handedness='right',calibrated_urdf='x')),
-            dict(result=dict(sdk_user=USER,handedness='left',calibrated_urdf=' '))]
-        for mutation in mutations:
-            with self.subTest(mutation=mutation), self.assertRaisesRegex(ValueError,'selected user'):
+        mutations=[(dict(status='error'),'confirm success'),(dict(result=None),'confirm success'),(dict(result={}),'hand side'),
+            (dict(result=dict(sdk_user='Other',handedness='left',calibrated_urdf='x')),'wearer identity'),
+            (dict(result=dict(sdk_user=USER,handedness='right',calibrated_urdf='x')),'hand side'),
+            (dict(result=dict(sdk_user=USER,handedness='left',calibrated_urdf=' ')),'model location')]
+        for mutation,reason in mutations:
+            with self.subTest(mutation=mutation), self.assertRaisesRegex(ValueError,reason):
                 self.decoder().feed(line({**record('result'),**mutation}))
 
     def test_any_returned_serial_must_match_selected_identity(self):
@@ -171,7 +174,7 @@ class OfficialEventTests(unittest.TestCase):
             elif target=='event_device':value['device']=dict(sn='WG_OTHER')
             elif target=='result_device':value['result']['device']=dict(serial='WG_OTHER')
             else:value['result'][target]='WG_OTHER'
-            with self.subTest(target=target), self.assertRaisesRegex(ValueError,'identity differs'):
+            with self.subTest(target=target), self.assertRaisesRegex(ValueError,'another glove'):
                 self.decoder().feed(line(value))
 
     def test_conflicting_user_or_invalid_result_device_context_rejected(self):
@@ -205,7 +208,7 @@ class GuidedCollectionTests(unittest.TestCase):
         self.assertEqual(state['status'],'completed')
         self.assertEqual(state['event_count'],2)
         self.assertEqual(state['captured_poses'],[0])
-        self.assertEqual(state['result']['result']['sdk_user'],USER)
+        self.assertEqual(state['result']['result']['sdk_user'],SDK_USER)
         self.assertTrue(state['cleanup_confirmed']);self.assertFalse(state['running']);self.assertEqual(marker,{})
 
     def test_progress_without_ready_is_failure_even_when_child_exits_zero(self):
@@ -285,6 +288,7 @@ class GuidedWorkerPreflightTests(unittest.TestCase):
     def environment(self,current=None,override=None):
         token='c'*32
         with temporary_root() as folder,ExitStack() as stack:
+            stack.enter_context(patch('calibration_identity.read_current_sdk_user',return_value=copy.deepcopy(SDK_USER)))
             stack.enter_context(patch.dict(os.environ,WUJI_OFFICIAL_CLI_DATA=str(folder)))
             stack.enter_context(patch.object(native,'_attach_pipes'))
             capture=io.StringIO();stack.enter_context(patch.object(native.sys,'stdout',capture))
@@ -300,7 +304,7 @@ class GuidedWorkerPreflightTests(unittest.TestCase):
             tty=stack.enter_context(patch('native_terminal_worker.run',side_effect=AssertionError('Guided must not use ConPTY')))
             marker=dict(kind='calibration',token=token,pid=os.getpid(),start='synthetic-live',
                 job_name='Local\\HandWorkbench-OfficialCalibration-'+token,serial=SN,side='left',
-                interface='guided',user=USER,replace=False,cli_version=COMPONENT['version'])
+                interface='guided',user=USER,replace=False,cli_version=COMPONENT['version'],sdk_user=copy.deepcopy(SDK_USER))
             marker.update(override or {});cli_coordination.atomic(folder/'session.json',marker)
             yield SimpleNamespace(args=[token,SN,'left','900','guided',USER,'keep'],capture=capture,
                 query=query,prepare=prepare,contained=contained,pipe=pipe,tty=tty)
@@ -313,6 +317,13 @@ class GuidedWorkerPreflightTests(unittest.TestCase):
             env.pipe.assert_called_once_with([COMPONENT['binary'],'--jsonl','calib','hand-model','--sn',SN,'--timeout-s','900'])
             env.tty.assert_not_called()
             self.assertEqual(json.loads(env.capture.getvalue()),ready())
+
+    def test_worker_rejects_same_name_different_captured_id_before_device_read(self):
+        with self.environment(override=dict(sdk_user=dict(SDK_USER,user_id='owner-other'))) as env:
+            self.assertEqual(native.worker_main(env.args),1)
+            self.assertEqual([call.args for call in env.query.call_args_list],[('user','show')])
+            env.pipe.assert_not_called();env.tty.assert_not_called()
+            self.assertIn('wearer identity changed',env.capture.getvalue())
 
     def test_changed_user_unknown_model_or_new_overwrite_need_refuses_before_device_read(self):
         cases=[profile('Other'),profile('Default'),{**profile(),'left_hand':{}},profile(calibrated=True)]
@@ -413,7 +424,7 @@ class NativeHostStartTests(unittest.TestCase):
     def test_direct_native_start_without_verified_connection_never_reads_users_or_spawns(self):
         for connected in [None,{},dict(source='discovery',serial=SN)]:
             with self.subTest(connected=connected), self.environment() as env:
-                with self.assertRaisesRegex(ValueError,'Connect the selected Viewer'):
+                with self.assertRaisesRegex(ValueError,'Start calibration for the selected glove'):
                     env.service.start('left',SN,profile=USER,connected=connected)
                 env.call.assert_not_called();env.spawn.assert_not_called();env.service.metadata_check.assert_not_called()
 

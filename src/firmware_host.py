@@ -25,6 +25,17 @@ SAFE_ACTIONS = {'disconnect', 'hardware_stop', 'glove_stop', 'glove_disconnect',
     'session_keepalive', 'hardware_keepalive', 'glove_keepalive', 'program_keepalive', 'group_beat'}
 
 
+def _terminal_status_reply(text):
+    # The bundled xterm answers CSI 6 n with this one-based cursor report and
+    # CSI c with this exact primary device-attributes response. After the CLI
+    # enables CSI ? 1004 h, it also reports focus with the two exact I/O strings.
+    # These are protocol reports, not confirmation keys or arbitrary controls.
+    # Keep them complete and cursor coordinates within our resize bounds.
+    if text in ('\x1b[?1;2c','\x1b[I','\x1b[O'):return True
+    match=re.fullmatch(r'\x1b\[([1-9][0-9]{0,2});([1-9][0-9]{0,2})R',text)
+    return bool(match and 1<=int(match[1])<=100 and 1<=int(match[2])<=240)
+
+
 def firmware_environment():
     """Compatibility entry for the shared native CLI environment."""
     from native_environment import official_cli_environment
@@ -368,11 +379,12 @@ class FirmwareHost:
         if set(command) != expected:raise ValueError('Invalid firmware terminal request')
         if command['type'] == 'write':
             text = command['text']
-            # Only the official confirmation/menu input. No Ctrl+C/Ctrl+D,
-            # paste control sequences, shell escapes, or arbitrary PTY control.
+            # Official confirmation/menu input and bounded xterm status replies
+            # only. No Ctrl+C/Ctrl+D, paste controls, or arbitrary PTY control.
             if (not isinstance(text, str) or not text or len(text) > 64
                     or not (text in ('\x1b[A', '\x1b[B', '\r', '\n')
-                            or all(32 <= ord(c) <= 126 for c in text))):
+                            or all(32 <= ord(c) <= 126 for c in text)
+                            or _terminal_status_reply(text))):
                 raise ValueError('Only confirmation input is accepted during firmware updates')
         elif (command['type'] != 'resize' or type(command['rows']) is not int
                 or type(command['cols']) is not int or not 1 <= command['rows'] <= 100

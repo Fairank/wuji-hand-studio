@@ -6,7 +6,7 @@ from pathlib import Path
 import tempfile
 from types import SimpleNamespace as N
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock,patch
 import zipfile
 
 from calibration_portability import (calibration_proof,export_native_bundle,file_digest,
@@ -14,14 +14,16 @@ from calibration_portability import (calibration_proof,export_native_bundle,file
 
 
 MODEL=b'<robot name="synthetic-test" />'
+SDK_USER=dict(user_id='owner-1',display_name='Alice')
 
 
 def completed(path):
-    result=dict(handedness='right',sdk_user='Alice',calibrated_urdf=str(path))
+    result=dict(handedness='right',sdk_user=copy.deepcopy(SDK_USER),calibrated_urdf=str(path))
     return dict(cleanup_required=False,run=dict(id='a'*32,running=False,status='completed',
         source='official_jsonl_native',exit_code=0,cleanup_confirmed=True,error=None,
-        serial='WG-SYNTHETIC',side='right',expected_side='right',user='Alice',cli_version='2026.10.12',
-        result=dict(event='result',operation='calibrate',calibration='hand_model',schema_version=2,status='ok',result=result)))
+        model_sha256=hashlib.sha256(MODEL).hexdigest(),model_bytes=len(MODEL),
+        serial='WG-SYNTHETIC',side='right',expected_side='right',user='Alice',sdk_user=copy.deepcopy(SDK_USER),cli_version='2026.10.12',
+        result=dict(event='result',operation='calibrate',calibration='hand_model',schema_version=2,status='ok',user=copy.deepcopy(SDK_USER),result=result)))
 
 
 def bundle_context(root,model=MODEL,side='right'):
@@ -33,7 +35,7 @@ def bundle_context(root,model=MODEL,side='right'):
     if target.exists():stage.unlink()
     else:stage.replace(target)
     return dict(source_run_id='a'*32,source_workspace='test-workspace',serial='WG-SYNTHETIC',
-        side=side,source_profile='Alice',model_sha256=hashlib.sha256(model).hexdigest(),model_bytes=len(model),
+        side=side,source_profile='Alice',source_user_id='owner-1',model_sha256=hashlib.sha256(model).hexdigest(),model_bytes=len(model),
         bundle_path=str(target),bundle_sha256=digest,bundle_bytes=size)
 
 
@@ -65,6 +67,10 @@ class FakeManager:
 
 
 class PortabilityTests(unittest.TestCase):
+    def setUp(self):
+        reader=patch('calibration_identity.read_current_sdk_user',return_value=copy.deepcopy(SDK_USER))
+        reader.start();self.addCleanup(reader.stop)
+
     def test_private_transfer_root_is_shared_outside_immutable_code_version(self):
         self.assertEqual(controller_transfer_directory('/opt/hand-workbench/code/'+'a'*16),'/opt/hand-workbench/calibration-transfer')
         self.assertEqual(controller_transfer_directory('/home/test/agent'),'/home/test/agent/calibration-transfer')
@@ -221,6 +227,10 @@ class PortabilityTests(unittest.TestCase):
             other.write_bytes(MODEL);self.assertTrue(verify_loaded_model(glove,receipt))
             ignored=root/'sdk/legacy/right_hand.urdf'
             resource.get=lambda:str(ignored)
+            with self.assertRaises(ValueError):verify_loaded_model(glove,receipt,sdk_root=root/'sdk')
+            ignored.parent.mkdir(parents=True);ignored.write_bytes(b'<robot name="older-model" />')
+            with self.assertRaisesRegex(ValueError,'custom'):verify_loaded_model(glove,receipt,sdk_root=root/'sdk')
+            ignored.write_bytes(MODEL)
             self.assertTrue(verify_loaded_model(glove,receipt,sdk_root=root/'sdk'))
             resource.set.assert_not_called()
 

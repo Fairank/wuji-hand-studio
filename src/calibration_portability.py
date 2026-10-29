@@ -106,16 +106,22 @@ def calibration_proof(snapshot, *, workspace='main'):
             or not isinstance(result,dict) or event.get('event')!='result'
             or type(event.get('schema_version')) is not int or event['schema_version']!=2
             or event.get('calibration')!='hand_model' or event.get('operation')!='calibrate'
-            or event.get('status')!='ok' or result.get('sdk_user')!=profile
+            or event.get('status')!='ok'
             or result.get('handedness')!=side or not isinstance(result.get('calibrated_urdf'),str)):
         raise ValueError('本次标定的设备、佩戴者或手型结果不一致 / Calibration device, wearer or model result differs')
+    from calibration_guided import validate_result
+    identity=validate_result(event,serial,side,profile,run.get('sdk_user'))
     for row in (event,result,event.get('device') or {},result.get('device') or {}):
         if not isinstance(row,dict):raise ValueError('Invalid calibration device context')
         if any(row.get(k) is not None and row[k]!=serial for k in ('sn','serial')):
             raise ValueError('Calibration result belongs to another glove')
     path=Path(result['calibrated_urdf'])
     digest,size=file_digest(path)
-    proof=dict(source_run_id=run['id'],serial=serial,side=side,source_profile=profile,
+    if (not isinstance(run.get('model_sha256'),str) or not HASH.fullmatch(run['model_sha256'])
+            or type(run.get('model_bytes')) is not int
+            or (digest,size)!=(run['model_sha256'],run['model_bytes'])):
+        raise ValueError('保存的手型与标定结束时不一致，请重新核对 / Saved hand model differs from the verified calibration output')
+    proof=dict(source_run_id=run['id'],serial=serial,side=side,source_profile=profile,source_user_id=identity['user_id'],
         source_workspace=str(workspace),model_sha256=digest,model_bytes=size,model_path=str(path),source_cli_version=run['cli_version'])
     proof['expected_revision']=hashlib.sha256(json.dumps(proof,sort_keys=True,separators=(',',':')).encode()).hexdigest()
     return proof
@@ -126,12 +132,15 @@ def export_native_bundle(proof, folder, *, json_command=None, cancel_check=None)
     if json_command is None:
         from native_cli import json_command
     from calibration_guided import validate_profile
+    from calibration_identity import read_current_sdk_user,require_sdk_user
+    expected=dict(user_id=proof['source_user_id'],display_name=proof['source_profile'])
     def official(*args):
         try:return json_command(*args)
         except Exception:raise ValueError('官方标定资料读取或导出失败，未接入手套；请检查官方组件和佩戴者 / Official calibration data could not be read or exported; glove was not opened. Check the official component and wearer') from None
     _check(cancel_check)
     current=official('user','show')
     validate_profile(current,proof['source_profile'],proof['side'],True)
+    require_sdk_user(read_current_sdk_user(proof['source_profile']),expected,proof['source_profile'])
     if file_digest(proof['model_path'])!=(proof['model_sha256'],proof['model_bytes']):
         raise ValueError('保存的手型已改变，请重新核对标定 / Saved hand model changed; review calibration')
     root=Path(folder).absolute()
@@ -144,6 +153,7 @@ def export_native_bundle(proof, folder, *, json_command=None, cancel_check=None)
     _check(cancel_check)
     # An external CLI can change its current profile outside our application.
     validate_profile(official('user','show'),proof['source_profile'],proof['side'],True)
+    require_sdk_user(read_current_sdk_user(proof['source_profile']),expected,proof['source_profile'])
     if file_digest(proof['model_path'])!=(proof['model_sha256'],proof['model_bytes']):
         raise ValueError('Hand model changed during export; no controller was opened')
     digest,size=file_digest(target,MAX_BUNDLE)
@@ -151,7 +161,7 @@ def export_native_bundle(proof, folder, *, json_command=None, cancel_check=None)
     return dict(proof,bundle_path=str(target),bundle_sha256=digest,bundle_bytes=size)
 
 
-CONTEXT_FIELDS={'source_run_id','source_workspace','serial','side','source_profile',
+CONTEXT_FIELDS={'source_run_id','source_workspace','serial','side','source_profile','source_user_id',
                 'model_sha256','model_bytes','bundle_sha256','bundle_bytes'}
 
 
@@ -163,6 +173,7 @@ def validate_continuation(value, *, path=False):
             or not isinstance(value['source_workspace'],str) or not 1<=len(value['source_workspace'])<=100
             or value['side'] not in ('left','right') or not isinstance(value['source_profile'],str)
             or not PROFILE.fullmatch(value['source_profile']) or value['source_profile'].lower()=='default'
+            or not isinstance(value['source_user_id'],str) or not IDENT.fullmatch(value['source_user_id'])
             or any(not isinstance(value[k],str) or not HASH.fullmatch(value[k]) for k in ('model_sha256','bundle_sha256'))
             or type(value['model_bytes']) is not int or not 0<value['model_bytes']<=MAX_MODEL
             or type(value['bundle_bytes']) is not int or not 0<value['bundle_bytes']<=MAX_BUNDLE):
@@ -272,7 +283,7 @@ def prepare_controller_model(manager, context, *, folder=None, receipt_folder=No
     try:preview=manager.preview_user_data(str(bundle))
     except Exception:raise ValueError('控制端未能验证官方标定资料包，未接入手套 / Controller could not validate the official calibration bundle; glove was not opened') from None
     owner=preview.get('owner_user_id') if isinstance(preview,dict) else None
-    if (not isinstance(owner,str) or not IDENT.fullmatch(owner)
+    if (not isinstance(owner,str) or not IDENT.fullmatch(owner) or owner!=context['source_user_id']
             or preview.get('owner_display_name')!=context['source_profile']):
         raise ValueError('Official calibration bundle belongs to another SDK user')
     rows=_components(preview);model_key='hand_model.'+context['side']+'|'
@@ -350,8 +361,9 @@ def verify_loaded_model(glove, receipt, *, sdk_root=None):
     if file_digest(receipt['model_path'])!=expected:raise ValueError('Controller hand model changed before connection')
     override=glove.hand_model_path().get()
     if not isinstance(override,str):raise ValueError('Cannot verify active glove hand model')
-    managed=Path(sdk_root or Path.home()/'.wuji/sdk').resolve()
-    if override and Path(override).resolve()!=Path(receipt['model_path']).resolve() and not Path(override).resolve().is_relative_to(managed):
+    # A directory managed by the SDK can contain older models or another
+    # wearer's custom model. Only this exact model's bytes establish the match.
+    if override:
         if file_digest(override)!=expected:
             raise ValueError('手套已有另一份自定义手型覆盖，未修改该设置 / A different custom glove hand model is active; it was not changed')
     return True

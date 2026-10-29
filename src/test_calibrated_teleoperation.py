@@ -87,7 +87,12 @@ class ContinuationTests(unittest.TestCase):
             e.service.execute(self.command(e));self.finish(e);e.glove.update(connection='disconnected',busy=False)
             new=e.root/'new.urdf';new.write_bytes(MODEL+b'\n')
             e.state['run'].update(id='e'*32,serial='GLOVE-B',user='Bob')
-            e.state['run']['result']['result'].update(calibrated_urdf=str(new),sdk_user='Bob')
+            e.state['run'].update(model_sha256=__import__('hashlib').sha256(new.read_bytes()).hexdigest(),model_bytes=new.stat().st_size)
+            e.state['run']['result']['result'].update(calibrated_urdf=str(new))
+            identity=dict(user_id='owner-bob',display_name='Bob')
+            e.state['run']['sdk_user']=copy.deepcopy(identity)
+            e.state['run']['result']['user']=copy.deepcopy(identity)
+            e.state['run']['result']['result']['sdk_user']=copy.deepcopy(identity)
             result=e.service.snapshot()
             self.assertEqual(result['run_id'],'e'*32);self.assertEqual(result['serial'],'GLOVE-B');self.assertEqual(result['profile'],'Bob')
             self.assertEqual(result['model_sha256'],__import__('hashlib').sha256(new.read_bytes()).hexdigest())
@@ -377,7 +382,8 @@ class BridgeContinuationTests(unittest.TestCase):
             self.assertEqual(command['user_id'],'owner-1');callback.assert_called_once_with(receipt)
             self.assertNotIn('glove_prepare',bridge.stdin.getvalue());self.assertNotIn('glove_follow',bridge.stdin.getvalue())
             bridge.stdin=io.StringIO()
-            for changed in ({'serial':'OTHER'},{'model_sha256':'b'*64},{'owner_user_id':''},{'source_workspace':'foreign'}):
+            for changed in ({'serial':'OTHER'},{'model_sha256':'b'*64},{'owner_user_id':''},
+                            {'owner_user_id':'same-name-different-owner'},{'source_workspace':'foreign'}):
                 with self.subTest(changed=changed),self.assertRaises(ValueError):bridge._calibrated_ready(dict(receipt={**receipt,**changed}),context)
             self.assertEqual(bridge.stdin.getvalue(),'')
 

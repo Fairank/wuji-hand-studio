@@ -161,6 +161,8 @@ class ConnectionSwitch:
         if pending or calibration_cleanup_required(state):return '设备退出或停用尚未确认 / Device cleanup or stop is unconfirmed'
         if (state.get('hardware') or {}).get('active') is not False and (state.get('hardware') or {}).get('active') is not True:return '灵巧手停用结果尚未确认 / Hand stop is unconfirmed'
         g=state.get('glove') or {};hw=g.get('hardware') or {}
+        if (g.get('feedback') or {}).get('device_id') and type(hw.get('active')) is not bool:
+            return '已配对灵巧手的停用状态未知，未切换会话 / Paired hand disable state is unknown; session was not switched'
         cleanup=g.get('session_cleanup') or {}
         if not cleanup.get('retryable') and (cleanup.get('error') or (self._cleanup_error(state)
                 and cleanup.get('cleanup_confirmed') is not True)):
@@ -408,6 +410,69 @@ class ConnectionSwitch:
                 expected_user=source['user_id'],expected_profile=source['profile'])
             if proof.get('cleanup_confirmed') is not True:raise ValueError('SDK cleanup is unconfirmed')
         else:c.stop_feedback_confirmed(source['session'],source['serial'])
+
+    def release_for_calibration(self,command,*,cancel_check=None):
+        """Final explicit calibration Start may release its exact SDK glove.
+
+        Reuse the normal switch's owner, stop acknowledgement and cleanup
+        checks. No Viewer, glove stream, or motor is started by this method.
+        """
+        if not self.workflow_lock.acquire(blocking=False):raise ValueError('Another device task is switching')
+        begun=False;source=None;released=False
+        def check():
+            self._check_cancel()
+            if cancel_check is not None:cancel_check()
+        try:
+            state=self.controller.snapshot();source=owner(state)
+            if cancel_check is not None:cancel_check()
+            if source is None or source.get('mode')!='teleoperation':return False
+            if source.get('serial')!=command.get('serial'):
+                raise ValueError('请先结束另一手套的会话 / Another glove owns the SDK session')
+            transition=self.controller.calibration_handover
+            checked=state
+            if (getattr(transition,'internal',False) and (state.get('calibration_connection') or {}).get('serial')==command.get('serial')):
+                checked=copy.deepcopy(state);checked['calibration_connection']={}
+            reason=self._blocked(checked)
+            if reason:raise ValueError(reason)
+            if command.get('side') not in ('left','right'):
+                raise ValueError('请确认手套左右手 / Confirm the selected glove hand side')
+            with self.lock:
+                begun=True;self._thread=threading.get_ident();self.cancelled=False;self.viewer_token=None
+                self.deadline=self.clock()+45
+                self.state.update(busy=True,phase='preflight',source=copy.deepcopy(source),
+                    target=dict(mode='calibration',serial=source['serial']),source_released=False,
+                    request_id=secrets.token_hex(16),attempt_id=secrets.token_hex(16),
+                    error=None,cleanup_error=None,receipt=None)
+            from studio_component import enforce_session_owner
+            enforce_session_owner(command)
+            self._official_preflight()
+            check()
+            with gate(self.controller.official_viz.folder):
+                if owner(self.controller.snapshot())!=source:raise ValueError('SDK owner changed before calibration')
+                if reservation(self.controller.official_viz.folder):raise ValueError('Another official device owner is active')
+                self.preflight_check(source);self.check_parent();check()
+                if command.get('interface','guided')=='guided':
+                    self.controller.calibration.preflight_guided(command.get('profile'),command['side'],
+                        command.get('replace',False),create_profile=command.get('create_profile',False))
+                if owner(self.controller.snapshot())!=source:raise ValueError('SDK owner changed during calibration preflight')
+                check()
+            self.resume={k:source[k] for k in ('serial','profile','user_id')}
+            self.resume['binding']=copy.deepcopy(state.get('retarget_binding'));self.resume_config=self._config()
+            self._set(phase='stopping');check();self._stop(source);released=True
+            self._set(source_released=True);check()
+            with gate(self.controller.official_viz.folder):
+                if reservation(self.controller.official_viz.folder):raise ValueError('Another session acquired the device')
+                self.idle_check();self.check_parent();check()
+                if owner(self.controller.snapshot()) is not None:raise ValueError('SDK release is unconfirmed')
+            self._set(phase='released_for_calibration')
+            return True
+        except Exception as error:
+            if begun:self._set(phase='error',error=str(error)[:900],source_released=released)
+            raise
+        finally:
+            if begun:
+                with self.lock:self.state['busy']=False;self._thread=None;self.deadline=None
+            self.workflow_lock.release()
 
     def start(self,command,*,pair_target=None):
         if not self.workflow_lock.acquire(blocking=False):raise ValueError('Another device task is switching')

@@ -213,16 +213,20 @@ class SDKConnectionDefaultsTests(unittest.TestCase):
             controller=Controller(factory=Mock(),reports=Path(folder)/'reports')
             controller.state['device_profile']=profile('hand2_right');controller._continuation_profile='hand2_right'
             model=Path(folder)/'right_hand.urdf';model.write_bytes(b'<robot name="synthetic"/>')
-            proof=dict(source_run_id='a'*32,source_workspace='main',source_profile='Alice',serial='SYNTHETIC-GLOVE',
+            proof=dict(source_run_id='a'*32,source_workspace='main',source_profile='Alice',source_user_id='owner',serial='SYNTHETIC-GLOVE',
                 side='right',model_path=str(model),model_sha256=hashlib.sha256(model.read_bytes()).hexdigest(),model_bytes=model.stat().st_size)
             expected={key:proof[key] for key in ('source_run_id','source_workspace','source_profile','serial','side','model_sha256')}
             controller.calibrated_teleoperation=N(_current_proof=lambda:copy.deepcopy(proof))
-            controller.glove._continuation=expected
+            controller.glove._continuation=dict(expected,source_user_id=proof['source_user_id'])
             binding=dict(generation='hand2',side='right',glove_serial=proof['serial'],hand_serial='',sdk_user='owner')
             controller.retarget.select(binding,controller.state['device_profile'])
             values,files=self.archived_open_profile(controller,binding)
             with patch('studio_component.enforce_session_owner'):
                 settings=controller._continuation_model_ready(dict(expected,owner_user_id='owner',imported=True))
+                binding_bytes=controller.retarget.path.read_bytes()
+                with self.assertRaises(ValueError):
+                    controller._continuation_model_ready(dict(expected,owner_user_id='same-name-different-owner',imported=True))
+                self.assertEqual(controller.retarget.path.read_bytes(),binding_bytes)
             self.assertEqual(settings['solver']['engine'],'sdk');self.assertEqual(settings['solver']['values'],values)
             self.assertEqual(controller.tuning.context(binding)['engine'],'sdk')
             for path,data in files.items():self.assertEqual(path.read_bytes(),data)

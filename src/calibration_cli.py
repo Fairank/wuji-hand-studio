@@ -234,10 +234,14 @@ class CalibrationCLI:
                 cache.update(devices=[copy.deepcopy(d) for d in devices if is_glove_device(d)],devices_error=None)
             except (OSError,ValueError,RuntimeError,TimeoutError) as error:
                 cache.update(devices=[],devices_error=str(error)[:400])
-        with self.lock:run=copy.deepcopy(self.run)
+        with self.lock:
+            run=copy.deepcopy(self.run)
+            native_token=getattr(self.native,'token',None)
         from cli_coordination import reservation,identity
         marker=reservation()
-        cleanup=bool(marker.get('kind')=='calibration' and identity(marker.get('pid'))!=marker.get('start'))
+        cleanup=bool(marker.get('kind')=='calibration' and (identity(marker.get('pid'))!=marker.get('start')
+            or isinstance(native_token,str) and marker.get('token')==native_token and run.get('running') is False
+            and run.get('cleanup_confirmed') is False))
         return dict(**(cache or {}), run=run,cleanup_required=cleanup,
                     cleanup_error='上次原版 CLI 退出尚未核对，请结束会话以恢复 / Previous CLI cleanup is unverified; end the session to recover' if cleanup else None)
 
@@ -291,16 +295,18 @@ class CalibrationCLI:
             if type(replace) is not bool or type(timeout_s) is not int or not 60<=timeout_s<=1800:
                 raise ValueError('Invalid calibration options')
             if interface not in ('guided','terminal') or type(create_profile) is not bool:raise ValueError('Invalid calibration interface')
-            # Only the server handover supplies this fact after matching and
-            # stopping its own live Viewer. Browser discovery is not a connection.
+            # Only the server supplies a receipt after an exact Viewer handover
+            # or the final explicit Start and fresh discovery. Neither tab
+            # selection nor a browser-supplied object reaches this argument.
             from cli_coordination import identity,gate
-            if (not isinstance(connected,dict) or connected.get('source')!='native_viewer'
+            if (not isinstance(connected,dict) or connected.get('source') not in ('native_viewer','explicit_calibration')
                     or connected.get('serial')!=serial or connected.get('owner_pid')!=os.getpid()
+                    or not isinstance(connected.get('owner_start'),str) or not connected['owner_start']
                     or identity(os.getpid())!=connected.get('owner_start')
-                    or not isinstance(connected.get('viewer_token'),str)
+                    or connected.get('source')=='native_viewer' and not isinstance(connected.get('viewer_token'),str)
                     or type(connected.get('checked_at')) not in (int,float)
                     or not math.isfinite(connected['checked_at']) or not 0<=time.time()-connected['checked_at']<=60):
-                raise ValueError('请先手动接入并查看，再切换到标定 / Connect the selected Viewer before calibration')
+                raise ValueError('请从所选手套开始标定 / Start calibration for the selected glove')
             if side not in ('left','right') or connected.get('side') not in (None,side):raise ValueError('Glove side changed during handover')
             with gate():
                 # Metadata checks read Controller.snapshot (controller -> run
