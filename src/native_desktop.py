@@ -57,9 +57,10 @@ class NativeDesktop:
         else:
             try:
                 saved=json.loads((DATA/'native-window.json').read_text(encoding='utf-8'))
+                if not isinstance(saved,dict):raise ValueError('Window preferences must be an object')
                 self.bounds=saved
                 port=saved.get('port')
-                if port in ports:ports.remove(port);ports.insert(0,port)
+                if type(port) is int and port in ports:ports.remove(port);ports.insert(0,port)
             except (OSError,ValueError,TypeError):pass
         for port in ports:
             try:self.server=ConsoleHTTPServer(('127.0.0.1',port),Handler);break

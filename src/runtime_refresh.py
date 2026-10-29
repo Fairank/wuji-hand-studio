@@ -82,7 +82,7 @@ def apply(image,digest,root=Path('/')):
         if any(tuple(map(int,value.split('.')))>baseline for value in versions):
             raise ValueError('已安装较新 SDK，请使用遥操作组件维护，不能回退内置基线 / A newer SDK is installed; use teleoperation component maintenance instead of a bundled downgrade')
     current.parent.mkdir(parents=True,exist_ok=True);cli.parent.mkdir(parents=True,exist_ok=True)
-    env_swapped=cli_swapped=False
+    env_swapped=cli_swapped=env_displaced=cli_displaced=rollback_failed=False
     try:
         venv.EnvBuilder(with_pip=False,symlinks=True).create(staged)
         with tarfile.open(image) as archive:
@@ -101,30 +101,32 @@ def apply(image,digest,root=Path('/')):
         result=subprocess.run([str(cli_pending),'--version'],check=True,timeout=15,capture_output=True,text=True,env=environment)
         if SDK_VERSION not in result.stdout:raise ValueError('CLI version mismatch')
         assert_idle(root)
-        if current.exists():current.rename(previous)
-        try:staged.rename(current);env_swapped=True
-        except BaseException:
-            if previous.exists():previous.rename(current)
-            raise
-        if cli.exists():cli.rename(cli_previous)
-        try:cli_pending.rename(cli);cli_swapped=True
-        except BaseException:
-            if cli_previous.exists():cli_previous.rename(cli)
-            raise
+        # Record intent before each rename: an interrupt can arrive after the
+        # filesystem move, before Python can record that it completed.
+        if current.exists():env_displaced=True;current.rename(previous)
+        env_swapped=True;staged.rename(current)
+        if cli.exists():cli_displaced=True;cli.rename(cli_previous)
+        cli_swapped=True;cli_pending.rename(cli)
         subprocess.run([str(current/'bin/python'),'-c',command[-1]],check=True,timeout=30,env=environment,capture_output=True)
         return dict(ok=True,sdk_version=SDK_VERSION,cli_version=SDK_VERSION,
                     sdk_backup=str(previous) if previous.exists() else None,cli_backup=str(cli_previous) if cli_previous.exists() else None,parameters_preserved=True,motion_started=False)
     except BaseException:
-        if cli_swapped:
-            cli.rename(cli_pending)
-            if cli_previous.exists():cli_previous.rename(cli)
-        if env_swapped:
-            current.rename(staged)
-            if previous.exists():previous.rename(current)
+        errors=[]
+        for destination,pending,backup,swapped,displaced in (
+                (cli,cli_pending,cli_previous,cli_swapped,cli_displaced),
+                (current,staged,previous,env_swapped,env_displaced)):
+            try:
+                if swapped and destination.exists():destination.rename(pending)
+                if displaced and backup.exists():backup.rename(destination)
+            except BaseException as error:errors.append(error)
+        if errors:
+            rollback_failed=True
+            raise RuntimeError('Runtime restoration is unconfirmed; preserve the original backups and staging files for recovery') from errors[0]
         raise
     finally:
-        if staged.exists() and staged.parent==current.parent and not staged.is_symlink():shutil.rmtree(staged)
-        cli_pending.unlink(missing_ok=True)
+        if not rollback_failed:
+            if staged.exists() and staged.parent==current.parent and not staged.is_symlink():shutil.rmtree(staged)
+            cli_pending.unlink(missing_ok=True)
 
 
 if __name__=='__main__':print(json.dumps(apply(sys.argv[1],sys.argv[2])))

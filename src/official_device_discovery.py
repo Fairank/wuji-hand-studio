@@ -18,6 +18,12 @@ class DiscoveryDeferred(ValueError):
 class DiscoveryCleanupUnconfirmed(ValueError):
     """Keep ownership when the discovery child has not certainly exited."""
 
+    def __init__(self,message,*,owned=None):
+        super().__init__(message)
+        # A failed close retains its private Job handle. Keep that exact owner
+        # available for an explicit retry; never rediscover a process by PID.
+        self.owned=owned
+
 
 def _cancellable_read(command,cancelled):
     from windows_process_job import OwnedProcess
@@ -43,8 +49,12 @@ def _cancellable_read(command,cancelled):
         # This private job contains only `devices`, never a Viewer or firmware
         # writer. A user action may cancel it, but must prove the whole read
         # tree exited before another owner is admitted.
-        if owned is not None and not owned.close(timeout=2):
-            raise DiscoveryCleanupUnconfirmed('Discovery process exit is unconfirmed')
+        if owned is not None:
+            try:closed=owned.close(timeout=2)
+            except Exception as error:
+                raise DiscoveryCleanupUnconfirmed('Discovery process exit is unconfirmed: '+str(error)[:400],owned=owned) from error
+            if not closed:
+                raise DiscoveryCleanupUnconfirmed('Discovery process exit is unconfirmed',owned=owned)
 
 
 def native_devices(*,cancelled=None):

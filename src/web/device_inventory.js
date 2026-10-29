@@ -24,7 +24,7 @@
  advanced.id='di-workspace-settings';
  for(const element of [...host.children])if(element.matches('.cr-device-grid,.cr-next'))advancedBody.append(element);
  root.after(advanced);const oldIntro=host.querySelector(':scope > .hub-intro');if(oldIntro)oldIntro.hidden=true;
- let inventory=null,previousDisplayRows=[],scanFocus='',online=false,loading=null,scanning=false,using=false,pendingMode='',filter='all',activeSerial='',useHandler=null,timer=0,lastRead=0,backoffUntil=0,lastErrorKey='',localError='',consumerError='',consoleState=null,destroyed=false,discoveryWanted=true,sessionBaseline=new Set(),sessionCount=0,pausedForSession=false;
+ let inventory=null,previousDisplayRows=[],scanFocus='',online=false,loading=null,scanning=false,using=false,pendingMode='',filter='all',activeSerial='',useHandler=null,timer=0,lastRead=0,backoffUntil=0,lastErrorKey='',localError='',consumerError='',consoleState=null,destroyed=false,discoveryWanted=true,sessionBaseline=new Set(),sessionCount=0,pausedForSession=false,serviceRevision=0;
  const selectedByKind=new Map(),cards=new Map(),discoveryHolds=new Set();
  const getTime=value=>{if(typeof value==='number'&&Number.isFinite(value))return value<1e12?value*1000:value;if(typeof value==='string'){const parsed=Date.parse(value);return Number.isFinite(parsed)?parsed:0;}return 0;};
  const rows=()=>{const current=Array.isArray(inventory?.devices)?inventory.devices.filter(d=>d&&typeof(d.sn||d.serial)==='string'):[],observed=online&&inventory?.scanning===true&&!inventory.error&&!localError&&!current.length?previousDisplayRows:current;return observed.filter(fresh);};
@@ -122,7 +122,7 @@
   const shown=all.filter(d=>filter==='all'||d.kind===filter);list.setAttribute('aria-label',t('已发现设备，按编号选择','Discovered devices; select by serial number'));
   const existing=new Set();for(let index=0;index<shown.length;index++){
    const item=shown[index],serial=sn(item);existing.add(serial);const itemCard=cards.get(serial)||createCard(serial),{card,radio,icon,name,meta,identity,status}=itemCard;
-   radio.disabled=!usable(item);radio.checked=activeSerial===serial;card.dataset.selected=String(radio.checked);card.dataset.available=String(usable(item));card.dataset.kind=item.kind||'unknown';
+   radio.disabled=using||!usable(item);radio.checked=activeSerial===serial;card.dataset.selected=String(radio.checked);card.dataset.available=String(usable(item));card.dataset.kind=item.kind||'unknown';
    icon.hidden=true;icon.replaceChildren();icon.dataset.kind=item.kind||'unknown';
    const owner=ownerLabel(item);setText(name,deviceName(item));setText(meta,sideLabel(item)+(item.side_source==='serial_hint'?t(' · 身份提示，待设备核对',' · Identity hint; verify on connection'):item.side_source==='device'?t(' · 设备报告',' · Device reported'):'')+(owner&&!fresh(item)?t(' · 发现记录已过期',' · Discovery record expired'):''));setText(identity,serial);
    setText(status,owner||(busy?t('正在核对','Checking'):!fresh(item)?t('已过期','Stale'):item.kind==='unknown'?t('待识别','Unidentified'):item.selectable!==true?t('暂不可用','Unavailable'):t('已发现','Discovered')));status.dataset.state=owner||busy?'busy':!fresh(item)||item.kind==='unknown'?'muted':'ready';
@@ -149,12 +149,12 @@
  }
  function schedule(delay=1000){clearTimeout(timer);if(!destroyed)timer=setTimeout(tick,delay);}
  async function refresh(){
-  if(destroyed||loading)return loading;
+  if(destroyed||loading)return loading;const own=serviceRevision;
   loading=(async()=>{
-   try{const response=await fetch('/api/device-inventory',{cache:'no-store',signal:AbortSignal.timeout(6000)});if(!response.ok)throw Error(t('无法读取设备列表','Device list unavailable'));const value=await response.json();if(!value||!Array.isArray(value.devices)||typeof value.scan_allowed!=='boolean')throw Error(t('设备列表不完整','Incomplete device list'));if(value.scanning!==true||value.devices.length||value.error)previousDisplayRows=value.error?[]:value.devices.filter(d=>d&&typeof(d.sn||d.serial)==='string');inventory=value;online=true;localError='';lastRead=Date.now();
+   try{const response=await fetch('/api/device-inventory',{cache:'no-store',signal:AbortSignal.timeout(6000)});if(!response.ok)throw Error(t('无法读取设备列表','Device list unavailable'));const value=await response.json();if(destroyed||own!==serviceRevision)return;if(!value||!Array.isArray(value.devices)||typeof value.scan_allowed!=='boolean')throw Error(t('设备列表不完整','Incomplete device list'));if(value.scanning!==true||value.devices.length||value.error)previousDisplayRows=value.error?[]:value.devices.filter(d=>d&&typeof(d.sn||d.serial)==='string');inventory=value;online=true;localError='';lastRead=Date.now();
     const errorKey=JSON.stringify([value.error,value.scanned_at]);if(value.error&&errorKey!==lastErrorKey){backoffUntil=Date.now()+5000;lastErrorKey=errorKey;}
     window.dispatchEvent(new CustomEvent('device-inventory-update',{detail:JSON.parse(JSON.stringify(value))}));
-   }catch(error){online=false;localError=error.message;backoffUntil=Math.max(backoffUntil,Date.now()+5000);lastRead=Date.now();}
+   }catch(error){if(!destroyed&&own===serviceRevision){online=false;localError=error.message;backoffUntil=Math.max(backoffUntil,Date.now()+5000);lastRead=Date.now();}}
    finally{loading=null;render();}
   })();return loading;
  }
@@ -182,7 +182,7 @@
  const observer=new MutationObserver(visibilityChanged);for(let element=host;element;element=element.parentElement)observer.observe(element,{attributes:true,attributeFilter:['hidden','class','style','data-page','data-hub-tab']});
  window.addEventListener('workspace-page',visibilityChanged);window.addEventListener('hashchange',visibilityChanged);document.addEventListener('visibilitychange',visibilityChanged);window.addEventListener('wuji-language',render);
  window.addEventListener('console-state',event=>{consoleState=event.detail;render();});
- window.addEventListener('console-offline',()=>{consoleState=null;online=false;localError=t('工作台服务已离线，连接状态未核对。','Workbench service offline. Connection state is unverified.');render();});
+ window.addEventListener('console-offline',()=>{serviceRevision++;consoleState=null;online=false;localError=t('工作台服务已离线，连接状态未核对。','Workbench service offline. Connection state is unverified.');render();});
  window.WujiDeviceInventory={
   selection(kind){const serial=kind?selectedByKind.get(kind):activeSerial;const row=rows().find(item=>sn(item)===serial);return usable(row)?clone(row):null;},
   mount(target){if(target){if(root.parentElement!==target)target.append(root);}else if(root.previousSibling!==anchor)anchor.after(root);render();visibilityChanged();},

@@ -18,7 +18,8 @@ SHAPES={'mean':(86,), 'std':(86,), 'rnn.weight_ih_l0':(105,86),
 
 def load_weights(folder):
     manifest=json.loads((folder/'manifest.json').read_text(encoding='utf-8'))
-    if manifest.get('format')!='hand-workbench-model-v1' or manifest.get('contract')!=CONTRACT:
+    if (not isinstance(manifest,dict) or manifest.get('format')!='hand-workbench-model-v1'
+            or manifest.get('contract')!=CONTRACT or not isinstance(manifest.get('sha256'),dict)):
         raise ValueError('Unsupported model format or feedback contract')
     for name in ('recognizer.npz','parity.npz'):
         path=folder/name
@@ -29,7 +30,7 @@ def load_weights(folder):
         with zipfile.ZipFile(path) as pack:
             if sum(x.file_size for x in pack.infolist())>4_000_000:raise ValueError('Model array size exceeded')
     with np.load(folder/'recognizer.npz',allow_pickle=False) as pack:
-        if set(pack.files)!=set(SHAPES):raise ValueError('Unexpected model arrays')
+        if set(pack.files)!=set(SHAPES) or len(pack.files)!=len(SHAPES):raise ValueError('Unexpected model arrays')
         weights={name:pack[name].copy() for name in SHAPES}
     for name,shape in SHAPES.items():
         v=weights[name]
@@ -68,9 +69,18 @@ class Recognizer:
 def validate_parity(folder):
     model=Recognizer(folder)
     with np.load(folder/'parity.npz',allow_pickle=False) as pack:
-        result=model.consume(pack['input'][0],contract=CONTRACT)
-        error=max(float(np.max(np.abs(result[k]-pack[k][0]))) for k in result)
-        error=max(error,float(np.max(np.abs(model.h-pack['hidden'][0,0]))))
+        required={'input','hidden','decoder','recent','force'}
+        if set(pack.files)!=required or len(pack.files)!=len(required):raise ValueError('Unexpected parity arrays')
+        arrays={name:pack[name] for name in required};frames=arrays['input']
+        if frames.ndim!=3 or frames.shape[0]!=1 or frames.shape[2]!=86 or not 1<=frames.shape[1]<=100000:
+            raise ValueError('Invalid parity input shape')
+        shapes={'input':frames.shape,'hidden':(1,1,35),**{name:(1,frames.shape[1],5) for name in ('decoder','recent','force')}}
+        for name,array in arrays.items():
+            if array.shape!=shapes[name] or array.dtype.kind!='f' or not np.isfinite(array).all():
+                raise ValueError('Invalid parity shape or values')
+        result=model.consume(frames[0],contract=CONTRACT)
+        error=max(float(np.max(np.abs(result[k]-arrays[k][0]))) for k in result)
+        error=max(error,float(np.max(np.abs(model.h-arrays['hidden'][0,0]))))
     if not np.isfinite(error) or error>1e-4:raise ValueError('Model parity check failed')
     return error
 

@@ -44,6 +44,7 @@ class DeviceFleet:
         if profile not in PROFILES:
             raise ValueError('Unknown device profile')
         with self.lock:
+            if self._closing:raise ValueError('工作区正在结束，请稍后重试 / Workspaces are closing; retry shortly')
             if len(self.children) >= 7:
                 raise ValueError('最多8个同时打开的设备工作区 / Up to eight device workspaces')
             ident = _ident or secrets.token_hex(8)
@@ -250,21 +251,35 @@ class DeviceFleet:
         return dict(removed=True)
 
     def close(self):
-        for r in list(self.children.values()):
-            try:
-                response=self.post(r, {'name': 'session_close'})
-                if not response.get('ok'):
-                    return response
-            except (OSError, ValueError) as error:
-                if r['process'].poll() is None:
-                    return dict(ok=False,error='设备工作区尚未确认断开 / Workspace disconnect unconfirmed: '+str(error))
-        for r in list(self.children.values()):
-            if r['process'].poll() is None:
-                r['process'].terminate()
-                try:r['process'].wait(timeout=5)
-                except subprocess.TimeoutExpired:r['process'].kill()
         with self.lock:
-            self._closing=True
-            self._beat_pool.shutdown(wait=False,cancel_futures=True)
-        self.children.clear()
-        return dict(ok=True)
+            if self._closing:
+                return dict(ok=False,error='Workspace shutdown is already in progress') if self.children else dict(ok=True)
+            self._closing=True;records=list(self.children.values())
+        complete=False
+        try:
+            for r in records:
+                try:
+                    response=self.post(r, {'name': 'session_close'})
+                    if not response.get('ok'):return response
+                except (OSError, ValueError) as error:
+                    if r['process'].poll() is None:
+                        return dict(ok=False,error='设备工作区尚未确认断开 / Workspace disconnect unconfirmed: '+str(error))
+            for r in records:
+                process=r['process']
+                if process.poll() is None:
+                    process.terminate()
+                    try:process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        process.kill();process.wait(timeout=5)
+                if process.poll() is None:raise ValueError('Workspace process exit was not confirmed')
+            with self.lock:
+                if len(self.children)!=len(records) or any(self.children.get(r['id']) is not r for r in records):
+                    raise ValueError('Workspace changed while closing; retry')
+                self._beat_pool.shutdown(wait=False,cancel_futures=True)
+                self.children.clear();complete=True
+            return dict(ok=True)
+        except (OSError,ValueError,subprocess.TimeoutExpired) as error:
+            return dict(ok=False,error='设备工作区退出尚未确认，请重试 / Workspace process exit unconfirmed; retry: '+str(error)[:600])
+        finally:
+            if not complete:
+                with self.lock:self._closing=False

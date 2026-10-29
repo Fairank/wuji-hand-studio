@@ -374,21 +374,24 @@ def apply(wheel_path,release,mode,root=Path('/'),*,run=None,operation_token=None
             (staged/'hand-workbench-sdk.json').write_text(json.dumps(receipt,sort_keys=True),encoding='utf-8')
             assert_idle(root,mode)
             phase('switching',staged_proof=staged_proof)
-            current.rename(backup);displaced=True;touched=True
-            staged.rename(current);swapped=True
+            # Intent precedes the OS move so interruption after rename cannot
+            # leave an untracked displaced original environment.
+            displaced=True;touched=True;current.rename(backup)
+            swapped=True;staged.rename(current)
             final_proof=verify_proof(_probe(current/'bin/python',Path(__file__).resolve().parent,run),expected)
             phase('completed',sdk_proof=final_proof)
             return dict(ok=True,changed=True,sdk_version=release['version'],sdk_proof=final_proof,
                         sdk_backup=str(backup),profiles_preserved=True,motion_started=False,operation_token=operation_token)
-        except Exception as error:
+        except BaseException as error:
             confirmed=True
             if displaced:
                 try:
-                    if swapped:current.rename(staged)
-                    backup.rename(current);displaced=False
+                    if swapped and current.exists():current.rename(staged)
+                    if backup.exists():backup.rename(current)
+                    displaced=False
                     restored=_probe(current/'bin/python',Path(__file__).resolve().parent,run)
                     if _identity(restored)!=_identity(proof):raise ValueError('Original SDK restoration proof changed')
-                except Exception:confirmed=False
+                except BaseException:confirmed=False
             try:phase('rolled_back' if confirmed else 'unknown',rollback_confirmed=confirmed)
             except Exception:confirmed=False
             raise SDKUpdateError('SDK 更新未完成，'+('已恢复原控制环境 / Original SDK environment restored' if confirmed

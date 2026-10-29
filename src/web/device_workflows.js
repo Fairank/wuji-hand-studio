@@ -102,7 +102,7 @@
   // Re-read after the click. Retained cards are never sufficient authority.
   await directory.refresh();const current=directory.snapshot(),serial=device.sn||device.serial;
   const found=current?.devices?.find(row=>(row.sn||row.serial)===serial);
-  if(!found?.selectable||!directory.select(serial))throw Error(t('设备列表已改变，请重新查找并选择。','The device list changed. Find and select the device again.'));
+  if(!found?.selectable||serialOf(directory.selection())!==serial)throw Error(t('设备列表或所选设备已改变，请重新选择后继续。','The device list or selected device changed. Select it again to continue.'));
   if(mode==='official'){
    if(!found.official_available)throw Error(t('请先完成官方设备发现','Run official discovery first'));
    const switched=await switchConnection({mode:'official',serial,theme:document.documentElement.dataset.theme==='dark'?'dark':'light'});if(switched.routed)return;
