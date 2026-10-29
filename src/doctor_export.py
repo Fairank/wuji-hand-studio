@@ -6,7 +6,13 @@ def report_text(report):
     if not isinstance(report, dict):
         raise ValueError('Expected a completed diagnostic report')
     finished = report.get('finished')
-    stamp = datetime.fromtimestamp(finished, timezone.utc).isoformat() if isinstance(finished, (int, float)) else 'unknown'
+    stamp = 'unknown'
+    if type(finished) in (int, float):
+        try:
+            stamp = datetime.fromtimestamp(finished, timezone.utc).isoformat()
+        except (OverflowError, OSError, ValueError):
+            # A damaged saved timestamp must not discard the official output.
+            pass
     header = [
         'WUJI Doctor / 官方诊断原始报告',
         'Time (UTC) / 时间: ' + stamp,

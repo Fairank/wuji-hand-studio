@@ -43,7 +43,8 @@
    if(parentOrigin&&window.parent!==window&&signature!==lastPublished){lastPublished=signature;window.parent.postMessage(payload,parentOrigin);}
   }
   function invalidate(message){if(current||stateReady){epoch++;stateReady=false;clearConsent();}current=false;reason=message;publish();}
-  function clearConsent(){for(const box of document.querySelectorAll('#glove-clear,#trial-clear,#probe-clear,#pe-clear,#hub-replace,.hg-clearbox'))box.checked=false;clearing=true;try{window.dispatchEvent(new Event('console-offline'));}finally{clearing=false;}}
+  // Owner revalidation clears UI authority without claiming a new backend service.
+  function clearConsent(){for(const box of document.querySelectorAll('#glove-clear,#trial-clear,#probe-clear,#pe-clear,#hub-replace,.hg-clearbox'))box.checked=false;clearing=true;try{window.dispatchEvent(new CustomEvent('console-offline',{detail:{task_scope:true}}));}finally{clearing=false;}}
   async function refreshScope(force=false){
    if(reading)return reading;if(!force&&Date.now()-checkedAt<750)return;
    const requestedRevision=parentRevision;reading=(async()=>{try{const r=await rawFetch('/api/task-view?task_id='+encodeURIComponent(taskViewId||''),{cache:'no-store',signal:AbortSignal.timeout(3000)});if(!r.ok)throw Error(t('无法核对任务归属。','Task ownership is unavailable.'));const value=await r.json();if(requestedRevision!==parentRevision)return;

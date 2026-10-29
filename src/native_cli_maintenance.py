@@ -13,7 +13,9 @@ def snapshot(owner):
     from native_cli import current_info,PINNED_VERSION
     saved=selection(owner.native_store.folder)
     try:current=dict(current_info(folder=owner.native_store.folder),validated=True)
-    except (OSError,ValueError):current=dict(version=(saved.get('current') or {}).get('version',PINNED_VERSION),validated=False,binary=None)
+    except (OSError,ValueError) as error:
+        current=dict(version=(saved.get('current') or {}).get('version',PINNED_VERSION),validated=False,binary=None,
+            validation_error=str(error)[:900])
     current.update(mode='windows_native',source='managed_native' if saved.get('current') else 'workbench_native',update_method='managed_native')
     return current,saved.get('previous')
 

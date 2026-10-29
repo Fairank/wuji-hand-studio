@@ -1,8 +1,12 @@
 /* Continue the verified current official result; never infer a device or user. */
 (()=>{
  'use strict';
- let state=null,pending=false,requestedRun=null,requestedMode='virtual',entryHash='',error='',host=null,button=null,realButton=null,cancel=null,note=null;
+ let state=null,pending=false,pendingName='',requestEpoch=0,requestedRun=null,requestedMode='virtual',entryHash='',error='',host=null,button=null,realButton=null,cancel=null,note=null;
  const t=(zh,en)=>window.WujiLocale?.lang==='en'?en:zh;
+ const validId=value=>typeof value==='string'&&/^[a-f0-9]{32}$/.test(value);
+ const sameRequest=(epoch,context,attempt=false)=>epoch===requestEpoch&&state?.csrf===context.csrf
+  &&state?.calibrated_teleoperation?.run_id===context.run_id
+  &&(!attempt||state.calibrated_teleoperation.attempt_id===context.attempt_id);
  function loadedSession(){
   const c=state?.calibrated_teleoperation,g=state?.glove,p=g?.model_provenance;
   return !!c&&!!g&&Number.isInteger(c.sdk_session)&&/^[a-f0-9]{32}$/.test(c.run_id||'')
@@ -24,12 +28,13 @@
    const context=state?.calibrated_teleoperation;if(!context||pending)return;
    if(context.connected===true||loadedSession()){navigate(mode);return;}
    if(context.can_continue!==true||!context.run_id||!context.expected_revision)return;
-   pending=true;requestedRun=context.run_id;requestedMode=mode;entryHash=location.hash;error='';render();
-   try{acceptReply(await request('calibrated_teleoperation_continue',{run_id:context.run_id,expected_revision:context.expected_revision}),context.run_id,context.attempt_id,true);}
-   catch(e){if(state?.calibrated_teleoperation?.run_id===context.run_id&&(!state.calibrated_teleoperation.attempt_id||state.calibrated_teleoperation.attempt_id===context.attempt_id))error=requestError(e);requestedRun=null;}finally{pending=false;render();}
+   const captured={...context,csrf:state?.csrf},epoch=++requestEpoch;
+   pending=true;pendingName='begin';requestedRun=context.run_id;requestedMode=mode;entryHash=location.hash;error='';render();
+   try{const value=await request('calibrated_teleoperation_continue',{run_id:context.run_id,expected_revision:context.expected_revision});if(sameRequest(epoch,captured))acceptReply(value,context.run_id,context.attempt_id,true);}
+   catch(e){if(sameRequest(epoch,captured)){error=requestError(e);requestedRun=null;}}finally{if(epoch===requestEpoch){pending=false;pendingName='';render();}}
   };
   button.onclick=()=>begin('virtual');realButton.onclick=()=>begin('real');
-  cancel.onclick=async()=>{if(pending)return;const context=state?.calibrated_teleoperation;if(!context?.run_id||!context?.attempt_id)return;pending=true;requestedRun=null;error='';render();try{acceptReply(await request('calibrated_teleoperation_cancel',{run_id:context.run_id,attempt_id:context.attempt_id}),context.run_id,context.attempt_id);}catch(e){if(state?.calibrated_teleoperation?.run_id===context.run_id&&state?.calibrated_teleoperation?.attempt_id===context.attempt_id)error=requestError(e);}finally{pending=false;render();}};
+  cancel.onclick=async()=>{const context=state?.calibrated_teleoperation;if(pendingName==='cancel'||context?.busy!==true||!validId(context.run_id)||!validId(context.attempt_id)||loadedSession())return;const captured={...context,csrf:state?.csrf},epoch=++requestEpoch;pending=true;pendingName='cancel';requestedRun=null;error='';render();try{const value=await request('calibrated_teleoperation_cancel',{run_id:context.run_id,attempt_id:context.attempt_id});if(sameRequest(epoch,captured,true))acceptReply(value,context.run_id,context.attempt_id);}catch(e){if(sameRequest(epoch,captured,true))error=requestError(e);}finally{if(epoch===requestEpoch){pending=false;pendingName='';render();}}};
   return true;
  }
  function acceptReply(value,runId,attemptId,starting=false){
@@ -59,13 +64,16 @@
   button.hidden=c?.busy===true&&!loaded;button.disabled=pending||!state||!(c?.can_continue===true||c?.connected===true||loaded);
   realButton.hidden=button.hidden;realButton.disabled=button.disabled;
   button.textContent=t('虚拟遥操作','Virtual teleoperation');realButton.textContent=t('遥操作','Teleoperation');
-  cancel.hidden=c?.busy!==true||loaded;cancel.disabled=pending||!state||!c?.attempt_id;cancel.textContent=t('取消接续','Cancel continuation');
+  cancel.hidden=c?.busy!==true||loaded;cancel.disabled=pendingName==='cancel'||!state?.csrf||!validId(c?.run_id)||!validId(c?.attempt_id);cancel.textContent=t('取消接续','Cancel continuation');
   const phases={validating:['正在接续本次标定…','Continuing this calibration…'],exporting:['正在沿用已保存的手型…','Loading the saved hand model…'],connecting:['正在打开手套预览…','Opening glove preview…'],cancelling:['正在结束接续…','Ending continuation…']};
   const fault=error||c?.error;
-  note.textContent=fault?(window.WujiLocale?.lang==='en'?fault.split(' / ').at(-1):fault.split(' / ')[0]):(pending?t('正在加载已保存的标定…','Loading saved calibration…'):c?.busy?(phases[c.phase]?.[window.WujiLocale?.lang==='en'?1:0]||t('正在接续…','Continuing…')):'');note.hidden=!note.textContent;
+  note.textContent=fault?(window.WujiLocale?.lang==='en'?fault.split(' / ').at(-1):fault.split(' / ')[0]):(pending?(pendingName==='cancel'?t('正在结束接续…','Ending continuation…'):t('正在加载已保存的标定…','Loading saved calibration…')):c?.busy?(phases[c.phase]?.[window.WujiLocale?.lang==='en'?1:0]||t('正在接续…','Continuing…')):'');note.hidden=!note.textContent;
   if((c?.connected===true||loaded)&&requestedRun===c.run_id){requestedRun=null;if(location.hash===entryHash)navigate(requestedMode);}
  }
- window.addEventListener('console-state',event=>{state=event.detail;render();});
- window.addEventListener('console-offline',()=>{state=null;requestedRun=null;render();});
+ window.addEventListener('console-state',event=>{const next=event.detail;if(state&&(state.csrf!==next?.csrf||state.calibrated_teleoperation?.run_id!==next?.calibrated_teleoperation?.run_id||pendingName==='cancel'&&state.calibrated_teleoperation?.attempt_id!==next?.calibrated_teleoperation?.attempt_id)){requestEpoch++;pending=false;pendingName='';requestedRun=null;error='';}state=next;render();});
+ window.addEventListener('console-offline',()=>{requestEpoch++;state=null;pending=false;pendingName='';requestedRun=null;error='';render();});
+ // Leaving the entry page retires only its automatic navigation intention.
+ // The already-submitted exact continuation remains visible for manual use.
+ window.addEventListener('hashchange',()=>{if(requestedRun!==null&&location.hash!==entryHash)requestedRun=null;});
  window.addEventListener('wuji-language',render);
 })();

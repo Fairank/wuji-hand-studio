@@ -8,7 +8,7 @@
  card.innerHTML='<header class="wbu-heading"><div><h3 id="wbu-title" tabindex="-1"></h3><p id="wbu-description"></p></div><span id="wbu-state" role="status"></span></header><div class="wbu-versions"><div><span id="wbu-current-label"></span><strong id="wbu-current"></strong></div><div id="wbu-latest-row"><span id="wbu-latest-label"></span><strong id="wbu-latest"></strong></div></div><p id="wbu-completed" role="status" hidden></p><p id="wbu-message" role="status" aria-live="polite"></p><p id="wbu-error" role="alert"></p><div id="wbu-progress-wrap" hidden><div class="wbu-progress-heading"><span id="wbu-progress-label"></span><span id="wbu-progress-detail"></span></div><progress id="wbu-progress" max="100" aria-labelledby="wbu-progress-label"></progress></div><div class="wbu-actions"><button id="wbu-check" type="button"></button><button id="wbu-prepare" type="button" class="primary"></button><button id="wbu-apply" type="button" class="primary"></button></div><p id="wbu-checked-at" class="wbu-meta"></p>';
  const errorDetails=document.createElement('details');errorDetails.id='wbu-error-details';errorDetails.hidden=true;errorDetails.innerHTML='<summary id="wbu-error-details-label"></summary><pre id="wbu-error-details-text"></pre>';card.querySelector('#wbu-error').after(errorDetails);
  host.prepend(card);const updateEntry=window.parent===window&&!new URLSearchParams(location.search).has('task_view')?document.createElement('button'):null;if(updateEntry){updateEntry.id='desktop-software-update';updateEntry.type='button';updateEntry.className='desktop-menu-row';updateEntry.onclick=open;document.getElementById('desktop-settings')?.after(updateEntry);}const $=id=>card.querySelector('#'+id);
- let data=null,fresh=false,loading=null,pending='',transportError='',actionError='',actionErrorStage='',lastAttempt=0,revision=0,destroyed=false,wasVisible=false,sheet=null,applyUnconfirmed=false;
+ let data=null,fresh=false,loading=null,pending='',pendingDispatched=false,transportError='',actionError='',actionErrorStage='',lastAttempt=0,revision=0,destroyed=false,wasVisible=false,sheet=null,applyUnconfirmed=false;
  const activePhases=new Set(['checking','downloading','applying']);
  const visible=()=>!document.hidden&&card.getClientRects().length>0;
  const text=(id,value)=>{if($(id).textContent!==value)$(id).textContent=value;};
@@ -18,6 +18,7 @@
  function accept(value){if(!valid(value))throw Error('Incomplete software update state');data=value;fresh=true;transportError='';actionError='';applyUnconfirmed=false;}
  function userError(error,state={}){
   const value=String(error||'').toLowerCase();
+  if(/workbench service is offline|工作台服务已离线/.test(value))return t('工作台服务已离线，请重新读取更新状态。','Workbench service is offline. Reload update status.');
   if(state.cancelled===true||/cancelled|canceled|取消/.test(value))return t('本次更新已取消。需要时可重新开始。','This update was cancelled. You can start again when ready.');
   if(/rate.?limit|too many requests|(?:http(?: error)?|status)\s*[:=]?\s*(?:403|429)\b|限流/.test(value))return t('更新服务暂时限制请求，请稍后重试。','The update service is limiting requests. Please try again later.');
   if(/sha.?256|digest|checksum|integrity/.test(value))return t('安装包未通过完整性校验，请重新下载。','The installer did not pass integrity verification. Download it again.');
@@ -66,21 +67,21 @@
  }
  async function refresh(){
   if(destroyed||pending)return;if(loading)return loading;const own=revision;lastAttempt=Date.now();
-  loading=(async()=>{try{const response=await fetch('/api/workbench-update',{cache:'no-store',signal:AbortSignal.timeout(6000)});if(!response.ok)throw Error('Update status HTTP '+response.status);const next=await response.json();if(own===revision)accept(next);}
+  const request=(async()=>{try{const response=await fetch('/api/workbench-update',{cache:'no-store',signal:AbortSignal.timeout(6000)});if(!response.ok)throw Error('Update status HTTP '+response.status);const next=await response.json();if(own===revision)accept(next);}
    catch(error){if(own===revision){fresh=false;transportError=error.message||'Update state unavailable';}}
-   finally{loading=null;render();}})();return loading;
+   finally{if(loading===request)loading=null;render();}})();loading=request;return request;
  }
  async function act(name){
   if(pending||!fresh)return;
   if(name==='workbench_update_prepare'&&($('wbu-prepare').hidden||$('wbu-prepare').disabled))return;
   if(name==='workbench_update_apply'&&($('wbu-apply').hidden||$('wbu-apply').disabled))return;
   if(name==='workbench_update_check'&&$('wbu-check').disabled)return;
-  revision++;pending=name;actionError='';actionErrorStage=name==='workbench_update_apply'?'install':name==='workbench_update_prepare'?'download':'check';render();lastAttempt=Date.now();let dispatched=false,rejected=false;
-  try{const response=await fetch('/api/state',{cache:'no-store',signal:AbortSignal.timeout(5000)});if(!response.ok)throw Error('Workbench connection unavailable');const state=await response.json();if(typeof state.csrf!=='string'||!state.csrf)throw Error('Workbench connection unavailable');
-   dispatched=true;const sent=await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json','X-Console-Token':state.csrf},body:JSON.stringify({name}),signal:AbortSignal.timeout(15000)});rejected=!sent.ok;const body=await sent.json();
+  const own=++revision;loading=null;pending=name;pendingDispatched=false;actionError='';actionErrorStage=name==='workbench_update_apply'?'install':name==='workbench_update_prepare'?'download':'check';render();lastAttempt=Date.now();let dispatched=false,rejected=false;
+  try{const response=await fetch('/api/state',{cache:'no-store',signal:AbortSignal.timeout(5000)});if(!response.ok)throw Error('Workbench connection unavailable');const state=await response.json();if(own!==revision)return;if(typeof state.csrf!=='string'||!state.csrf)throw Error('Workbench connection unavailable');
+   dispatched=true;pendingDispatched=true;const sent=await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json','X-Console-Token':state.csrf},body:JSON.stringify({name}),signal:AbortSignal.timeout(15000)});rejected=!sent.ok;const body=await sent.json();if(own!==revision)return;
    if(!sent.ok||body.ok!==true){rejected=true;throw Error(body.error||'Software update action failed');}accept(body.workbench_update);
-  }catch(error){fresh=false;applyUnconfirmed=name==='workbench_update_apply'&&dispatched&&!rejected;actionError=applyUnconfirmed?'':error.message||'Software update action failed';}
-  finally{pending='';render();}
+  }catch(error){if(own===revision){fresh=false;applyUnconfirmed=name==='workbench_update_apply'&&dispatched&&!rejected;actionError=applyUnconfirmed?'':error.message||'Software update action failed';}}
+  finally{if(own===revision){pending='';pendingDispatched=false;render();}}
  }
  $('wbu-check').onclick=()=>fresh?act('workbench_update_check'):refresh();$('wbu-prepare').onclick=()=>act('workbench_update_prepare');$('wbu-apply').onclick=()=>act('workbench_update_apply');
  function open(){
@@ -94,8 +95,10 @@
  }
  function syncVisibility(){if(destroyed)return;const now=visible();if(now&&!wasVisible&&Date.now()-lastAttempt>1000)refresh();wasVisible=now;}
  const observer=new MutationObserver(syncVisibility);for(let node=host;node;node=node.parentElement)observer.observe(node,{attributes:true,attributeFilter:['hidden','class','style']});
- const onLanguage=()=>render();window.addEventListener('wuji-language',onLanguage);window.addEventListener('workspace-page',syncVisibility);document.addEventListener('visibilitychange',syncVisibility);
+ const onLanguage=()=>render();
+ const onOffline=()=>{applyUnconfirmed=applyUnconfirmed||pending==='workbench_update_apply'&&pendingDispatched||data?.phase==='applying';revision++;loading=null;pending='';pendingDispatched=false;fresh=false;transportError=t('工作台服务已离线，请重新读取更新状态。','Workbench service is offline. Reload update status.');actionError='';render();};
+ window.addEventListener('wuji-language',onLanguage);window.addEventListener('console-offline',onOffline);window.addEventListener('workspace-page',syncVisibility);document.addEventListener('visibilitychange',syncVisibility);
  const timer=setInterval(()=>{const busy=data?.busy||activePhases.has(data?.phase),due=Date.now()-lastAttempt>=(busy?900:5900);if(due&&(busy||visible()))refresh();},1000);
- window.WujiWorkbenchUpdate={refresh,snapshot:()=>({data,fresh}),open,destroy(){destroyed=true;clearInterval(timer);observer.disconnect();window.removeEventListener('wuji-language',onLanguage);window.removeEventListener('workspace-page',syncVisibility);document.removeEventListener('visibilitychange',syncVisibility);sheet?.destroy();updateEntry?.remove();card.remove();}};
+ window.WujiWorkbenchUpdate={refresh,snapshot:()=>({data,fresh}),open,destroy(){destroyed=true;revision++;loading=null;clearInterval(timer);observer.disconnect();window.removeEventListener('wuji-language',onLanguage);window.removeEventListener('console-offline',onOffline);window.removeEventListener('workspace-page',syncVisibility);document.removeEventListener('visibilitychange',syncVisibility);sheet?.destroy();updateEntry?.remove();card.remove();}};
  render();refresh();
 })();

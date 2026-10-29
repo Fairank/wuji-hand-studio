@@ -11,7 +11,7 @@
   const reasons={completed:['时长完成','Duration reached'],user_stop:['手动停止','Stopped manually'],disconnected:['连接断开','Disconnected'],feedback_error:['反馈中断','Feedback interrupted']};
   const labelOf=value=>Object.hasOwn(labels,value)?t(...labels[value]):String(value??'');
   const reasonOf=value=>Object.hasOwn(reasons,value)?t(...reasons[value]):String(value??'');
-  let state=null,pending=false,service=false,logsKey='',sessionsKey='';
+  let state=null,pending=false,service=false,logsKey='',sessionsKey='',serviceRevision=0;
   // Reviewed adaptation of the delegated Fable UI: conservative state parsing
   // and a single polling lane with a post-action freshness barrier.
   let inFlight=false,pollTimer=0,pollId=0,waiter=null;
@@ -50,8 +50,9 @@
     el('duration').disabled=!!state?.recording.active||pending;
   }
   function showError(text){el('service-error').textContent=text;el('service-error').hidden=!text;}
-  function offline(){service=false;state=null;controls();el('connection-state').textContent='本机服务未连接';el('connection-message').textContent='请通过“打开手部工作台”重新打开本机服务。';for(const id of ['joint-count','device-hz','host-hz','data-age'])el(id).textContent='—';el('record-progress').textContent=t('采集状态未知，请恢复连接后核对','Recording state is unknown. Reconnect to verify it.');window.dispatchEvent(new Event('console-offline'));}
+  function offline(){serviceRevision++;service=false;state=null;controls();el('connection-state').textContent='本机服务未连接';el('connection-message').textContent='请通过“打开手部工作台”重新打开本机服务。';for(const id of ['joint-count','device-hz','host-hz','data-age'])el(id).textContent='—';el('record-progress').textContent=t('采集状态未知，请恢复连接后核对','Recording state is unknown. Reconnect to verify it.');window.dispatchEvent(new Event('console-offline'));}
   function render(next){
+    if(state?.csrf&&next.csrf&&state.csrf!==next.csrf)offline();
     state=next;service=true;
     const devices=next.devices||[],key=JSON.stringify(devices);
     if(key!==deviceChoiceKey){deviceChoiceKey=key;deviceChoice.replaceChildren(new Option('选择设备 / Select device',''),...devices.map(d=>new Option(d.serial+' · '+d.generation+(d.side_hint?' · '+d.side_hint:''),d.serial)));}
@@ -77,9 +78,9 @@
     waiter.resolves.push(resolve);if(!inFlight)poll();
   });}
   async function action(body){
-    if(pending||!service)return false;pending=true;controls();showError('');let succeeded=false;
-    try{if(body.name==='connect'&&window.WujiNetwork)body.address=await window.WujiNetwork.prepare(body.address);const response=await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json','X-Console-Token':state.csrf},body:JSON.stringify(body),signal:AbortSignal.timeout(4000)});const result=await response.json();if(!response.ok||!result.ok)throw new Error(result.error||'操作未完成');succeeded=true;}
-    catch(error){showError(error.message||'操作未完成');}
+    if(pending||!service)return false;const own=serviceRevision,token=state.csrf;pending=true;controls();showError('');let succeeded=false;
+    try{if(body.name==='connect'&&window.WujiNetwork)body.address=await window.WujiNetwork.prepare(body.address);if(own!==serviceRevision||!service||state?.csrf!==token)return false;const response=await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json','X-Console-Token':token},body:JSON.stringify(body),signal:AbortSignal.timeout(4000)});const result=await response.json();if(own!==serviceRevision)return false;if(!response.ok||!result.ok)throw new Error(result.error||'操作未完成');succeeded=true;}
+    catch(error){if(own===serviceRevision)showError(error.message||'操作未完成');}
     finally{await freshState();pending=false;controls();}
     return succeeded;
   }

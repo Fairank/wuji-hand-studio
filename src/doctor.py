@@ -1,10 +1,35 @@
 """Explicit official Wuji CLI diagnostics. No update, calibration or motor API."""
-import copy,ipaddress,json,os,queue,re,shlex,shutil,subprocess,tempfile,threading,time
+import copy,ipaddress,json,math,os,queue,re,shlex,shutil,subprocess,tempfile,threading,time
+from datetime import datetime,timezone
 from pathlib import Path,PurePosixPath
 from runtime_paths import DATA
 from bridge_config import load_config,ssh_client
 
 MAX_OUTPUT=2*1024*1024
+
+
+def public_saved_report(report):
+    """Preserve the saved source file while making its metadata JSON-safe."""
+    result=copy.deepcopy(report);issues=[];pending=[(result,'report')]
+    while pending:
+        container,path=pending.pop()
+        values=container.items() if isinstance(container,dict) else enumerate(container)
+        for key,value in list(values):
+            location=(path+'.'+str(key))[:250]
+            if type(value) is float and not math.isfinite(value):
+                container[key]=None
+                if len(issues)<32:issues.append(dict(path=location,original=repr(value),reason='nonfinite_numeric_metadata'))
+            elif isinstance(value,(dict,list)):pending.append((value,location))
+    finished=result.get('finished');valid=False
+    if type(finished) in (int,float):
+        try:datetime.fromtimestamp(finished,timezone.utc);valid=True
+        except (OverflowError,OSError,ValueError):pass
+    if not valid:
+        result['finished']=None;result['finished_unknown']=True
+        if report.get('finished') is not None and len(issues)<32 and not any(v['path']=='report.finished' for v in issues):
+            issues.append(dict(path='report.finished',original=repr(report['finished'])[:100],reason='invalid_timestamp'))
+    if issues:result.update(metadata_unverified=True,metadata_issues=issues)
+    return result
 
 def sdk_command(config, command):
     """The CLI must inspect the Python environment used by this controller."""
@@ -91,8 +116,8 @@ class Doctor:
                 report=json.loads(path.read_text(encoding='utf-8'))
                 if (isinstance(report,dict) and type(report.get('exit_code')) is int
                         and isinstance(report.get('stdout'),str) and isinstance(report.get('stderr'),str)):
-                    self.state.update(status='completed',report=report,restored=True)
-        except (OSError,ValueError,TypeError):pass
+                    self.state.update(status='completed',report=public_saved_report(report),restored=True)
+        except (OSError,ValueError,TypeError,RecursionError):pass
     def snapshot(self):
         with self.lock:return copy.deepcopy(self.state)
     def _launch(self,target,args,previous):

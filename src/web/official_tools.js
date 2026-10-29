@@ -66,20 +66,21 @@
  }
  function renderCli(){
   const u=cliData?.update||{},current=cliData?.current||{},previous=cliData?.previous||{},busy=!!cliPending||!!pending||cliFresh&&(!!cliData?.busy||!!u.checking||!!u.preparing);
-  const managed=u.update_method==='managed_native',phase=cliPending==='official_cli_check'?'checking':cliPending==='official_cli_update'?'checking':cliPending==='official_cli_rollback'?'verifying':u.phase;
+  const managed=u.update_method==='managed_native',unverified=managed&&current.validated===false,phase=cliPending==='official_cli_check'?'checking':cliPending==='official_cli_update'?'checking':cliPending==='official_cli_rollback'?'verifying':u.phase;
   const bundledUpdate=cliFresh&&u.update_method==='workbench'&&u.newer_cli_available===true;
   const phaseLabels={checking:['正在检查更新','Checking for updates'],downloading:['正在下载更新','Downloading update'],verifying:['正在校验更新','Verifying update'],preparing:['正在准备更新','Preparing update'],waiting_idle:['设备使用中，空闲后更新','Waiting for devices to be idle'],ready:['更新已完成','Update complete']};
   let label=!cliFresh?t('版本状态暂不可用','Version status unavailable'):phaseLabels[phase]?t(...phaseLabels[phase]):u.checking?t('正在检查更新','Checking for updates'):u.preparing?t('正在准备更新','Preparing update'):u.error?t('更新未完成','Update incomplete'):u.available?t('可更新至 ','Update available: ')+(u.latest_version||'—'):u.checked_at!=null?t('检查已完成','Check completed'):t('尚未检查更新','Updates not checked');
   if(cliFresh&&phase!=='ready'&&u.checked_at!=null&&!busy&&!u.error&&!u.available&&u.latest_version&&u.latest_version===current.version)label=t('已是最新版本','Up to date');
   if(bundledUpdate&&!busy&&!u.error)label=t('随工作台更新 · ','Updates with workbench · ')+(u.latest_version||'—');
+  if(cliFresh&&unverified&&!busy)label=t('本地 CLI 待校验','Local CLI unverified');
   $('ot-cli-release-state').textContent='CLI '+version(current.version)+' · '+label;
   $('ot-cli-check').textContent=!cliFresh?t('重新读取','Reload status'):phase==='checking'?t('正在检查…','Checking…'):t('检查更新','Check updates');$('ot-cli-update').textContent=busy&&phase!=='checking'?t('正在更新…','Updating…'):bundledUpdate?t('软件更新','Software update'):phase==='error'?t('重试更新','Retry update'):t('更新 CLI','Update CLI');$('ot-cli-rollback').textContent=t('切换至 ','Switch to ')+version(previous.version);
   $('ot-cli-check').disabled=busy;$('ot-cli-update').hidden=!bundledUpdate&&!u.available&&!u.preparing&&cliPending!=='official_cli_update';$('ot-cli-update').disabled=!cliFresh||busy||!bundledUpdate&&u.available!==true;$('ot-cli-rollback').hidden=!previous.version;$('ot-cli-rollback').disabled=!cliFresh||busy||!previous.version;
   $('ot-cli-auto-row').hidden=!managed;$('ot-cli-auto-label').textContent=t('自动更新 CLI','Update CLI automatically');$('ot-cli-auto-note').textContent=cliPending==='official_cli_auto_update'?t('正在保存…','Saving…'):t('使用官方稳定版，设备空闲时安装。','Install official stable releases when devices are idle.');
   $('ot-cli-auto').setAttribute('aria-checked',String(u.auto_update===true));$('ot-cli-auto').disabled=!cliFresh||!!cliPending;
   $('ot-cli-auto').setAttribute('aria-busy',String(cliPending==='official_cli_auto_update'));
-  const failure=cliTransportError||cliActionError||(phase!=='waiting_idle'?u.error:'')||'';
-  $('ot-cli-release-error').textContent=failure?(cliTransportError?t('暂时无法读取更新状态，请重新读取。','Update status is unavailable. Reload to retry.'):cliActionError?cliActionError:t('更新未完成，当前版本仍可使用。请重试或查看版本详情。','Update did not complete. The current version remains available. Retry or see version details.')):'';
+  const failure=cliTransportError||cliActionError||(phase!=='waiting_idle'?u.error:'')||(unverified?current.validation_error||'Native CLI integrity is unverified':'');
+  $('ot-cli-release-error').textContent=failure?(cliTransportError?t('暂时无法读取更新状态，请重新读取。','Update status is unavailable. Reload to retry.'):cliActionError?cliActionError:unverified?t('本地 CLI 尚未通过校验，请重新读取或查看版本详情。','The local CLI has not passed verification. Reload or see version details.'):t('更新未完成，当前版本仍可使用。请重试或查看版本详情。','Update did not complete. The current version remains available. Retry or see version details.')):'';
   const progress=u.progress||{},showProgress=cliFresh&&['checking','downloading','verifying','preparing'].includes(phase),bar=$('ot-cli-progress'),received=progress.received_bytes,total=progress.total_bytes;
   $('ot-cli-progress-wrap').hidden=!showProgress;$('ot-cli-progress-label').textContent=phaseLabels[phase]?t(...phaseLabels[phase]):'';
   const known=phase==='downloading'&&Number.isFinite(received)&&Number.isFinite(total)&&total>0&&received>=0&&received<=total,mb=value=>(value/1048576).toFixed(1);
@@ -87,7 +88,7 @@
   else{bar.removeAttribute('value');$('ot-cli-progress-detail').textContent=phase==='downloading'&&Number.isFinite(received)&&received>=0?mb(received)+' MB':'';}
   releases.dataset.phase=cliFresh?phase||'unchecked':'unknown';
   $('ot-cli-release-details-label').textContent=t('版本详情','Version details');
-  $('ot-cli-release-details').textContent=[t('当前：','Current: ')+version(current.version)+(current.commit?' · '+String(current.commit).slice(0,12):''),t('最新：','Latest: ')+version(u.latest_version),t('上次检查：','Last checked: ')+timestamp(u.checked_at),t('上一版：','Previous: ')+version(previous.version),u.update_method==='workbench'?t('原版 CLI 随工作台软件更新，设备与标定共用同一版本。','The original CLI updates with the workbench. Discovery and calibration use the same version.'):u.auto_update===true?t('自动更新已开启','Automatic updates enabled'):t('自动更新未开启','Automatic updates not enabled'),u.error||''].filter(Boolean).join('\n');
+  $('ot-cli-release-details').textContent=[t(unverified?'上次记录：':'当前：',unverified?'Last recorded: ':'Current: ')+version(current.version)+(current.commit?' · '+String(current.commit).slice(0,12):''),t('最新：','Latest: ')+version(u.latest_version),t('上次检查：','Last checked: ')+timestamp(u.checked_at),t('上一版：','Previous: ')+version(previous.version),u.update_method==='workbench'?t('原版 CLI 随工作台软件更新，设备与标定共用同一版本。','The original CLI updates with the workbench. Discovery and calibration use the same version.'):u.auto_update===true?t('自动更新已开启','Automatic updates enabled'):t('自动更新未开启','Automatic updates not enabled'),u.error||'',unverified?current.validation_error||'':''].filter(Boolean).join('\n');
  }
  async function loadCli({afterAction=false}={}){
   if(cliPending&&!afterAction)return;if(cliPromise)return cliPromise;const own=cliEpoch;
