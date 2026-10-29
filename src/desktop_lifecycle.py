@@ -2,6 +2,9 @@
 import time
 from device_termination import unconfirmed
 
+def cli_cleanup_required(state):
+    return (((state.get('official_cli') or {}).get('update') or {}).get('recovery_required') is True)
+
 def calibration_cleanup_required(state):
     calibration=state.get('calibration') or {}
     run=calibration.get('run') or calibration
@@ -11,6 +14,7 @@ def calibration_cleanup_required(state):
                 and run.get('cleanup_confirmed') is not True))
 
 def needs_confirmation(state):
+    if cli_cleanup_required(state):return True
     from connection_switch import unsettled
     if unsettled(state):return True
     return (state.get('maintenance',{}).get('busy') is True
@@ -70,6 +74,18 @@ def _close_sessions(controller, timeout, clock, sleep, *, deadline=None):
     state=controller.snapshot()
     blocked=close_block_reason(state,controller.doctor.snapshot())
     if blocked:return dict(ok=False,error=blocked)
+    # Explicit exit may retry only this CLI owner's completed maintenance.
+    # Refuse before releasing any unrelated device/workspace if it stays held.
+    if cli_cleanup_required(state):
+        cli=getattr(controller,'official_cli',None)
+        try:
+            remaining=budget()
+            if cli is None or not cli.cancel_and_wait(timeout=remaining):
+                return dict(ok=False,error='CLI 更新占用尚未释放，请重新检查后重试 / CLI update reservation remains held; check it again before retrying')
+        except (ValueError,OSError) as error:return dict(ok=False,error=str(error))
+        state=controller.snapshot()
+        if cli_cleanup_required(state):
+            return dict(ok=False,error='CLI 更新退出仍未确认 / CLI update cleanup is still unconfirmed')
     continuation=getattr(controller,'calibrated_teleoperation',None)
     if state.get('calibrated_teleoperation',{}).get('busy'):
         if continuation is None or not continuation.cancel_and_wait(budget()):

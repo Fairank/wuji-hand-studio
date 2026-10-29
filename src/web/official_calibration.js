@@ -11,7 +11,7 @@
   return run.step_total===6&&Number.isInteger(run.step)&&run.step>=0&&run.step<6?(language==='en'?'Step ':'步骤 ')+(run.step+1)+' / 6':null;
  }
  function progress(value){return typeof value==='number'&&Number.isFinite(value)&&value>=0&&value<=1?value:null;}
- function mount(host,{language=()=>window.WujiLocale?.lang||'zh',onRestore}={}){
+ function mount(host,{language=()=>window.WujiLocale?.lang||'zh',onRestore,scope=()=>null}={}){
   host.classList.add('oc-run');host.setAttribute('aria-labelledby','oc-title');
   host.innerHTML='<div class="oc-heading"><h4 id="oc-title"></h4><span id="oc-state"></span></div><div class="oc-instruction"><dl class="oc-step"><dt id="oc-step-label"></dt><dd id="hub-calib-step"></dd><span id="oc-step-count"></span></dl><p id="hub-calib-status" role="status" aria-live="polite"></p><div class="oc-progress-row"><span id="oc-progress-label"></span><progress id="oc-progress" max="1" aria-labelledby="oc-progress-label"></progress><span id="oc-progress-text"></span></div><dl class="oc-feedback"><div><dt id="oc-stability-label"></dt><dd id="oc-stability"></dd></div><div><dt id="oc-constraints-label"></dt><dd id="oc-constraints"></dd></div><div id="oc-hold-row"><dt id="oc-hold-label"></dt><dd id="oc-hold"></dd></div></dl></div><div class="oc-result" hidden><strong id="oc-result-label"></strong><p id="oc-result-user"></p></div><details class="oc-details"><summary id="oc-details-label"></summary><div id="oc-backup" class="oc-backup" hidden><span id="oc-backup-label"></span><a id="oc-backup-save"></a><button id="oc-backup-restore" type="button"></button><p id="oc-backup-note"></p></div><div id="oc-result-meta" hidden><p id="oc-result-location"></p><p id="oc-result-note"></p></div><dl class="oc-more-feedback"><div id="oc-frames-row"><dt id="oc-frames-label"></dt><dd id="oc-frames"></dd></div></dl><pre id="oc-details"></pre></details>';
   const empty=document.createElement('div');empty.id='oc-empty';empty.innerHTML='<strong id="oc-empty-title"></strong><p id="oc-empty-note"></p>';host.prepend(empty);
@@ -19,25 +19,27 @@
   const diagnostics=document.createElement('ul');diagnostics.id='oc-diagnostics';diagnostics.hidden=true;host.querySelector('.oc-feedback').after(diagnostics);
   const terminalHost=document.createElement('section');host.querySelector('.oc-result').before(terminalHost);
   const terminal=window.OfficialTerminal?.mount(terminalHost,{language});
-  const $=id=>host.querySelector('#'+id),details=host.querySelector('details');let data={},context={},imageKey='',hintsKey='',visualKey='',restorePending=false;
+  const $=id=>host.querySelector('#'+id),details=host.querySelector('details');let data={},context={},imageKey='',hintsKey='',visualKey='',restoreTicket=null;
   $('oc-guide-image').onload=()=>{$('oc-guide-image').hidden=false;$('oc-guide-unavailable').hidden=true;};$('oc-guide-image').onerror=()=>{$('oc-guide-image').hidden=true;$('oc-guide-unavailable').hidden=false;};
   const write=(id,value)=>{if($(id).textContent!==value)$(id).textContent=value;};
   function backupRecord(){
    const run=data.run||{},b=run.backup;
    return b&&b.verified===true&&/^[a-f0-9]{32}$/.test(b.id||'')&&/^[a-f0-9]{32}$/.test(b.run_id||'')&&/^[a-f0-9]{64}$/.test(b.sha256||'')&&Number.isSafeInteger(b.bytes)&&b.bytes>0&&typeof b.profile==='string'&&/^[A-Za-z0-9_][A-Za-z0-9_-]{0,31}$/.test(b.profile)&&['left','right'].includes(b.side)&&typeof b.serial==='string'&&!!b.serial?b:null;
   }
+  function backupOwner(){const b=backupRecord();return b?JSON.stringify([scope(),data.run?.id,b.id,b.sha256]):null;}
   function backupControls(){
-   const b=backupRecord(),run=data.run||{},en=language()==='en',t=(zh,eng)=>en?eng:zh;$('oc-backup').hidden=!b;
+   const identity=backupOwner();if(restoreTicket&&(context.fresh!==true||restoreTicket.owner!==identity))restoreTicket=null;
+   const pending=!!restoreTicket,b=backupRecord(),run=data.run||{},en=language()==='en',t=(zh,eng)=>en?eng:zh;$('oc-backup').hidden=!b;
    if(!b){$('oc-backup-save').removeAttribute('href');$('oc-backup-restore').disabled=true;return;}
    write('oc-backup-label',t('覆盖前档案备份 · ','Profile backup before replacement · ')+b.profile);
    const save=$('oc-backup-save');save.href='/api/calibration-backup?backup_id='+encodeURIComponent(b.id);save.download='wuji-calibration-backup-'+b.profile+'.zip';write('oc-backup-save',t('保存备份','Save backup'));
-   write('oc-backup-restore',restorePending?t('正在打开…','Opening…'):t('恢复整份档案…','Restore full profile…'));
-   $('oc-backup-restore').disabled=restorePending||context.fresh!==true||context.busy===true||run.running===true||data.cleanup_required===true||typeof onRestore!=='function';
+   write('oc-backup-restore',pending?t('正在打开…','Opening…'):t('恢复整份档案…','Restore full profile…'));
+   $('oc-backup-restore').disabled=pending||context.fresh!==true||context.busy===true||run.running===true||data.cleanup_required===true||typeof onRestore!=='function';
    write('oc-backup-note',t('官方导入会先显示预览（默认 No），由你确认是否恢复整份档案。','Official import opens a preview (No by default). You decide whether to restore the full profile.'));
   }
   $('oc-backup-restore').onclick=async()=>{
    const b=backupRecord();if(!b||$('oc-backup-restore').disabled)return;
-   restorePending=true;backupControls();try{await onRestore({backup_id:b.id,expected_sha256:b.sha256});}finally{restorePending=false;backupControls();}
+   const ticket={owner:backupOwner()};restoreTicket=ticket;backupControls();try{await onRestore({backup_id:b.id,expected_sha256:b.sha256});}finally{if(restoreTicket===ticket)restoreTicket=null;backupControls();}
   };
   function raw(){
    if(!details.open)return;

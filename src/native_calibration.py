@@ -124,6 +124,7 @@ class NativeCalibration:
         self.finished=threading.Event();self.cancel_timer=False;self.forced_stop=False
         self.launching=False
         self.failed_start_run=None;self.spawn_attempted=False
+        self.run_id=None
 
     def start_human(self,serial,expected_side=None,timeout=900,*,cancel_check=None):
         """The original Human TTY owns user selection and overwrite prompts."""
@@ -176,6 +177,7 @@ class NativeCalibration:
             component=prepare(strict=True)
             if cancel_check is not None:cancel_check()
             self.token=reserve('calibration',self.folder)
+            self.run_id=run_id
             with owner.lock:self.launching=True
             spawn_attempted=False
             try:
@@ -231,7 +233,7 @@ class NativeCalibration:
 
     def _start_failure(self,error,run_id,serial,side,user,sdk_user,backup,spawn_attempted,restoring):
         """Never abandon a possibly running private Job or a retained lease."""
-        owner=self.owner;self.failed_start_run=run_id;self.spawn_attempted=spawn_attempted
+        owner=self.owner;self.run_id=run_id;self.failed_start_run=run_id;self.spawn_attempted=spawn_attempted
         clean=not spawn_attempted;released=self.token is None;cleanup_error=None
         if self.job is not None:
             try:clean=self.job.close(timeout=7) is True
@@ -267,12 +269,28 @@ class NativeCalibration:
                 (owner.reports/(run_id+'.json')).write_text(json.dumps(record,ensure_ascii=False,indent=2),encoding='utf-8')
             except OSError:pass
 
-    def _cleanup_failed_start(self):
+    def _check_cancel_run(self,expected_run):
+        if expected_run is None:return
+        from glove_protocol import CancellationNotDispatched
+        if (not isinstance(expected_run,str) or not re.fullmatch('[0-9a-f]{32}',expected_run)
+                or self.owner.run.get('id')!=expected_run or self.run_id!=expected_run):
+            raise CancellationNotDispatched('标定会话已改变，未发送旧取消 / Calibration session changed; the old cancellation was not sent')
+        marker=reservation(self.folder)
+        never_started=self.failed_start_run==expected_run and not self.spawn_attempted
+        if marker and (marker.get('kind')!='calibration' or marker.get('token')!=self.token
+                or marker.get('run_id') not in ((None,expected_run) if never_started else (expected_run,))
+                or marker.get('serial') not in ((None,self.owner.run.get('serial')) if never_started else (self.owner.run.get('serial'),))):
+            raise ValueError('Calibration cancellation owner changed')
+
+    def _cleanup_failed_start(self,*,expected_run=None):
         """Explicit retry only; recover this private Job if construction was uncertain."""
         owner=self.owner
-        with owner.lock:token=self.token;run_id=owner.run.get('id');job=self.job
+        with owner.lock:
+            self._check_cancel_run(expected_run)
+            token=self.token;run_id=owner.run.get('id');job=self.job
         if not token or self.failed_start_run!=run_id:raise ValueError('Calibration startup cleanup owner changed')
         with gate(self.folder):
+            with owner.lock:self._check_cancel_run(expected_run)
             marker=reservation(self.folder);expected='Local\\HandWorkbench-OfficialCalibration-'+token
             if (marker and (marker.get('kind')!='calibration' or marker.get('token')!=token
                     or marker.get('run_id') not in (None,run_id))):
@@ -349,13 +367,15 @@ class NativeCalibration:
         if process is None or process.poll() is not None:raise ValueError('Official terminal has exited')
         process.stdin.write(json.dumps(payload)+'\n');process.stdin.flush()
 
-    def cancel(self):
+    def cancel(self,*,expected_run=None):
         owner=self.owner
+        with owner.lock:self._check_cancel_run(expected_run)
         if not self.launching and self.token and self.failed_start_run==owner.run.get('id'):
-            return self._cleanup_failed_start()
+            return self._cleanup_failed_start(expected_run=expected_run)
         # Never wait on the global gate or a Job while holding the run lock:
         # startup holds that gate and needs this lock to publish its state.
         with owner.lock:
+            self._check_cancel_run(expected_run)
             launching=self.launching;running=owner.run['running']
             run_id=owner.run.get('id')
             if launching or running:self.cancel_requested=True

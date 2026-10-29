@@ -58,7 +58,9 @@ class OfficialCLI:
         from native_cli_update import ManagedNativeCLIStore
         self.native_store=native_store or ManagedNativeCLIStore(timeout=300,socket_timeout=20,cancel_event=self.closed,progress=self._native_progress)
         self.idle_check=idle_check or (lambda:None);self.lock=threading.RLock();self.thread=None
-        self.state=dict(phase='unchecked',checking=False,preparing=False,available=False,latest_version=None,checked_at=None,error=None,auto_update=True)
+        self.state=dict(phase='unchecked',checking=False,preparing=False,available=False,latest_version=None,checked_at=None,error=None,auto_update=True,recovery_required=False)
+        self._maintenance_marker=None
+        self._maintenance_outcome=None
         self.started=False
         self.initial_check_started=False
         self.monitor=None;self.monitor_stop=threading.Event()
@@ -107,6 +109,7 @@ class OfficialCLI:
 
     def _monitor(self):
         while not self.monitor_stop.wait(60):
+            if self.closed.is_set():continue
             from native_cli_maintenance import preference
             if not preference(self):continue
             from bridge_config import load_config
@@ -114,7 +117,7 @@ class OfficialCLI:
             if not use_native(load_config()):continue
             with self.lock:
                 due=self.state.get('auto_update_pending') or time.time()-(self.state.get('checked_at') or 0)>=900
-                busy=bool(self.thread and self.thread.is_alive())
+                busy=bool(self.thread and self.thread.is_alive()) or self.state.get('recovery_required') is True
             if due and not busy:
                 try:self.start(check_only=False,automatic=True)
                 except ValueError:pass
@@ -122,6 +125,9 @@ class OfficialCLI:
     def start(self,check_only=False,automatic=False):
         with self.lock:
             if self.thread and self.thread.is_alive():raise ValueError('CLI 更新检查正在进行 / CLI update already in progress')
+            if automatic and self.state.get('recovery_required') is True:
+                raise ValueError('CLI 占用释放尚未确认，请明确重试 / CLI reservation release is unconfirmed; retry explicitly')
+            if automatic and self.closed.is_set():raise ValueError('CLI 维护正在结束，请明确重试 / CLI maintenance is closing; retry explicitly')
             self.closed.clear();self.state.update(phase='checking',checking=True,preparing=False,error=None)
             try:
                 self.thread=threading.Thread(target=self._work,args=(check_only,automatic),name='Official CLI update',daemon=True);self.thread.start()
@@ -140,6 +146,8 @@ class OfficialCLI:
                 from native_cli_maintenance import run
                 run(self,check_only,automatic)
                 return
+            from native_cli_maintenance import retry_release
+            retry_release(self,automatic=automatic)
             release_doc=self.store.fetch_release();version=release_doc['tag_name'].removeprefix('v')
             saved=selected(self.folder);current=saved.get('current') or {}
             available=(not current.get('version') or version_order(version)>version_order(current['version'])
@@ -167,17 +175,23 @@ class OfficialCLI:
                     if self.closed.wait(10):break
         except Exception as error:
             if not self.closed.is_set():logging.getLogger(__name__).exception('Official CLI release maintenance failed')
-            self._set(phase='cancelled' if self.closed.is_set() else 'error',error=None if self.closed.is_set() else str(error)[:700])
+            with self.lock:recovering=self.state.get('recovery_required') is True
+            self._set(phase='error' if recovering else 'cancelled' if self.closed.is_set() else 'error',error=str(error)[:700] if recovering or not self.closed.is_set() else None)
         finally:
-            if self.closed.is_set():self._set(phase='cancelled',error=None)
+            with self.lock:recovering=self.state.get('recovery_required') is True
+            if self.closed.is_set() and not recovering:self._set(phase='cancelled',error=None)
             self._set(checking=False,preparing=False)
 
     def cancel_and_wait(self,timeout=22):
-        self.monitor_stop.set()
         self.closed.set()
         with self.lock:worker=self.thread
         if worker and worker is not threading.current_thread():worker.join(timeout=timeout)
-        return not worker or not worker.is_alive()
+        if worker and worker.is_alive():return False
+        from native_cli_maintenance import retry_release
+        try:retry_release(self)
+        except (ValueError,RuntimeError,OSError):return False
+        self.monitor_stop.set()
+        return True
 
     def _deploy(self,prepared,config):
         source=Path(prepared['directory'])/prepared['paths']['binary']
@@ -216,8 +230,9 @@ class OfficialCLI:
         return dict(version=version,commit=prepared['commit'],archive_sha256=prepared['archive_sha256'],binary_sha256=digest,binary=target,mode=config['mode'],validated=True,validated_at=time.time(),validation='software-help-only',source=prepared['release_url'])
 
     def _activate(self,candidate):
+        from native_cli_maintenance import reserve_switch,release_switch,switch_applied
         with gate(self.folder):
-            token=reserve('switch',self.folder)
+            token=reserve_switch(self)
             try:
                 self.idle_check()
                 previous=selected(self.folder)
@@ -228,7 +243,8 @@ class OfficialCLI:
                     if manifest.get('cli_version'):
                         baseline=dict(version=manifest['cli_version'],source='bundled',mode='wsl',binary='/usr/local/bin/wuji',validated=False)
                 atomic(self.folder/'selection.json',dict(current=candidate,previous=baseline,updated_at=time.time()))
-            finally:release(token,self.folder)
+                switch_applied(self,candidate)
+            finally:release_switch(self,token)
         self._set(error=None)
 
     def rollback(self):
@@ -239,12 +255,20 @@ class OfficialCLI:
             return rollback(self)
         with self.lock:
             if self.thread and self.thread.is_alive():raise ValueError('Wait for the CLI update to finish')
+        from native_cli_maintenance import retry_release,reserve_switch,release_switch,switch_applied
+        recovered=retry_release(self)
+        if recovered and recovered.get('operation')=='rollback' and recovered.get('applied') is not None:
+            if selected(self.folder).get('current')!=recovered['applied']:
+                raise ValueError('CLI rollback target changed; check the current version before retrying')
+            self._set(phase='ready',error=None)
+            return self.snapshot()
         with gate(self.folder):
             saved=selected(self.folder);previous=saved.get('previous')
             if not previous:raise ValueError('尚无可回退的独立 CLI 版本 / No prior managed CLI version')
-            token=reserve('switch',self.folder)
+            token=reserve_switch(self,'rollback')
             try:
                 self.idle_check()
                 atomic(self.folder/'selection.json',dict(current=previous,previous=saved.get('current'),hold_version=(saved.get('current') or {}).get('version'),updated_at=time.time()))
-            finally:release(token,self.folder)
+                switch_applied(self,previous)
+            finally:release_switch(self,token)
         return self.snapshot()

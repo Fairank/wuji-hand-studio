@@ -1,7 +1,75 @@
 """Idle-only native CLI maintenance, sharing the existing workspace reservation."""
+import copy
+import threading
 import time
 from cli_coordination import atomic,gate,reserve,release,reservation
 from native_cli_update import selection,pointer,version_info,read_json
+
+
+class CLIReleaseUnconfirmed(RuntimeError):
+    """This completed software operation still owns its exact switch lease."""
+
+
+def switch_marker(owner):
+    # reservation() intentionally hides dead generic switch markers. Recovery
+    # must compare the original bytes' object, including a changed PID/start.
+    try:return read_json(owner.folder/'session.json')
+    except FileNotFoundError:return {}
+
+
+def reserve_switch(owner,operation='update'):
+    if getattr(owner,'_maintenance_marker',None) is not None:
+        raise CLIReleaseUnconfirmed('CLI 占用释放尚未确认，请明确重试 / CLI reservation release is unconfirmed; retry explicitly')
+    token=reserve('switch',owner.folder)
+    with owner.lock:
+        owner._maintenance_marker=copy.deepcopy(reservation(owner.folder))
+        owner._maintenance_outcome=dict(operation=operation,applied=None)
+    return token
+
+
+def switch_applied(owner,target):
+    with owner.lock:owner._maintenance_outcome['applied']=copy.deepcopy(target)
+
+
+def release_switch(owner,token):
+    """Retain the exact receipt on failure; never clear a replacement owner."""
+    try:
+        with gate(owner.folder):
+            with owner.lock:expected=copy.deepcopy(owner._maintenance_marker)
+            if not expected or expected.get('token')!=token or expected.get('kind')!='switch':
+                raise ValueError('CLI cleanup owner is unverified')
+            current=switch_marker(owner)
+            if current and current!=expected:raise ValueError('CLI cleanup owner changed')
+            if current:release(token,owner.folder)
+            if switch_marker(owner):raise ValueError('CLI reservation remains unconfirmed')
+            with owner.lock:
+                if owner._maintenance_marker!=expected:raise ValueError('CLI cleanup owner changed')
+                owner._maintenance_marker=None
+                owner._maintenance_outcome=None
+                recovering=owner.state.get('recovery_required') is True
+                owner.state['recovery_required']=False
+                if recovering:
+                    owner.state['error']=None
+                    if owner.closed.is_set():owner.state['phase']='cancelled'
+    except Exception as error:
+        detail='CLI 更新已结束，但占用尚未释放；请检查或重试 / CLI maintenance ended but reservation release is unconfirmed; check or retry: '+str(error)[:350]
+        owner._set(phase='error',recovery_required=True,error=detail)
+        raise CLIReleaseUnconfirmed(detail) from error
+
+
+def retry_release(owner,*,automatic=False):
+    with owner.lock:
+        pending=copy.deepcopy(getattr(owner,'_maintenance_marker',None))
+        worker=owner.thread
+        required=owner.state.get('recovery_required') is True
+        outcome=copy.deepcopy(getattr(owner,'_maintenance_outcome',None))
+    if pending is None:return
+    if not required or automatic:
+        raise CLIReleaseUnconfirmed('CLI 占用释放尚未确认，请明确重试 / CLI reservation release is unconfirmed; retry explicitly')
+    if worker is not None and worker is not threading.current_thread() and worker.is_alive():
+        raise ValueError('Wait for the original CLI maintenance worker to finish')
+    release_switch(owner,pending.get('token'))
+    return outcome
 
 
 def preference(owner):
@@ -25,7 +93,7 @@ def set_preference(owner,enabled):
     atomic(owner.folder/'update-preferences.json',dict(native_auto_update=enabled))
     owner._set(auto_update=enabled,auto_update_pending=enabled)
     if enabled:
-        with owner.lock:busy=bool(owner.thread and owner.thread.is_alive())
+        with owner.lock:busy=bool(owner.thread and owner.thread.is_alive()) or owner.state.get('recovery_required') is True
         if not busy:owner.start(check_only=False,automatic=True)
     return owner.snapshot()
 
@@ -35,6 +103,7 @@ def run(owner,check_only,automatic):
     from official_cli import version_order
     from bridge_config import load_config
     from official_device_discovery import use_native
+    retry_release(owner,automatic=automatic)
     original_config=load_config()
     if not use_native(original_config):raise ValueError('Native CLI controller selection changed; retry')
     store=owner.native_store;document=store.fetch_release();value=document['tag_name'].removeprefix('v')
@@ -53,9 +122,9 @@ def run(owner,check_only,automatic):
         try:
             with gate(owner.folder):
                 if load_config()!=original_config:raise RuntimeError('Controller selection changed; retry CLI update')
-                token=reserve('switch',owner.folder)
+                token=reserve_switch(owner)
                 try:owner.idle_check()
-                except BaseException:release(token,owner.folder);token=None;raise
+                except BaseException:release_switch(owner,token);token=None;raise
             break
         except ValueError as error:
             owner._set(phase='waiting_idle',preparing=False,error=str(error))
@@ -77,23 +146,31 @@ def run(owner,check_only,automatic):
             if pointer(candidate)!=pointer(checked):raise ValueError('Prepared CLI changed before activation')
             if pointer(current_info(folder=store.folder,strict=True))!=pointer(baseline):raise ValueError('Active native CLI changed during update')
             atomic(store.folder/'selection.json',dict(current=pointer(checked),previous=pointer(baseline),updated_at=time.time()))
+            switch_applied(owner,pointer(checked))
         owner._set(phase='ready',available=False,newer_cli_available=False,error=None,progress=dict(stage='ready',received_bytes=candidate['archive_size'],total_bytes=candidate['archive_size']))
-    finally:release(token,owner.folder)
+    finally:release_switch(owner,token)
 
 
 def rollback(owner):
     from native_cli import current_info
     with owner.lock:
         if owner.thread and owner.thread.is_alive():raise ValueError('Wait for the CLI update to finish')
+    recovered=retry_release(owner)
+    if recovered and recovered.get('operation')=='rollback' and recovered.get('applied') is not None:
+        if pointer(current_info(folder=owner.native_store.folder,strict=True))!=recovered['applied']:
+            raise ValueError('CLI rollback target changed; check the current version before retrying')
+        owner._set(phase='ready',error=None,progress=None,available=False,newer_cli_available=False)
+        return owner.snapshot()
     with gate(owner.folder):
         saved=selection(owner.native_store.folder);previous=saved.get('previous')
         if not previous:raise ValueError('No prior managed native CLI version')
-        token=reserve('switch',owner.folder)
+        token=reserve_switch(owner,'rollback')
         try:
             owner.idle_check();current=current_info(folder=owner.native_store.folder,strict=True)
             checked=version_info(previous['version'],folder=owner.native_store.folder,strict=True)
             if pointer(checked)!=previous:raise ValueError('Previous native CLI changed; rollback refused')
             atomic(owner.native_store.folder/'selection.json',dict(current=pointer(checked),previous=pointer(current),hold_version=current['version'],updated_at=time.time()))
-        finally:release(token,owner.folder)
+            switch_applied(owner,pointer(checked))
+        finally:release_switch(owner,token)
     owner._set(phase='ready',error=None,progress=None,available=False,newer_cli_available=False)
     return owner.snapshot()

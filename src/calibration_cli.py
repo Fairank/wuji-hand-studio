@@ -472,14 +472,25 @@ class CalibrationCLI:
                 try:(self.reports/(record['id']+'.json')).write_text(json.dumps(record,ensure_ascii=False,indent=2),encoding='utf-8')
                 except OSError:pass
 
-    def cancel(self):
-        if self.native is not None and (self.run['running'] or self.native.token):return self.native.cancel()
+    def cancel(self,*,expected_run=None):
+        from glove_protocol import CancellationNotDispatched
+        with self.lock:
+            if expected_run is not None:
+                if not isinstance(expected_run,str) or not re.fullmatch('[0-9a-f]{32}',expected_run):raise ValueError('Invalid calibration run identity')
+                if self.run.get('id')!=expected_run:raise CancellationNotDispatched('标定会话已改变，未发送旧取消 / Calibration session changed; the old cancellation was not sent')
+            native=self.native
+        if native is not None and (self.run['running'] or native.token):return native.cancel(**({'expected_run':expected_run} if expected_run is not None else {}))
         from cli_coordination import reservation,gate
         if reservation().get('kind')=='calibration':
             from native_calibration import NativeCalibration
-            with gate():NativeCalibration(self).recover()
+            with gate():
+                with self.lock:
+                    if expected_run is not None and (self.run.get('id')!=expected_run or self.native is not native or reservation().get('run_id')!=expected_run):
+                        raise CancellationNotDispatched('Calibration recovery owner changed')
+                NativeCalibration(self).recover()
             return self.snapshot(refresh=False)
         with self.lock:
+            if expected_run is not None and self.run.get('id')!=expected_run:raise CancellationNotDispatched('Calibration session changed; the old cancellation was not sent')
             process = self.process
             if not process or process.poll() is not None:
                 return self.snapshot(refresh=False)

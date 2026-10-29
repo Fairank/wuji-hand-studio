@@ -549,6 +549,25 @@ class Controller:
             if not workflow_held:workflow.release()
 
     def action(self, command,*,_workflow_held=False):
+        if isinstance(command,dict) and command.get('name')=='calibration_cancel' and set(command)!={'name'}:
+            keys=set(command)
+            if keys=={'name','request_id'}:
+                run_id=self.calibration_handover.cancel_request(command['request_id'])
+                with self.calibration.lock:current=copy.deepcopy(self.calibration.run)
+                if run_id is not None and current.get('id')==run_id:
+                    from glove_protocol import CancellationNotDispatched
+                    try:result=self.calibration.cancel(expected_run=run_id)
+                    except CancellationNotDispatched:
+                        with self.calibration.lock:current=copy.deepcopy(self.calibration.run)
+                        if current.get('id')==run_id:raise
+                        result=dict(run=current)
+                else:result=dict(run=current)
+                return dict(calibration=result,calibration_connection=self.calibration_handover.snapshot(),cancelled_request_id=command['request_id'])
+            if keys=={'name','expected_run'}:
+                expected=command['expected_run']
+                if not isinstance(expected,str) or not re.fullmatch('[0-9a-f]{32}',expected):raise ValueError('Invalid calibration run identity')
+                return dict(calibration=self.calibration.cancel(expected_run=expected))
+            raise ValueError('Invalid scoped calibration cancellation')
         if isinstance(command,dict) and ('expected_session' in command
                 or command.get('name') in ('glove_stop','glove_disconnect','glove_follow','glove_open') and 'expected_revision' in command):
             if command.get('name') in ('glove_stop','glove_disconnect'):return self._scoped_glove_stop(command)

@@ -2,6 +2,7 @@
 import copy
 import hashlib
 import json
+import math
 from pathlib import Path
 import re
 import time
@@ -9,9 +10,64 @@ import uuid
 import zipfile
 
 from calibration_portability import MAX_BUNDLE,_private_directory,file_digest
-from calibration_identity import require_sdk_user
+from calibration_identity import require_sdk_user,sdk_user_identity,PROFILE
 
 ID=re.compile('[0-9a-f]{32}\\Z')
+HASH=re.compile('[0-9a-f]{64}\\Z')
+SERIAL=re.compile('[A-Za-z0-9][A-Za-z0-9_-]{0,79}\\Z')
+
+def _timestamp(value):
+    if type(value) not in (int,float):return False
+    try:return math.isfinite(value) and value>0
+    except OverflowError:return False
+
+def _receipt(value,backup_id,expected_sha256):
+    """Validate this app's ledger, without interpreting the vendor ZIP format."""
+    required={'schema','id','run_id','profile','side','serial','sdk_user','created_at','cli_version',
+              'verified','sha256','bytes','members','profile_metadata'}
+    invalid='标定备份记录不完整或已损坏，未启动恢复 / Calibration backup receipt is incomplete or damaged; restore was not started'
+    if (not isinstance(value,dict) or set(value)!=required or type(value.get('schema')) is not int or value['schema']!=1
+            or value.get('id')!=backup_id or value.get('verified') is not True
+            or not isinstance(value.get('run_id'),str) or not ID.fullmatch(value['run_id'])
+            or not isinstance(value.get('profile'),str) or not PROFILE.fullmatch(value['profile']) or value['profile'].lower()=='default'
+            or value.get('side') not in ('left','right')
+            or not isinstance(value.get('serial'),str) or not SERIAL.fullmatch(value['serial'])
+            or not _timestamp(value.get('created_at'))
+            or value.get('cli_version') is not None and (not isinstance(value['cli_version'],str) or not 1<=len(value['cli_version'])<=100)
+            or not isinstance(value.get('sha256'),str) or not HASH.fullmatch(value['sha256'])
+            or type(value.get('bytes')) is not int or not 0<value['bytes']<=MAX_BUNDLE
+            or expected_sha256 is not None and value['sha256']!=expected_sha256):
+        raise ValueError(invalid)
+    try:
+        if sdk_user_identity(value['sdk_user'],value['profile'])!=value['sdk_user']:raise ValueError(invalid)
+        from calibration_guided import validate_profile
+        metadata=value['profile_metadata']
+        for side in ('left','right'):validate_profile(metadata,value['profile'],side,True)
+        if 'is_default' in metadata and metadata['is_default'] is not False:raise ValueError(invalid)
+        if metadata[value['side']+'_hand']['calibrated'] is not True:raise ValueError(invalid)
+    except (ValueError,TypeError,KeyError):raise ValueError(invalid) from None
+    members=value['members']
+    if not isinstance(members,dict) or not 1<=len(members)<=4096:raise ValueError(invalid)
+    total=0
+    for name,row in members.items():
+        if (not isinstance(name,str) or not name or '\x00' in name or len(name)>65535
+                or not isinstance(row,dict) or set(row)!={'sha256','bytes'}
+                or not isinstance(row.get('sha256'),str) or not HASH.fullmatch(row['sha256'])
+                or type(row.get('bytes')) is not int or not 0<=row['bytes']<=MAX_BUNDLE):raise ValueError(invalid)
+        total+=row['bytes']
+        if total>MAX_BUNDLE:raise ValueError(invalid)
+    return value
+
+def _unique_fields(pairs):
+    result={}
+    for key,value in pairs:
+        if key in result:raise ValueError('Duplicate calibration backup receipt field')
+        result[key]=value
+    return result
+
+def _file_identity(path):
+    info=path.stat()
+    return info.st_dev,info.st_ino,info.st_size,info.st_mtime_ns
 
 def root_folder():
     from cli_coordination import root_folder as cli_data
@@ -59,18 +115,28 @@ class CalibrationBackups:
         stage.replace(target)
 
     def load(self,backup_id,expected_sha256=None):
+        try:return self._load(backup_id,expected_sha256)
+        except OSError as error:
+            raise ValueError('标定备份暂不可读取，未启动恢复 / Calibration backup is unreadable; restore was not started') from error
+
+    def _load(self,backup_id,expected_sha256=None):
         if not isinstance(backup_id,str) or not ID.fullmatch(backup_id):raise ValueError('Invalid calibration backup identity')
         root=self._root();receipt=root/(backup_id+'.json')
-        file_digest(receipt,1024*1024)
-        value=json.loads(receipt.read_text(encoding='utf-8'))
-        if (not isinstance(value,dict) or value.get('id')!=backup_id or value.get('verified') is not True
-                or expected_sha256 is not None and value.get('sha256')!=expected_sha256):
-            raise ValueError('标定备份尚未验证或已变化 / Calibration backup is unverified or changed')
+        identity=_file_identity(receipt);pinned=file_digest(receipt,1024*1024)
+        with receipt.open('rb') as stream:raw=stream.read(1024*1024+1)
+        if (len(raw)>1024*1024 or (hashlib.sha256(raw).hexdigest(),len(raw))!=pinned
+                or _file_identity(receipt)!=identity or file_digest(receipt,1024*1024)!=pinned):
+            raise ValueError('Calibration backup receipt changed during verification')
+        try:value=json.loads(raw.decode('utf-8'),object_pairs_hook=_unique_fields)
+        except (ValueError,UnicodeError):raise ValueError('标定备份记录已损坏，未启动恢复 / Calibration backup receipt is damaged; restore was not started') from None
+        value=_receipt(value,backup_id,expected_sha256)
         path=root/(backup_id+'.zip')
         if file_digest(path,MAX_BUNDLE)!=(value.get('sha256'),value.get('bytes')) or archive_signature(path)!=value.get('members'):
             raise ValueError('标定备份内容已变化，未启动恢复 / Calibration backup changed; restore was not started')
         if file_digest(path,MAX_BUNDLE)!=(value.get('sha256'),value.get('bytes')):
             raise ValueError('Calibration backup changed during verification')
+        if _file_identity(receipt)!=identity or file_digest(receipt,1024*1024)!=pinned:
+            raise ValueError('Calibration backup receipt changed during verification')
         return value,path
 
     @staticmethod

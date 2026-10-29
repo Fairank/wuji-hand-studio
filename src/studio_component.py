@@ -69,6 +69,8 @@ def enforce_session_owner(command,folder=None):
 
 
 def require_idle(state,doctor=None):
+    if ((state.get('official_cli') or {}).get('update') or {}).get('recovery_required') is True:
+        raise ValueError('CLI 更新占用退出尚未确认，请先重新检查 / CLI update reservation cleanup is unconfirmed; check it again first')
     from connection_switch import unsettled
     if unsettled(state):raise ValueError('Device switch or SDK cleanup is unconfirmed')
     from device_termination import unconfirmed

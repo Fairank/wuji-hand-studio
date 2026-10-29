@@ -55,13 +55,28 @@
  const previewIntent=s=>typeof s?.csrf==='string'&&s.csrf&&Number.isSafeInteger(s.glove?.session_id)&&s.glove.session_id>0&&Number.isSafeInteger(s.glove.action_revision)&&s.glove.action_revision>=0?{csrf:s.csrf,session:s.glove.session_id,revision:s.glove.action_revision}:null;
  const samePreviewIntent=(owner,s)=>!!owner&&owner.csrf===s?.csrf&&owner.session===s?.glove?.session_id&&owner.revision===s?.glove?.action_revision;
  const guideHost=$('hub-calibration-guide');
- const guide=window.OfficialCalibration?.mount(guideHost,{language:()=>window.WujiLocale?.lang||'zh',onRestore:record=>action('calibration_backup_restore',record)});
+ const guide=window.OfficialCalibration?.mount(guideHost,{language:()=>window.WujiLocale?.lang||'zh',scope:()=>serviceToken,onRestore:record=>action('calibration_backup_restore',record)});
  const advanced=document.createElement('details');advanced.id='hub-calib-advanced';advanced.innerHTML='<summary id="hub-calib-advanced-label"></summary><label for="hub-calib-interface" id="hub-calib-interface-label"></label><select id="hub-calib-interface"><option value="guided"></option><option value="terminal"></option></select><p id="hub-calib-interface-note" class="hub-field-note"></p>';
  calib.querySelector('.hub-calibration-preparation').append(advanced);
  const previous=document.createElement('details');previous.id='hub-calib-previous';previous.hidden=true;previous.innerHTML='<summary id="hub-calib-previous-label"></summary>';calib.append(previous);
  window.WujiConnectionHub={show(key){if(key==='visual'||key==='glove'){location.hash='#glove';ws.showPage();return;}location.hash='#connection';ws.showPage();select(key)}};
  let active='device',calibration=null,calibrationFresh=false,consoleState=null,busy=false,calibrationStartPending=false,cancelStartPending=false,startCancelRequested=false,refreshPending=false,scanPending=false,calibrationReadAt=0,actionError='',refreshError='',wantedGlove='',newProfileOpen=false,nextAction=null,lastActiveProfile='',replacementContext='',lastStartedRunId='',calibrationEpoch=0,previewEndPending=false,previewErrorOwner=null;
- function selectSharedDevice(serial,row){if(serial!==wantedGlove){calibrationEpoch++;$('hub-side').value=sideOf(row);}wantedGlove=serial||'';renderCalibration();}
+ // Service lifetime and each pending slot have independent owners.
+ let serviceEpoch=0,serviceToken=null,selectionEpoch=0,requestSequence=0,actionOwner=null,startOwner=null,cancelOwner=null,refreshOwner=null,scanOwner=null,previewOwner=null;
+ const owner=()=>({service:serviceEpoch,token:serviceToken,id:++requestSequence,view:calibrationEpoch,selection:selectionEpoch});
+ const sameService=value=>!!value&&value.service===serviceEpoch&&value.token===serviceToken;
+ function retireService(token=null){
+  serviceEpoch++;serviceToken=token;calibrationEpoch++;selectionEpoch++;
+  actionOwner=startOwner=cancelOwner=refreshOwner=scanOwner=previewOwner=null;
+  busy=calibrationStartPending=cancelStartPending=startCancelRequested=refreshPending=scanPending=previewEndPending=false;
+  calibrationFresh=false;calibrationReadAt=0;actionError=refreshError='';previewErrorOwner=null;nextAction=null;lastStartedRunId='';replacementContext='';
+  $('hub-replace').checked=false;
+ }
+ function requestId(){
+  const bytes=new Uint8Array(16);window.crypto.getRandomValues(bytes);
+  return Array.from(bytes,value=>value.toString(16).padStart(2,'0')).join('');
+ }
+ function selectSharedDevice(serial,row){if(serial!==wantedGlove){calibrationEpoch++;selectionEpoch++;$('hub-side').value=sideOf(row);}wantedGlove=serial||'';renderCalibration();}
  window.addEventListener('device-inventory-selection',event=>{const row=event.detail?.device;if(row)selectSharedDevice(row.sn||row.serial,row);});
  window.addEventListener('device-inventory-update',()=>{renderCalibration();});
  window.addEventListener('official-viz-update',()=>renderCalibration());
@@ -118,38 +133,92 @@
   if(consoleState.program?.active||consoleState.group?.active||consoleState.recording?.active||consoleState.parameter_sync?.busy)return t('当前工作区仍有任务运行，请先结束后再标定。','A workspace task is still running. Finish it before calibration.');
   return '';
  }
- async function refresh(force=false){if(busy||refreshPending||(!force&&!calibrationVisible()))return;const epoch=calibrationEpoch;refreshPending=true;renderCalibration();try{
-  const response=await fetch('/api/calibration'+(force?'?refresh=1':''),{cache:'no-store',signal:AbortSignal.timeout(8000)});
-  if(!response.ok)throw Error(t('无法读取官方校准状态','Calibration status unavailable'));
-  const next=await response.json();if(!object(next)||typeof next.available!=='boolean'||!Array.isArray(next.users)||!Array.isArray(next.devices)||next.current!==null&&!object(next.current)||!object(next.run)||typeof next.run.running!=='boolean')throw Error(t('官方标定信息不完整，请刷新后重试。','Official calibration data is incomplete. Refresh and retry.'));
-  if(epoch!==calibrationEpoch)return;calibration=next;calibrationReadAt=Date.now();calibrationFresh=true;refreshError='';
- }catch(error){if(epoch===calibrationEpoch){calibrationFresh=false;refreshError=error.message;}}finally{refreshPending=false;renderCalibration();if(epoch!==calibrationEpoch&&!busy&&consoleState&&calibrationVisible())queueMicrotask(()=>refresh(true));}}
- async function action(name,extra={}){const restoring=name==='calibration_backup_restore',backup=calibration?.run?.backup;if(restoring&&(!calibrationFresh||!consoleState?.csrf||calibration?.run?.running||calibration?.cleanup_required||backup?.verified!==true||backup.id!==extra.backup_id||backup.sha256!==extra.expected_sha256))return;const endingPreview=name==='glove_disconnect'?previewIntent(consoleState):null;if(name==='glove_disconnect'&&(!endingPreview||endingPreview.session!==extra.expected_session||endingPreview.revision!==extra.expected_revision))return;const cancelStarting=name==='calibration_cancel'&&calibrationStartPending;if((busy||cancelStartPending)&&!cancelStarting||cancelStarting&&cancelStartPending)return;calibrationEpoch++;if(cancelStarting){cancelStartPending=true;startCancelRequested=true;}else{busy=true;if(name==='calibration_begin'){calibrationStartPending=true;startCancelRequested=false;}}actionError='';previewErrorOwner=null;const restoreOwner=restoring?{epoch:calibrationEpoch,csrf:consoleState?.csrf}:null,restoreCurrent=()=>!restoreOwner||restoreOwner.epoch===calibrationEpoch&&restoreOwner.csrf===consoleState?.csrf;renderCalibration();try{
-   const token=consoleState?.csrf;if(!token)throw Error(t('工作台服务未就绪','Workbench service not ready'));
-   const response=await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json','X-Console-Token':token},body:JSON.stringify({name,...extra}),...(restoring?{signal:AbortSignal.timeout(15000)}:{})});const data=await response.json();if(!restoreCurrent())return;if(!response.ok||data.ok===false)throw Error(data.error||'Action failed');
-   const acceptResult=name!=='calibration_begin'||!startCancelRequested;
-   if(acceptResult&&object(data.calibration)){calibrationEpoch++;calibration=data.calibration;calibrationReadAt=Date.now();calibrationFresh=true;}if(name==='calibration_start')$('hub-replace').checked=false;
-   if(acceptResult&&['calibration_handover','calibration_begin','calibration_backup_restore'].includes(name)&&object(data.calibration?.run)){lastStartedRunId=data.calibration.run.id||'';$('hub-replace').checked=false;}
+ async function refresh(force=false){
+  if(busy||refreshPending||!consoleState?.csrf||(!force&&!calibrationVisible()))return;
+  const ticket=owner();refreshOwner=ticket;refreshPending=true;renderCalibration();
+  const current=()=>sameService(ticket)&&refreshOwner===ticket;
+  try{
+   const response=await fetch('/api/calibration'+(force?'?refresh=1':''),{cache:'no-store',signal:AbortSignal.timeout(8000)});
+   if(!current())return;
+   if(!response.ok)throw Error(t('无法读取官方校准状态','Calibration status unavailable'));
+   const next=await response.json();if(!current())return;
+   if(!object(next)||typeof next.available!=='boolean'||!Array.isArray(next.users)||!Array.isArray(next.devices)||next.current!==null&&!object(next.current)||!object(next.run)||typeof next.run.running!=='boolean')throw Error(t('官方标定信息不完整，请刷新后重试。','Official calibration data is incomplete. Refresh and retry.'));
+   if(ticket.view!==calibrationEpoch)return;
+   calibration=next;calibrationReadAt=Date.now();calibrationFresh=true;refreshError='';
+  }catch(error){if(current()&&ticket.view===calibrationEpoch){calibrationFresh=false;refreshError=error.message;}}
+  finally{if(current()){refreshOwner=null;refreshPending=false;renderCalibration();if(ticket.view!==calibrationEpoch&&!busy&&consoleState&&calibrationVisible())queueMicrotask(()=>refresh(true));}}
+ }
+ async function action(name,extra={}){
+  if(!consoleState?.csrf||consoleState.csrf!==serviceToken)return;
+  const restoring=name==='calibration_backup_restore',backup=calibration?.run?.backup;
+  if(restoring&&(!calibrationFresh||calibration?.run?.running||calibration?.cleanup_required||backup?.verified!==true||backup.id!==extra.backup_id||backup.sha256!==extra.expected_sha256))return;
+  const endingPreview=name==='glove_disconnect'?previewIntent(consoleState):null;
+  if(name==='glove_disconnect'&&(!endingPreview||endingPreview.session!==extra.expected_session||endingPreview.revision!==extra.expected_revision))return;
+  const cancelStarting=name==='calibration_cancel'&&calibrationStartPending&&sameService(startOwner);
+  if((busy||cancelStartPending)&&!cancelStarting||cancelStarting&&cancelStartPending)return;
+  let payload={name,...extra};
+  if(name==='calibration_cancel'){
+   if(cancelStarting)payload={name,request_id:startOwner.requestId};
+   else{const run=calibration?.run;if(!calibrationFresh||!run||!/^[a-f0-9]{32}$/.test(run.id||''))return;payload={name,expected_run:run.id};}
+  }
+  if(name==='calibration_begin')payload.request_id=requestId();
+  calibrationEpoch++;const ticket=owner();ticket.publicRun=consoleState?.calibration?.run?.id||consoleState?.calibration?.id||null;
+  if(cancelStarting){cancelOwner=ticket;cancelStartPending=true;startCancelRequested=true;startOwner.cancelled=true;}
+  else{actionOwner=ticket;busy=true;if(name==='calibration_begin'){startOwner=ticket;ticket.requestId=payload.request_id;calibrationStartPending=true;startCancelRequested=false;}}
+  actionError='';previewErrorOwner=null;
+  const current=()=>sameService(ticket)&&(cancelStarting?cancelOwner===ticket:actionOwner===ticket);
+  const runCurrent=()=>{
+   if(!payload.expected_run)return true;
+   const local=calibration?.run?.id,published=consoleState?.calibration?.run?.id||consoleState?.calibration?.id;
+   return (!local||local===payload.expected_run)&&(!published||published===ticket.publicRun||published===payload.expected_run);
+  };
+  const acceptable=()=>current()&&ticket.selection===selectionEpoch&&!ticket.cancelled&&runCurrent();
+  renderCalibration();
+  try{
+   const response=await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json','X-Console-Token':ticket.token},body:JSON.stringify(payload),...(restoring?{signal:AbortSignal.timeout(15000)}:{})});
+   if(!current())return;const data=await response.json();if(!current())return;
+   if(!response.ok||data.ok===false)throw Error(data.error||'Action failed');
+   if(!acceptable())return;
+   if(cancelStarting&&data.cancelled_request_id===payload.request_id&&startOwner?.requestId===payload.request_id){
+    if(actionOwner===startOwner){actionOwner=null;busy=false;}
+    startOwner=null;calibrationStartPending=false;
+   }
+   if(object(data.calibration)){
+    calibrationEpoch++;
+    const complete=typeof data.calibration.available==='boolean'&&Array.isArray(data.calibration.users)&&Array.isArray(data.calibration.devices);
+    calibration=complete?data.calibration:{...calibration,...data.calibration};
+    calibrationFresh=complete;if(complete)calibrationReadAt=Date.now();
+   }
+   if(name==='calibration_start')$('hub-replace').checked=false;
+   if(['calibration_handover','calibration_begin','calibration_backup_restore'].includes(name)&&object(data.calibration?.run)){lastStartedRunId=data.calibration.run.id||'';$('hub-replace').checked=false;}
    if(name==='calibration_profile_create'||name==='calibration_profile_switch')$('hub-profile').value='';
    if(name==='calibration_profile_create'){newProfileOpen=false;$('hub-new-profile').value='';}
-  }catch(error){if(restoreCurrent()&&(name!=='calibration_begin'||!startCancelRequested)&&(!endingPreview||samePreviewIntent(endingPreview,consoleState))){actionError=error.message;previewErrorOwner=endingPreview;}}finally{if(cancelStarting)cancelStartPending=false;else{busy=false;if(name==='calibration_begin')calibrationStartPending=false;}renderCalibration();refresh(true)}}
+  }catch(error){if(acceptable()&&(!endingPreview||samePreviewIntent(endingPreview,consoleState))){actionError=error.message;previewErrorOwner=endingPreview;}}
+  finally{
+   if(current()){
+    if(cancelStarting){cancelOwner=null;cancelStartPending=false;}
+    else{actionOwner=null;busy=false;if(startOwner===ticket){startOwner=null;calibrationStartPending=false;}}
+    renderCalibration();refresh(true);
+   }
+  }
+ }
  async function scanGloves(){
-  if(scanPending||busy||calibration?.run?.running)return;scanPending=true;actionError='';renderCalibration();
+  if(scanPending||busy||calibration?.run?.running||!consoleState?.csrf)return;const ticket=owner();scanOwner=ticket;const current=()=>sameService(ticket)&&scanOwner===ticket;scanPending=true;actionError='';renderCalibration();
   try{
    const inventory=window.WujiDeviceInventory;if(!inventory)throw Error(t('设备发现尚未就绪，请稍后重试。','Device discovery is not ready. Retry shortly.'));
-   await inventory.refresh();const before=inventory.snapshot();if(before?.scan_allowed!==true)throw Error(before?.blocked_reason||t('当前会话暂不能扫描，请先结束设备任务。','Discovery is unavailable. Finish active device sessions first.'));
-   const scanned=await inventory.scan();await inventory.refresh();let after=inventory.snapshot();
+   await inventory.refresh();if(!current())return;const before=inventory.snapshot();if(before?.scan_allowed!==true)throw Error(before?.blocked_reason||t('当前会话暂不能扫描，请先结束设备任务。','Discovery is unavailable. Finish active device sessions first.'));
+   const scanned=await inventory.scan();if(!current())return;await inventory.refresh();if(!current())return;let after=inventory.snapshot();
    if(!scanned)throw Error(after?.error||after?.blocked_reason||t('手套扫描尚未完成，请重试。','Glove discovery did not complete. Retry.'));
    const deadline=Date.now()+20000;
    while(after?.scanning===true){
-    if(document.hidden||active!=='official'||location.hash!=='#connection')return;
+    if(!current()||document.hidden||active!=='official'||location.hash!=='#connection')return;
     if(Date.now()>=deadline)throw Error(t('扫描尚未结束，请稍后重新查找。','Discovery is still running. Try again shortly.'));
     await new Promise(resolve=>setTimeout(resolve,300));
-    if(document.hidden||active!=='official'||location.hash!=='#connection')return;
-    await inventory.refresh();after=inventory.snapshot();
+    if(!current()||document.hidden||active!=='official'||location.hash!=='#connection')return;
+    await inventory.refresh();if(!current())return;after=inventory.snapshot();
    }
    if(after?.error)throw Error(after.error);
-  }catch(error){actionError=error.message}finally{scanPending=false;if(!document.hidden&&active==='official'&&location.hash==='#connection')await refresh(true);renderCalibration()}
+  }catch(error){if(current())actionError=error.message}finally{if(current()){scanOwner=null;scanPending=false;if(!document.hidden&&active==='official'&&location.hash==='#connection')await refresh(true);if(sameService(ticket))renderCalibration()}}
  }
  function renderGuidedCalibration(c){
   const run=object(c.run)?c.run:{},running=run.running===true,cleanup=c.cleanup_required===true,view=officialViz?.snapshot(),v=view?.state||{},selection=officialViz?.selection(),serial=selection?.serial||'',reported=v.reported_device||v.device||{},connectedSerial=reported.sn||reported.serial||'',device=view?.fresh===true&&v.active===true&&v.phase==='running'&&connectedSerial===serial?reported:selection?.device||{},reportedSide=sideOf(device),side=reportedSide||$('hub-side').value,terminal=$('hub-calib-interface').value==='terminal';
@@ -171,7 +240,7 @@
   write('hub-calib-advanced-label',t('高级','Advanced'));write('hub-calib-interface-label',t('标定方式','Calibration interface'));$('hub-calib-interface').options[0].textContent=t('引导界面（推荐）','Guided interface (recommended)');$('hub-calib-interface').options[1].textContent=t('原版终端','Original terminal');write('hub-calib-interface-note',terminal?t('点击“开始标定”后打开官方完整菜单与图示。','Start calibration to open the complete official menus and illustrations.'):t('使用官方采集与求解，只显示当前动作和结果。','Official capture and solver, showing the current step and result.'));
   const restoring=run.source==='official_user_import_tty'&&run.interface==='restore';
   const mutating=busy||cancelStartPending||running||cleanup;for(const id of ['hub-profile','hub-new-profile','hub-side','hub-replace','hub-calib-interface'])$(id).disabled=mutating;
-  $('hub-calib-refresh').hidden=!calibrationVisible();$('hub-calib-doc').hidden=!calibrationVisible();$('hub-calib-refresh').disabled=busy||cancelStartPending||refreshPending||running;$('hub-calib-start').hidden=true;$('hub-calib-cancel').hidden=!running&&!cleanup&&!calibrationStartPending;$('hub-calib-cancel').disabled=cancelStartPending||!calibrationStartPending&&(busy||!running&&!cleanup);
+  $('hub-calib-refresh').hidden=!calibrationVisible();$('hub-calib-doc').hidden=!calibrationVisible();$('hub-calib-refresh').disabled=busy||cancelStartPending||refreshPending||running;$('hub-calib-start').hidden=true;$('hub-calib-cancel').hidden=!running&&!cleanup&&!calibrationStartPending;$('hub-calib-cancel').disabled=cancelStartPending||!calibrationFresh&&!calibrationStartPending||calibrationStartPending&&startCancelRequested||!calibrationStartPending&&(busy||!running&&!cleanup);
   write('hub-calib-cancel',calibrationStartPending?cancelStartPending?t('正在取消开始…','Cancelling start…'):t('取消开始','Cancel start'):cleanup?t('结束并核对会话','End and verify session'):restoring?t('结束恢复','End restore'):terminal||run.source==='official_tty'?t('结束标定','End calibration'):t('取消标定','Cancel calibration'));
   let reason='',next=null,nextLabel='';
   if(cleanup)reason=c.cleanup_error||t('上次会话尚未完整退出，请结束并核对。','The previous session has not fully exited. End and verify it.');
@@ -284,12 +353,21 @@
   if(calibration?.guided_native===true){const view=officialViz?.snapshot()?.state||{},reported=view.reported_device||view.device||{},selected=view.active===true&&view.phase==='running'&&(reported.sn||reported.serial)===serial?reported:officialViz?.selection()?.device,side=sideOf(selected)||$('hub-side').value,isNew=$('hub-profile').value==='__new__',profile=isNew?$('hub-new-profile').value.trim():$('hub-profile').value,record=profile===calibration.current?.name?calibration.current:calibration.users?.find(u=>u.name===profile),guided=$('hub-calib-interface').value!=='terminal';action('calibration_begin',{serial,interface:guided?'guided':'terminal',profile:guided?profile:null,side,replace:guided&&record?.[side+'_hand']?.calibrated===true&&$('hub-replace').checked,create_profile:guided&&isNew});return;}
   action('calibration_start',calibration?.human_tty===true?{serial}:{side:$('hub-side').value,serial,replace:calibration?.current?.[$('hub-side').value+'_hand']?.calibrated===true&&$('hub-replace').checked});}
  $('hub-calib-start').onclick=startCalibration;$('hub-calib-cancel').onclick=()=>action('calibration_cancel');
- endPreview.onclick=async()=>{const owner=previewIntent(consoleState);if(previewEndPending||busy||!owner)return;previewEndPending=true;renderCalibration();try{const response=await fetch('/api/state',{cache:'no-store',signal:AbortSignal.timeout(5000)});if(!response.ok)throw Error(t('无法核对设备状态','Cannot verify device state'));const state=await response.json();if(!samePreviewIntent(owner,consoleState))return;if(!previewOnly(state)||!samePreviewIntent(owner,state))throw Error(t('设备会话已改变，请在原工作区结束。','The device session changed. End it in its owning workspace.'));consoleState=state;await action('glove_disconnect',{expected_session:state.glove.session_id,expected_revision:state.glove.action_revision});}catch(error){if(samePreviewIntent(owner,consoleState)){actionError=error.message;previewErrorOwner=owner;}}finally{previewEndPending=false;renderCalibration();}};
+ endPreview.onclick=async()=>{const owner=previewIntent(consoleState);if(previewEndPending||busy||!owner)return;const ticket={service:serviceEpoch,token:serviceToken};previewOwner=ticket;previewEndPending=true;renderCalibration();try{const response=await fetch('/api/state',{cache:'no-store',signal:AbortSignal.timeout(5000)});if(!response.ok)throw Error(t('无法核对设备状态','Cannot verify device state'));const state=await response.json();if(!sameService(ticket)||previewOwner!==ticket||!samePreviewIntent(owner,consoleState))return;if(!previewOnly(state)||!samePreviewIntent(owner,state))throw Error(t('设备会话已改变，请在原工作区结束。','The device session changed. End it in its owning workspace.'));consoleState=state;await action('glove_disconnect',{expected_session:state.glove.session_id,expected_revision:state.glove.action_revision});}catch(error){if(sameService(ticket)&&previewOwner===ticket&&samePreviewIntent(owner,consoleState)){actionError=error.message;previewErrorOwner=owner;}}finally{if(sameService(ticket)&&previewOwner===ticket){previewOwner=null;previewEndPending=false;renderCalibration();}}};
  $('hub-calib-device').addEventListener('input',()=>{wantedGlove=$('hub-calib-device').value;const row=(Array.isArray(calibration?.devices)?calibration.devices:[]).find(d=>(d.sn||d.serial)===wantedGlove);$('hub-side').value=sideOf(row);window.WujiDeviceInventory?.select(wantedGlove);});
  for(const id of ['hub-new-profile','hub-side','hub-replace','hub-profile','hub-calib-device'])$(id).addEventListener('input',renderCalibration);
  $('hub-calib-interface').onchange=renderCalibration;
- window.addEventListener('console-state',event=>{consoleState=event.detail;if(previewErrorOwner&&!samePreviewIntent(previewErrorOwner,consoleState)){actionError='';previewErrorOwner=null;}renderStatus();renderCalibration()});
- window.addEventListener('console-offline',()=>{calibrationEpoch++;consoleState=null;calibrationFresh=false;actionError='';renderStatus();renderCalibration()});
+ window.addEventListener('console-state',event=>{
+  const next=event.detail,token=typeof next?.csrf==='string'&&next.csrf?next.csrf:null;
+  if(serviceToken!==null&&token!==serviceToken)retireService(token);else serviceToken=token;
+  consoleState=next;if(previewErrorOwner&&!samePreviewIntent(previewErrorOwner,consoleState)){actionError='';previewErrorOwner=null;}
+  renderStatus();renderCalibration();if(token&&!calibrationFresh&&!busy&&calibrationVisible())queueMicrotask(()=>refresh(true));
+ });
+ window.addEventListener('console-offline',event=>{
+  if(event.detail?.task_scope===true){calibrationEpoch++;refreshOwner=null;refreshPending=false;calibrationFresh=false;actionError='';}
+  else retireService();
+  consoleState=null;renderStatus();renderCalibration();
+ });
  function labels(){for(const [key,zh,en] of definitions)$('hub-tab-'+key).textContent=t(zh,en);
   $('hub-intro-note').textContent=t('灵巧手与手套独立连接，也可以只使用其中一种。','Connect a hand, a glove, or both. Each connection is independent.');
   $('hub-calib-title').textContent=t('手型标定','Hand-model calibration');
