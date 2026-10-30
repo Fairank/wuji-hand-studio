@@ -68,10 +68,10 @@ class MappingPrecisionTests(unittest.TestCase):
         glove=dict(profile='hand2_right',session_id=3,glove_serial='WG-SYNTHETIC',busy=True,
                    connection='receiving',stream=dict(q=raw,seq=1,fresh=True))
         q,mode,_=pose(glove,'hand2','target',collision=result)
-        self.assertIsNone(q);self.assertEqual(mode,'glove_constrained_unavailable')
+        self.assertIsNone(q);self.assertEqual(mode,'glove_preview')
         glove['stream']['fresh']=False
         q,mode,_=pose(glove,'hand2','target',collision=result)
-        self.assertIsNone(q);self.assertEqual(mode,'glove_constrained_unavailable')
+        self.assertIsNone(q);self.assertEqual(mode,'glove_preview')
 
 
 if __name__=='__main__':unittest.main()

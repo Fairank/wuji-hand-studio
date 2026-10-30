@@ -20,7 +20,7 @@ def fixture(profile='hand2_right'):
     return dict(view_source='glove',teleoperation_view_mode='constrained',device_profile=dict(id=profile,generation=profile.split('_')[0]),
         stale=True,metrics={},glove=dict(connection='receiving',busy=True,profile=profile,session_id=7,
         glove_serial='SYNTHETIC-GLOVE',user=dict(user_id=''),stream=dict(seq=1,age_ms=10,timeout_ms=250,
-        fresh=True,q=[.1]*20,solver=dict(engine='sdk'),retarget=dict(gain=[1.]*20,offset_deg=[0.]*20,smoothing_ms=0.))))
+        fresh=True,q=[.1]*20,solver=dict(engine='sdk',applied=True),retarget=dict(gain=[1.]*20,offset_deg=[0.]*20,smoothing_ms=0.))))
 
 
 class FakePreview:
@@ -66,7 +66,7 @@ class CollisionOwnerTests(unittest.TestCase):
         result=self.owner.update(self.state,now=10.)
         self.assertEqual(result['status'],'ready')
         self.assertIn('映射预览 · 碰撞约束',result['message'])
-        self.assertEqual(pose(self.state['glove'],'hand2','constrained',result)[0],[.05]*20)
+        self.assertEqual(pose(self.state['glove'],'hand2','constrained',result)[0],[.1]*20)
         self.assertEqual(json.dumps(self.state,sort_keys=True),before)
         self.owner.update(self.state,now=10.05)
         self.assertEqual(len(self.created[0].calls),1)
@@ -113,7 +113,7 @@ class CollisionOwnerTests(unittest.TestCase):
         self.state['glove']['stream']['seq']=2
         out=self.owner.update(self.state,now=10.05)
         self.assertEqual(out['status'],'blocked');self.assertNotIn('display_q',out)
-        self.assertIsNone(pose(self.state['glove'],'hand2','constrained',out)[0])
+        self.assertEqual(pose(self.state['glove'],'hand2','constrained',out)[0],[.1]*20)
         self.assertFalse(preview.closed)
         preview.verified=True;preview.limited=False;preview.progressed=True;self.state['glove']['stream']['seq']=3
         self.assertEqual(self.owner.update(self.state,now=10.1)['status'],'ready')
@@ -147,34 +147,34 @@ class CollisionOwnerTests(unittest.TestCase):
     def test_hand1_has_the_same_complete_290_pair_coverage(self):
         state=fixture('hand1_left');out=self.owner.update(state,now=10.)
         self.assertEqual(out['status'],'ready');self.assertEqual(out['geometry_pairs_verified'],290)
-        self.assertEqual(pose(state['glove'],'hand1','constrained',out)[1],'glove_constrained')
+        self.assertEqual(pose(state['glove'],'hand1','constrained',out)[1],'glove_preview')
 
-    def test_decoder_never_falls_back_on_unknown_mismatched_or_excessive_result(self):
+    def test_sdk_decoder_ignores_legacy_projection_results(self):
         good=self.owner.update(self.state,now=10.)
         for edit in (dict(stable=None),dict(max_all_contact_penetration_m=.0011),dict(limit_excess_rad=.0011),
                      dict(source_seq=99),dict(bridge_session_id=99),dict(glove_serial='OTHER'),dict(profile='hand2_left'),
                      dict(source_target_sha256='wrong'),dict(coverage='unknown'),dict(display_q=[float('inf')]*20)):
             result=dict(good,**edit)
             q,mode,meta=pose(self.state['glove'],'hand2','constrained',result)
-            self.assertIsNone(q);self.assertEqual(mode,'glove_constrained_unavailable')
-            self.assertEqual(meta['collision_preview']['status'],'blocked')
-        self.assertIsNone(pose(self.state['glove'],'hand2','constrained')[0])
+            self.assertEqual(q,[.1]*20);self.assertEqual(mode,'glove_preview')
+            self.assertEqual(meta['target_frame']['source'],'official_sdk')
+        self.assertEqual(pose(self.state['glove'],'hand2','constrained')[0],[.1]*20)
 
-    def test_automatic_requires_verified_geometry_before_feedback_and_never_projects_feedback(self):
+    def test_automatic_sdk_target_does_not_project_actual_feedback(self):
         state=fixture();state['teleoperation_view_mode']='automatic'
         out=self.owner.update(state,now=10.)
-        self.assertEqual(out['status'],'ready');self.assertEqual(pose(state['glove'],'hand2','automatic',out)[0],[.05]*20)
+        self.assertEqual(out['status'],'ready');self.assertEqual(pose(state['glove'],'hand2','automatic',out)[0],[.1]*20)
         state['glove']['feedback']=dict(device_id='HAND',stale=True)
         self.assertIsNone(self.owner.update(state,now=10.05));self.assertTrue(self.created[0].closed)
         self.assertEqual(pose(state['glove'],'hand2','automatic',out)[1],'glove_live')
 
-    def test_legacy_target_and_constrained_choices_share_the_static_geometry_contract(self):
+    def test_legacy_target_and_constrained_choices_use_the_same_sdk_target(self):
         for mode in ('automatic','target','constrained'):
             state=fixture();state['teleoperation_view_mode']=mode
             out=self.owner.update(state,now=10.)
-            self.assertEqual(pose(state['glove'],'hand2',mode,out)[1],'glove_constrained')
+            self.assertEqual(pose(state['glove'],'hand2',mode,out)[1],'glove_preview')
             self.assertTrue(out['geometry_only']);self.assertEqual(out['geometry_pairs_verified'],290)
-            self.assertIsNone(pose(state['glove'],'hand2',mode)[0])
+            self.assertEqual(pose(state['glove'],'hand2',mode)[0],[.1]*20)
 
     def test_source_short_timeout_is_rechecked_after_model_creation_and_geometry(self):
         with patch('pose_view.time.perf_counter',side_effect=[0.,0.,.3]):
@@ -222,7 +222,7 @@ class _StopLoop(BaseException):pass
 
 
 class RendererContractTests(unittest.TestCase):
-    def run_once(self,state,after_render=None):
+    def run_once(self,state,after_render=None,*,frames=1):
         class Vector(list):
             def __setitem__(self,key,value):
                 if isinstance(key,slice) and isinstance(value,(int,float)):
@@ -239,11 +239,12 @@ class RendererContractTests(unittest.TestCase):
         data=types.SimpleNamespace(qpos=Vector([0.]*20),xanchor=[[0.,0.,0.]]*20)
         scene=types.SimpleNamespace(ngeom=0,maxgeom=100,geoms=[types.SimpleNamespace() for _ in range(100)])
         renderer=types.SimpleNamespace(scene=scene,update_scene=Mock(),render=Mock(return_value='synthetic-rgb'),close=Mock())
-        if after_render is not None:
-            def rendered():
-                after_render(state)
-                return 'synthetic-rgb'
-            renderer.render.side_effect=rendered
+        renderer.poses=[]
+        def rendered():
+            renderer.poses.append(list(data.qpos))
+            if after_render is not None:after_render(state)
+            return 'synthetic-rgb'
+        renderer.render.side_effect=rendered
         mj=types.SimpleNamespace(__version__='3.3.7',MjData=lambda _:data,Renderer=lambda *a,**k:renderer,
             MjvCamera=lambda:types.SimpleNamespace(lookat=[0]*3),MjvOption=lambda:types.SimpleNamespace(geomgroup=[1]*6),
             mj_forward=Mock(),mjtGeom=types.SimpleNamespace(mjGEOM_SPHERE=0),mjv_initGeom=Mock())
@@ -254,7 +255,7 @@ class RendererContractTests(unittest.TestCase):
         calls=[]
         def demand():
             calls.append(1)
-            if len(calls)>2:raise _StopLoop()
+            if len(calls)>frames+1:raise _StopLoop()
         obj.wait_for_demand=demand
         created=[]
         def factory(runtime,p,s,assets,**kw):
@@ -270,18 +271,18 @@ class RendererContractTests(unittest.TestCase):
         state=fixture();state['glove']['stream']['fresh']=False
         obj,mj,data,renderer,created=self.run_once(state)
         self.assertEqual(obj.jpeg,b'previous-image');self.assertFalse(obj.meta['ready'])
-        self.assertEqual(obj.meta['mode'],'glove_constrained_unavailable')
+        self.assertEqual(obj.meta['mode'],'glove_preview')
         renderer.render.assert_not_called();mj.mj_forward.assert_not_called();self.assertEqual(created,[])
 
-    def test_ready_renderer_maps_only_separate_display_angles_and_keeps_targets(self):
+    def test_ready_renderer_maps_exact_official_sdk_angles_and_keeps_targets(self):
         state=fixture();before=copy.deepcopy(state)
         obj,mj,data,renderer,created=self.run_once(state)
-        self.assertTrue(obj.meta['ready']);self.assertEqual(obj.meta['mode'],'glove_constrained')
+        self.assertTrue(obj.meta['ready']);self.assertEqual(obj.meta['mode'],'glove_preview')
         self.assertTrue(obj.meta['no_physics_step']);self.assertTrue(obj.meta['no_motion_commands'])
         self.assertTrue(obj.meta['preview_only']);self.assertEqual(obj.meta['active_joints'],0)
-        self.assertEqual(data.qpos,[.05]*20);self.assertEqual(state,before)
-        self.assertIn('碰撞约束',obj.meta['message']);renderer.render.assert_called_once()
-        self.assertTrue(created[0].closed)
+        self.assertEqual(data.qpos,[.1]*20);self.assertEqual(state,before)
+        self.assertIn('官方 SDK',obj.meta['message']);renderer.render.assert_called_once()
+        self.assertEqual(created,[])
 
     def test_automatic_stale_feedback_preserves_old_jpeg_without_render_or_physics(self):
         state=fixture();state['teleoperation_view_mode']='automatic'
@@ -295,26 +296,26 @@ class RendererContractTests(unittest.TestCase):
         state=fixture();state['teleoperation_view_mode']='automatic';state['glove']['stream']['q']=[.1]*19
         obj,mj,data,renderer,created=self.run_once(state)
         self.assertEqual(obj.jpeg,b'previous-image');self.assertFalse(obj.meta['ready'])
-        self.assertEqual(obj.meta['mode'],'glove_constrained_unavailable');self.assertIsNone(obj.meta['source_seq'])
+        self.assertEqual(obj.meta['mode'],'glove_preview');self.assertIsNone(obj.meta['source_seq'])
         renderer.render.assert_not_called();mj.mj_forward.assert_not_called();self.assertEqual(created,[])
 
     def test_same_sequence_payload_mutated_during_render_cannot_publish_the_old_pose(self):
         state=fixture();state['teleoperation_view_mode']='automatic'
         obj,mj,data,renderer,created=self.run_once(state,lambda current:current['glove']['stream']['q'].__setitem__(0,.2))
         self.assertEqual(obj.jpeg,b'previous-image');self.assertFalse(obj.meta['ready'])
-        self.assertEqual(obj.meta['mode'],'glove_constrained_unavailable');renderer.render.assert_called_once()
+        self.assertEqual(obj.meta['mode'],'glove_preview');renderer.render.assert_called_once()
 
     def test_glove_profile_conflict_during_render_cannot_publish_a_matching_device_label(self):
         state=fixture();state['teleoperation_view_mode']='automatic'
         obj,mj,data,renderer,created=self.run_once(state,lambda current:current['glove'].update(profile='hand1_left'))
         self.assertEqual(obj.jpeg,b'previous-image');self.assertFalse(obj.meta['ready'])
-        self.assertEqual(obj.meta['mode'],'glove_constrained_unavailable');renderer.render.assert_called_once()
+        self.assertEqual(obj.meta['mode'],'glove_preview');renderer.render.assert_called_once()
 
     def test_newer_finite_source_frame_does_not_prevent_a_still_fresh_render(self):
         state=fixture();state['teleoperation_view_mode']='automatic'
         def newer(current):current['glove']['stream'].update(seq=2,q=[.2]*20)
         obj,mj,data,renderer,created=self.run_once(state,newer)
-        self.assertTrue(obj.meta['ready']);self.assertEqual(obj.meta['mode'],'glove_constrained')
+        self.assertTrue(obj.meta['ready']);self.assertEqual(obj.meta['mode'],'glove_preview')
         self.assertEqual(obj.jpeg,b'synthetic-constrained-jpeg');renderer.render.assert_called_once()
 
     def test_newer_fresh_frame_does_not_extend_an_expired_result_during_late_render(self):
@@ -324,7 +325,7 @@ class RendererContractTests(unittest.TestCase):
             current['glove']['stream'].update(seq=2,age_ms=0.,fresh=True)
         with patch('pose_view.time.monotonic',clock):obj,mj,data,renderer,created=self.run_once(state,late)
         self.assertEqual(obj.jpeg,b'previous-image');self.assertFalse(obj.meta['ready'])
-        self.assertEqual(obj.meta['mode'],'glove_constrained_unavailable');renderer.render.assert_called_once()
+        self.assertEqual(obj.meta['mode'],'glove_preview');renderer.render.assert_called_once()
 
 
 if __name__=='__main__':unittest.main()

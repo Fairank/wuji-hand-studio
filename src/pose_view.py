@@ -1,7 +1,7 @@
-"""Native left MuJoCo geometry driven by validated display-only mappings.
+"""Native hand geometry driven by measured pose or the official SDK target.
 
-Measured and raw-target paths update kinematics only. Automatic mapping
-display uses a separate static geometry model; it never writes a device target.
+Both paths update display kinematics only. SDK targets are not projected,
+filtered or sent to a device by this renderer.
 """
 import io
 import hashlib
@@ -80,7 +80,7 @@ def validate_mapping(entries):
 
 
 class GloveCollisionPreview:
-    """Lazy display-only owner, independently testable without a physics import."""
+    """Historical geometry QA helper; never used by the product render loop."""
     def __init__(self,factory):
         self.factory=factory
         self.reset()
@@ -243,6 +243,24 @@ class DemonstrationPoseSource:
                 else self.controller.demonstration_snapshot(self.profile_id,display=self.display))
 
 
+def _target_frame_meta(meta, now):
+    """The displayed target keeps its own source deadline, even in the cache."""
+    meta=dict(meta)
+    if meta.get('mode') not in ('glove_constrained','glove_preview'):return meta
+    source=meta.get('_frame_source_monotonic');timeout=meta.get('frame_timeout_ms')
+    number=lambda value:type(value) in (int,float) and math.isfinite(value)
+    valid=(number(now) and number(source) and 0<=source<=now
+           and number(timeout) and 0<timeout<=500)
+    age=(now-source)*1000 if valid else None
+    meta['frame_age_ms']=age
+    if not valid or age>timeout:
+        meta.update(ready=False,mode='glove_preview' if meta.get('mode')=='glove_preview' else 'glove_constrained_unavailable',render_hz=0,
+            message='手套画面已过期，等待新帧 / Glove view expired; waiting for a new frame')
+        if isinstance(meta.get('collision_preview'),dict):
+            meta['collision_preview']={**meta['collision_preview'],'status':'blocked'}
+    return meta
+
+
 class PoseView:
     def __init__(self, controller):
         self.controller = controller
@@ -276,7 +294,7 @@ class PoseView:
         with self.lock:
             self.requested_until=time.monotonic()+.5
             self.demand.set()
-            meta = dict(self.meta)
+            meta = _target_frame_meta(self.meta,time.monotonic())
             if meta.get('ready') and isinstance(self.controller,DemonstrationPoseSource):
                 current=self.controller.snapshot()
                 def playback_scope(value):
@@ -293,6 +311,7 @@ class PoseView:
             if meta.get('ready') and time.monotonic()-meta.get('rendered_monotonic', 0) > 1:
                 meta.update(ready=False, mode='stale', message='三维渲染已中断，画面不再代表当前姿态')
             meta.pop('rendered_monotonic', None)
+            meta.pop('_frame_source_monotonic',None)
             return self.jpeg, meta
 
     def wait_for_demand(self):
@@ -306,15 +325,12 @@ class PoseView:
 
     def run(self):
         renderer = None
-        collision = None
         try:
             self.wait_for_demand()
             import mujoco as mj
             import numpy as np
             from PIL import Image
             from device_profiles import load_native_model,FirstGenerationPreview
-            from collision_preview import create_display_preview
-            collision=GloveCollisionPreview(lambda p,s:create_display_preview(mj,p,s,HERE/'assets',mode='automatic',fresh_target=True))
             profile_id=self.controller.snapshot().get('device_profile',{}).get('id','hand2_left')
             m = load_native_model(profile_id)
             d = mj.MjData(m)
@@ -373,12 +389,12 @@ class PoseView:
                     d.qpos[:]=0;active=0;latest=None
                     for marker in markers:marker.update(status='unmapped',hz=None)
                 glove_display=None
-                collision_result=collision.update(state,now=tick)
                 if state.get('view_source')=='glove' and not state.get('virtual_preview_idle'):
                     from glove_view import pose as glove_pose,channel_ids
                     glove_generation=state.get('device_profile',{}).get('generation')
                     glove_channels=channel_ids(glove_generation)
-                    gq,gmode,gfeedback=glove_pose(state.get('glove',{}),glove_generation,state.get('teleoperation_view_mode','automatic'),collision=collision_result)
+                    gq,gmode,gfeedback=glove_pose(state.get('glove',{}),glove_generation,state.get('teleoperation_view_mode','automatic'))
+                    if gmode=='glove_preview' and (state.get('glove') or {}).get('profile')!=profile_id:gq=None
                     if gmode in ('glove_live','glove_preview') and gq is None:
                         with self.lock:
                             # A pending/lost measured frame must never become
@@ -389,18 +405,6 @@ class PoseView:
                                 active_joints=0,joints=[],render_hz=0,source_seq=None,
                                 glove_seq=(state.get('glove',{}).get('stream') or {}).get('seq'),
                                 feedback=gfeedback,no_motion_commands=True,no_physics_step=True,
-                                device_profile=profile_id,view_source='glove')
-                        time.sleep(max(0,.05-(time.monotonic()-tick)))
-                        continue
-                    if gmode=='glove_constrained_unavailable':
-                        info=gfeedback.get('collision_preview') or {}
-                        with self.lock:
-                            # Keep the previous JPEG stale, never render a new
-                            # attractive zero/raw pose for an invalid result.
-                            self.meta=dict(ready=False,mode=gmode,message=info.get('message','预演不可用 / Preview unavailable'),
-                                collision_preview=info,active_joints=0,joints=[],render_hz=0,
-                                source_seq=None,glove_seq=(state.get('glove',{}).get('stream') or {}).get('seq'),
-                                no_physics_step=True,no_motion_commands=True,preview_only=True,
                                 device_profile=profile_id,view_source='glove')
                         time.sleep(max(0,.05-(time.monotonic()-tick)))
                         continue
@@ -460,32 +464,42 @@ class PoseView:
                         glove_seq=state.get('glove',{}).get('stream',{}).get('seq'),
                         message=('手套遥操作 · 实际灵巧手反馈' if active else '手套映射目标 · 非实测反馈' if gq is not None else '手套遥操作 · 等待新鲜数据'),
                         feedback=gfeedback if active else dict(latest=None,joint_rates=[],stale=True,metrics={}))
-                    if gmode=='glove_constrained':
-                        info=gfeedback['collision_preview']
+                    if gmode=='glove_preview':
+                        from glove_view import target_still_current
+                        info=gfeedback['target_frame']
                         original_stream=state.get('glove',{}).get('stream') or {}
                         age=original_stream.get('age_ms');timeout=original_stream.get('timeout_ms',250)
                         fresh=(type(age) in (int,float) and type(timeout) in (int,float)
-                            and age+(time.monotonic()-tick)*1000<=min(500,timeout)
-                            and collision.still_current(self.controller.snapshot(),info))
+                            and age+(time.monotonic()-tick)*1000<=min(500,timeout))
+                        if fresh:
+                            fresh=target_still_current(self.controller.snapshot(),info)
+                            # The final snapshot may wait for Controller.lock.
+                            # A newer source cannot renew this rendered frame.
+                            fresh=fresh and age+(time.monotonic()-tick)*1000<=min(500,timeout)
                         if not fresh:
-                            with self.lock:self.meta=dict(ready=False,mode='glove_constrained_unavailable',
+                            with self.lock:self.meta=dict(ready=False,mode='glove_preview',
                                 message='手套数据已更新，等待下一帧 / Glove source changed; waiting for the next frame',
-                                collision_preview=dict(info,status='blocked'),render_hz=0,source_seq=None,
+                                target_frame=info,render_hz=0,source_seq=None,
                                 no_physics_step=True,no_motion_commands=True,preview_only=True,device_profile=profile_id,view_source='glove')
                             time.sleep(max(0,.05-(time.monotonic()-tick)));continue
-                        meta.update(message=info['message'],collision_preview=info,preview_only=True,
-                                    no_physics_step=True,source_seq=None,active_joints=0)
+                        meta.update(message='官方 SDK 映射预览 / Official SDK mapping preview',target_frame=info,preview_only=True,
+                                    no_physics_step=True,source_seq=None,active_joints=0,
+                                    _frame_source_monotonic=tick-age/1000,
+                                    frame_timeout_ms=min(500,timeout))
                 if state.get('virtual_preview_idle'):
                     meta.update(mode='virtual_idle',message='虚拟手 · 等待手套数据 / Virtual hand; waiting for glove data',
                         preview_only=True,source_seq=None,active_joints=0,
                         feedback=dict(latest=None,joint_rates=[],stale=True,metrics={}))
                 with self.lock:
-                    self.jpeg, self.meta = output.getvalue(), meta
+                    # The image lock can also wait. Keep an expired image as
+                    # stale history, never publish it as a newly ready target.
+                    meta=_target_frame_meta(meta,time.monotonic())
+                    if meta.get('ready'):self.jpeg=output.getvalue()
+                    self.meta=meta
                 time.sleep(max(0, .05-(time.monotonic()-tick)))
         except Exception as error:
             with self.lock:
                 self.meta = dict(ready=False, mode='error', message='三维模型加载失败：'+str(error), joints=[], render_hz=0)
         finally:
-            if collision:collision.close()
             if renderer:
                 renderer.close()

@@ -170,7 +170,7 @@ class GloveTests(unittest.TestCase):
 
     def test_intended_pose_never_impersonates_missing_measured_feedback(self):
         target=dict(stream=dict(q=[.5]*20,fresh=True))
-        q,mode,_=pose(target,'hand2');self.assertEqual(mode,'glove_constrained_unavailable');self.assertIsNone(q)
+        q,mode,_=pose(target,'hand2');self.assertEqual(mode,'glove_preview');self.assertIsNone(q)
         self.assertEqual(target['stream']['q'],[.5]*20)
         target['feedback']=dict(device_id='test',stale=True,latest=feedback(1.))
         q,mode,_=pose(target,'hand2');self.assertEqual(mode,'glove_live');self.assertIsNone(q)

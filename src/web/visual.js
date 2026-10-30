@@ -30,7 +30,18 @@
       value.view_source==='glove'?g.connection==='disconnected':value.view_source!=='preview'&&value.connection==='disconnected']);
   }
   function payloadMatches(meta){
-    if(!state)return false;const g=state.glove||{},proof=meta.collision_preview||{},kind=sourceKind(meta.mode);
+    if(!state)return false;const g=state.glove||{},target=meta.target_frame,proof=target||meta.collision_preview||{},kind=sourceKind(meta.mode);
+    if(kind==='glove_preview'&&meta.ready===true||target!=null){
+      if(!target||typeof target!=='object'||Array.isArray(target)||kind!=='glove_preview'
+          ||target.source!=='official_sdk'||meta.view_source!=='glove'||meta.device_profile!==g.profile||target.profile!==g.profile
+          ||g.profile!==state.device_profile?.id||g.connection!=='receiving'||g.busy!==true
+          ||!Number.isSafeInteger(g.session_id)||g.session_id<=0||target.bridge_session_id!==g.session_id
+          ||typeof g.glove_serial!=='string'||!g.glove_serial||target.glove_serial!==g.glove_serial
+          ||typeof g.user?.user_id!=='string'||target.sdk_user_id!==g.user.user_id
+          ||!Number.isSafeInteger(target.source_seq)||target.source_seq<0||meta.glove_seq!==target.source_seq
+          ||typeof target.source_target_sha256!=='string'||!/^[0-9a-f]{64}$/.test(target.source_target_sha256)
+          ||typeof target.source_context_sha256!=='string'||!/^[0-9a-f]{64}$/.test(target.source_context_sha256))return false;
+    }
     const desired=demonstrationProfile();if(desired){
       if(meta.ready===true&&meta.device_profile!==desired||meta.device_profile!=null&&meta.device_profile!==desired||kind?.startsWith('glove_')||kind==='virtual_idle')return false;
       const mode=demonstrationMode();if(meta.ready===true&&(meta.view_source!==mode||meta.demonstration_profile!==desired||meta.demonstration_display!==mode))return false;
@@ -49,9 +60,10 @@
       &&matches(meta.feedback?.device_id,kind==='glove_live'?g.feedback?.device_id:state.device_id);
   }
   function imageScope(meta){
-    const proof=meta?.collision_preview||{};
+    const proof=meta?.target_frame||meta?.collision_preview||{};
     return JSON.stringify([sourceScope,sourceKind(meta?.mode),meta?.device_profile??null,meta?.view_source??null,
-      proof.profile??null,proof.bridge_session_id??null,proof.glove_serial??null,meta?.feedback?.device_id??null]);
+      proof.profile??null,proof.bridge_session_id??null,proof.glove_serial??null,proof.sdk_user_id??null,
+      proof.source_context_sha256??null,meta?.feedback?.device_id??null]);
   }
   function discardImage(){hasImage=false;lastImageMode=null;lastImageScope=null;byId('pose-image').removeAttribute('src');}
   function syncSource(next){
@@ -120,7 +132,25 @@
     for(const c of cells){c.value.textContent='—';c.status.textContent=text('无新反馈','No fresh feedback');c.bar.hidden=true;c.button.classList.remove('live','provisional');}
     byId('joint-detail-body').replaceChildren();
   }
-  async function showFrame(payload, current) {
+  function frameDeadline(meta,started,deadline){
+    if(!Object.hasOwn(meta,'frame_age_ms')&&!Object.hasOwn(meta,'frame_timeout_ms'))return deadline;
+    const age=meta.frame_age_ms,timeout=meta.frame_timeout_ms;
+    if(typeof age!=='number'||!Number.isFinite(age)||age<0||typeof timeout!=='number'||!Number.isFinite(timeout)||timeout<=0)throw Error(text('画面时间信息无效，等待新画面','Invalid frame timing; waiting for a fresh view'));
+    return Math.min(deadline,started+timeout-age);
+  }
+  function frameExpired(){return Object.assign(Error(text('画面已过期，等待新画面','Frame expired; waiting for a fresh view')),{name:'TimeoutError'});}
+  function decodeFrame(image,signal,deadline){
+    return new Promise((resolve,reject)=>{
+      let timer,settled=false;
+      const finish=(fn,value)=>{if(settled)return;settled=true;clearTimeout(timer);signal?.removeEventListener('abort',abort);fn(value);};
+      const abort=()=>finish(reject,Object.assign(Error(text('画面请求已结束','View request ended')),{name:'AbortError'}));
+      const remaining=deadline-performance.now();
+      if(signal?.aborted){abort();return;}if(remaining<=0){finish(reject,frameExpired());return;}
+      signal?.addEventListener('abort',abort,{once:true});timer=setTimeout(()=>finish(reject,frameExpired()),remaining);
+      Promise.resolve().then(()=>image.decode()).then(()=>finish(resolve),error=>finish(reject,error));
+    }).catch(error=>{image.src='';throw error;});
+  }
+  async function showFrame(payload, current, started=performance.now(), deadline=started+2500, signal=null) {
     if(!current())return;
     const meta=payload?.meta||{};
     if(!payloadMatches(meta)){discardImage();clearVisual(text('设备已切换，等待新画面','Device changed; waiting for a new view'),'unavailable',meta);return;}
@@ -128,9 +158,11 @@
     if(hasImage&&lastImageScope!==scope){discardImage();viewStatus={kind:'loading',message:text('正在准备画面','Preparing view'),meta};renderStatus();}
     if(meta.mode==='glove_live'&&(meta.feedback?.stale!==false||meta.source_seq==null)){clearVisual(meta.message||'实机反馈已过期','stale',meta);return;}
     if(meta.ready!==true||typeof payload.image!=='string'||!payload.image){clearVisual(meta.message||'画面尚未就绪',meta.mode==='loading'?'loading':meta.mode==='error'?'error':meta.mode==='stale'?'stale':'unavailable',meta);return;}
+    const expires=frameDeadline(meta,started,deadline);if(performance.now()>=expires)throw frameExpired();
     const decoded=new Image();decodedImage=decoded;decoded.src=payload.image;
-    try{await decoded.decode();}catch(error){throw new Error(text('画面图像无法解码：','View image could not be decoded: ')+String(error.message||error));}finally{if(decodedImage===decoded)decodedImage=null;}
+    try{await decodeFrame(decoded,signal,expires);}catch(error){if(['AbortError','TimeoutError'].includes(error.name))throw error;throw new Error(text('画面图像无法解码：','View image could not be decoded: ')+String(error.message||error));}finally{if(decodedImage===decoded)decodedImage=null;}
     if(!current()||!payloadMatches(meta)||scope!==imageScope(meta))return;
+    if(performance.now()>=expires)throw frameExpired();
     byId('pose-image').src=payload.image;
     hasImage=true;lastImageMode=meta.mode;lastImageScope=scope;viewStatus={kind:'ready',meta};renderStatus();
     const rates=new Map((meta.feedback?.joint_rates||[]).map(r=>[r.nid,r]));
@@ -204,11 +236,11 @@
   }
   async function pollView(){
     if(viewPolling||!visible()){syncView();return;}
-    viewPolling=true;const revision=viewRevision,scope=sourceScope,controller=new AbortController();viewRequest=controller;
+    const started=performance.now();viewPolling=true;const revision=viewRevision,scope=sourceScope,controller=new AbortController();viewRequest=controller;
     const timeout=setTimeout(()=>controller.abort(),2500),current=()=>!serviceOffline&&revision===viewRevision&&scope===sourceScope&&visible();
-    try{const desired=demonstrationProfile(),url=desired?'/api/view?profile='+encodeURIComponent(desired)+'&display='+demonstrationMode():virtualTeleoperation()?'/api/view?teleoperation=preview':'/api/view';const r=await fetch(url,{cache:'no-store',signal:controller.signal});if(!r.ok){let detail='';try{detail=(await r.json()).error||'';}catch{}throw Error('HTTP '+r.status+(detail?' · '+detail:''));}const payload=await r.json();if(current())await showFrame(payload,current);}
-    catch(error){if(current())clearVisual(error.name==='AbortError'?'画面请求超时，请检查本机控制服务':String(error.message||'画面连接中断，请检查本机控制服务'));}
-    finally{clearTimeout(timeout);if(viewRequest===controller)viewRequest=null;viewPolling=false;if(visible())scheduleView(revision===viewRevision?50:0);else syncView();}
+    try{const desired=demonstrationProfile(),url=desired?'/api/view?profile='+encodeURIComponent(desired)+'&display='+demonstrationMode():virtualTeleoperation()?'/api/view?teleoperation=preview':'/api/view';const r=await fetch(url,{cache:'no-store',signal:controller.signal});if(!r.ok){let detail='';try{detail=(await r.json()).error||'';}catch{}throw Error('HTTP '+r.status+(detail?' · '+detail:''));}const payload=await r.json();if(current())await showFrame(payload,current,started,started+2500,controller.signal);}
+    catch(error){if(current())clearVisual(error.name==='AbortError'?'画面请求超时，请检查本机控制服务':String(error.message||'画面连接中断，请检查本机控制服务'),error.name==='TimeoutError'?'stale':'error');}
+    finally{clearTimeout(timeout);if(viewRequest===controller)viewRequest=null;viewPolling=false;if(visible())scheduleView(revision===viewRevision?Math.max(0,50-(performance.now()-started)):0);else syncView();}
   }
   const updateVisibility=()=>queueMicrotask(()=>{syncSource(state);syncView();});
   window.addEventListener('workspace-page',updateVisibility);window.addEventListener('workbench-session-visibility',updateVisibility);

@@ -1948,6 +1948,8 @@ class Handler(BaseHTTPRequestHandler):
 class ConsoleHTTPServer(ThreadingHTTPServer):
     allow_reuse_address = False
     allow_reuse_port = False
+    # A cold WebView loads many local assets before the accept loop catches up.
+    request_queue_size = 128
 
     @property
     def firmware_catalog(self):
