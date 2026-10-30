@@ -252,7 +252,9 @@ class OfficialCLI:
         from official_device_discovery import use_native
         if use_native(load_config()):
             from native_cli_maintenance import rollback
-            return rollback(self)
+            result=rollback(self)
+            self.closed.clear()
+            return result
         with self.lock:
             if self.thread and self.thread.is_alive():raise ValueError('Wait for the CLI update to finish')
         from native_cli_maintenance import retry_release,reserve_switch,release_switch,switch_applied
@@ -261,6 +263,7 @@ class OfficialCLI:
             if selected(self.folder).get('current')!=recovered['applied']:
                 raise ValueError('CLI rollback target changed; check the current version before retrying')
             self._set(phase='ready',error=None)
+            self.closed.clear()
             return self.snapshot()
         with gate(self.folder):
             saved=selected(self.folder);previous=saved.get('previous')
@@ -271,4 +274,5 @@ class OfficialCLI:
                 atomic(self.folder/'selection.json',dict(current=previous,previous=saved.get('current'),hold_version=(saved.get('current') or {}).get('version'),updated_at=time.time()))
                 switch_applied(self,previous)
             finally:release_switch(self,token)
+        self.closed.clear()
         return self.snapshot()

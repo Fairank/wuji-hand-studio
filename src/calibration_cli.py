@@ -157,6 +157,7 @@ class CalibrationCLI:
         self.thread = None
         self.cache = None
         self.cached_at = 0.0
+        self.metadata_epoch = 0
         self.reports=Path(reports) if reports else None
         self.run = dict(running=False, status='idle', step=None, progress=None,
                         event=None, error=None, exit_code=None, started=None,pose_index=None,
@@ -167,6 +168,8 @@ class CalibrationCLI:
             run = copy.deepcopy(self.run)
             cache = copy.deepcopy(self.cache)
             stale = time.monotonic() - self.cached_at > 8
+            metadata_epoch=self.metadata_epoch
+            run_identity=(run.get('id'),run.get('user'),run.get('running'))
         metadata_error=None
         refreshing=False
         if not run['running'] and (refresh or cache is None or stale):
@@ -217,6 +220,8 @@ class CalibrationCLI:
                         cache.update(runtime=dict(backend='windows_native',label='Windows CLI · Windows SDK',version=component['version']),guide='official_jsonl',human_tty=False,guided_native=True)
                     else:cache.update(runtime=dict(backend=config['mode'],label=config['mode']+' CLI / SDK'),guide='official_jsonl',human_tty=False)
                     with self.lock:
+                        if metadata_epoch!=self.metadata_epoch or run_identity!=(self.run.get('id'),self.run.get('user'),self.run.get('running')):
+                            raise ValueError('用户档案在读取期间已改变，请刷新 / Wearer profile changed during this read; refresh its current state')
                         self.cache=copy.deepcopy(cache);self.cached_at=time.monotonic()
                     stale=False
                 except (OSError,ValueError,RuntimeError,TimeoutError) as error:
@@ -235,6 +240,8 @@ class CalibrationCLI:
             except (OSError,ValueError,RuntimeError,TimeoutError) as error:
                 cache.update(devices=[],devices_error=str(error)[:400])
         with self.lock:
+            if metadata_epoch!=self.metadata_epoch or run_identity!=(self.run.get('id'),self.run.get('user'),self.run.get('running')):
+                cache.update(metadata_current=False,available=False,metadata_error='用户档案在读取期间已改变，请刷新 / Wearer profile changed during this read; refresh its current state')
             run=copy.deepcopy(self.run)
             native_token=getattr(self.native,'token',None)
         from cli_coordination import reservation,identity
@@ -248,25 +255,36 @@ class CalibrationCLI:
     def profile(self, operation, name):
         if not isinstance(name, str) or not _NAME.fullmatch(name):
             raise ValueError('Profile name must use 1–32 letters, digits, _ or -')
-        with self.lock:
-            if self.run['running']:
-                raise ValueError('Finish calibration before changing SDK user')
-            config = load_config()
-            if config['mode']=='ssh':raise ValueError('Use built-in or local controller to change calibration profiles')
-            self.metadata_check()
-            users = cli_json(config, 'user', 'list').get('users', [])
-            if operation == 'create':
-                if any(isinstance(u, dict) and u.get('name') == name for u in users):
-                    raise ValueError('SDK user already exists')
-                cli_json(config, 'user', 'create', name, '--switch')
-            elif operation == 'switch':
-                if not any(isinstance(u, dict) and u.get('name') == name for u in users):
-                    raise ValueError('Unknown SDK user')
-                cli_json(config, 'user', 'switch', name)
-            else:
-                raise ValueError('Unsupported SDK user operation')
-            self.cache = None
+        from cli_coordination import gate
+        with gate():
+            with self.lock:
+                if self.run['running']:raise ValueError('Finish calibration before changing SDK user')
+                self.metadata_epoch+=1;self.cache=None
+            # The metadata callback reads Controller.snapshot (controller ->
+            # run lock). Keep the run lock out of callbacks and vendor waits.
+            # The shared gate still serializes profile mutations with starts.
+            try:
+                config = load_config()
+                if config['mode']=='ssh':raise ValueError('Use built-in or local controller to change calibration profiles')
+                self.metadata_check()
+                users = cli_json(config, 'user', 'list').get('users', [])
+                if operation == 'create':
+                    if any(isinstance(u, dict) and u.get('name') == name for u in users):
+                        raise ValueError('SDK user already exists')
+                    cli_json(config, 'user', 'create', name, '--switch')
+                elif operation == 'switch':
+                    if not any(isinstance(u, dict) and u.get('name') == name for u in users):
+                        raise ValueError('Unknown SDK user')
+                    cli_json(config, 'user', 'switch', name)
+                else:raise ValueError('Unsupported SDK user operation')
+            finally:
+                # A failed RPC may already have changed the SDK's selected
+                # wearer. The next read must not advertise the old cache.
+                self._invalidate_metadata()
         return self.snapshot(refresh=True)
+
+    def _invalidate_metadata(self):
+        with self.lock:self.metadata_epoch+=1;self.cache=None
 
     def preflight_guided(self, profile, side, replace=False, *, create_profile=False):
         """Read-only preflight may run while this workspace owns the Viewer."""
@@ -334,8 +352,12 @@ class CalibrationCLI:
                     self.preflight_guided(profile,side,replace,create_profile=create_profile)
                     current=cli_json(config,'user','show')
                     if cancel_check is not None:cancel_check()
-                    if create_profile:cli_json(config,'user','create',profile,'--switch')
-                    elif current.get('name')!=profile:cli_json(config,'user','switch',profile)
+                    if create_profile or current.get('name')!=profile:
+                        self._invalidate_metadata()
+                        try:
+                            if create_profile:cli_json(config,'user','create',profile,'--switch')
+                            else:cli_json(config,'user','switch',profile)
+                        finally:self._invalidate_metadata()
                     if cancel_check is not None:cancel_check()
                     from calibration_guided import validate_profile
                     validate_profile(cli_json(config,'user','show'),profile,side,replace)

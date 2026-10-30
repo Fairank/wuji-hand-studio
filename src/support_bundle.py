@@ -57,6 +57,10 @@ def export_support(config,days,description,report,run_local,run_remote):
             transfer(incoming)
             if not incoming.is_file() or incoming.stat().st_size>1024**3 or not zipfile.is_zipfile(incoming):
                 raise RuntimeError('Controller copy did not produce a valid ZIP support bundle within 1 GiB')
+            with zipfile.ZipFile(incoming) as package:
+                damaged=package.testzip()
+                if damaged is not None:
+                    raise RuntimeError('Official support ZIP entry failed CRC verification: '+damaged[:300])
             incoming.replace(output)
         except Exception as error:
             collection_error=str(error)[:900] or 'Official support ZIP could not be collected from the controller'
