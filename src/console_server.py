@@ -283,7 +283,8 @@ class Controller:
                 return dict(timeout_ms=timeout_ms,retarget=context['settings'],solver=dict(engine='sdk',values=tuning['values']))
         with self.lock:
             check()
-            started['session']=self.glove.start_calibrated(private,ready,expected_profile=expected_profile)
+            started['session']=self.glove.start_calibrated(private,ready,expected_profile=expected_profile,
+                open_guard=lambda:self.connection_switch.open_guard(attempt))
             self.sdk_session_configs[started['session']]=config
         return started['session']
 

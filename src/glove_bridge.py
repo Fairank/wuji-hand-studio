@@ -1,5 +1,6 @@
 """Operator/status bridge over the configured local or SSH SDK transport."""
 import copy
+from contextlib import nullcontext
 import json
 import math
 import secrets
@@ -33,7 +34,7 @@ class GloveBridge:
         self.client=self.stdin=None;self.stopping=False;self.last_update=0.;self.lease=None
         self.action_revision=0
         self.state=dict(connection='disconnected',message='',devices=[],users=[],stream={},hardware={},feedback={})
-        self._continuation=None;self._on_model_ready=None
+        self._continuation=None;self._on_model_ready=None;self._open_guard=None
         self._unpair_pending=False
         self.seen_active=False;self._follow_unconfirmed=False
         self._follow_device=None;self._follow_session=None;self._follow_reason=''
@@ -154,7 +155,7 @@ class GloveBridge:
                 raise CancellationNotDispatched('接续已完成，请在遥操作中暂停或断开 / Continuation completed; pause or disconnect from teleoperation')
             return self.action(dict(name='glove_disconnect'))
 
-    def start_calibrated(self,bundle,on_model_ready,*,expected_profile=None):
+    def start_calibrated(self,bundle,on_model_ready,*,expected_profile=None,open_guard=None):
         """Private controller entry after a server-verified continuation intent.
 
         The public glove_session action remains rejected below. No browser
@@ -167,6 +168,7 @@ class GloveBridge:
         if 'glove_route' in bundle:private['glove_route']=copy.deepcopy(bundle['glove_route'])
         context=validate_continuation(private,path=True)
         if not callable(on_model_ready):raise ValueError('Continuation requires a workspace binding callback')
+        if open_guard is not None and not callable(open_guard):raise ValueError('Invalid calibrated open guard')
         if file_digest(context['bundle_path'],MAX_BUNDLE)!=(context['bundle_sha256'],context['bundle_bytes']):
             raise ValueError('Calibration bundle changed before controller startup')
         if expected_profile is not None:
@@ -175,7 +177,7 @@ class GloveBridge:
         with self.lock:
             if self.busy:raise ValueError('请先结束原手套会话 / Finish the existing glove session first')
             self._require_previous_cleanup()
-            self._continuation=context;self._on_model_ready=on_model_ready
+            self._continuation=context;self._on_model_ready=on_model_ready;self._open_guard=open_guard
             self._expected_profile=expected_profile
             self._begin_session()
             return self.session
@@ -340,7 +342,9 @@ class GloveBridge:
         command=dict(settings,name='glove_open',serial=context['serial'],user_id=receipt['owner_user_id'])
         validate(command)
         with self.lock:
-            if not self.stopping:self._send_open(command)
+            if not self.stopping:
+                with self._open_guard() if self._open_guard is not None else nullcontext():
+                    self._send_open(command)
 
     def _require_openable(self):
         if self._open_pending or self._open_intent is not None or self.state.get('connection')=='receiving':
@@ -415,7 +419,7 @@ class GloveBridge:
                 raise ValueError(self._cleanup_error)
             if name=='glove_scan' and not self.busy:
                 self._require_previous_cleanup()
-                self._continuation=None;self._on_model_ready=None;self._expected_profile=None
+                self._continuation=None;self._on_model_ready=None;self._open_guard=None;self._expected_profile=None
                 self._begin_session();return
             if name=='glove_disconnect':
                 self.stopping=True

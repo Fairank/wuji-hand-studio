@@ -35,7 +35,7 @@ class SavedControllerTests(unittest.TestCase):
             c.calibration_devices=Mock(return_value=[])
             bridge=N(lock=threading.RLock(),session=10,stopping=False,_continuation=None)
             callbacks=[]
-            def start(bundle,callback,expected_profile=None):
+            def start(bundle,callback,expected_profile=None,open_guard=None):
                 bridge.session+=1;bridge._continuation=copy.deepcopy(bundle);callbacks.append(callback);return bridge.session
             bridge.start_calibrated=Mock(side_effect=start);c.glove=bridge
             with patch.dict('os.environ',{'WUJI_FLEET_ID':''}):
@@ -81,6 +81,17 @@ class SavedControllerTests(unittest.TestCase):
             wire=e.bridge.start_calibrated.call_args.args[0]
             self.assertEqual(wire.get('glove_route'),dict(serial=e.proof['serial'],address='192.0.2.44:50001',source='official_discovery'))
             e.c.calibration_devices.assert_called_once_with(fresh=True)
+
+    def test_saved_profile_passes_exact_attempt_guard_to_final_bridge_dispatch(self):
+        with self.environment() as e:
+            @contextmanager
+            def permitted():yield
+            e.switch.open_guard=Mock(side_effect=lambda attempt:permitted())
+            self.start(e)
+            guard=e.bridge.start_calibrated.call_args.kwargs.get('open_guard')
+            self.assertTrue(callable(guard))
+            with guard():pass
+            e.switch.open_guard.assert_called_once_with('d'*32)
 
     def test_saved_profile_keeps_requested_timeout_and_rejects_invalid_before_start(self):
         with self.environment() as e,patch('saved_calibration.verify_saved_snapshot',return_value=True):

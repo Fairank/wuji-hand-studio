@@ -5,6 +5,7 @@ file gate is deliberately not held while readers finish. No motor-start action
 is dispatched here, and a failed new connection is never retried implicitly.
 """
 import copy
+from contextlib import contextmanager
 import hashlib
 import json
 import os
@@ -111,6 +112,21 @@ class ConnectionSwitch:
     def _check_cancel(self):
         if self.cancelled:raise ValueError('已请求取消本次切换；请核对当前设备会话 / Switch cancellation requested; review the current device session')
         if self.deadline is not None and self.clock()>=self.deadline:raise ValueError('切换等待超时，未继续接入 / Switch time budget expired; no further connection was started')
+
+    @contextmanager
+    def open_guard(self,attempt_id):
+        """Serialize the final local open dispatch with this attempt's cancel.
+
+        The caller already owns Bridge.lock. This scope reads only local
+        switch fields; it must not acquire controller locks or perform I/O.
+        """
+        with self.lock:
+            if (not isinstance(attempt_id,str) or not re.fullmatch('[0-9a-f]{32}',attempt_id)
+                    or self.state.get('busy') is not True or self.state.get('phase')!='connecting'
+                    or self.state.get('attempt_id')!=attempt_id):
+                raise ValueError('设备用途切换已改变，未接入手套 / Device purpose switch changed; glove was not opened')
+            self._check_cancel()
+            yield
 
     def check_parent(self):
         """A registered child retains its parent's existing workspace gates."""
@@ -309,9 +325,15 @@ class ConnectionSwitch:
                     with gate(self.controller.official_viz.folder):
                         side=self.controller.official_viz.connection_record(sn,source['session']).get('side')
                 elif source['mode']=='teleoperation':side=source['profile'].rsplit('_',1)[-1]
+            if side is not None and side not in ('left','right'):
+                raise ValueError('手套左右信息无效，请重新核对 / Glove side is invalid; review the selected device')
+            # UDP discovery may omit side. The existing mapping selection is
+            # then only target intent; the SDK still verifies actual hand_side
+            # before subscribing or allowing any hand action.
             selected=profile(target['profile'] if 'profile' in target else
-                (state['device_profile']['generation']+'_'+str(side)))
-            if row['kind']!='glove' or side!=selected['side']:
+                (state['device_profile']['id'] if side is None else
+                 state['device_profile']['generation']+'_'+side))
+            if row['kind']!='glove' or side is not None and side!=selected['side']:
                 raise ValueError('手套左右与目标型号不符 / Glove side differs from target profile')
             target['profile']=selected['id']
             if 'timeout_ms' not in target:

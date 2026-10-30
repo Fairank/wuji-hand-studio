@@ -4,8 +4,9 @@
  const directory=window.WujiDeviceInventory;if(!directory)return;
  const $=id=>document.getElementById(id),t=(zh,en)=>window.WujiLocale?.lang==='en'?en:zh;
  async function state(){const r=await fetch('/api/state',{cache:'no-store',signal:AbortSignal.timeout(6000)});if(!r.ok)throw Error(t('工作台服务未就绪','Workbench service unavailable'));return r.json();}
- let switching=false,serviceEpoch=0,serviceToken='',switchOwner=null,featureOwner=null,observedState=null,useError='';
- function retire(){serviceEpoch++;switchOwner=null;switching=false;featureOwner=null;useError='';}
+ let switching=false,serviceEpoch=0,serviceToken='',switchOwner=null,featureOwner=null,observedState=null,useError='',useFailure=null;
+ const switchFailures=new WeakMap();
+ function retire(){serviceEpoch++;switchOwner=null;switching=false;featureOwner=null;useError='';useFailure=null;}
  window.addEventListener('console-state',event=>{const token=event.detail?.csrf;if(typeof token!=='string'||!token)return;if(serviceToken&&serviceToken!==token)retire();serviceToken=token;observedState=event.detail;renderContexts();});
  window.addEventListener('console-offline',event=>{if(event.detail?.task_scope===true)return;retire();serviceToken='';observedState=null;renderContexts();});
  const serialOf=row=>row?.sn||row?.serial||'';
@@ -56,7 +57,7 @@
   if(!target||!['official','teleoperation','hand'].includes(target.mode)||typeof target.serial!=='string'||!target.serial)throw Error(t('请先选择要接入的设备。','Choose the device to connect first.'));
   const operationEpoch=serviceEpoch,ticket={epoch:operationEpoch};switchOwner=ticket;switching=true;emit();
   try{
-   const before=await state(),context=before.connection_switch;
+   const before=await state(),context=before.connection_switch;ticket.owner_context=context?.expected_owner;ticket.before_transition={request_id:context?.request_id||null,attempt_id:context?.attempt_id||null};
    const checkCurrent=current=>{if(switchOwner!==ticket||operationEpoch!==serviceEpoch||serviceToken&&serviceToken!==before.csrf||current&&current.csrf!==before.csrf)throw Error(t('工作台连接已变化，请核对当前设备后重新选择。','The Workbench connection changed. Review current devices and select again.'));};checkCurrent(before);
    if(!before.csrf||!context||!/^[a-f0-9]{64}$/.test(context.expected_owner||''))throw Error(t('连接归属尚未核对，请稍后重试。','Connection ownership is unverified. Retry shortly.'));
    if(context.busy===true)throw Error(t('正在切换设备，请等待本次操作完成。','A device switch is in progress. Wait for it to finish.'));
@@ -74,6 +75,7 @@
    if(selected.mode==='teleoperation'&&!hasUser(selected)&&!verifiedCalibration&&resume?.serial===selected.serial&&typeof resume.user_id==='string'&&profileID(resume.profile)){if(!nativeSaved){selected.user_id=resume.user_id;selected.profile=selected.profile||resume.profile;}if(!Object.hasOwn(selected,'timeout_ms')&&Number.isInteger(resume.timeout_ms)&&resume.timeout_ms>=100&&resume.timeout_ms<=2000)selected.timeout_ms=resume.timeout_ms;}
    if(selected.mode==='teleoperation'&&!hasUser(selected)&&!verifiedCalibration&&context.saved_profile_supported!==true)selected=await chooseProfile(before,selected,checkCurrent);checkCurrent();
    const requestId=requestID(),command={name:'connection_switch',request_id:requestId,expected_owner:context.expected_owner,target:selected};let response,value,recovered=false,readingProgress=false,progressActive=true;const progressAbort=new AbortController();
+   ticket.request_id=requestId;
    const progressTimer=setInterval(async()=>{if(readingProgress||!progressActive)return;readingProgress=true;try{checkCurrent();const r=await fetch('/api/connection-switch?request_id='+encodeURIComponent(requestId),{cache:'no-store',signal:AbortSignal.any([progressAbort.signal,AbortSignal.timeout(6000)])});if(r.ok){const body=await r.json(),progress=body.connection_switch||body;checkCurrent();if(progressActive&&progress.request_id===requestId)emit(progress);}}catch{}finally{readingProgress=false;}},350);
    try{
     try{response=await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json','X-Console-Token':before.csrf},body:JSON.stringify(command),signal:AbortSignal.timeout(90000)});value=await response.json();checkCurrent();}
@@ -100,8 +102,9 @@
    if(attempt&&current.connection_switch?.attempt_id!==attempt)throw Error(t('切换任务已变化，请查看当前连接。','The switch task changed. Review the current connection.'));
    return {state:current,target:selected,result:value};
   }catch(error){
-   if(['AbortError','TimeoutError'].includes(error?.name))throw Error(t('切换请求超时，结果尚未确认。请核对当前设备任务。','The switch request timed out and its outcome is unconfirmed. Review the current device task.'));
-   throw error;
+   const failure=['AbortError','TimeoutError'].includes(error?.name)?Error(t('切换请求超时，结果尚未确认。请核对当前设备任务。','The switch request timed out and its outcome is unconfirmed. Review the current device task.')):error;
+   if(failure&&typeof failure==='object')switchFailures.set(failure,{request_id:ticket.request_id||null,owner_context:ticket.owner_context||null,before_transition:ticket.before_transition});
+   throw failure;
   }finally{if(switchOwner===ticket){switchOwner=null;switching=false;emit();}}
  }
  window.WujiConnectionSwitch={run:switchConnection,busy:()=>switching};
@@ -112,6 +115,25 @@
   if(!own||!['official','teleoperation','hand'].includes(own.mode)||!['glove','hand'].includes(own.kind)||typeof own.serial!=='string'||!own.serial)return null;
   if(own.mode==='teleoperation'&&(!Number.isSafeInteger(own.session)||own.session<=0||typeof own.user_id!=='string'||!profileID(own.profile)))return null;
   return own;
+ }
+ // Retain the original failure, but stop attributing it to a later verified
+ // transaction. A plain refresh, a failed attempt, or our own changed context
+ // is not proof that the old error has been superseded. Neither is a receipt
+ // that was already present before the failed request started.
+ function currentUseError(){
+  if(!useError||useFailure?.retired)return '';
+  const sw=observedState?.connection_switch||{},receipt=sw.receipt,owner=currentOwner(),target=receipt?.target;
+  if(useFailure&&owner&&sw.busy===false&&sw.phase==='connected'&&!sw.error&&
+     /^[a-f0-9]{64}$/.test(useFailure.owner_context||'')&&sw.expected_owner!==useFailure.owner_context&&
+     /^[a-f0-9]{64}$/.test(sw.expected_owner||'')&&receipt?.version===1&&
+     /^[a-f0-9]{32}$/.test(receipt.request_id||'')&&receipt.request_id===sw.request_id&&receipt.request_id!==useFailure.request_id&&receipt.request_id!==useFailure.before_transition?.request_id&&
+     /^[a-f0-9]{32}$/.test(receipt.attempt_id||'')&&receipt.attempt_id===sw.attempt_id&&receipt.attempt_id!==useFailure.before_transition?.attempt_id&&
+     /^[a-f0-9]{64}$/.test(receipt.expected_owner||'')&&/^[a-f0-9]{64}$/.test(receipt.after_context||'')&&
+     target?.mode===owner.mode&&target.serial===owner.serial&&connected(observedState,target)&&
+     (owner.mode!=='teleoperation'||receipt.sdk_session===owner.session&&target.user_id===owner.user_id&&target.profile===owner.profile)){
+   useFailure.retired=true;return '';
+  }
+  return useError;
  }
  function currentCalibration(value=observedState){const c=value?.calibration||{},run=c.run||c;return run&&typeof run.id==='string'&&typeof run.serial==='string'&&(run.running===true||run.cleanup_required===true||c.cleanup_required===true)?run:null;}
  function selectedDevice(purpose,value=observedState){
@@ -128,10 +150,10 @@
  }
  async function useFeature(purpose,device=null){
   if(!['official','teleoperation','calibration','hand'].includes(purpose)||featureOwner)return;
-  const ticket={epoch:serviceEpoch,purpose,serial:serialOf(device)};featureOwner=ticket;useError='';renderContexts();
+  const ticket={epoch:serviceEpoch,purpose,serial:serialOf(device)};featureOwner=ticket;useError='';useFailure=null;renderContexts();
   const current=()=>featureOwner===ticket&&ticket.epoch===serviceEpoch;
   try{
-   const before=await state();if(!current()||serviceToken&&before.csrf!==serviceToken)return;
+   const before=await state();ticket.owner_context=before.connection_switch?.expected_owner;ticket.before_transition={request_id:before.connection_switch?.request_id||null,attempt_id:before.connection_switch?.attempt_id||null};if(!current()||serviceToken&&before.csrf!==serviceToken)return;
    const chosen=device||selectedDevice(purpose,before),serial=serialOf(chosen);
    if(!serial||['teleoperation','calibration'].includes(purpose)&&chosen?.kind!=='glove'||purpose==='hand'&&chosen?.kind!=='hand'){chooseDevice(purpose==='official'?'all':'glove');return;}
    ticket.serial=serial;if(chosen.kind==='glove')chooseGlove({...chosen,sn:serial,serial});
@@ -143,25 +165,26 @@
    const latest=await window.WujiConnection?.refresh?.();if(current()&&latest)observedState=latest;if(current())directory.select?.(serial);if(current()&&purpose==='hand'&&latest?.device_profile?.id){window.WujiDemonstration?.selectProfile(latest.device_profile.id);const select=document.getElementById('demonstration-hand');if(select){select.value=serial;select.dispatchEvent(new Event('change'));}}
    if(current()&&purpose==='official')await window.WujiOfficialViz?.selectDevice(serial);
    return {...switched,state:latest||switched.state};
-  }catch(error){if(current())useError=error.name==='SwitchCancelled'?'':error?.message||t('设备用途切换未完成，请核对当前会话。','The device switch did not complete. Review the current session.');throw error;}
+  }catch(error){if(current()){useError=error.name==='SwitchCancelled'?'':error?.message||t('设备用途切换未完成，请核对当前会话。','The device switch did not complete. Review the current session.');useFailure={...(switchFailures.get(error)||{owner_context:ticket.owner_context,request_id:null,before_transition:ticket.before_transition}),retired:false};}throw error;}
   finally{if(current()){featureOwner=null;renderContexts();}}
  }
  const contexts=[];
  function renderContexts(){
+  const error=currentUseError();
   for(const item of contexts){
    const owner=currentOwner(),calibration=currentCalibration(),selected=selectedDevice(item.purpose),serial=featureOwner?.serial||serialOf(selected),sw=observedState?.connection_switch||{};
    item.name.textContent=serial||(item.purpose==='teleoperation'?t('尚未选择手套','No glove selected'):t('尚未选择设备','No device selected'));
    const pending=featureOwner||sw.busy===true;
-   if(item.calibrate){item.calibrate.textContent=t('前往标定','Open calibration');item.calibrate.hidden=!useError||!/已标定|标定|calibrat/i.test(useError);}
-   item.status.textContent=useError||(pending?sw.phase==='stopping'?t('正在结束原会话…','Ending the previous session…'):sw.phase==='connecting'?t('正在接入所选功能…','Opening the selected feature…'):t('正在准备切换…','Preparing the switch…'):calibration?t('当前用途：手型标定','Current use: calibration'):owner?t('当前用途：','Current use: ')+(owner.mode==='official'?'CLI':owner.mode==='teleoperation'?t('遥操作','Teleoperation'):t('灵巧手反馈','Hand feedback')):sw.owner_error?t('会话归属待核对','Session ownership unverified'):serial?t('已选择，进入功能时接入','Selected; connects when a feature is chosen'):t('先在设备页选择本次设备','Choose the device on the Devices page'));
-   item.status.dataset.error=String(!!useError||!!sw.owner_error);item.change.textContent=serial?t('更换设备','Change device'):t('选择设备','Choose device');item.change.disabled=!!pending;
+   if(item.calibrate){item.calibrate.textContent=t('前往标定','Open calibration');item.calibrate.hidden=!error||!/已标定|标定|calibrat/i.test(error);}
+   item.status.textContent=error||(pending?sw.phase==='stopping'?t('正在结束原会话…','Ending the previous session…'):sw.phase==='connecting'?t('正在接入所选功能…','Opening the selected feature…'):t('正在准备切换…','Preparing the switch…'):calibration?t('当前用途：手型标定','Current use: calibration'):owner?t('当前用途：','Current use: ')+(owner.mode==='official'?'CLI':owner.mode==='teleoperation'?t('遥操作','Teleoperation'):t('灵巧手反馈','Hand feedback')):sw.owner_error?t('会话归属待核对','Session ownership unverified'):serial?t('已选择，进入功能时接入','Selected; connects when a feature is chosen'):t('先在设备页选择本次设备','Choose the device on the Devices page'));
+   item.status.dataset.error=String(!!error||!!sw.owner_error);item.change.textContent=serial?t('更换设备','Change device'):t('选择设备','Choose device');item.change.disabled=!!pending;
   }
-  window.dispatchEvent(new CustomEvent('device-use-update',{detail:{pending:!!featureOwner,error:useError}}));
+  window.dispatchEvent(new CustomEvent('device-use-update',{detail:{pending:!!featureOwner,error}}));
  }
  function mountContext(host,purpose){
   if(!host)return;const row=document.createElement('section');row.className='device-use-context';const name=document.createElement('strong'),status=document.createElement('span'),change=document.createElement('button'),calibrate=purpose==='teleoperation'?document.createElement('a'):null;status.setAttribute('role','status');status.setAttribute('aria-live','polite');change.type='button';change.onclick=()=>chooseDevice(purpose==='teleoperation'?'glove':'all');row.append(name,status,change);if(calibrate){calibrate.className='device-use-calibration';calibrate.href='#connection';calibrate.textContent=t('前往标定','Open calibration');calibrate.hidden=true;calibrate.onclick=event=>{event.preventDefault();useFeature('calibration').catch(()=>{});};row.append(calibrate);}host.prepend(row);contexts.push({purpose,name,status,change,calibrate});
  }
- window.WujiDeviceUse={open:useFeature,choose:chooseDevice,current:()=>currentOwner(),selected:purpose=>selectedDevice(purpose),snapshot:()=>({pending:!!featureOwner,error:useError})};
+ window.WujiDeviceUse={open:useFeature,choose:chooseDevice,current:()=>currentOwner(),selected:purpose=>selectedDevice(purpose),snapshot:()=>({pending:!!featureOwner,error:currentUseError()})};
  const enterTeleoperation=event=>{if(event.defaultPrevented)return;event.preventDefault();useFeature('teleoperation').catch(()=>{});};
  for(const link of document.querySelectorAll('.directory [data-page="glove"]'))link.addEventListener('click',enterTeleoperation);
  mountContext(document.getElementById('hub-official'),'official');mountContext(document.querySelector('#page-glove .glove-controls'),'teleoperation');
