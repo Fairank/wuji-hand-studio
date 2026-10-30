@@ -27,27 +27,40 @@
  let inventory=null,previousDisplayRows=[],scanFocus='',online=false,loading=null,scanning=false,using=false,pendingMode='',filter='all',activeSerial='',useHandler=null,timer=0,lastRead=0,backoffUntil=0,lastErrorKey='',localError='',consumerError='',consoleState=null,destroyed=false,discoveryWanted=true,sessionBaseline=new Set(),sessionCount=0,pausedForSession=false,serviceRevision=0;
  const selectedByKind=new Map(),cards=new Map(),discoveryHolds=new Set();
  const getTime=value=>{if(typeof value==='number'&&Number.isFinite(value))return value<1e12?value*1000:value;if(typeof value==='string'){const parsed=Date.parse(value);return Number.isFinite(parsed)?parsed:0;}return 0;};
- const sessionOwner=()=>window.WujiDeviceUse?.current();
+ const sessionOwner=()=>{
+  const owner=window.WujiDeviceUse?.current(),state=consoleState||{},g=state.glove||{},v=state.official_viz||{};if(!online||!owner)return null;
+  if(owner.kind!=='glove')return owner;
+  if(owner.mode==='teleoperation')return g.busy===true&&g.connection==='receiving'&&g.glove_serial===owner.serial&&Number.isSafeInteger(g.session_id)&&g.session_id>0&&g.session_id===owner.session&&typeof g.user?.user_id==='string'&&g.user.user_id===owner.user_id&&g.profile===owner.profile&&g.profile===state.device_profile?.id&&/^hand[12]_(left|right)$/.test(g.profile||'')?owner:null;
+  const reported=v.reported_device||v.device;return owner.mode==='official'&&v.active===true&&v.phase==='running'&&/^[a-f0-9]{32}$/.test(owner.session||'')&&v.session_id===owner.session&&(reported?.sn||reported?.serial)===owner.serial?owner:null;
+ };
  const isOwned=row=>{const owner=sessionOwner();return !!owner&&owner.serial===(row?.sn||row?.serial)&&owner.kind===row?.kind;};
  function calibrationOwner(){
   const calibration=consoleState?.calibration||{},run=calibration.run||calibration;
   return online&&typeof run.id==='string'&&/^[a-f0-9]{32}$/.test(run.id)&&typeof run.serial==='string'&&!!run.serial&&(run.running===true||run.cleanup_required===true||calibration.cleanup_required===true)?run:null;
  }
  const rows=()=>{
-  const current=Array.isArray(inventory?.devices)?inventory.devices.filter(d=>d&&typeof(d.sn||d.serial)==='string'):[],observed=online&&inventory?.scanning===true&&!inventory.error&&!localError&&!current.length?previousDisplayRows:current,calibration=calibrationOwner();
-  const visible=observed.filter(row=>fresh(row)||calibration&&(row.sn||row.serial)===calibration.serial&&row.in_use===true),owner=sessionOwner();
-  if(online&&owner&&!visible.some(row=>(row.sn||row.serial)===owner.serial))visible.push({sn:owner.serial,serial:owner.serial,kind:owner.kind,selectable:true,in_use:true,session_verified:true,...owner.kind==='hand'&&/^hand[12]_(left|right)$/.test(owner.profile||'')?{generation:owner.profile.split('_')[0],side:owner.profile.split('_')[1]}:{}});
+  const current=Array.isArray(inventory?.devices)?inventory.devices.filter(d=>d&&typeof(d.sn||d.serial)==='string'):[],owner=sessionOwner(),calibration=calibrationOwner();
+  const observed=current.length?current:online&&!inventory?.error&&!localError?previousDisplayRows.filter(row=>recentDiscovery(row)).map(row=>({...row,pending_review:true,selectable:false,official_available:false})):[];
+  const sessionOnly=row=>row.in_use===true&&['glove_session_identity','sdk_identity','official_viewer_session'].includes(row.identity_source||row.source);
+  const visible=observed.filter(row=>(fresh(row)&&(!sessionOnly(row)||owner&&(row.sn||row.serial)===owner.serial))||owner&&(row.sn||row.serial)===owner.serial||calibration&&(row.sn||row.serial)===calibration.serial&&row.in_use===true);
+  if(owner){let index=visible.findIndex(row=>(row.sn||row.serial)===owner.serial);const prior=index>=0?visible[index]:current.find(row=>(row.sn||row.serial)===owner.serial),g=consoleState?.glove||{},v=consoleState?.official_viz||{},reported=v.reported_device||v.device||{},normalize=value=>{const side=typeof value==='string'?value.toLowerCase().replace(/^handedness\./,''):'';return ['left','right'].includes(side)?side:null;};
+   const side=owner.kind==='hand'&&/^hand[12]_(left|right)$/.test(owner.profile||'')?owner.profile.split('_')[1]:owner.mode==='teleoperation'?g.profile.split('_')[1]:normalize(reported.handedness)||normalize(reported.side),priorSide=normalize(prior?.side)||normalize(prior?.handedness),conflict=prior?.conflict===true||!!side&&!!priorSide&&side!==priorSide;
+   const stale=!prior||!fresh(prior)||prior.pending_review===true||prior.selectable!==true,row={...(prior||{}),sn:owner.serial,serial:owner.serial,kind:owner.kind,in_use:true,pending_review:false,...!prior?{last_seen:null,stale:true,identity_verified:false}:{} ,...stale?{view_only:true,selectable:false}:{} ,...side&&!priorSide?{side,side_source:'device'}:{} ,...conflict?{conflict:true,view_only:true,selectable:false}:{} };
+   if(index<0)visible.push(row);else visible[index]=row;
+  }
   if(calibration){const index=visible.findIndex(row=>(row.sn||row.serial)===calibration.serial);if(index>=0)visible[index]={...visible[index],selectable:false,in_use:true};else visible.push({sn:calibration.serial,serial:calibration.serial,kind:'glove',side:null,last_seen:null,stale:true,in_use:true,selectable:false,identity_verified:false,source:'official_calibration_session'});}
   return visible;
  };
  const sn=row=>row?.sn||row?.serial||'';
  const fresh=row=>{const seen=getTime(row?.last_seen),ttl=Number(inventory?.ttl_s),age=Date.now()-seen;return online&&row?.stale!==true&&seen>0&&age>=0&&age<((Number.isFinite(ttl)&&ttl>0?ttl:30)*1000);};
- const usable=row=>!scanning&&inventory?.scanning!==true&&!!row&&['hand','glove'].includes(row.kind)&&row.selectable===true&&(fresh(row)||isOwned(row));
+ function recentDiscovery(row,ttl=inventory?.ttl_s){const seen=getTime(row?.last_seen),age=Date.now()-seen,limit=Math.min(Number.isFinite(Number(ttl))&&Number(ttl)>0?Number(ttl):30,Number.isFinite(row?.review_ttl_s)&&row.review_ttl_s>0?row.review_ttl_s:30,30)*1000;return row?.in_use!==true&&row?.stale!==true&&seen>0&&age>=0&&age<limit;}
+ function rememberDiscovery(value){const found=Array.isArray(value.devices)?value.devices:[];if(value.error){previousDisplayRows=[];return;}previousDisplayRows=(found.length?found:previousDisplayRows).filter(row=>row&&typeof(row.sn||row.serial)==='string'&&recentDiscovery(row,value.ttl_s)).map(row=>found.length?{...row,review_ttl_s:Math.min(Number.isFinite(Number(value.ttl_s))&&Number(value.ttl_s)>0?Number(value.ttl_s):30,30)}:row);}
+ const usable=row=>!scanning&&inventory?.scanning!==true&&!!row&&row.pending_review!==true&&['hand','glove'].includes(row.kind)&&(row.selectable===true&&fresh(row)||row.view_only===true&&isOwned(row));
  const visible=()=>!document.hidden&&!root.closest('[hidden]')&&root.getClientRects().length>0&&getComputedStyle(root).visibility!=='hidden';
  const selected=()=>rows().find(row=>sn(row)===activeSerial)||null;
  const clone=row=>row?JSON.parse(JSON.stringify(row)):null;
  const setText=(element,value)=>{if(element.textContent!==value)element.textContent=value;};
- const sideLabel=row=>row.side==='left'?t('左','Left'):row.side==='right'?t('右','Right'):t('左右待确认','Side unknown');
+ const sideLabel=row=>row.conflict===true?t('身份冲突','Identity conflict'):row.side==='left'?t('左','Left'):row.side==='right'?t('右','Right'):row.in_use===true||isOwned(row)?t('左右待确认','Side unknown'):t('连接后识别左右','Detected after connection');
  function deviceName(row){const kind=row.kind==='glove'?'Wuji Glove':row.kind==='hand'?'Wuji Hand':t('待识别设备','Unidentified device');const generation=row.generation==='hand2'?' 2':row.generation==='hand1'?' 1':row.generation==='glove1'?' 1':'';return kind+generation;}
  function brief(row){return deviceName(row)+' · '+sideLabel(row);}
  function ownerLabel(row){
@@ -123,7 +136,7 @@
  function render(){
   syncDiscoveryIntent();
   const all=rows().slice().sort((a,b)=>(a.kind||'').localeCompare(b.kind||'')||(a.side||'').localeCompare(b.side||'')||sn(a).localeCompare(sn(b)));
-  const busy=scanning||inventory?.scanning===true,globalBusy=window.WujiConnectionSwitch?.busy()===true,hasSelection=!!selected(),row=selected(),canUse=usable(row)&&!using&&!busy&&!globalBusy;
+  const busy=scanning||inventory?.scanning===true,globalBusy=window.WujiConnectionSwitch?.busy()===true,hasSelection=!!selected(),row=selected(),canUse=usable(row)&&!using&&!busy&&!globalBusy,canConnect=canUse&&row?.view_only!==true&&row?.pending_review!==true&&fresh(row)&&row?.selectable===true;
   if(busy&&document.activeElement?.name==='inventory-device'&&!scanFocus)scanFocus=document.activeElement.value;
   setText(title,root.closest('#page-home')?t('当前设备','Current devices'):t('发现你的设备','Your devices'));setText(description,t('自动查找手套与灵巧手，选中后再进入需要的功能。','Find gloves and hands automatically. Select one, then choose how to use it.'));
   const scanState=busy?'scanning':!online?'offline':discoveryHolds.size||!discoveryWanted?'paused':inventory?.scan_allowed!==true?'waiting':'ready';
@@ -142,7 +155,7 @@
    radio.disabled=using||globalBusy||!usable(item);radio.checked=activeSerial===serial;card.dataset.selected=String(radio.checked);card.dataset.available=String(usable(item));card.dataset.kind=item.kind||'unknown';
    icon.hidden=true;icon.replaceChildren();icon.dataset.kind=item.kind||'unknown';
    const owner=ownerLabel(item);setText(name,deviceName(item));setText(meta,sideLabel(item)+(item.side_source==='serial_hint'?t(' · 身份提示，待设备核对',' · Identity hint; verify on connection'):item.side_source==='device'?t(' · 设备报告',' · Device reported'):'')+(owner&&!fresh(item)?t(' · 发现记录已过期',' · Discovery record expired'):''));setText(identity,serial);
-   setText(status,owner||(busy?t('正在核对','Checking'):!fresh(item)?t('已过期','Stale'):item.kind==='unknown'?t('待识别','Unidentified'):item.selectable!==true?t('暂不可用','Unavailable'):t('已发现','Discovered')));status.dataset.state=owner||busy?'busy':!fresh(item)||item.kind==='unknown'?'muted':'ready';
+   setText(status,owner||(item.pending_review===true?t('待复查','Awaiting rediscovery'):busy?t('正在核对','Checking'):!fresh(item)?t('已过期','Stale'):item.kind==='unknown'?t('待识别','Unidentified'):item.selectable!==true?t('暂不可用','Unavailable'):t('已发现','Discovered')));status.dataset.state=owner||busy?'busy':!fresh(item)||item.kind==='unknown'?'muted':'ready';
    const calibration=calibrationOwner();calibrationLink.hidden=calibration?.serial!==serial;setText(calibrationLink,t('查看标定','View calibration'));
    if(list.children[index]!==card)list.insertBefore(card,list.children[index]||null);
   }
@@ -156,10 +169,10 @@
   if(row?.kind==='glove'){if(buttons.official.parentElement!==actions)actions.prepend(buttons.official);}else if(buttons.official.parentElement!==moreActions)moreActions.prepend(buttons.official);
   buttons.hand.classList.toggle('primary',row?.kind==='hand');more.hidden=!hasSelection;
   buttons.official.classList.toggle('primary',row?.kind==='glove');
-  buttons.official.hidden=hasSelection&&row.kind==='unknown';buttons.official.disabled=!canUse||!gloveView&&(row?.official_available!==true||row?.generation==='hand1');buttons.official.title=row?.generation==='hand1'?t('官方画面支持 Hand 2 与 Glove','Official view supports Hand 2 and Glove'):'';
-  buttons.preview.hidden=!hasSelection||row.kind!=='glove';buttons.preview.disabled=!canUse;
-  buttons.hand.hidden=!hasSelection||row.kind!=='hand';buttons.hand.disabled=!canUse;
-  buttons.calibration.hidden=!hasSelection||row.kind!=='glove';buttons.calibration.disabled=!canUse;
+  buttons.official.hidden=hasSelection&&row.kind==='unknown';buttons.official.disabled=gloveView?!canUse:!canConnect||row?.official_available!==true||row?.generation==='hand1';buttons.official.title=row?.generation==='hand1'?t('官方画面支持 Hand 2 与 Glove','Official view supports Hand 2 and Glove'):'';
+  buttons.preview.hidden=!hasSelection||row.kind!=='glove';buttons.preview.disabled=!canConnect;
+  buttons.hand.hidden=!hasSelection||row.kind!=='hand';buttons.hand.disabled=handView?!canUse:!canConnect;
+  buttons.calibration.hidden=!hasSelection||row.kind!=='glove';buttons.calibration.disabled=!canConnect;
   selectedArea.hidden=!hasSelection;
   const preparing={official:['正在准备官方画面…','Preparing official view…'],preview:['正在打开遥操作…','Opening teleoperation…'],hand:['正在连接所选灵巧手反馈…','Connecting the selected hand feedback…'],calibration:['正在打开所选手套的标定设置…','Opening calibration settings for the selected glove…']};
   setText(useStatus,consumerError||(using&&preparing[pendingMode]?t(...preparing[pendingMode]):''));useStatus.hidden=!useStatus.textContent;useStatus.dataset.error=String(!!consumerError);
@@ -170,10 +183,10 @@
  async function refresh(){
   if(destroyed||loading)return loading;const own=serviceRevision;
   loading=(async()=>{
-   try{const response=await fetch('/api/device-inventory',{cache:'no-store',signal:AbortSignal.timeout(6000)});if(!response.ok)throw Error(t('无法读取设备列表','Device list unavailable'));const value=await response.json();if(destroyed||own!==serviceRevision)return;if(!value||!Array.isArray(value.devices)||typeof value.scan_allowed!=='boolean')throw Error(t('设备列表不完整','Incomplete device list'));if(value.scanning!==true||value.devices.length||value.error)previousDisplayRows=value.error?[]:value.devices.filter(d=>d&&typeof(d.sn||d.serial)==='string');inventory=value;online=true;localError='';lastRead=Date.now();
+   try{const response=await fetch('/api/device-inventory',{cache:'no-store',signal:AbortSignal.timeout(6000)});if(!response.ok)throw Error(t('无法读取设备列表','Device list unavailable'));const value=await response.json();if(destroyed||own!==serviceRevision)return;if(!value||!Array.isArray(value.devices)||typeof value.scan_allowed!=='boolean')throw Error(t('设备列表不完整','Incomplete device list'));rememberDiscovery(value);inventory=value;online=true;localError='';lastRead=Date.now();
     const errorKey=JSON.stringify([value.error,value.scanned_at]);if(value.error&&errorKey!==lastErrorKey){backoffUntil=Date.now()+5000;lastErrorKey=errorKey;}
     window.dispatchEvent(new CustomEvent('device-inventory-update',{detail:JSON.parse(JSON.stringify(value))}));
-   }catch(error){if(!destroyed&&own===serviceRevision){online=false;localError=error.message;backoffUntil=Math.max(backoffUntil,Date.now()+5000);lastRead=Date.now();}}
+   }catch(error){if(!destroyed&&own===serviceRevision){online=false;previousDisplayRows=[];localError=error.message;backoffUntil=Math.max(backoffUntil,Date.now()+5000);lastRead=Date.now();}}
    finally{loading=null;render();}
   })();return loading;
  }
@@ -200,8 +213,8 @@
  function visibilityChanged(){if(visible())schedule(0);}
  const observer=new MutationObserver(visibilityChanged);for(let element=host;element;element=element.parentElement)observer.observe(element,{attributes:true,attributeFilter:['hidden','class','style','data-page','data-hub-tab']});
  window.addEventListener('workspace-page',visibilityChanged);window.addEventListener('hashchange',visibilityChanged);document.addEventListener('visibilitychange',visibilityChanged);window.addEventListener('wuji-language',render);
- window.addEventListener('console-state',event=>{consoleState=event.detail;render();});window.addEventListener('device-use-update',render);
- window.addEventListener('console-offline',()=>{serviceRevision++;consoleState=null;online=false;localError=t('工作台服务已离线，连接状态未核对。','Workbench service offline. Connection state is unverified.');render();});
+ window.addEventListener('console-state',event=>{if(consoleState?.csrf&&event.detail?.csrf&&consoleState.csrf!==event.detail.csrf){serviceRevision++;previousDisplayRows=[];inventory=null;online=false;}consoleState=event.detail;render();});window.addEventListener('device-use-update',render);
+ window.addEventListener('console-offline',()=>{serviceRevision++;consoleState=null;online=false;previousDisplayRows=[];localError=t('工作台服务已离线，连接状态未核对。','Workbench service offline. Connection state is unverified.');render();});
  window.WujiDeviceInventory={
   selection(kind){const serial=kind?selectedByKind.get(kind):activeSerial;const row=rows().find(item=>sn(item)===serial);return usable(row)?clone(row):null;},
   mount(target){if(target){if(root.parentElement!==target)target.append(root);}else if(root.previousSibling!==anchor)anchor.after(root);render();visibilityChanged();},

@@ -56,7 +56,7 @@
    const owned=s.reported_device||s.device,ownedSN=s.active===true&&s.phase==='running'&&typeof(owned?.sn||owned?.serial)==='string'?(owned.sn||owned.serial):'';
    if(ownedSN){const index=devices.findIndex(d=>d.sn===ownedSN);if(index<0)devices.push({...owned,sn:ownedSN});else if(fresh&&/^[a-f0-9]{32}$/.test(s.session_id||''))mergeSide(index,owned);}
    const sdk=consoleState?.glove||{},sdkSN=sdk.glove_serial,profile=consoleState?.device_profile?.id;
-   if(sdk.busy===true&&sdk.connection==='receiving'&&typeof sdkSN==='string'&&/^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/.test(sdkSN)&&Number.isSafeInteger(sdk.session_id)&&sdk.session_id>0&&typeof sdk.user?.user_id==='string'&&!!sdk.user.user_id&&sdk.profile===profile&&/^hand[12]_(left|right)$/.test(profile||'')){
+   if(sdk.busy===true&&sdk.connection==='receiving'&&typeof sdkSN==='string'&&/^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/.test(sdkSN)&&Number.isSafeInteger(sdk.session_id)&&sdk.session_id>0&&typeof sdk.user?.user_id==='string'&&sdk.profile===profile&&/^hand[12]_(left|right)$/.test(profile||'')){
     const row=window.WujiDeviceInventory?.snapshot()?.devices?.find(d=>(d.sn||d.serial)===sdkSN);let index=devices.findIndex(d=>d.sn===sdkSN);
     if(index<0){index=devices.length;devices.push({sn:sdkSN,kind:'glove',device_type:'wuji_glove',model:row?.model||'Wuji Glove'});}
     // Session identity survives a stale pose frame; no freshness flag is promoted.

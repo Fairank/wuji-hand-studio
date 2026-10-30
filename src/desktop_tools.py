@@ -82,6 +82,59 @@ def idle(state, doctor):
             and not doctor.get('running') and not unconfirmed(state))
 
 
+def _reload_identity(state, doctor):
+    """Permit only idle work or an exactly owned SDK preview with no hand."""
+    from connection_switch import owner
+    switch = state.get('connection_switch') or {}
+    if switch.get('owner_error') or ((state.get('official_cli') or {}).get('update') or {}).get('recovery_required') is True:
+        return None
+    try:
+        actual = owner(state)
+    except ValueError:
+        return None
+    canonical = switch.get('current_owner')
+    if actual is None:
+        return ('idle',) if canonical is None and idle(state, doctor) else None
+    keys = ('mode', 'kind', 'serial', 'session', 'user_id', 'profile')
+    if (actual.get('mode') != 'teleoperation' or actual.get('kind') != 'glove'
+            or not isinstance(canonical, dict)
+            or any(canonical.get(key) != actual.get(key) for key in keys)
+            or type(actual.get('session')) is not int or actual['session'] <= 0):
+        return None
+    glove = state.get('glove') or {}
+    feedback = glove.get('feedback') or {}
+    hardware = glove.get('hardware') or {}
+    if (glove.get('busy') is not True or glove.get('connection') != 'receiving'
+            or glove.get('open_pending') or glove.get('hand_unpairing')
+            or glove.get('follow_pending') is not False or glove.get('follow_unconfirmed') is not False
+            or feedback.get('device_id') not in (None, '')
+            or feedback.get('connection') not in (None, 'disconnected')
+            or (state.get('hardware') or {}).get('stop_confirmed') is False
+            or hardware.get('active', False) is not False or hardware.get('stop_confirmed') is False):
+        return None
+    # Keep all existing uncertainty/maintenance checks. Only the known preview
+    # reader is exempted; neither its identity nor frame freshness is changed.
+    preview = {**state, 'glove': {**glove, 'busy': False}}
+    return tuple(actual[key] for key in keys) if idle(preview, doctor) else None
+
+
+def _reload_ui(host):
+    controller = host.server.controller
+    workflow = getattr(getattr(controller, 'calibration_handover', None), 'workflow_lock', None)
+    if workflow is None or not workflow.acquire(blocking=False):
+        raise ValueError('设备任务正在切换，请稍后刷新界面 / A device task is switching; retry UI reload shortly')
+    try:
+        before = _reload_identity(controller.snapshot(), controller.doctor.snapshot())
+        after = _reload_identity(controller.snapshot(), controller.doctor.snapshot())
+        if before is None or after != before:
+            raise ValueError('请先结束实机操作、配对和维护任务再刷新界面 / Finish hardware, pairing and maintenance tasks before reloading the UI')
+        # Normal prepare/follow and purpose switches share this workflow lock.
+        # Do not hold Controller.lock while waiting for a WebView callback.
+        return host.reload_ui()
+    finally:
+        workflow.release()
+
+
 def version_tuple(version):
     if not isinstance(version, str) or not re.fullmatch(r'\d{1,4}\.\d{1,4}\.\d{1,4}', version):
         raise ValueError('Expected a release version such as 0.1.4')
@@ -140,8 +193,7 @@ def dispatch(host, payload, *, clock=time.monotonic):
         if payload.get('state') not in ('open','closed'):raise ValueError('Expected open or closed')
         return host.connection_panel(payload['state'])
     if op == 'reload_ui':
-        if not idle(host.server.controller.snapshot(),host.server.controller.doctor.snapshot()):raise ValueError('UI reload requires an idle disconnected app')
-        return host.reload_ui()
+        return _reload_ui(host)
     if op == 'capture':
         return host.capture()
     if op == 'page':

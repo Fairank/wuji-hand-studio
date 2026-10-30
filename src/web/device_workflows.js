@@ -52,7 +52,7 @@
   user.append(new Option(t('选择档案','Choose a profile'),'__choose_user__'),...users.map(row=>new Option(row.name||row.user_id||t('Default · 内置手型','Default · Built-in model'),row.user_id)));user.selectedIndex=0;confirm.type='submit';confirm.className='primary';confirm.id='connection-switch-confirm';confirm.textContent=t('切换并连接','Switch and connect');confirm.disabled=true;user.onchange=model.onchange=()=>{confirm.disabled=!profileID(model.value)||user.selectedIndex<1||!users.some(row=>row.user_id===user.value);};modelRow.append(modelLabel,model);userRow.append(userLabel,user);actions.append(confirm);form.append(modelRow,userRow,actions);sheet.body.append(form);
   return new Promise((resolve,reject)=>{let settled=false;const cleanup=()=>{window.removeEventListener('console-state',changed);window.removeEventListener('console-offline',changed);sheet.destroy();};const changed=()=>{if(settled)return;try{checkCurrent();}catch(error){settled=true;sheet.close();cleanup();reject(error);}};sheet.element.addEventListener('close',()=>{if(settled)return;settled=true;cleanup();const error=Error(t('已取消切换，原连接保持。','Switch cancelled. The original connection is retained.'));error.name='SwitchCancelled';reject(error);},{once:true});window.addEventListener('console-state',changed);window.addEventListener('console-offline',changed);form.onsubmit=event=>{event.preventDefault();changed();if(settled||user.selectedIndex<1||!users.some(row=>row.user_id===user.value)||!profileID(model.value))return;settled=true;const selected={...target,profile:model.value,user_id:user.value};sheet.close();cleanup();resolve(selected);};changed();if(!settled){sheet.open();user.focus();}});
  }
- async function switchConnection(target){
+ async function switchConnection(target,expectedContext=null){
   if(switching)throw Error(t('正在切换设备，请等待本次操作完成。','A device switch is in progress. Wait for it to finish.'));
   if(!target||!['official','teleoperation','hand'].includes(target.mode)||typeof target.serial!=='string'||!target.serial)throw Error(t('请先选择要接入的设备。','Choose the device to connect first.'));
   const operationEpoch=serviceEpoch,ticket={epoch:operationEpoch};switchOwner=ticket;switching=true;emit();
@@ -60,6 +60,7 @@
    const before=await state(),context=before.connection_switch;ticket.owner_context=context?.expected_owner;ticket.before_transition={request_id:context?.request_id||null,attempt_id:context?.attempt_id||null};
    const checkCurrent=current=>{if(switchOwner!==ticket||operationEpoch!==serviceEpoch||serviceToken&&serviceToken!==before.csrf||current&&current.csrf!==before.csrf)throw Error(t('工作台连接已变化，请核对当前设备后重新选择。','The Workbench connection changed. Review current devices and select again.'));};checkCurrent(before);
    if(!before.csrf||!context||!/^[a-f0-9]{64}$/.test(context.expected_owner||''))throw Error(t('连接归属尚未核对，请稍后重试。','Connection ownership is unverified. Retry shortly.'));
+   if(expectedContext!==null&&context.expected_owner!==expectedContext)throw Error(t('当前连接已变化，请重新核对。','The current connection changed. Verify it again.'));
    if(context.busy===true)throw Error(t('正在切换设备，请等待本次操作完成。','A device switch is in progress. Wait for it to finish.'));
    if(context.can_switch!==true)throw Error(context.blocked_reason||t('当前连接尚未核对，暂不能切换。','The current connection is unverified. Switching is unavailable.'));
    let selected={...target};
@@ -155,8 +156,9 @@
   const current=()=>featureOwner===ticket&&ticket.epoch===serviceEpoch;
   try{
    const before=await state();ticket.owner_context=before.connection_switch?.expected_owner;ticket.before_transition={request_id:before.connection_switch?.request_id||null,attempt_id:before.connection_switch?.attempt_id||null};if(!current()||serviceToken&&before.csrf!==serviceToken)return;
-   if(options.viewOwner){
-    const expected=options.viewOwner,actual=currentOwner(before),observed=currentOwner(),target={mode:expected.mode,serial:expected.serial,user_id:expected.user_id,profile:expected.profile};
+   if(options.viewOwner||options.retryOwner){
+    const expected=options.viewOwner||options.retryOwner,actual=currentOwner(before),observed=currentOwner(),target={mode:expected.mode,serial:expected.serial,user_id:expected.user_id,profile:expected.profile};
+    if(options.retryOwner&&(!/^[a-f0-9]{64}$/.test(options.expectedContext||'')||before.connection_switch?.expected_owner!==options.expectedContext))throw Error(t('当前连接已变化，请重新核对。','The current connection changed. Verify it again.'));
     if(before.connection_switch?.busy===true||!actual||!observed||['mode','kind','serial','session','user_id','profile'].some(key=>actual[key]!==expected[key]||observed[key]!==expected[key])||!connected(before,target)||actual.mode==='teleoperation'&&before.glove?.session_id!==actual.session||actual.mode==='official'&&(!/^[a-f0-9]{32}$/.test(actual.session||'')||before.official_viz?.session_id!==actual.session))throw Error(t('当前连接已变化，请重新核对。','The current connection changed. Verify it again.'));
    }
    const chosen=device||selectedDevice(purpose,before),serial=serialOf(chosen);
@@ -167,7 +169,7 @@
    if(purpose==='calibration')return; // The final Start atomically hands over this exact glove.
    const target={mode:purpose,serial,...purpose==='official'?{theme:document.documentElement.dataset.theme==='dark'?'dark':'light'}:{}};
    if(purpose==='teleoperation'&&device?.mode==='teleoperation')for(const key of ['user_id','profile','hand_serial','timeout_ms','address'])if(Object.hasOwn(device,key))target[key]=device[key];
-   const switched=await switchConnection(target);if(!current())return;if(switched.routed)return switched;
+   const switched=await switchConnection(target,options.retryOwner?options.expectedContext:null);if(!current())return;if(switched.routed)return switched;
    const latest=await window.WujiConnection?.refresh?.();if(current()&&latest)observedState=latest;if(current())directory.select?.(serial);if(current()&&purpose==='hand'&&options.navigate!==false&&latest?.device_profile?.id){window.WujiDemonstration?.selectProfile(latest.device_profile.id);const select=document.getElementById('demonstration-hand');if(select){select.value=serial;select.dispatchEvent(new Event('change'));}}
    if(current()&&purpose==='official')await window.WujiOfficialViz?.selectDevice(serial);
    return {...switched,state:latest||switched.state};

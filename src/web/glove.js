@@ -69,13 +69,17 @@
  }
  window.addEventListener('resize',syncOperationOrder);
  function renderSharedStart(controllerBusy,transferBusy){
-  const shared=window.WujiDeviceUse,button=$('glove-start'),selected=shared?.selected?.('teleoperation'),selectedSerial=selected?.serial||selected?.sn,calibration=state?.calibration||{},run=calibration.run||calibration;
-  button.hidden=!shared||controllerBusy||transferBusy;
+  const shared=window.WujiDeviceUse,button=$('glove-start'),selected=shared?.selected?.('teleoperation'),selectedSerial=selected?.serial||selected?.sn,calibration=state?.calibration||{},run=calibration.run||calibration,g=state?.glove||{},hw=g.hardware||{},feedback=g.feedback||{},identity=feedback.identified_device||{},owner=shared?.current?.();
+  const noHand=!feedback.device_id&&Object.keys(hw).length===0,inactive=noHand||hw.active===false&&hw.stop_confirmed===true,knownHand=!feedback.device_id||identity.source==='sdk_identity'&&identity.serial===feedback.device_id&&identity.profile===g.profile;
+  const retry=online&&controllerBusy&&!transferBusy&&!pending&&g.connection==='receiving'&&g.stream?.fresh===false&&owner?.mode==='teleoperation'&&owner.kind==='glove'&&owner.serial===g.glove_serial&&owner.session===g.session_id&&Number.isSafeInteger(g.session_id)&&g.session_id>0&&typeof g.user?.user_id==='string'&&owner.user_id===g.user.user_id&&owner.profile===g.profile&&g.profile===state?.device_profile?.id&&/^hand[12]_(left|right)$/.test(g.profile||'')&&state?.connection_switch?.can_switch===true&&/^[a-f0-9]{64}$/.test(state.connection_switch.expected_owner||'')&&inactive&&knownHand&&lease===null&&!g.follow_pending&&!g.follow_unconfirmed&&!(state.unconfirmed_devices||[]).length;
+  button._retry=retry?{owner:{...owner},context:state.connection_switch.expected_owner,hand:feedback.device_id||null}:null;
+  button.hidden=!shared||controllerBusy&&!retry||transferBusy;
   button.disabled=!online||pending||run.running===true||run.cleanup_required===true||calibration.cleanup_required===true||!!selectedSerial&&state?.connection_switch?.can_switch!==true;
-  button.textContent=!selectedSerial?t('选择手套','Choose glove'):shared?.snapshot()?.error?t('重新接入','Retry teleoperation'):t('开始遥操作','Start teleoperation');
+  button.textContent=!selectedSerial?t('选择手套','Choose glove'):retry||shared?.snapshot()?.error?t('重新接入','Retry teleoperation'):t('开始遥操作','Start teleoperation');
  }
  function beginSharedTeleoperation(event){
   const button=$('glove-start');if(event?.detail>1||button.hidden||button.disabled||!window.WujiDeviceUse)return;
+  const retry=button._retry;if(retry){const owner=window.WujiDeviceUse.current?.();if(!owner||['mode','kind','serial','session','user_id','profile'].some(key=>owner[key]!==retry.owner[key]))return;const target={mode:'teleoperation',kind:'glove',serial:owner.serial,user_id:owner.user_id,profile:owner.profile,...retry.hand?{hand_serial:retry.hand}:{}};window.WujiDeviceUse.open('teleoperation',target,{navigate:false,retryOwner:retry.owner,expectedContext:retry.context}).catch(()=>{});return;}
   window.WujiDeviceUse.open('teleoperation',null,{navigate:false}).catch(()=>{});
  }
  function render(){

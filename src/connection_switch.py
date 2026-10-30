@@ -396,7 +396,10 @@ class ConnectionSwitch:
                 saved_resume=(saved_hint and saved_hint['config']==self._config()
                     and saved_hint['serial']==sn and saved_hint['profile']==selected['id']
                     and target.get('user_id')==saved_hint['user_id']
-                    and (not source or source['mode']!='teleoperation'))
+                    and (not source or source['mode']!='teleoperation'
+                         or source['serial']==sn and source['profile']==saved_hint['profile']
+                         and source['user_id']==saved_hint['user_id']
+                         and ((state.get('glove') or {}).get('stream') or {}).get('fresh') is not True))
                 if ('_saved_profile' not in target and ('user_id' not in target or saved_resume) and self._saved_supported()
                         and callable(getattr(self.controller,'_saved_profile_preflight',None))):
                     proof=self.controller._saved_profile_preflight(sn,selected['side'],
@@ -620,6 +623,7 @@ class ConnectionSwitch:
             same=source and all(source.get(k)==target.get(k) for k in ('mode','serial'))
             if same and target['mode']=='teleoperation':same=(source['profile']==target['profile'] and source['user_id']==target.get('user_id')
                 and '_continuation' not in target and (state.get('glove') or {}).get('connection')=='receiving'
+                and ((state.get('glove') or {}).get('stream') or {}).get('fresh') is True
                 and not ((state.get('glove') or {}).get('session_cleanup') or {}).get('error'))
             if same and 'hand_serial' in target:
                 feedback=(state.get('glove') or {}).get('feedback') or {}
