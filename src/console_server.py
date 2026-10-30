@@ -352,8 +352,9 @@ class Controller:
             context=self.retarget.select(binding,profile)
             tuning=self.tuning.context(context['binding'])
             if tuning['engine']!='sdk':self.tuning.select_engine(context['binding'],'sdk')
-            # The human URDF stays in the official SDK user store. It is never
-            # assigned to the robot model or a custom hand_model_path override.
+            # The human URDF stays in the official SDK user store. The worker
+            # applies a missing online-IK model parameter and verifies readback;
+            # it never replaces a foreign override or the robot model.
             self.state['view_source']='glove'
             return dict(timeout_ms=250,retarget=context['settings'],
                 solver=dict(engine='sdk',values=tuning['values']))

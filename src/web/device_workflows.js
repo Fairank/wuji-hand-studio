@@ -169,13 +169,16 @@
   finally{if(current()){featureOwner=null;renderContexts();}}
  }
  const contexts=[];
+ function calibrationUnavailable(message){
+  return message==='请先选择已标定的命名佩戴者，或进行标定 / Select a calibrated named wearer or calibrate first'||message==='这位佩戴者尚无此侧标定，请先标定 / This wearer has no calibration for this side; calibrate first';
+ }
  function renderContexts(){
   const error=currentUseError();
   for(const item of contexts){
    const owner=currentOwner(),calibration=currentCalibration(),selected=selectedDevice(item.purpose),serial=featureOwner?.serial||serialOf(selected),sw=observedState?.connection_switch||{};
    item.name.textContent=serial||(item.purpose==='teleoperation'?t('尚未选择手套','No glove selected'):t('尚未选择设备','No device selected'));
    const pending=featureOwner||sw.busy===true;
-   if(item.calibrate){item.calibrate.textContent=t('前往标定','Open calibration');item.calibrate.hidden=!error||!/已标定|标定|calibrat/i.test(error);}
+   if(item.calibrate){item.calibrate.textContent=t('前往标定','Open calibration');item.calibrate.hidden=!calibrationUnavailable(error);}
    item.status.textContent=error||(pending?sw.phase==='stopping'?t('正在结束原会话…','Ending the previous session…'):sw.phase==='connecting'?t('正在接入所选功能…','Opening the selected feature…'):t('正在准备切换…','Preparing the switch…'):calibration?t('当前用途：手型标定','Current use: calibration'):owner?t('当前用途：','Current use: ')+(owner.mode==='official'?'CLI':owner.mode==='teleoperation'?t('遥操作','Teleoperation'):t('灵巧手反馈','Hand feedback')):sw.owner_error?t('会话归属待核对','Session ownership unverified'):serial?t('已选择，进入功能时接入','Selected; connects when a feature is chosen'):t('先在设备页选择本次设备','Choose the device on the Devices page'));
    item.status.dataset.error=String(!!error||!!sw.owner_error);item.change.textContent=serial?t('更换设备','Change device'):t('选择设备','Choose device');item.change.disabled=!!pending;
   }

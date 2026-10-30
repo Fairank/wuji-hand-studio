@@ -13,6 +13,7 @@ from unittest.mock import Mock, patch
 import numpy as np  # Keep the real extension outside the synthetic SDK patch.
 from calibrated_teleoperation import CalibratedTeleoperation
 from glove_agent import worker_glove
+from test_runtime_model_binding_0268 import Resource, WujiException
 from glove_bridge import GloveBridge
 from test_calibration_portability import MODEL, bundle_context, completed
 
@@ -36,9 +37,9 @@ class ExplicitCalibratedDiscoveryTests(unittest.TestCase):
             class Glove:
                 def __init__(self):
                     self.serial_number='wrong-SN' if fault in ('serial','serial_close_false','serial_close_raise') else context['serial']
-                    self.close_calls=0
+                    self.close_calls=0;self.runtime_model=Resource(str(wrong) if fault=='model' else None)
                 def hand_side(self):return N(get=lambda:'left' if fault=='side' else 'right')
-                def hand_model_path(self):return N(get=lambda:str(wrong) if fault=='model' else '')
+                def hand_model_path(self):return self.runtime_model
                 def hand_skeleton(self):
                     def subscribe():calls.append(('subscribe',));return N(recv=lambda:None,close=lambda:True)
                     return N(subscribe=subscribe)
@@ -58,7 +59,7 @@ class ExplicitCalibratedDiscoveryTests(unittest.TestCase):
                 return Glove()
             manager=N(current_user=lambda:copy.deepcopy(current[0]),list_users=lambda:[prior,wearer],
                       switch_user=switch,scan=Mock(return_value=[]),connect=connect)
-            sdk=N(SdkManager=N(instance=lambda:manager),DeviceType=N(WujiGlove='glove'),WujiGlove=Glove,
+            sdk=N(WujiException=WujiException,SdkManager=N(instance=lambda:manager),DeviceType=N(WujiGlove='glove'),WujiGlove=Glove,
                   HandModel=N(WujiHand2='hand2',WujiHand='hand1'),Handedness=N(Left='left',Right='right'),
                   RetargetSession=N(for_hand=lambda *a,**kw:N(step=lambda kp:[0.]*20)))
             class Events(queue.Queue):

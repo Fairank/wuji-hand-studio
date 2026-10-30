@@ -7,6 +7,7 @@ import io
 import json
 import os
 from pathlib import Path
+from test_runtime_model_binding_0268 import Resource, WujiException
 import queue
 import sys
 import tempfile
@@ -159,13 +160,14 @@ class SavedCalibrationTests(unittest.TestCase):
                 manager.switch_user=switch;manager.scan=Mock(side_effect=AssertionError('No broadcast prerequisite'))
                 class Glove:
                     serial_number='OTHER' if wrong_serial else SN
+                    def __init__(self):self.runtime_model=Resource()
                     def hand_side(self):return N(get=lambda:'right')
-                    def hand_model_path(self):return N(get=lambda:'')
+                    def hand_model_path(self):return self.runtime_model
                     def hand_skeleton(self):
                         calls.append(('subscribe',));return N(subscribe=lambda:N(recv=lambda:None,close=lambda:True))
                     def disconnect(self):calls.append(('disconnect',));return True
                 manager.connect=lambda **kw:(calls.append(('connect',kw)) or Glove())
-                sdk=N(SdkManager=N(instance=lambda:manager),WujiGlove=Glove,
+                sdk=N(WujiException=WujiException,SdkManager=N(instance=lambda:manager),WujiGlove=Glove,
                     HandModel=N(WujiHand2='hand2',WujiHand='hand1'),Handedness=N(Left='left',Right='right'),
                     RetargetSession=N(for_hand=lambda *a,**kw:N(step=lambda kp:[0.]*20)))
                 requests=queue.Queue();events_list=[]

@@ -11,6 +11,7 @@ import os
 from pathlib import Path, PurePosixPath
 import re
 import stat
+import sys
 import uuid
 import zipfile
 
@@ -456,15 +457,37 @@ def prepare_controller_model(manager, context, *, folder=None, receipt_folder=No
     return dict(context,owner_user_id=owner,model_path=model_path,imported=True)
 
 
-def verify_loaded_model(glove, receipt, *, sdk_root=None):
-    """A custom online-IK override must never silently shadow the saved model."""
+def verify_loaded_model(glove, receipt, *, sdk_root=None, apply_missing=False):
+    """Verify online IK; an explicit managed session may load its missing model.
+
+    Existing nonempty overrides are never replaced. Only the SDK's exact
+    optional-parameter absence permits applying the verified receipt file.
+    """
+    if type(apply_missing) is not bool:raise ValueError('Invalid model application intent')
     expected=(receipt['model_sha256'],receipt['model_bytes'])
     if file_digest(receipt['model_path'])!=expected:raise ValueError('Controller hand model changed before connection')
-    override=glove.hand_model_path().get()
+    resource=glove.hand_model_path()
+    try:override=resource.get()
+    except Exception as error:
+        sdk_error=getattr(sys.modules.get('wuji_sdk'),'WujiException',None)
+        if (not apply_missing or not isinstance(sdk_error,type) or not isinstance(error,sdk_error)
+                or str(error)!='Parameter not set: calibration.hand_model_path'):
+            raise
+        override=''
     if not isinstance(override,str):raise ValueError('Cannot verify active glove hand model')
+    applied=False
+    if not override and apply_missing:
+        if file_digest(receipt['model_path'])!=expected:raise ValueError('Controller hand model changed before application')
+        resource.set(receipt['model_path'])
+        override=resource.get()
+        if not isinstance(override,str) or not override:
+            raise ValueError('SDK 运行模型路径未确认，未启动手套数据 / SDK runtime model path is unconfirmed; glove stream was not started')
+        if file_digest(receipt['model_path'])!=expected:raise ValueError('Controller hand model changed during application')
+        applied=True
     # A directory managed by the SDK can contain older models or another
     # wearer's custom model. Only this exact model's bytes establish the match.
     if override:
         if file_digest(override)!=expected:
+            if applied:raise ValueError('SDK 运行模型与已保存资料不符，未启动手套数据 / SDK runtime model differs from the saved calibration; glove stream was not started')
             raise ValueError('手套已有另一份自定义手型覆盖，未修改该设置 / A different custom glove hand model is active; it was not changed')
     return True

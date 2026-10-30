@@ -9,7 +9,7 @@
  <section class="glove-controls" aria-labelledby="glove-receive-title"><div class="glove-source-heading"><h3 id="glove-receive-title"></h3><div class="glove-model-field"><label for="glove-model" id="glove-model-label"></label><select id="glove-model"><option value="hand2_left"></option><option value="hand2_right"></option><option value="hand1_left"></option><option value="hand1_right"></option></select></div><button id="glove-scan" type="button"></button></div>
  <div class="glove-source-fields"><div><label for="glove-device" id="glove-device-label"></label><select id="glove-device"></select></div><div><label for="glove-user" id="glove-user-label"></label><select id="glove-user"></select></div><div class="glove-target-field"><label for="glove-hand-device" id="glove-hand-device-label"></label><div class="glove-target-control"><select id="glove-hand-device"></select><button id="glove-hand-scan" type="button"></button><button id="glove-prepare" type="button"></button></div></div></div></section>
  <section class="glove-display" aria-labelledby="glove-preview-title"><h3 id="glove-preview-title" class="glove-sr-only"></h3><div id="glove-viewer-dock" class="viewer-dock"></div></section>
- <section class="glove-actionbar" aria-labelledby="glove-phase"><strong id="glove-phase" hidden></strong><div class="glove-status-copy"><p id="glove-status" role="status" aria-live="polite"></p></div><label class="glove-confirm"><input type="checkbox" id="glove-clear"><span id="glove-clear-label"></span></label><div class="glove-main-actions"><button id="glove-open-viewer" type="button"></button><button id="glove-handover" class="primary" type="button"></button><button id="glove-handover-cancel" type="button"></button><button id="glove-open" class="primary" type="button"></button><button id="glove-switch-source" class="primary" type="button" hidden></button><button id="glove-switch-cli" type="button" hidden></button><button id="glove-follow" class="primary" type="button"></button><button id="glove-stop" class="danger" type="button"></button><button id="glove-disconnect" type="button"></button></div></section>
+ <section class="glove-actionbar" aria-labelledby="glove-phase"><strong id="glove-phase" hidden></strong><div class="glove-status-copy"><p id="glove-status" role="status" aria-live="polite"></p></div><label class="glove-confirm"><input type="checkbox" id="glove-clear"><span id="glove-clear-label"></span></label><div class="glove-main-actions"><button id="glove-start" class="primary" type="button" hidden></button><button id="glove-open-viewer" type="button"></button><button id="glove-handover" class="primary" type="button"></button><button id="glove-handover-cancel" type="button"></button><button id="glove-open" class="primary" type="button"></button><button id="glove-switch-source" class="primary" type="button" hidden></button><button id="glove-switch-cli" type="button" hidden></button><button id="glove-follow" class="primary" type="button"></button><button id="glove-stop" class="danger" type="button"></button><button id="glove-disconnect" type="button"></button></div></section>
  </div><details id="glove-details" class="glove-details"><summary id="glove-details-title"></summary><div class="glove-details-body"><section><h3 id="glove-options-title"></h3><div class="glove-detail-fields"><label><span id="glove-timeout-label"></span><span class="glove-input-unit"><input id="glove-timeout" type="number" min="100" max="2000" step="50" value="250"><span>ms</span></span></label><label><span id="glove-address-label"></span><input id="glove-hand-address" autocomplete="off" spellcheck="false"></label></div><p id="glove-profile"></p><p id="glove-pair-note"></p><p id="glove-user-note"></p><a href="#connection" id="glove-config"></a></section>
  <section><h3 id="glove-parameters-title"></h3><p id="glove-parameters"></p><a href="#parameters" id="glove-parameters-link"></a><div class="glove-metrics"><div><span id="glove-rate-label"></span><strong id="glove-rate">—</strong></div><div><span id="glove-age-label"></span><strong id="glove-age">—</strong></div><div><span id="glove-send-label"></span><strong id="glove-send">—</strong></div></div><p id="glove-rate-note"></p></section>
  <section><h3 id="glove-platform-title"></h3><p id="glove-platform-text"></p><p id="glove-cli-note"></p><p id="glove-follow-note"></p><p id="glove-runtime-note"></p><p id="glove-command-status" role="alert"></p><div class="glove-detail-links"><a id="glove-sdk-doc" href="https://github.com/wuji-technology/wuji-sdk/blob/main/examples/python/retargeting/1.teleop_real.py" target="_blank" rel="noopener">SDK ↗</a><a id="glove-calib-doc" href="https://docs.wuji.tech/docs/en/wuji-glove/latest/sdk-data-reference/calibration/" target="_blank" rel="noopener"></a></div></section>
@@ -68,6 +68,16 @@
   else{gloveLayout.insertBefore(operationBar,next);if(focused&&operationBar.contains(focused)&&document.activeElement!==focused)focused.focus({preventScroll:true});}
  }
  window.addEventListener('resize',syncOperationOrder);
+ function renderSharedStart(controllerBusy,transferBusy){
+  const shared=window.WujiDeviceUse,button=$('glove-start'),selected=shared?.selected?.('teleoperation'),selectedSerial=selected?.serial||selected?.sn,calibration=state?.calibration||{},run=calibration.run||calibration;
+  button.hidden=!shared||controllerBusy||transferBusy;
+  button.disabled=!online||pending||run.running===true||run.cleanup_required===true||calibration.cleanup_required===true||!!selectedSerial&&state?.connection_switch?.can_switch!==true;
+  button.textContent=!selectedSerial?t('选择手套','Choose glove'):shared?.snapshot()?.error?t('重新接入','Retry teleoperation'):t('开始遥操作','Start teleoperation');
+ }
+ function beginSharedTeleoperation(event){
+  const button=$('glove-start');if(event?.detail>1||button.hidden||button.disabled||!window.WujiDeviceUse)return;
+  window.WujiDeviceUse.open('teleoperation',null,{navigate:false}).catch(()=>{});
+ }
  function render(){
   const virtual=virtualMode();page.dataset.teleopMode=virtual?'virtual':'real';
   $('glove-title').textContent=t('遥操作','Teleoperation');for(const [mode,id] of [['virtual','glove-mode-virtual'],['real','glove-mode-real']]){const selected=virtual===(mode==='virtual');$(id).setAttribute('aria-selected',String(selected));$(id).tabIndex=selected?0:-1;}$('glove-mode-panel').setAttribute('aria-labelledby',virtual?'glove-mode-virtual':'glove-mode-real');
@@ -130,7 +140,8 @@
   page.dataset.teleopPhase=phase;
   $('glove-open').hidden=phase!=='ready';$('glove-open-viewer').hidden=phase!=='viewer_other';$('glove-handover').hidden=phase!=='viewer';$('glove-handover-cancel').hidden=phase!=='handover';$('glove-prepare').hidden=!!feedback.device_id;$('glove-follow').hidden=phase!=='prepared'||sourceChanged;$('glove-stop').hidden=(!['following','starting','prepared'].includes(phase)&&!disableUnconfirmed)||hw.active===false&&hw.stop_confirmed===true&&!lease&&!currentUnconfirmed&&!g.follow_unconfirmed&&!g.follow_pending;$('glove-disconnect').hidden=!controllerBusy&&!transferBusy;
   if(transferBusy){$('glove-stop').hidden=true;$('glove-disconnect').hidden=true;}
-  if(window.WujiDeviceUse){$('glove-scan').hidden=true;$('glove-open').hidden=true;$('glove-hand-scan').hidden=true;}
+  if(window.WujiDeviceUse){$('glove-scan').hidden=true;$('glove-open').hidden=true;$('glove-hand-scan').hidden=true;$('glove-handover').hidden=true;}
+  renderSharedStart(controllerBusy,transferBusy);
   if(virtual){$('glove-prepare').hidden=true;$('glove-follow').hidden=true;$('glove-hand-scan').hidden=true;}
   $('glove-stop').textContent=virtual?t('暂停实机跟随','Pause real following'):t('暂停跟随','Pause following');
   const confirmVisible=!virtual&&phase==='prepared'&&hw.active===false&&feedback.stale===false&&feedbackMatches&&hw.probe_ready===true&&!disableUnconfirmed;page.querySelector('.glove-confirm').hidden=!confirmVisible;$('glove-clear').disabled=!online||pending||!confirmVisible;
@@ -218,6 +229,7 @@
   catch(error){if(operation===operationVersion)lastMessage=actionError(error);}
   finally{if(operation===operationVersion){pending=false;pendingName='';render();}}
  }
+ $('glove-start').onclick=beginSharedTeleoperation;
  $('glove-scan').onclick=()=>act({name:'glove_scan'});
  $('glove-hand-scan').onclick=()=>{if(!$('glove-hand-scan').disabled)act({name:'glove_hand_scan'});};
  function startLocalSession(command){if(command.name==='glove_open'&&state?.glove?.open_pending===true)return;const session=state?.glove?.session_id,revision=state?.glove?.action_revision;if(!online||!validSession(session)||!validRevision(revision))return;act({...command,expected_session:session,expected_revision:revision});}

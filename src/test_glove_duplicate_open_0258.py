@@ -13,6 +13,7 @@ from unittest.mock import patch
 
 import numpy as np  # Real extension is loaded before the isolated synthetic SDK.
 from glove_agent import worker_glove
+from test_runtime_model_binding_0268 import Resource, WujiException
 import test_glove_primary_intent_0258 as primary_fixture
 from test_calibration_portability import MODEL,bundle_context
 
@@ -66,8 +67,9 @@ class GloveDuplicateOpenTests(unittest.TestCase):
                 def close(self):calls.append(('subscription_close',));return True
             class Glove:
                 serial_number=serial
+                def __init__(self):self.runtime_model=Resource()
                 def hand_side(self):return N(get=lambda:'right')
-                def hand_model_path(self):return N(get=lambda:'')
+                def hand_model_path(self):return self.runtime_model
                 def hand_skeleton(self):
                     def subscribe():calls.append(('subscribe',));return Subscription()
                     return N(subscribe=subscribe)
@@ -79,7 +81,7 @@ class GloveDuplicateOpenTests(unittest.TestCase):
                 switch_user=switch,scan=scan,connect=connect)
             def solver(*args,**kwargs):
                 calls.append(('solver',));return N(step=lambda kp:[0.]*20,close=lambda:calls.append(('solver_close',)) or True)
-            sdk=N(SdkManager=N(instance=lambda:manager),DeviceType=N(WujiGlove='glove'),WujiGlove=Glove,
+            sdk=N(WujiException=WujiException,SdkManager=N(instance=lambda:manager),DeviceType=N(WujiGlove='glove'),WujiGlove=Glove,
                 HandModel=N(WujiHand2='hand2',WujiHand='hand1'),Handedness=N(Left='left',Right='right'),
                 RetargetSession=N(for_hand=solver))
             started=time.monotonic()

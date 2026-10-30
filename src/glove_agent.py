@@ -270,7 +270,7 @@ def worker_glove(requests,events,continuation=None,sdk_requirement=None):
                                 raise ValueError('手套左右与工作台所选型号不符 / Glove side differs from profile')
                             if model_receipt is not None:
                                 from calibration_portability import verify_loaded_model
-                                verify_loaded_model(candidate,model_receipt)
+                                verify_loaded_model(candidate,model_receipt,apply_missing=True)
                             session=new_solver(c.get('solver',{}));solver_engine=c.get('solver',{}).get('engine','sdk')
                             sub=candidate.hand_skeleton().subscribe()
                         except Exception:

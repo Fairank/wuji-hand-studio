@@ -20,6 +20,7 @@ from calibration_portability import CONTEXT_FIELDS
 from glove_bridge import GloveBridge
 from glove_protocol import CancellationNotDispatched
 from glove_agent import worker_glove
+from test_runtime_model_binding_0268 import Resource, WujiException
 from retarget_settings import defaults
 from test_calibration_portability import MODEL,bundle_context,completed
 
@@ -462,13 +463,14 @@ class WorkerContinuationTests(unittest.TestCase):
                 wearer=dict(user_id='owner-1',display_name='Alice',is_default=False);current=[prior];calls=[]
                 def switch(user):current[0]=wearer if user=='owner-1' else prior;calls.append(('user',user))
                 def subscribe():calls.append(('subscribe',current[0]['user_id']));return N(recv=lambda:None,close=lambda:None)
+                runtime_model=Resource()
                 glove=N(serial_number=context['serial'],hand_side=lambda:N(get=lambda:actual),
-                    hand_model_path=lambda:N(get=lambda:''),hand_skeleton=lambda:N(subscribe=subscribe),
+                    hand_model_path=lambda:runtime_model,hand_skeleton=lambda:N(subscribe=subscribe),
                     disconnect=lambda:calls.append(('disconnect',current[0]['user_id'])))
                 manager=N(current_user=lambda:current[0],list_users=lambda:[prior,wearer],switch_user=switch,
                     scan=lambda:[N(sn=context['serial'],device_type='glove',address='fixture')],
                     connect=lambda **kwargs:(calls.append(('connect',kwargs)) or glove))
-                sdk=N(SdkManager=N(instance=lambda:manager),DeviceType=N(WujiGlove='glove'),WujiGlove=type(glove),
+                sdk=N(WujiException=WujiException,SdkManager=N(instance=lambda:manager),DeviceType=N(WujiGlove='glove'),WujiGlove=type(glove),
                     HandModel=N(WujiHand2='hand2',WujiHand='hand1'),Handedness=N(Left='left',Right='right'),
                     RetargetSession=N(for_hand=lambda *args,**kw:N(step=lambda _: [0.]*20)))
                 requests=queue.Queue()
