@@ -300,7 +300,7 @@ class HandoverTests(unittest.TestCase):
             finally:release.set();thread.join(1)
 
     def test_inventory_task_ownership_never_invents_feedback_freshness(self):
-        row=build_inventory(controller={'calibration':{'running':True,'serial':SN,'side':'left','source':'official_jsonl_native'}},now=100)['devices'][0]
+        row=build_inventory(controller={'calibration':{'id':'a'*32,'running':True,'serial':SN,'side':'left','source':'official_jsonl_native'}},now=100)['devices'][0]
         self.assertTrue(row['in_use']);self.assertTrue(row['stale'])
         self.assertFalse(row['identity_verified']);self.assertFalse(row['official_available']);self.assertFalse(row['selectable'])
         self.assertIsNone(row['last_seen']);self.assertEqual(row['source'],'official_calibration_session')

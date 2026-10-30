@@ -1,0 +1,22 @@
+/* Actual inventory ownership projection; no device/network/native SDK. */
+'use strict';
+const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm'),test=require('node:test'),assert=require('node:assert/strict');
+const source=fs.readFileSync(path.join(__dirname,'web/device_inventory.js'),'utf8');
+function fn(name){const begin=source.indexOf(' function '+name+'(');assert(begin>=0,'Actual inventory function '+name+' must exist');let depth=0;for(let i=source.indexOf('{',begin);i<source.length;i++){if(source[i]==='{')depth++;else if(source[i]==='}'&&!--depth)return source.slice(begin,i+1);}throw Error('Unclosed function');}
+const SN='WG_SYNTHETIC_CALIBRATION_0269',OTHER='WG_SYNTHETIC_OTHER_0269',ID='a'.repeat(32);
+const run=(extra={})=>({id:ID,serial:SN,running:true,status:'collecting',side:'left',...extra});
+const oldRow=(serial=SN)=>({serial,sn:serial,kind:'glove',stale:true,in_use:true,last_seen:1,selectable:false,identity_verified:false,side:null,source:'official_calibration_session'});
+function fixture({calibration={run:run()},devices=[oldRow()],online=true,owner=null}={}){
+ const calls=[],window={WujiDeviceUse:{current:()=>owner},WujiConnectionHub:{show:value=>calls.push(value)}};
+ const c={window,consoleState:{calibration},inventory:{devices,ttl_s:30},online,scanning:false,previousDisplayRows:[],localError:'',Date,Number};
+ const begin=source.indexOf(' const rows=()=>'),end=source.indexOf(' const visible=()=>',begin);assert(begin>=0&&end>begin);
+ vm.runInNewContext('const sessionOwner=()=>window.WujiDeviceUse?.current();\n'+source.slice(source.indexOf(' const getTime='),source.indexOf(' const sessionOwner='))+'\n'+fn('calibrationOwner')+'\n'+source.slice(begin,end)+'\n'+fn('openCalibrationSession')+'\nthis.rows=rows;this.usable=usable;this.open=openCalibrationSession;',c);
+ return {c,calls,rows:()=>JSON.parse(JSON.stringify(c.rows())),state:value=>c.consoleState={calibration:value},event:()=>({preventDefault(){},stopPropagation(){}})};
+}
+test('active exact calibration retains its stale session card without connection authority',()=>{const f=fixture(),r=f.rows();assert.equal(r.length,1);assert.equal(r[0].serial,SN);assert.equal(r[0].stale,true);assert.equal(r[0].identity_verified,false);assert.equal(r[0].selectable,false);assert.equal(f.c.usable(r[0]),false);});
+test('a missing inventory row is projected from the exact run without a claimed physical side or fresh identity',()=>{const f=fixture({devices:[]}),r=f.rows()[0];assert.equal(r.serial,SN);assert.equal(r.kind,'glove');assert.equal(r.side,null);assert.equal(r.last_seen,null);assert.equal(r.stale,true);assert.equal(r.in_use,true);assert.equal(r.selectable,false);assert.equal(r.identity_verified,false);});
+test('cleanup-unconfirmed ownership remains visible but confirmed completion retires all session-only history',()=>{const f=fixture({calibration:{run:run({running:false,cleanup_required:true})}});assert.equal(f.rows().length,1);f.state({run:run({running:false,cleanup_required:false,cleanup_confirmed:true,status:'completed'})});assert.equal(f.rows().length,0);});
+test('unrelated stale in-use entries and malformed run identities never become owned cards',()=>{for(const calibration of [{run:run({id:[ID]})},{run:run({id:'old'})},{run:run({serial:''})},{run:{running:true,serial:SN}},{run:run({running:false})}])assert.equal(fixture({calibration}).rows().length,0);const f=fixture({devices:[oldRow(),oldRow(OTHER)]});assert.deepEqual(f.rows().map(r=>r.serial),[SN]);});
+test('offline removes session projections and a new empty service does not revive them',()=>{const f=fixture({online:false});assert.equal(f.rows().length,0);f.c.online=true;f.state({});assert.equal(f.rows().length,0);});
+test('a fresh physical discovery keeps its reported side but remains nonconnectable during calibration',()=>{const f=fixture({devices:[{...oldRow(),stale:false,last_seen:Date.now()/1000,side:'right',side_source:'device',identity_verified:true,selectable:true}]});const r=f.rows()[0];assert.equal(r.side,'right');assert.equal(r.side_source,'device');assert.equal(r.selectable,false);assert.equal(f.c.usable(r),false);});
+test('View calibration only navigates the matching current run and cannot start or release anything',()=>{const f=fixture();f.c.open(SN,f.event());assert.deepEqual(f.calls,['calibration']);f.state({run:run({serial:OTHER})});f.c.open(SN,f.event());assert.equal(f.calls.length,1);f.c.online=false;f.c.open(OTHER,f.event());assert.equal(f.calls.length,1);});

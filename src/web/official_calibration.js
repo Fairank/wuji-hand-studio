@@ -11,6 +11,21 @@
   return run.step_total===6&&Number.isInteger(run.step)&&run.step>=0&&run.step<6?(language==='en'?'Step ':'步骤 ')+(run.step+1)+' / 6':null;
  }
  function progress(value){return typeof value==='number'&&Number.isFinite(value)&&value>=0&&value<=1?value:null;}
+ const errorText=value=>text(typeof value==='object'&&value?value.message:value,800);
+ function metricHints(checks,en){
+  if(!Array.isArray(checks?.metrics))return [];
+  const finite=value=>typeof value==='number'&&Number.isFinite(value),t=(zh,eng)=>en?eng:zh;
+  return checks.metrics.slice(0,64).flatMap(metric=>{
+   if(!metric||!finite(metric.value))return [];
+   const upper=finite(metric.max),lower=finite(metric.min),outside=upper&&metric.value>metric.max||lower&&metric.value<metric.min;
+   if(!outside&&(!finite(metric.error)||Math.abs(metric.error)<=.0001))return [];
+   const scale=metric.unit==='m'?1000:1,unit=metric.unit==='m'?'mm':text(metric.unit,20),format=value=>String(Number((value*scale).toFixed(metric.unit==='m'?1:3)))+(unit?' '+unit:'');
+   const label=metric.label==='Fingertip distance'?t('指尖距离','Fingertip distance'):text(metric.label,80)||t('官方指标','Official metric');
+   const bounds=[lower?'≥ '+format(metric.min):'',upper?'≤ '+format(metric.max):''].filter(Boolean).join(', ');
+   const hint=metric.hint==='move the two fingertips closer'?t('请让两个指尖更靠近。','Move the two fingertips closer.'):text(metric.hint,180);
+   return [label+'：'+format(metric.value)+(bounds?' ('+bounds+')':'')+(hint?' · '+hint:'')];
+  }).slice(0,8);
+ }
  function mount(host,{language=()=>window.WujiLocale?.lang||'zh',onRestore,scope=()=>null}={}){
   host.classList.add('oc-run');host.setAttribute('aria-labelledby','oc-title');
   host.innerHTML='<div class="oc-heading"><h4 id="oc-title"></h4><span id="oc-state"></span></div><div class="oc-instruction"><dl class="oc-step"><dt id="oc-step-label"></dt><dd id="hub-calib-step"></dd><span id="oc-step-count"></span></dl><p id="hub-calib-status" role="status" aria-live="polite"></p><div class="oc-progress-row"><span id="oc-progress-label"></span><progress id="oc-progress" max="1" aria-labelledby="oc-progress-label"></progress><span id="oc-progress-text"></span></div><dl class="oc-feedback"><div><dt id="oc-stability-label"></dt><dd id="oc-stability"></dd></div><div><dt id="oc-constraints-label"></dt><dd id="oc-constraints"></dd></div><div id="oc-hold-row"><dt id="oc-hold-label"></dt><dd id="oc-hold"></dd></div></dl></div><div class="oc-result" hidden><strong id="oc-result-label"></strong><p id="oc-result-user"></p></div><details class="oc-details"><summary id="oc-details-label"></summary><div id="oc-backup" class="oc-backup" hidden><span id="oc-backup-label"></span><a id="oc-backup-save"></a><button id="oc-backup-restore" type="button"></button><p id="oc-backup-note"></p></div><div id="oc-result-meta" hidden><p id="oc-result-location"></p><p id="oc-result-note"></p></div><dl class="oc-more-feedback"><div id="oc-frames-row"><dt id="oc-frames-label"></dt><dd id="oc-frames"></dd></div></dl><pre id="oc-details"></pre></details>';
@@ -53,7 +68,8 @@
    data=next||{};context=options;const run=data.run||{},en=language()==='en',t=(zh,eng)=>en?eng:zh,fresh=context.fresh===true;
    const restoring=run.source==='official_user_import_tty'&&run.interface==='restore',restoreVerified=restoring&&run.running===false&&run.cleanup_confirmed===true&&run.exit_code===0&&run.status==='restore_verified'&&run.restore_verified===true;
    const native=restoring||run.source==='official_tty'||data.human_tty===true&&!data.guided_native,guided=data.guided_native===true&&!native;host.dataset.source=native?'official_tty':'official_jsonl';host.dataset.humanTty=String(native);host.dataset.guided=String(guided);host.dataset.previous=String(context.previous===true);terminal?.render(restoring?{...run,source:'official_tty'}:run,{fresh});
-   const cleanup=data.cleanup_required===true,done=!cleanup&&!native&&completed(run),error=text(context.error)||text(run.error),status=typeof run.status==='string'?run.status:'idle';host.dataset.cleanupRequired=String(cleanup);
+   const eventError=run.event?.schema_version===2&&run.event?.calibration==='hand_model'&&(run.event.event==='error'||run.event.type==='error')?run.event.error:null;
+   const cleanup=data.cleanup_required===true,done=!cleanup&&!native&&completed(run),error=errorText(context.error)||errorText(eventError)||errorText(run.error),status=typeof run.status==='string'?run.status:'idle';host.dataset.cleanupRequired=String(cleanup);
    let label=t('尚未开始','Not started'),message=context.notice||t('选择用户和手套，再开始标定。','Select a user and glove, then start calibration.'),tone='idle';
    if(cleanup){label=t('待结束核对','Session end unverified');message=[text(data.cleanup_error)||t('上次会话尚未完整退出，请结束并核对。','The previous session has not fully exited. End and verify it.'),error].filter((value,index,all)=>value&&all.indexOf(value)===index).join(' · ');tone='unknown';}
    else if(!fresh){label=t('状态未核对','Status unverified');message=error||t('无法读取当前状态。上次事件仍保留，刷新后再核对。','Current status is unavailable. Previous events remain; refresh to verify.');tone='unknown';}
@@ -74,6 +90,12 @@
    if(guided&&fresh&&!error&&tone==='running'&&run.running===true&&run.status!=='starting'&&run.status!=='solving'&&run.status!=='cancelling'){
     const hints={waiting_movement:['先放松张开手掌，再做这个动作。','Relax and open your palm, then make this pose.'],waiting_stable:['保持这个动作，手掌尽量平稳。','Hold this pose and keep your hand steady.'],collecting:['保持不动，正在采集。','Keep holding still. Capturing this pose.'],done:['这个动作已采集，等待下一步。','Pose captured. Wait for the next step.']};if(hints[run.phase])message=t(...hints[run.phase]);
     if(run.phase==='done'&&run.step_total===6&&run.step===5)message=t('六个动作已采集，等待官方生成并保存手型。','All six poses captured. Wait for the official model and save result.');
+    else if(run.checks?.variance_ok===true&&run.checks?.constraints_ok===false)message=t('动作已稳定，请按下方官方指标调整动作。','The pose is stable. Adjust it using the official measurements below.');
+   }
+   if(guided&&fresh&&tone==='error'&&!context.error){
+    const timeout=/Pose '([a-z0-9_]+)' timed out after ([0-9]+(?:\.[0-9]+)?)s/.exec(error);
+    if(timeout)message=t('“'+(names[timeout[1]]?.[0]||timeout[1])+'”在 '+timeout[2]+' 秒内未满足官方采集条件。请调整动作后重新开始。','“'+(names[timeout[1]]?.[1]||timeout[1])+'” did not meet the official capture conditions within '+timeout[2]+' seconds. Adjust the pose, then start again.');
+    const metrics=metricHints(run.checks,en);if(metrics.length)message+=' '+t('最后一次官方检查：','Last official check: ')+metrics.join(' ');
    }
    const view=cleanup||!fresh?'unverified':tone==='error'?'error':done?'completed':native&&run.id?'terminal':tone==='unknown'?'unverified':run.running===true?status==='starting'?'preparing':status==='solving'?'solving':status==='cancelling'?'cancelling':'collecting':status==='cancelled'||status==='stopped'?'cancelled':'idle';
    host.dataset.view=view;host.dataset.phase=text(run.phase,80);host.dataset.runId=text(run.id,100);
@@ -97,8 +119,7 @@
    const seconds=value=>typeof value==='number'&&Number.isFinite(value)&&value>=0?value:null,held=seconds(timing.hold_elapsed),target=seconds(timing.hold_target),frames=seconds(timing.frames_collected);
    $('oc-hold-row').hidden=held===null;write('oc-hold-label',t('官方保持时间','Official hold time'));write('oc-hold',held===null?'—':held.toFixed(1)+(target===null?'':' / '+target.toFixed(1))+' s');
    $('oc-frames-row').hidden=frames===null;write('oc-frames-label',t('已采集帧','Captured frames'));write('oc-frames',frames===null?'—':String(frames));
-   const groups=new Map();if(guided&&run.running===true&&Array.isArray(checks.metrics))for(const metric of checks.metrics){const hint=text(metric?.hint,180);if(!hint||typeof metric.error!=='number'||!Number.isFinite(metric.error)||Math.abs(metric.error)*(metric.unit==='m'?1000:1)<=.0001)continue;const group=[text(metric.finger,40),text(metric.finger_b,40)].filter(Boolean).join('-');if(!groups.has(group))groups.set(group,[]);groups.get(group).push(hint);}
-   const hints=[...groups.keys()].sort().flatMap(key=>groups.get(key)).slice(0,8);if(guided&&run.running===true&&checks.constraints_ok===false&&!hints.length)hints.push(t('请微调当前动作，直到官方约束满足。','Adjust the current pose until the official constraints are satisfied.'));const nextHints=JSON.stringify(hints);if(hintsKey!==nextHints){hintsKey=nextHints;diagnostics.replaceChildren(...hints.map(hint=>{const item=document.createElement('li');item.textContent=hint;return item;}));}diagnostics.hidden=!hints.length;
+   const hints=guided&&fresh&&run.running===true?metricHints(checks,en):[];if(guided&&fresh&&run.running===true&&checks.constraints_ok===false&&!hints.length)hints.push(t('请微调当前动作，直到官方约束满足。','Adjust the current pose until the official constraints are satisfied.'));const nextHints=JSON.stringify(hints);if(hintsKey!==nextHints){hintsKey=nextHints;diagnostics.replaceChildren(...hints.map(hint=>{const item=document.createElement('li');item.textContent=hint;return item;}));}diagnostics.hidden=!hints.length;
    host.querySelector('.oc-feedback').hidden=!(hasRun&&view==='collecting');
    const result=officialResult(run.result)?run.result:officialResult(run.event)?run.event:null,payload=result?.result&&typeof result.result==='object'?result.result:{};
    host.querySelector('.oc-result').hidden=view!=='completed';$('oc-result-meta').hidden=view!=='completed';write('oc-result-label',t('手型已保存','Hand model saved'));

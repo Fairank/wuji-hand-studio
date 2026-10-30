@@ -20,7 +20,6 @@ PAIR_COUNT=290
 MIN_CLEARANCE_M=.0001
 PATH_CLEARANCE_M=.00002
 DISTANCE_CUTOFF_M=.002
-MAX_FRAME_ANGLE_RAD=.12
 MAX_ITERATIONS=12
 MAX_FRAME_MS=18.
 MAX_DISPLAY_LIMIT_CLAMP_RAD=.001
@@ -326,7 +325,11 @@ class NativeGeometryEngine:
                 raw_limit_excess_rad=raw_excess,display_target_clamped=bool(raw_excess))
         path=[current.copy()]
         if distances.min()<MIN_CLEARANCE_M:raise ValueError('Previous geometry display is no longer verified')
-        goal=current+np.clip(target-current,-MAX_FRAME_ANGLE_RAD,MAX_FRAME_ANGLE_RAD)
+        # The verified SDK target is the goal, without a display-frame angle
+        # ramp. Configuration-independent point-motion bounds below still
+        # certify every accepted path; insufficient clearance or time keeps
+        # the previous verified prefix instead of bypassing geometry checks.
+        goal=target
         for _ in range(min(MAX_ITERATIONS,max(1,int(substeps)))):
             if self.clock()>=deadline:limited=True;break
             delta=goal-current

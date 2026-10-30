@@ -8,9 +8,10 @@ import re
 import sys
 
 PROOF_VERSION=1
-_APIS={'SdkManager':('instance','scan','connect','list_users','current_user','switch_user','preview_user_data','import_user_data'),
+_APIS={'SdkManager':('instance','scan','connect','list_users','current_user','switch_user','preview_user_data','import_user_data','export_user_data'),
        'RetargetSession':('for_hand','step'),'HandModel':('WujiHand','WujiHand2'),
-       'Handedness':('Left','Right'),'WujiGlove':('hand_skeleton','hand_side'),
+       'Handedness':('Left','Right'),'WujiGlove':('hand_skeleton','hand_side','hand_model_path'),
+       'HandModelPathResource':('get','set'),'WujiException':(),
        'WujiHand2':('joint_states','joint_command','joint_diagnostics','enable','disable')}
 
 
@@ -33,7 +34,14 @@ def probe_runtime():
         for owner,members in _APIS.items():
             cls=getattr(sdk,owner,None)
             if cls is None:missing.append(owner);continue
-            missing.extend(owner+'.'+name for name in members if not hasattr(cls,name))
+            if owner=='WujiException':
+                if not isinstance(cls,type) or not issubclass(cls,Exception):missing.append(owner)
+                continue
+            # Read class descriptors only; probing must never construct a
+            # manager, model resource or retargeter. Enum values are data;
+            # every other required member is an actual callable operation.
+            missing.extend(owner+'.'+name for name in members if not hasattr(cls,name)
+                or owner not in ('HandModel','Handedness') and not callable(getattr(cls,name)))
         filename=Path(sdk.__file__).resolve()
         if not filename.is_file():raise ValueError('SDK module has no importable file')
         if filename.parent!=Path(distribution.locate_file('wuji_sdk')).resolve():

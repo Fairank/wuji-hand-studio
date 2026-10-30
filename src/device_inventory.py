@@ -246,7 +246,8 @@ def build_inventory(viz=None, controller=None, glove=None, *, now=None, ttl=30):
             'sdk_identity', None if controller.get('stale', True) else now, owned=True)
     glove_serial = glove.get('glove_serial')
     glove_profile = glove.get('profile')
-    if glove.get('busy') is True and glove_serial and isinstance(glove_profile, str) and re.fullmatch(r'hand[12]_(left|right)', glove_profile):
+    if (glove.get('busy') is True and glove.get('connection')=='receiving' and glove_serial
+            and isinstance(glove_profile, str) and re.fullmatch(r'hand[12]_(left|right)', glove_profile)):
         add([dict(serial=glove_serial, device_type='wuji_glove', handedness=glove_profile.rsplit('_', 1)[1], identity_verified=True)],
             'glove_session_identity', now if (glove.get('stream') or {}).get('fresh') is True else None, owned=True)
     feedback=glove.get('feedback') or {}
@@ -267,12 +268,28 @@ def build_inventory(viz=None, controller=None, glove=None, *, now=None, ttl=30):
         for row in observations:
             if row['serial'] == active_serial:
                 row['in_use'] = True
+    reported=viz.get('reported_device') or {}
+    reported_serial=reported.get('sn') or reported.get('serial')
+    if (viz.get('active') is True and viz.get('busy') is False and viz.get('phase')=='running'
+            and viz.get('backend')=='windows_native' and isinstance(viz.get('session_id'),str)
+            and re.fullmatch(r'[0-9a-f]{32}',viz['session_id'])
+            and isinstance(reported_serial,str) and _SERIAL.fullmatch(reported_serial)
+            and active_serial in (None,reported_serial)):
+        # Preserve only the original process's reported glove identity. Its
+        # selected row/model and UI mapping side are not device readback.
+        row,reason=_one(reported,'official_viewer_session',None,now,ttl)
+        if reason is None and row['kind']=='glove':
+            row['in_use']=True;observations.append(row)
     calibration=controller.get('calibration') or {}
     calibration_serial=calibration.get('serial')
-    if calibration.get('running') is True and isinstance(calibration_serial,str) and _SERIAL.fullmatch(calibration_serial):
+    if ((calibration.get('running') is True or calibration.get('cleanup_required') is True)
+            and isinstance(calibration.get('id'),str) and re.fullmatch(r'[0-9a-f]{32}',calibration['id'])
+            and isinstance(calibration_serial,str) and _SERIAL.fullmatch(calibration_serial)):
         # An official task owns this exact glove; it does not expose SDK
         # feedback freshness. Do not renew an advertisement or claim receiving.
-        add([dict(serial=calibration_serial,device_type='wuji_glove',side=calibration.get('side'))],
+        # The run's side may still be the user's selection during startup; it
+        # must not conflict with, or impersonate, physical-side readback.
+        add([dict(serial=calibration_serial,device_type='wuji_glove')],
             'official_calibration_session',None,owned=True)
     devices, merged_conflicts = _merge(observations)
     conflicts.extend(merged_conflicts)

@@ -96,6 +96,7 @@ class RuntimeProofTests(unittest.TestCase):
             site=Path(folder);sdk=site/'wuji_sdk';sdk.mkdir();(sdk/'__init__.py').write_bytes(b'# synthetic')
             (sdk/'native.so').write_bytes(b'synthetic native file')
             manager=Mock();classes={name:N(**{member:Mock() for member in members}) for name,members in runtime._APIS.items()}
+            classes['WujiException']=type('SyntheticSDKError',(Exception,),{})
             classes['SdkManager'].instance=manager
             module=N(__file__=str(sdk/'__init__.py'),**classes)
             dist=N(version=VERSION,files=[PurePosixPath('wuji_sdk/native.so')],locate_file=lambda p:site/str(p))

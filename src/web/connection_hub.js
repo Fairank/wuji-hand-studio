@@ -249,6 +249,7 @@
   else if(!calibrationFresh)reason=refreshError||t('暂时无法读取标定状态，请重试。','Calibration status is temporarily unavailable. Retry.');
   else if(running)reason='';
   else if(c.available!==true||c.calibration_supported!==true)reason=c.error||t('标定组件暂不可用，请在设置中检查更新。','Calibration is unavailable. Check updates in Settings.');
+  else if(selection?.conflict===true)reason=t('设备身份报告不一致，请重新核对。','Device identity reports conflict. Verify the device again.');
   else if(!serial)reason=t('请先选择本次标定的手套。','Choose the glove to calibrate.');
   else if(!connected&&!sdkOwned&&(!gloveFresh({...device,observed_at:device.observed_at||v.scanned_at},c,true)||device.selectable===false||device.conflict===true))reason=t('所选手套信息已过期，请重新查找设备。','The selected glove information is stale. Find devices again.');
   else if(!/glove/i.test([device.model,device.type,device.device_type,device.kind].join(' '))&&!/^WG/i.test(serial))reason=t('当前接入的是灵巧手，请选择手套进行手型标定。','The connected device is a hand. Choose a glove for hand-model calibration.');

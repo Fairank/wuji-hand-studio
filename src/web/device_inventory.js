@@ -29,7 +29,17 @@
  const getTime=value=>{if(typeof value==='number'&&Number.isFinite(value))return value<1e12?value*1000:value;if(typeof value==='string'){const parsed=Date.parse(value);return Number.isFinite(parsed)?parsed:0;}return 0;};
  const sessionOwner=()=>window.WujiDeviceUse?.current();
  const isOwned=row=>{const owner=sessionOwner();return !!owner&&owner.serial===(row?.sn||row?.serial)&&owner.kind===row?.kind;};
- const rows=()=>{const current=Array.isArray(inventory?.devices)?inventory.devices.filter(d=>d&&typeof(d.sn||d.serial)==='string'):[],observed=online&&inventory?.scanning===true&&!inventory.error&&!localError&&!current.length?previousDisplayRows:current;const visible=observed.filter(fresh),owner=sessionOwner();if(online&&owner&&!visible.some(row=>(row.sn||row.serial)===owner.serial))visible.push({sn:owner.serial,serial:owner.serial,kind:owner.kind,selectable:true,in_use:true,session_verified:true,...owner.kind==='hand'&&/^hand[12]_(left|right)$/.test(owner.profile||'')?{generation:owner.profile.split('_')[0],side:owner.profile.split('_')[1]}:{}});return visible;};
+ function calibrationOwner(){
+  const calibration=consoleState?.calibration||{},run=calibration.run||calibration;
+  return online&&typeof run.id==='string'&&/^[a-f0-9]{32}$/.test(run.id)&&typeof run.serial==='string'&&!!run.serial&&(run.running===true||run.cleanup_required===true||calibration.cleanup_required===true)?run:null;
+ }
+ const rows=()=>{
+  const current=Array.isArray(inventory?.devices)?inventory.devices.filter(d=>d&&typeof(d.sn||d.serial)==='string'):[],observed=online&&inventory?.scanning===true&&!inventory.error&&!localError&&!current.length?previousDisplayRows:current,calibration=calibrationOwner();
+  const visible=observed.filter(row=>fresh(row)||calibration&&(row.sn||row.serial)===calibration.serial&&row.in_use===true),owner=sessionOwner();
+  if(online&&owner&&!visible.some(row=>(row.sn||row.serial)===owner.serial))visible.push({sn:owner.serial,serial:owner.serial,kind:owner.kind,selectable:true,in_use:true,session_verified:true,...owner.kind==='hand'&&/^hand[12]_(left|right)$/.test(owner.profile||'')?{generation:owner.profile.split('_')[0],side:owner.profile.split('_')[1]}:{}});
+  if(calibration){const index=visible.findIndex(row=>(row.sn||row.serial)===calibration.serial);if(index>=0)visible[index]={...visible[index],selectable:false,in_use:true};else visible.push({sn:calibration.serial,serial:calibration.serial,kind:'glove',side:null,last_seen:null,stale:true,in_use:true,selectable:false,identity_verified:false,source:'official_calibration_session'});}
+  return visible;
+ };
  const sn=row=>row?.sn||row?.serial||'';
  const fresh=row=>{const seen=getTime(row?.last_seen),ttl=Number(inventory?.ttl_s),age=Date.now()-seen;return online&&row?.stale!==true&&seen>0&&age>=0&&age<((Number.isFinite(ttl)&&ttl>0?ttl:30)*1000);};
  const usable=row=>!scanning&&inventory?.scanning!==true&&!!row&&['hand','glove'].includes(row.kind)&&row.selectable===true&&(fresh(row)||isOwned(row));
@@ -41,8 +51,8 @@
  function deviceName(row){const kind=row.kind==='glove'?'Wuji Glove':row.kind==='hand'?'Wuji Hand':t('待识别设备','Unidentified device');const generation=row.generation==='hand2'?' 2':row.generation==='hand1'?' 1':row.generation==='glove1'?' 1':'';return kind+generation;}
  function brief(row){return deviceName(row)+' · '+sideLabel(row);}
  function ownerLabel(row){
-  if(!online||!row)return '';const owner=sessionOwner();if(owner?.serial===sn(row))return owner.purpose==='teleoperation'?t('遥操作','Teleoperation'):owner.purpose==='cli_view'?'CLI':t('灵巧手反馈','Hand feedback');const serial=sn(row),state=consoleState||{},calibration=state.calibration||{},run=calibration.run||calibration;
-  if(serial&&run.serial===serial&&typeof run.id==='string'&&run.id&&(run.running===true||run.cleanup_required===true||calibration.cleanup_required===true))return run.running===true?run.status==='starting'?t('标定准备中','Preparing calibration'):run.status==='solving'?t('正在生成手型','Creating model'):run.status==='cancelling'?t('正在结束标定','Ending calibration'):t('标定中','Calibrating'):t('会话待核对','Session unverified');
+  if(!online||!row)return '';const owner=sessionOwner();if(owner?.serial===sn(row))return owner.purpose==='teleoperation'?t('遥操作','Teleoperation'):owner.purpose==='cli_view'?'CLI':t('灵巧手反馈','Hand feedback');const serial=sn(row),state=consoleState||{},run=calibrationOwner();
+  if(serial&&run?.serial===serial)return run.running===true?run.status==='starting'?t('标定准备中','Preparing calibration'):run.status==='solving'?t('正在生成手型','Creating model'):run.status==='cancelling'?t('正在结束标定','Ending calibration'):t('标定中','Calibrating'):t('待结束确认','Awaiting session end');
   const viewer=state.official_viz||{},device=viewer.reported_device||viewer.device;if(serial&&sn(device)===serial&&viewer.active===true&&viewer.phase==='running'&&viewer.session_id)return t('画面会话','Viewer session');
   return row.in_use===true?t('会话占用','Session in use'):'';
  }
@@ -58,11 +68,16 @@
   }catch(error){consumerError=error.message||t('操作未完成','The operation did not complete');return false;}
   finally{using=false;pendingMode='';render();}
  }
+ function openCalibrationSession(serial,event){
+  event?.preventDefault();event?.stopPropagation();const owner=calibrationOwner();if(!owner||owner.serial!==serial)return;
+  window.WujiConnectionHub?.show('calibration');
+ }
  function createCard(serial){
   const card=make('label','di-device'),radio=make('input','',card);radio.type='radio';radio.name='inventory-device';radio.value=serial;radio.onchange=()=>select(serial);
   const icon=make('span','di-device-icon',card);icon.setAttribute('aria-hidden','true');
   const copy=make('span','di-device-copy',card),name=make('strong','',copy),meta=make('span','di-device-meta',copy),identity=make('span','di-device-serial',copy),status=make('span','di-device-state',card);
-  const value={card,radio,icon,name,meta,identity,status};cards.set(serial,value);return value;
+  const calibrationLink=make('a','di-calibration-link',copy);calibrationLink.href='#connection';calibrationLink.hidden=true;calibrationLink.onclick=event=>openCalibrationSession(serial,event);
+  const value={card,radio,icon,name,meta,identity,status,calibrationLink};cards.set(serial,value);return value;
  }
  // Ownership and fresh connection evidence are different. Stale feedback
  // keeps its owner; it must never silently resume discovery as a disconnect.
@@ -123,11 +138,12 @@
   setText(notice,error||blocked||(!online?t('正在读取设备状态…','Reading device status…'):busy?t('只读取设备身份，不会启动可视化、标定或灵巧手动作。','Reading device identity only. No Viewer, calibration or hand motion is started.'):''));notice.hidden=!notice.textContent;notice.dataset.error=String(!!error);
   const shown=all.filter(d=>filter==='all'||d.kind===filter);list.setAttribute('aria-label',t('已发现设备，按编号选择','Discovered devices; select by serial number'));
   const existing=new Set();for(let index=0;index<shown.length;index++){
-   const item=shown[index],serial=sn(item);existing.add(serial);const itemCard=cards.get(serial)||createCard(serial),{card,radio,icon,name,meta,identity,status}=itemCard;
+   const item=shown[index],serial=sn(item);existing.add(serial);const itemCard=cards.get(serial)||createCard(serial),{card,radio,icon,name,meta,identity,status,calibrationLink}=itemCard;
    radio.disabled=using||globalBusy||!usable(item);radio.checked=activeSerial===serial;card.dataset.selected=String(radio.checked);card.dataset.available=String(usable(item));card.dataset.kind=item.kind||'unknown';
    icon.hidden=true;icon.replaceChildren();icon.dataset.kind=item.kind||'unknown';
    const owner=ownerLabel(item);setText(name,deviceName(item));setText(meta,sideLabel(item)+(item.side_source==='serial_hint'?t(' · 身份提示，待设备核对',' · Identity hint; verify on connection'):item.side_source==='device'?t(' · 设备报告',' · Device reported'):'')+(owner&&!fresh(item)?t(' · 发现记录已过期',' · Discovery record expired'):''));setText(identity,serial);
    setText(status,owner||(busy?t('正在核对','Checking'):!fresh(item)?t('已过期','Stale'):item.kind==='unknown'?t('待识别','Unidentified'):item.selectable!==true?t('暂不可用','Unavailable'):t('已发现','Discovered')));status.dataset.state=owner||busy?'busy':!fresh(item)||item.kind==='unknown'?'muted':'ready';
+   const calibration=calibrationOwner();calibrationLink.hidden=calibration?.serial!==serial;setText(calibrationLink,t('查看标定','View calibration'));
    if(list.children[index]!==card)list.insertBefore(card,list.children[index]||null);
   }
   for(const [serial,value] of cards)if(!existing.has(serial)){value.card.remove();cards.delete(serial);}

@@ -49,6 +49,21 @@
   }
   function renderFrameStatus(){root.dataset.rendererReady=String(frameReady);setText('ov-frame-status',(viewMode==='offline'?frameReady:frameLoaded)?(viewMode==='offline'?t('查看器已打开 · 未接入设备数据，不用于标定','Viewer open · No device data; not a calibration session'):t('页面已载入；CLI 未报告数据新鲜度','Page loaded; data freshness is not reported by the CLI')):t('正在载入原版画面…','Loading the original Viewer…'));$('ov-frame-status').hidden=task==='calibration'||!frame||root.dataset.liveOwned==='true'&&frameLoaded&&!viewerError;}
   function renderLogs(){if(logs.open){const detail=[$('ov-version').textContent,viewMode==='device'&&frameLoaded?t('页面已载入；CLI 未报告数据新鲜度。','Page loaded; data freshness is not reported by the CLI.'):null,...(Array.isArray(state?.logs)?state.logs:[])];setText('ov-logs',detail.filter(line=>typeof line==='string'&&line).slice(-82).map(line=>line.slice(0,2000)).join('\n')||t('暂无日志','No log messages'));}}
+  function devicesForTask(){
+   const s=state||{},devices=(Array.isArray(s.devices)?s.devices:[]).filter(d=>d&&typeof(d.sn||d.serial)==='string'&&(d.sn||d.serial)).map(d=>({...d,sn:d.sn||d.serial}));
+   const side=value=>{const v=typeof value==='string'?value.toLowerCase().replace(/^handedness\./,''):'';return ['left','right'].includes(v)?v:'';};
+   const mergeSide=(index,row)=>{const prior=devices[index],a=side(prior.side),b=side(prior.handedness),reported=side(row.handedness)||side(row.side);if(a&&b&&a!==b||reported&&(a&&a!==reported||b&&b!==reported)){devices[index]={...prior,side_conflict:true};return;}if(reported)devices[index]={...prior,side:a||reported,handedness:b||reported,side_source:prior.side_source||row.side_source||'device'};};
+   const owned=s.reported_device||s.device,ownedSN=s.active===true&&s.phase==='running'&&typeof(owned?.sn||owned?.serial)==='string'?(owned.sn||owned.serial):'';
+   if(ownedSN){const index=devices.findIndex(d=>d.sn===ownedSN);if(index<0)devices.push({...owned,sn:ownedSN});else if(fresh&&/^[a-f0-9]{32}$/.test(s.session_id||''))mergeSide(index,owned);}
+   const sdk=consoleState?.glove||{},sdkSN=sdk.glove_serial,profile=consoleState?.device_profile?.id;
+   if(sdk.busy===true&&sdk.connection==='receiving'&&typeof sdkSN==='string'&&/^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/.test(sdkSN)&&Number.isSafeInteger(sdk.session_id)&&sdk.session_id>0&&typeof sdk.user?.user_id==='string'&&!!sdk.user.user_id&&sdk.profile===profile&&/^hand[12]_(left|right)$/.test(profile||'')){
+    const row=window.WujiDeviceInventory?.snapshot()?.devices?.find(d=>(d.sn||d.serial)===sdkSN);let index=devices.findIndex(d=>d.sn===sdkSN);
+    if(index<0){index=devices.length;devices.push({sn:sdkSN,kind:'glove',device_type:'wuji_glove',model:row?.model||'Wuji Glove'});}
+    // Session identity survives a stale pose frame; no freshness flag is promoted.
+    if(row?.kind==='glove'&&row.identity_verified===true&&row.identity_source==='glove_session_identity'&&row.conflict!==true){const reported=side(row.handedness)||side(row.side);if(reported&&reported!==profile.split('_')[1])devices[index]={...devices[index],side_conflict:true};else mergeSide(index,row);}
+   }
+   return devices;
+  }
   function render(){
    if(destroyed)return;const s=state||{},busy=!!pending||!!s.busy,active=s.active===true,phase=s.phase,scanCleanup=s.scan_cleanup_required===true&&!active;
    setText('ov-title',t('官方 CLI','Official CLI'));setText('ov-description',t('选好设备，在同一工作区查看或标定。','Choose a device to view or calibrate in this workspace.'));
@@ -61,21 +76,9 @@
    const phases={idle:['尚未打开','Not open'],starting:['CLI 正在启动','CLI starting'],running:['CLI 运行中','CLI running'],stopping:['CLI 正在停止','CLI stopping'],error:['CLI 需要处理','CLI needs attention'],exited:['CLI 已退出','CLI exited']};
    setText('ov-state',blank?(offline?.available?t('无设备查看器','Viewer only'):t('正在准备界面','Preparing Viewer')):!fresh?t('状态未核对','Status unverified'):s.scanning?t('正在查找设备','Finding devices'):phases[phase]?t(...phases[phase]):t('状态未知','Status unknown'));root.dataset.phase=fresh?text(phase,40):'unknown';
    setText('ov-device-label',t('本次使用的设备','Device for this task'));setText('ov-scan',s.scanning?t('正在查找…','Finding…'):previewOnly(consoleState)?t('关闭手套预览并查找','Close glove preview and find'):t('查找设备','Find devices'));setText('ov-start',pending==='official_viz_start'?t('正在打开…','Opening…'):t('查看画面','View device'));setText('ov-calibrate',t('准备标定','Prepare calibration'));setText('ov-stop',pending==='official_viz_stop'?t('正在停止…','Stopping…'):t('停止画面会话','Stop Viewer session'));setText('ov-reload',t('重新载入画面','Reload view'));setFocus(focus);
-   const devices=(Array.isArray(s.devices)?s.devices:[]).filter(d=>d&&typeof (d.sn||d.serial)==='string'&&(d.sn||d.serial)).map(d=>({...d,sn:d.sn||d.serial}));
-   const ownedDevice=s.reported_device||s.device,ownedSN=active&&phase==='running'&&typeof (ownedDevice?.sn||ownedDevice?.serial)==='string'?(ownedDevice.sn||ownedDevice.serial):'';
-   // A mounted task already has a verified owner. Show that existing session
-   // even when its earlier discovery advertisement has expired; never start it.
-   if(ownedSN&&!devices.some(d=>d.sn===ownedSN))devices.push({...ownedDevice,sn:ownedSN});
-   // A live SDK stream is selectable without creating a second connection.
-   // Selection grants no handover permission; calibration rechecks its exact
-   // owner/session and the backend alone releases it on the final Start.
-   const sdk=consoleState?.glove||{},sdkSN=sdk.glove_serial;
-   if(sdk.busy===true&&sdk.connection==='receiving'&&typeof sdkSN==='string'&&/^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/.test(sdkSN)&&Number.isInteger(sdk.session_id)&&typeof sdk.user?.user_id==='string'&&sdk.profile===consoleState?.device_profile?.id&&!devices.some(d=>d.sn===sdkSN)){
-    const row=window.WujiDeviceInventory?.snapshot()?.devices?.find(d=>(d.sn||d.serial)===sdkSN);
-    devices.push({...row,sn:sdkSN,kind:'glove',device_type:'wuji_glove',model:row?.model||'Wuji Glove'});
-   }
+   const devices=devicesForTask(),ownedDevice=s.reported_device||s.device,ownedSN=active&&phase==='running'&&typeof(ownedDevice?.sn||ownedDevice?.serial)==='string'?(ownedDevice.sn||ownedDevice.serial):'';
    const key=JSON.stringify([devices,ownedSN,window.WujiLocale?.lang]);
-   if(key!==optionKey){optionKey=key;const selected=wantedSerial||ownedSN||$('ov-device').value;$('ov-device').replaceChildren(new Option(t('选择设备','Select a device'),''),...devices.map(d=>new Option([text(d.model||d.device_type,100),d.sn,(d.handedness||d.side)==='left'?t('左','Left'):(d.handedness||d.side)==='right'?t('右','Right'):''].filter(Boolean).join(' · '),d.sn)));if(devices.some(d=>d.sn===selected))$('ov-device').value=selected;}
+   if(key!==optionKey){optionKey=key;const selected=wantedSerial||ownedSN||$('ov-device').value;$('ov-device').replaceChildren(new Option(t('选择设备','Select a device'),''),...devices.map(d=>{const option=new Option([text(d.model||d.device_type,100),d.sn,d.side_conflict?t('身份报告冲突','Identity conflict'):(d.handedness||d.side)==='left'?t('左','Left'):(d.handedness||d.side)==='right'?t('右','Right'):''].filter(Boolean).join(' · '),d.sn);option.disabled=d.side_conflict===true;return option;}));if(devices.some(d=>d.sn===selected))$('ov-device').value=selected;}
    // Reduce routine chrome only for the exact, verified session we own.
    // Unknown state, another owner and every reported error keep their context.
    const liveOwned=fresh&&s.supported===true&&calibrationVerified&&!blank&&!calibrating&&active&&phase==='running'&&ownedSN===$('ov-device').value&&!!ownedSN&&/^[a-f0-9]{32}$/.test(s.session_id||'')&&!busy&&!calibrationRunning&&!calibrationBusy&&!s.blocked_reason&&!s.error&&!transportError&&!actionError&&!viewerError;
@@ -156,7 +159,7 @@
   const observer=new MutationObserver(syncVisibility);for(let node=host;node;node=node.parentElement)observer.observe(node,{attributes:true,attributeFilter:['hidden','class','style','data-page','data-hub-tab']});
   const themeObserver=new MutationObserver(onTheme);themeObserver.observe(document.documentElement,{attributes:true,attributeFilter:['data-theme']});
   const sizeObserver=new ResizeObserver(syncVisibility);sizeObserver.observe(host);const timer=setInterval(()=>{syncVisibility();if(visible()||state?.active)refresh();},1000);
-  function selection(){const serial=$('ov-device').value,sdk=consoleState?.glove||{};let device=(Array.isArray(state?.devices)?state.devices:[]).find(d=>(d.sn||d.serial)===serial)||null;if(!device&&sdk.busy===true&&sdk.connection==='receiving'&&sdk.glove_serial===serial&&Number.isInteger(sdk.session_id)&&typeof sdk.user?.user_id==='string'&&sdk.profile===consoleState?.device_profile?.id){const row=window.WujiDeviceInventory?.snapshot()?.devices?.find(d=>(d.sn||d.serial)===serial);device={...row,sn:serial,kind:'glove',device_type:'wuji_glove'};}return {serial,device};}
+  function selection(){const serial=$('ov-device').value,device=devicesForTask().find(d=>d.sn===serial)||null;return device?.side_conflict?{serial:'',device:null,conflict:true}:{serial,device};}
   function selectDevice(serial){wantedSerial=serial||'';optionKey='';render();options.onDeviceChange?.(wantedSerial,selection().device);}
   function setCalibrationState(value){const running=value?.running===true,busy=value?.busy===true,verified=value?.verified===true,meta={ready:value?.ready===true,human:value?.human===true,reason:text(value?.reason),runtime:text(value?.runtime,200),status:text(value?.status,100),terminal:value?.terminal===true,actionLabel:text(value?.actionLabel,80),guided:value?.guided===true};if(running===calibrationRunning&&busy===calibrationBusy&&verified===calibrationVerified&&JSON.stringify(meta)===JSON.stringify(calibrationMeta))return;if(running!==calibrationRunning||busy!==calibrationBusy)readEpoch++;calibrationRunning=running;calibrationBusy=busy;calibrationVerified=verified;calibrationMeta=meta;render();}
   const onSelection=event=>{const serial=event.detail?.device?.sn||event.detail?.device?.serial||'';selectDevice(serial);};
