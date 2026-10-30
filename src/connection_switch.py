@@ -204,10 +204,11 @@ class ConnectionSwitch:
                     and hw.get('active') is False and hw.get('stop_confirmed') is True):return None
         return error
 
-    def _blocked(self,state):
+    def _blocked(self,state,*,_own_transition=False):
         from device_termination import unconfirmed
         from desktop_lifecycle import calibration_cleanup_required
-        if self.state['busy'] or self.catalog['busy']:return '设备任务正在切换 / Device transition is in progress'
+        if (self.state['busy'] and not (_own_transition and self.internal)) or self.catalog['busy']:
+            return '设备任务正在切换 / Device transition is in progress'
         try:current=owner(state)
         except ValueError as error:return str(error)
         # A positively running, exact local owner may be stopped by this
@@ -619,6 +620,25 @@ class ConnectionSwitch:
             target=self._target(command,state,source,pair_target)
             self._check_cancel()
             self.requests.add(request_id)
+            def current_source():
+                current=self.controller.snapshot()
+                if context_digest(current)!=command['expected_owner'] or owner(current)!=source:
+                    raise ValueError('设备归属在读取目标时已改变，请重新选择 / Device owner changed during target lookup; select again')
+                reason=self._blocked(current,_own_transition=True)
+                if reason:raise ValueError(reason)
+                return current
+            current=current_source()
+            if (source and source['mode']=='teleoperation' and target['mode']=='teleoperation'
+                    and all(source.get(k)==target.get(k) for k in ('serial','profile','user_id'))
+                    and ((state.get('glove') or {}).get('stream') or {}).get('fresh') is True
+                    and ((current.get('glove') or {}).get('stream') or {}).get('fresh') is not True):
+                # A directory read may outlast the source frame. Resolve the
+                # existing exact saved hint while that owner is still retained,
+                # then use the normal confirmed-release/reopen transaction.
+                target=self._target(command,current,source,pair_target)
+                self._check_cancel()
+                current=current_source()
+            state=current
             attach=self._can_attach(state,target) if 'hand_serial' in target else False
             same=source and all(source.get(k)==target.get(k) for k in ('mode','serial'))
             if same and target['mode']=='teleoperation':same=(source['profile']==target['profile'] and source['user_id']==target.get('user_id')

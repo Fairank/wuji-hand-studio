@@ -102,25 +102,44 @@ class OfficialCLI:
                 if not (self.thread and self.thread.is_alive()):self.start(check_only=True,automatic=True)
                 with self.lock:self.initial_check_started=True
             self.monitor_stop.clear()
-            self.monitor=threading.Thread(target=self._monitor,name='Official CLI update schedule',daemon=True);self.monitor.start()
+            self.monitor=threading.Thread(target=self._monitor,args=(self.monitor_stop,),name='Official CLI update schedule',daemon=True);self.monitor.start()
         except Exception:
             with self.lock:self.started=False;self.monitor=None
             raise
 
-    def _monitor(self):
-        while not self.monitor_stop.wait(60):
-            if self.closed.is_set():continue
+    def _resume_monitor(self):
+        """Only an explicit successful operation may resume a stopped schedule."""
+        with self.lock:
+            if (not self.started or self.closed.is_set() or not self.monitor_stop.is_set()
+                    or self.state.get('recovery_required') is True or self._maintenance_marker is not None
+                    or self.state['checking'] or self.state['preparing']):return False
+            previous,previous_stop=self.monitor,self.monitor_stop
+            stop=threading.Event()
+            monitor=threading.Thread(target=self._monitor,args=(stop,),name='Official CLI update schedule',daemon=True)
+            self.monitor_stop,self.monitor=stop,monitor
+            try:monitor.start()
+            except Exception:
+                stop.set();self.monitor_stop,self.monitor=previous_stop,previous
+                logging.getLogger(__name__).exception('Official CLI schedule could not resume')
+                return False
+            return True
+
+    def _monitor(self,stop=None):
+        stop=self.monitor_stop if stop is None else stop
+        while not stop.wait(60):
+            if self.closed.is_set() or stop.is_set():continue
             from native_cli_maintenance import preference
             if not preference(self):continue
             from bridge_config import load_config
             from official_device_discovery import use_native
             if not use_native(load_config()):continue
             with self.lock:
+                if stop is not self.monitor_stop or stop.is_set() or self.closed.is_set():continue
                 due=self.state.get('auto_update_pending') or time.time()-(self.state.get('checked_at') or 0)>=900
                 busy=bool(self.thread and self.thread.is_alive()) or self.state.get('recovery_required') is True
-            if due and not busy:
-                try:self.start(check_only=False,automatic=True)
-                except ValueError:pass
+                if due and not busy:
+                    try:self.start(check_only=False,automatic=True)
+                    except ValueError:pass
 
     def start(self,check_only=False,automatic=False):
         with self.lock:
@@ -181,6 +200,8 @@ class OfficialCLI:
             with self.lock:recovering=self.state.get('recovery_required') is True
             if self.closed.is_set() and not recovering:self._set(phase='cancelled',error=None)
             self._set(checking=False,preparing=False)
+            with self.lock:resume=not automatic and self.state['phase'] in ('checked','ready') and not self.state.get('error')
+            if resume:self._resume_monitor()
 
     def cancel_and_wait(self,timeout=22):
         self.closed.set()
@@ -254,6 +275,7 @@ class OfficialCLI:
             from native_cli_maintenance import rollback
             result=rollback(self)
             self.closed.clear()
+            self._resume_monitor()
             return result
         with self.lock:
             if self.thread and self.thread.is_alive():raise ValueError('Wait for the CLI update to finish')
@@ -264,6 +286,7 @@ class OfficialCLI:
                 raise ValueError('CLI rollback target changed; check the current version before retrying')
             self._set(phase='ready',error=None)
             self.closed.clear()
+            self._resume_monitor()
             return self.snapshot()
         with gate(self.folder):
             saved=selected(self.folder);previous=saved.get('previous')
@@ -275,4 +298,5 @@ class OfficialCLI:
                 switch_applied(self,previous)
             finally:release_switch(self,token)
         self.closed.clear()
+        self._resume_monitor()
         return self.snapshot()

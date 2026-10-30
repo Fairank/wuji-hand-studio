@@ -50,6 +50,36 @@ def _session(value):
             (type(value) is str and 0<len(value)<=128 and not any(ord(c)<32 for c in value)))
 
 
+def _verified_file_readback(state,now):
+    """An exact successful readback is a version fact, never a catalog offer."""
+    device=state.get('device') or {};result=state.get('result') or {};report=state.get('verification_report') or {}
+    if not all(type(value) is dict for value in (device,result,report)):return None
+    sn=_serial(device.get('sn') or device.get('serial'));current=state.get('current_version');checked=state.get('checked_at')
+    if (not sn or device.get('kind')!='glove' or device.get('device_type','wuji_glove')!='wuji_glove'
+            or state.get('operation')!='upgrade' or state.get('mode')!='official_file_confirmation'
+            or state.get('phase')!='verified' or state.get('busy') is not False or state.get('locked') is not False
+            or state.get('recovery_required') is not False or state.get('error') is not None
+            or type(checked) not in (int,float) or not 0<=now-checked<FIRMWARE_INTERVAL
+            or type(result.get('returncode')) is not int or result['returncode']!=0
+            or result.get('verdict')!='target_version_verified' or result.get('version_verified') is not True
+            or result.get('source')!='official_resource_readback' or result.get('sn')!=sn
+            or report.get('source')!='official_resource_readback' or report.get('sn')!=sn
+            or not isinstance(current,str) or current!=state.get('target_version')
+            or any(value!=current for value in (result.get('firmware_version'),result.get('expected_version'),report.get('firmware_version')))):
+        return None
+    resources=report.get('resources')
+    if type(resources) is not dict or set(resources)!={'serial_number','firmware_version'}:return None
+    from device_versions import parse_official_resource_json
+    for path,expected in (('serial_number',sn),('firmware_version',current)):
+        resource=resources[path]
+        if type(resource) is not dict or resource.get('value')!=expected:return None
+        raw=resource.get('report')
+        if (type(raw) is not dict or raw.get('exited') is not True
+                or type(raw.get('returncode')) is not int or raw['returncode']!=0
+                or parse_official_resource_json(raw.get('stdout'),path)!=expected):return None
+    return sn,current,checked
+
+
 def _live_firmware_devices(states):
     """Current handle/session owners only; selections and history are not owners."""
     live={}
@@ -225,6 +255,17 @@ class UpdateNotifications:
     def _ingest_firmware(self,state,now):
         # Consume facts already obtained by an explicit check even while the
         # user's Viewer is active. This never opens a second CLI or device.
+        readback=_verified_file_readback(state,now)
+        if readback is not None:
+            sn,version,checked=readback
+            with self.lock:
+                known=self.known.get(sn)
+                if known is not None and known.get('kind')=='glove' and checked>=known.get('firmware_observed_at',0):
+                    known.update(firmware_version=version,firmware_observed_at=checked,
+                        firmware_version_source='official_resource_readback',_verified_readback_at=checked)
+                    previous=self.reports.get(sn)
+                    if previous and previous.get('current')!=version and previous.get('checked_at',0)<=checked:
+                        self.reports.pop(sn,None)
         if self.pending_firmware:
             sn,started=self.pending_firmware;device=state.get('device') or {}
             finished=state.get('finished_at')
@@ -292,8 +333,11 @@ class UpdateNotifications:
             checked=state.get('checked_at');observed=known.get('firmware_observed_at',0)
             valid_time=type(checked) in (int,float) and 0<=now-checked<FIRMWARE_INTERVAL
             rejected=known.get('_rejected_check')==(report.get('current'),report.get('latest'),checked)
+            older_than_readback=(report.get('device_type')=='wuji_glove' and current!=report.get('current') and checked is not None
+                and type(checked) in (int,float) and checked<=known.get('_verified_readback_at',-1))
             if (valid_time and _type_matches(known['kind'],report.get('device_type'))
                     and not (rejected and current!=report.get('current'))
+                    and not older_than_readback
                     and (current is None or current==report.get('current') or checked>=observed)):
                 report=copy.deepcopy(report);report['checked_at']=checked
                 with self.lock:

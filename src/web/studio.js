@@ -143,7 +143,21 @@
     if(catalog){$('official-list').replaceChildren(...catalog.official_inventory.map(item=>{const li=document.createElement('li');const a=node('a',item.name);a.href=item.url;a.target='_blank';a.rel='noopener';li.append(a,node('p',item.detail));return li;}));}
     staticEnglish();
   }
-  $('touch-flow').addEventListener('click',async()=>{try{await post({name:'demo_start',action:'touch_flow',speed:1,cycles:1});location.hash='feedback';}catch(e){notice(e);}});
+  let touchPending=null,touchServiceRevision=0,touchNavigationRevision=0,touchServiceToken=null;
+  function retireTouchPreview(){touchPending=null;$('touch-flow').disabled=false;}
+  function currentTouchPreview(ticket){return touchPending===ticket&&ticket.service===touchServiceRevision&&ticket.navigation===touchNavigationRevision&&ticket.intent===intentRevision&&ticket.token===state?.csrf&&ticket.entry===location.hash;}
+  async function startTouchPreview(){
+    if(touchPending)return;
+    const ticket={service:touchServiceRevision,navigation:touchNavigationRevision,intent:intentRevision,token:state?.csrf,entry:location.hash};
+    touchPending=ticket;$('touch-flow').disabled=true;
+    try{await post({name:'demo_start',action:'touch_flow',speed:1,cycles:1});if(currentTouchPreview(ticket))location.hash='feedback';}
+    catch(e){if(currentTouchPreview(ticket))notice(e);}
+    finally{if(touchPending===ticket)retireTouchPreview();}
+  }
+  $('touch-flow').addEventListener('click',startTouchPreview);
+  window.addEventListener('hashchange',()=>{touchNavigationRevision++;retireTouchPreview();});
+  window.addEventListener('console-offline',()=>{touchServiceRevision++;touchServiceToken=null;retireTouchPreview();});
+  window.addEventListener('console-state',e=>{const token=typeof e.detail?.csrf==='string'?e.detail.csrf:null;if(token!==touchServiceToken){touchServiceRevision++;touchServiceToken=token;retireTouchPreview();}});
   const pose=$('pose-console'),actions=document.createElement('div');actions.className='viewer-actions';
   const float=node('button',''),pop=node('button','');actions.append(float,pop);pose.prepend(actions);
   window.wujiFloating=window.FloatingPanel.create({panel:pose,home:ws.viewerHome(),title:'MuJoCo · Hand Studio',storageKey:'wuji-viewer-layout-v12',initialRect:{x:20,y:150,width:440,height:360},minHeight:240,onChange:()=>{if(!window.wujiFloating?.isFloating())ws.showPage();}});

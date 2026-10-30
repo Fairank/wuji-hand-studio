@@ -1677,6 +1677,14 @@ class Handler(BaseHTTPRequestHandler):
         if url.path in ('/api/doctor','/api/doctor/report'):
             state=self.server.controller.doctor.snapshot()
             if url.path.endswith('/report'):
+                query=parse_qs(url.query,keep_blank_values=True)
+                if 'report_id' in query:
+                    from doctor import report_identity
+                    tokens=query['report_id']
+                    if len(tokens)!=1 or not re.fullmatch('[a-f0-9]{64}',tokens[0]):
+                        return self.reply(400,dict(error='Invalid diagnostic report identity'))
+                    if tokens[0]!=report_identity(state.get('report')):
+                        return self.reply(409,dict(error='诊断报告已变化，请重新读取后导出 / Diagnostic report changed; reload it before exporting',error_code='report_changed'))
                 if not state.get('report'):return self.reply(404,dict(error='No completed diagnostic report'))
                 fmt=parse_qs(url.query).get('format',['json'])[0]
                 if fmt=='txt':

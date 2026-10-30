@@ -1,11 +1,20 @@
 """Explicit official Wuji CLI diagnostics. No update, calibration or motor API."""
-import copy,ipaddress,json,math,os,queue,re,shlex,shutil,subprocess,tempfile,threading,time
+import copy,hashlib,ipaddress,json,math,os,queue,re,shlex,shutil,subprocess,tempfile,threading,time
 from datetime import datetime,timezone
 from pathlib import Path,PurePosixPath
 from runtime_paths import DATA
 from bridge_config import load_config,ssh_client
 
 MAX_OUTPUT=2*1024*1024
+
+
+def report_identity(report):
+    """Bind an export to the complete report already displayed, without altering it."""
+    if not isinstance(report,dict) or not report:return None
+    try:
+        content=json.dumps(report,ensure_ascii=False,sort_keys=True,separators=(',',':'),allow_nan=False).encode('utf-8')
+    except (ValueError,TypeError,RecursionError):return None
+    return hashlib.sha256(content).hexdigest()
 
 
 def public_saved_report(report):
@@ -119,7 +128,10 @@ class Doctor:
                     self.state.update(status='completed',report=public_saved_report(report),restored=True)
         except (OSError,ValueError,TypeError,RecursionError):pass
     def snapshot(self):
-        with self.lock:return copy.deepcopy(self.state)
+        with self.lock:
+            state=copy.deepcopy(self.state)
+        state['report_id']=report_identity(state.get('report'))
+        return state
     def _launch(self,target,args,previous):
         try:threading.Thread(target=target,args=args,daemon=True).start()
         except Exception as error:

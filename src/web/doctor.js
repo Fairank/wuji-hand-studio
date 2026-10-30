@@ -11,7 +11,14 @@
  document.querySelector('.directory').insertBefore(link,document.querySelector('.nav-advanced'));
  let state=null,result=null,sending=false,fresh=false,readRevision=0,serviceEpoch=0,controllerToken=null;const t=(zh,en)=>window.WujiLocale.lang==='en'?en:zh;
  function translate(){page.querySelector('h2').textContent=t('官方诊断','Diagnostics');link.querySelector('span').textContent=t('官方诊断','Diagnostics');$('doctor-scope').textContent=t('使用当前控制端的 SDK 环境运行官方 CLI。退出码 0 不代表全部检查通过；跳过和未发现设备均不计为设备通过。','Runs the official CLI with this controller’s SDK environment. Exit code 0 does not mean all checks passed; skipped or undiscovered devices are not validated.');$('doctor-serial-label').textContent=t('设备序列号（可空，留空自动发现）','Device serial (optional; empty discovers devices)');$('doctor-version').textContent=t('CLI 与 SDK','CLI & SDK');$('doctor-run').textContent=t('运行官方诊断','Run official diagnostics');$('doctor-download').textContent=t('导出可读报告','Export text');$('doctor-json').textContent=t('官方原始 JSON','Official JSON');$('doctor-bundle').textContent=t('完整运行记录','Full run record');$('doctor-raw-label').textContent=t('官方原始输出','Official raw output');$('doctor-docs').textContent=t('查看官方诊断说明','Official diagnostic documentation');render();}
- function render(){const busy=sending||result?.running,connected=state?.connection!=='disconnected'||!!state?.glove?.busy;$('doctor-run').disabled=busy||connected||!fresh;$('doctor-version').disabled=false;$('doctor-serial').disabled=busy;$('doctor-download').hidden=!result?.report;
+ function bindReportExports(report){
+  const token=result?.report_id,verified=!!report&&typeof token==='string'&&/^[a-f0-9]{64}$/.test(token);
+  for(const [id,format] of [['doctor-download','txt'],['doctor-json','raw'],['doctor-bundle','json']]){
+   const link=$(id);link.hidden=!verified||(format==='raw'&&(report.operation!=='diagnose'||!!report.parse_error));
+   if(verified)link.href='/api/doctor/report?format='+format+'&report_id='+encodeURIComponent(token);else link.removeAttribute('href');
+  }
+ }
+ function render(){const busy=sending||result?.running,connected=state?.connection!=='disconnected'||!!state?.glove?.busy;$('doctor-run').disabled=busy||connected||!fresh;$('doctor-version').disabled=false;$('doctor-serial').disabled=busy;
   $('doctor-address-label').textContent=t('设备 IPv4:端口（可选，与序列号二选一）','Device IPv4:port (optional; choose address or serial)');$('doctor-address').disabled=busy;
   $('support-heading').textContent=t('故障简报与官方支持包','Fault brief and official support bundle');$('support-help').textContent=t('调用官方 wuji logs export，包含已有日志、诊断及范围内的标定录制。文件保存在本机，不会自动发送。','Runs official wuji logs export, including existing logs, diagnostics and calibration recordings in range. Saved locally; never uploaded automatically.');$('support-description-label').textContent=t('故障现象（作为用户描述记录）','Symptom (recorded as operator observation)');$('support-days-label').textContent=t('最近天数','Recent days');$('support-generate').textContent=t('生成支持包','Create support bundle');$('support-brief').textContent=t('故障简报','Fault brief');$('support-official').textContent=t('官方支持包','Official support ZIP');$('support-all').textContent=t('全部附件','All evidence');
   $('support-generate').disabled=busy||connected||!fresh;$('support-days').disabled=busy;$('support-description').disabled=busy;
@@ -20,7 +27,7 @@
   for(const [id,kind,filename] of [['support-brief','brief','fault-brief.txt'],['support-official','official','official-wuji-support.zip'],['support-all','all','workbench-support.zip']]){const a=$(id);a.download=filename;a.hidden=!exported||(kind==='official'&&!exported.official_archive_available);if(exported)a.href='/api/support?id='+encodeURIComponent(exported.id)+'&kind='+kind;}
   $('doctor-status').textContent=!fresh?t('诊断状态尚未核对，恢复连接后重新读取。','Diagnostic status is unverified. Reload it after reconnection.'):busy?t('正在检查，请稍候…','Checking…'):result?.error|| (result?.report?t('诊断已结束 · 官方退出码 ','Finished · official exit code ')+result.report.exit_code:connected?t('请先断开设备连接，再运行独立诊断。','Disconnect the SDK session before diagnostics.'):t('尚未运行。控制端和CLI路径在“连接与校准”设置。','Not run. Set the controller and CLI path in Connection.'));
   const report=result?.report,container=$('doctor-rows');container.replaceChildren();
-  $('doctor-json').hidden=!report||report.operation!=='diagnose'||!!report.parse_error;$('doctor-bundle').hidden=!report;
+  bindReportExports(report);
   const date=report?.finished?new Date(report.finished*1000):null;
   const labels={pass:t('通过','Pass'),warn:t('警告','Warning'),fail:t('失败','Fail'),skip:t('跳过','Skipped'),unknown:t('未知','Unknown')};
   const totals={};for(const row of report?.rows||[]){if(row.status in labels)totals[row.status]=(totals[row.status]||0)+1;}
