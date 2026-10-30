@@ -324,6 +324,19 @@ class ConnectionSwitch:
             # authoritative even if an earlier calibration remains offered.
             if 'user_id' not in target and source and source.get('mode')=='teleoperation' and source['serial']==sn:
                 target['user_id']=source['user_id']
+            # An ordinary native purpose choice uses the wearer selected now,
+            # not an older completed run or remembered SDK profile. Resolve it
+            # while the existing source is still retained. Explicit SDK user
+            # choices and the actual current SDK owner remain authoritative.
+            if ('user_id' not in target and self._saved_supported()
+                    and callable(getattr(self.controller,'_saved_profile_preflight',None))):
+                proof=self.controller._saved_profile_preflight(sn,selected['side'],cancel_check=self._check_cancel)
+                self._check_cancel()
+                if (not isinstance(proof,dict) or proof.get('source_kind')!='saved_profile'
+                        or proof.get('serial')!=sn or proof.get('side')!=selected['side']
+                        or not isinstance(proof.get('source_user_id'),str)):
+                    raise ValueError('已存标定资料的设备或佩戴者不符 / Saved calibration device or wearer differs')
+                target['_saved_profile']=proof;target['user_id']=proof['source_user_id']
             if ('user_id' not in target and continuation.get('can_continue') and continuation.get('serial')==sn
                     and continuation.get('side')==selected['side']):
                 target['_continuation']={k:continuation[k] for k in ('run_id','expected_revision')}
@@ -339,7 +352,7 @@ class ConnectionSwitch:
                     and saved_hint['serial']==sn and saved_hint['profile']==selected['id']
                     and target.get('user_id')==saved_hint['user_id']
                     and (not source or source['mode']!='teleoperation'))
-                if (('user_id' not in target or saved_resume) and self._saved_supported()
+                if ('_saved_profile' not in target and ('user_id' not in target or saved_resume) and self._saved_supported()
                         and callable(getattr(self.controller,'_saved_profile_preflight',None))):
                     proof=self.controller._saved_profile_preflight(sn,selected['side'],
                         **({'profile':saved_hint['source_profile']} if saved_resume else {}),cancel_check=self._check_cancel)

@@ -191,14 +191,14 @@ class PurposeSwitchTests(unittest.TestCase):
             self.assertEqual(result['connection_switch']['current_owner']['user_id'],USER)
             self.assertFalse(result['connection_switch']['cancel_requested'])
 
-    def test_saved_resume_cannot_substitute_same_name_with_another_user_id(self):
+    def test_explicit_saved_resume_cannot_substitute_same_name_with_another_user_id(self):
         with self.environment('official') as e:
             e.service.resume=dict(serial=SN,profile='hand2_left',user_id=USER)
             e.service.resume_config=e.service._config()
             e.service._saved_resume=dict(**e.service.resume,source_profile='Alice',config=e.service._config())
             e.c._saved_profile_preflight=Mock(return_value=dict(source_kind='saved_profile',
                 serial=SN,side='left',source_profile='Alice',source_user_id='same-name-new-user'))
-            with self.assertRaises(ValueError):e.service.start(self.command(e,'teleoperation'))
+            with self.assertRaises(ValueError):e.service.start(self.command(e,'teleoperation',user_id=USER))
             self.assertTrue(e.vs['active']);self.assertEqual(e.calls,[])
             e.c.official_viz.stop_owned.assert_not_called()
 

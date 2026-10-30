@@ -517,7 +517,8 @@ class SwitchTests(unittest.TestCase):
         with self.environment() as e,patch.dict('os.environ',WUJI_OFFICIAL_CLI_DATA=str(e.folder),
                 WUJI_STUDIO_COMPONENT_DATA=str(e.folder/'studio'),WUJI_FLEET_PARENT=''), \
                 patch('device_profiles.selected_profile',return_value=profile('hand2_left')), \
-                patch('managed_runtime.status',return_value={'busy':False,'ready':True}):
+                patch('managed_runtime.status',return_value={'busy':False,'ready':True}), \
+                patch('native_cli.json_command',side_effect=AssertionError('Explicit SDK user must not invoke native profile commands')):
             c=Controller(factory=Mock(side_effect=AssertionError('No actual controller transport')),
                          reports=e.folder/'actual-controller'/'reports')
             class Glove:
@@ -543,7 +544,7 @@ class SwitchTests(unittest.TestCase):
             first=c.action(cmd);self.assertEqual(first['connection_switch']['phase'],'connected')
             self.assertEqual(c.connection_switch.resume['binding'],binding)
             cmd=dict(name='connection_switch',request_id='2'*32,
-                expected_owner=c.snapshot()['connection_switch']['expected_owner'],target=dict(mode='teleoperation',serial=SN))
+                expected_owner=c.snapshot()['connection_switch']['expected_owner'],target=dict(mode='teleoperation',serial=SN,user_id=USER))
             result=c.action(cmd)
             self.assertEqual(result['connection_switch']['phase'],'connected')
             self.assertEqual(c.retarget.selection(c.state['device_profile']),binding)

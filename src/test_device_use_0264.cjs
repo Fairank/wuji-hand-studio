@@ -24,3 +24,18 @@ test('global pending switch retires on a new controller and an old finally canno
 test('global hand purpose submits exact serial and never overrides the official discovered route',async()=>{const f=fixture();await f.window.WujiDeviceUse.open('hand',{kind:'hand',serial:'WH_SYNTHETIC_ADDRESS',address:'192.0.2.51:50001'}).catch(()=>{});const request=f.calls.find(x=>x.action?.name==='connection_switch');assert.equal(request.action.target.mode,'hand');assert.equal(Object.hasOwn(request.action.target,'address'),false);assert.equal(request.action.target.serial,'WH_SYNTHETIC_ADDRESS');});
 
 test('an explicit SDK profile or pairing edit crosses the same purpose adapter without losing its exact fields',async()=>{const f=fixture({current:true});await f.window.WujiDeviceUse.open('teleoperation',{kind:'glove',mode:'teleoperation',serial:SN,user_id:'explicit-person',profile:'hand2_right',timeout_ms:1000,hand_serial:'WH_SYNTHETIC_PAIR'}).catch(()=>{});const request=f.calls.find(x=>x.action?.name==='connection_switch');assert.equal(request.action.target.user_id,'explicit-person');assert.equal(request.action.target.profile,'hand2_right');assert.equal(request.action.target.timeout_ms,1000);assert.equal(request.action.target.hand_serial,'WH_SYNTHETIC_PAIR');});
+
+
+test('native ordinary purpose does not turn an old continuation or resume into an explicit wearer',async()=>{
+ const f=fixture({saved:true});f.state().calibrated_teleoperation={serial:SN,can_continue:true,run_id:'f'.repeat(32),expected_revision:'old-person-proof',side:'right'};
+ f.state().connection_switch.resume={serial:SN,user_id:'old-person-A',profile:'hand2_right',timeout_ms:650};
+ await f.use('preview').catch(()=>{});const request=f.calls.find(x=>x.action?.name==='connection_switch');assert.equal(Object.hasOwn(request.action.target,'user_id'),false);assert.equal(Object.hasOwn(request.action.target,'profile'),false);
+});
+test('native ordinary purpose ignores a resume wearer even without a continuation',async()=>{
+ const f=fixture({saved:true});f.state().connection_switch.resume={serial:SN,user_id:'old-person-A',profile:'hand2_right',timeout_ms:650};
+ await f.use('preview').catch(()=>{});const request=f.calls.find(x=>x.action?.name==='connection_switch');assert.equal(Object.hasOwn(request.action.target,'user_id'),false);assert.equal(Object.hasOwn(request.action.target,'profile'),false);
+});
+test('native saved capability still preserves the actual SDK owner and explicitly selected wearer',async()=>{
+ const f=fixture({saved:true,current:true});await f.use('preview');let request=f.calls.find(x=>x.action?.name==='connection_switch');assert.equal(request.action.target.user_id,USER);assert.equal(request.action.target.profile,'hand2_left');
+ const e=fixture({saved:true});await e.window.WujiDeviceUse.open('teleoperation',{kind:'glove',mode:'teleoperation',serial:SN,user_id:'explicit-person-B',profile:'hand2_right'}).catch(()=>{});request=e.calls.find(x=>x.action?.name==='connection_switch');assert.equal(request.action.target.user_id,'explicit-person-B');assert.equal(request.action.target.profile,'hand2_right');
+});
