@@ -4,7 +4,16 @@
  const bounds = el => {const r=el.getBoundingClientRect();return {x:Math.round(r.x),y:Math.round(r.y),width:Math.round(r.width),height:Math.round(r.height)};};
  const nodes = [...document.querySelectorAll('button,a[data-page],input,select,textarea,dialog')].filter(visible);
  const surface = s => {const e=document.querySelector(s);if(!e)return null;const c=getComputedStyle(e);return {bounds:bounds(e),background:c.backgroundColor,blur:c.backdropFilter,radius:c.borderRadius};};
+ const branding=(()=>{const e=document.querySelector('img.studio-brand');if(!e)return null;const c=getComputedStyle(e);return {bounds:bounds(e),naturalWidth:e.naturalWidth,naturalHeight:e.naturalHeight,complete:e.complete,computedWidth:c.width,computedHeight:c.height,display:c.display};})();
+ const stylesheets=[...document.querySelectorAll('link[rel~="stylesheet"]')].flatMap(link=>{
+  let url;try{url=new URL(link.getAttribute('href')||'',location.href);}catch{return [];}
+  if(url.origin!==location.origin||!['http:','https:'].includes(url.protocol))return [];
+  const sheet=link.sheet,result={href:url.pathname,sheetPresent:!!sheet,cssRules:null,error:null,disabled:!!link.disabled};
+  if(sheet)try{result.cssRules=sheet.cssRules.length;}catch(error){result.error=typeof error?.name==='string'?error.name.slice(0,60):'Stylesheet unreadable';}
+  return [result];
+ });
  return {page:document.body.dataset.page,language:window.WujiLocale?.lang,experience:document.documentElement.dataset.experience,
+   documentReadyState:document.readyState,branding,stylesheets,
    native:document.documentElement.dataset.desktop === 'true',
    viewport:{width:innerWidth,height:innerHeight},scroll:{x:scrollX,y:scrollY},overflow:document.documentElement.scrollWidth>innerWidth,
    appearance:{reduceTransparency:document.documentElement.dataset.reduceTransparency,reduceMotion:document.documentElement.dataset.reduceMotion},
