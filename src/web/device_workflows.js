@@ -151,13 +151,19 @@
  async function useFeature(purpose,device=null,options={}){
   if(!['official','teleoperation','calibration','hand'].includes(purpose)||featureOwner)return;
   const ticket={epoch:serviceEpoch,purpose,serial:serialOf(device)};featureOwner=ticket;useError='';useFailure=null;renderContexts();
+  const leaveView=()=>{if(options.viewOwner&&featureOwner===ticket){featureOwner=null;renderContexts();}};if(options.viewOwner)window.addEventListener('workspace-page',leaveView);
   const current=()=>featureOwner===ticket&&ticket.epoch===serviceEpoch;
   try{
    const before=await state();ticket.owner_context=before.connection_switch?.expected_owner;ticket.before_transition={request_id:before.connection_switch?.request_id||null,attempt_id:before.connection_switch?.attempt_id||null};if(!current()||serviceToken&&before.csrf!==serviceToken)return;
+   if(options.viewOwner){
+    const expected=options.viewOwner,actual=currentOwner(before),observed=currentOwner(),target={mode:expected.mode,serial:expected.serial,user_id:expected.user_id,profile:expected.profile};
+    if(before.connection_switch?.busy===true||!actual||!observed||['mode','kind','serial','session','user_id','profile'].some(key=>actual[key]!==expected[key]||observed[key]!==expected[key])||!connected(before,target)||actual.mode==='teleoperation'&&before.glove?.session_id!==actual.session||actual.mode==='official'&&(!/^[a-f0-9]{32}$/.test(actual.session||'')||before.official_viz?.session_id!==actual.session))throw Error(t('当前连接已变化，请重新核对。','The current connection changed. Verify it again.'));
+   }
    const chosen=device||selectedDevice(purpose,before),serial=serialOf(chosen);
    if(!serial||['teleoperation','calibration'].includes(purpose)&&chosen?.kind!=='glove'||purpose==='hand'&&chosen?.kind!=='hand'){chooseDevice(purpose==='official'?'all':'glove');return;}
-   ticket.serial=serial;if(chosen.kind==='glove')chooseGlove({...chosen,sn:serial,serial});
+   ticket.serial=serial;if(chosen.kind==='glove'&&!options.viewOwner)chooseGlove({...chosen,sn:serial,serial});
    if(options.navigate!==false)navigate(purpose,serial);renderContexts();
+   if(options.viewOwner)return {state:before,view:true}; // Viewing never changes an existing device purpose.
    if(purpose==='calibration')return; // The final Start atomically hands over this exact glove.
    const target={mode:purpose,serial,...purpose==='official'?{theme:document.documentElement.dataset.theme==='dark'?'dark':'light'}:{}};
    if(purpose==='teleoperation'&&device?.mode==='teleoperation')for(const key of ['user_id','profile','hand_serial','timeout_ms','address'])if(Object.hasOwn(device,key))target[key]=device[key];
@@ -166,7 +172,7 @@
    if(current()&&purpose==='official')await window.WujiOfficialViz?.selectDevice(serial);
    return {...switched,state:latest||switched.state};
   }catch(error){if(current()){useError=error.name==='SwitchCancelled'?'':error?.message||t('设备用途切换未完成，请核对当前会话。','The device switch did not complete. Review the current session.');useFailure={...(switchFailures.get(error)||{owner_context:ticket.owner_context,request_id:null,before_transition:ticket.before_transition}),retired:false};}throw error;}
-  finally{if(current()){featureOwner=null;renderContexts();}}
+  finally{if(options.viewOwner)window.removeEventListener('workspace-page',leaveView);if(current()){featureOwner=null;renderContexts();}}
  }
  const contexts=[];
  function calibrationUnavailable(message){
@@ -194,6 +200,8 @@
  window.addEventListener('connection-switch-update',renderContexts);window.addEventListener('device-inventory-selection',renderContexts);window.addEventListener('device-inventory-update',renderContexts);window.addEventListener('wuji-language',renderContexts);renderContexts();
 
  directory.setUseHandler(async(mode,device)=>{
+  const owner=currentOwner(),serialAtClick=serialOf(device);
+  if(mode==='official'&&device.kind==='glove'&&owner?.kind==='glove'&&owner.serial===serialAtClick&&['official','teleoperation'].includes(owner.mode)){await useFeature(owner.mode,device,{viewOwner:{...owner}});return;}
   // Re-read after the click. Retained cards are never sufficient authority.
   await directory.refresh();const current=directory.snapshot(),serial=device.sn||device.serial;
   const found=current?.devices?.find(row=>(row.sn||row.serial)===serial);
