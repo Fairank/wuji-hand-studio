@@ -82,6 +82,7 @@ class ConnectionSwitch:
         self.catalog=dict(busy=False,status='idle',users=[],error=None,checked_at=None)
         self.catalog_config=None;self.requests=set();self.catalog_cleanup_error=None
         self.catalog_client=None;self.catalog_thread=None;self.catalog_finished=None
+        self._cleanup_owner=None
         self.idle_check=lambda:None
         self.preflight_check=lambda source:None
 
@@ -157,9 +158,32 @@ class ConnectionSwitch:
         except (OSError,ValueError,RuntimeError):return False
 
     def _cleanup_error(self,state):
-        error=self.state.get('cleanup_error');source=self.state.get('source') or {}
+        with self.lock:
+            error=self.state.get('cleanup_error');source=self.state.get('source') or {}
+            responsibility=copy.deepcopy(self._cleanup_owner);attempt=self.state.get('attempt_id')
         if not error:return None
         glove=state.get('glove') or {};cleanup=glove.get('session_cleanup') or {}
+        if responsibility is not None:
+            # A failed newly-started SDK belongs to this attempt, not the
+            # already released source (which may have been no owner at all).
+            # Late ACKs retire only this exact resource-cleanup diagnostic.
+            hardware=glove.get('hardware') or {}
+            if (responsibility.get('attempt_id')==attempt
+                    and type(responsibility.get('session')) is int
+                    and type(glove.get('session_id')) is int and type(cleanup.get('session_id')) is int
+                    and glove.get('session_id')==responsibility['session']
+                    and cleanup.get('session_id')==responsibility['session']
+                    and all(cleanup.get(key) is True for key in ('acknowledged','cleanup_confirmed','reader_finished','transport_closed'))
+                    and cleanup.get('error') is None and glove.get('busy') is False
+                    and glove.get('follow_pending',False) is False and glove.get('follow_unconfirmed',False) is False
+                    and hardware.get('active',False) is False
+                    and ('stop_confirmed' not in hardware or hardware['stop_confirmed'] is True)):
+                with self.lock:
+                    if self._cleanup_owner==responsibility and self.state.get('attempt_id')==attempt:
+                        self._cleanup_owner=None;self.state['cleanup_error']=None
+                        return None
+                    return self.state.get('cleanup_error')
+            return error
         if source.get('mode')=='teleoperation' and glove.get('session_id')==source.get('session'):
             if cleanup.get('cleanup_confirmed') is True or cleanup.get('retryable') is True:return None
             hw=glove.get('hardware') or {}
@@ -200,8 +224,7 @@ class ConnectionSwitch:
         if (g.get('feedback') or {}).get('device_id') and type(hw.get('active')) is not bool:
             return '已配对灵巧手的停用状态未知，未切换会话 / Paired hand disable state is unknown; session was not switched'
         cleanup=g.get('session_cleanup') or {}
-        if not cleanup.get('retryable') and (cleanup.get('error') or (self._cleanup_error(state)
-                and cleanup.get('cleanup_confirmed') is not True)):
+        if self._cleanup_error(state) or (cleanup.get('error') and not cleanup.get('retryable')):
             return '手套退出尚未确认 / Glove cleanup is unconfirmed'
         if (hw.get('active',False) is not False and hw.get('active',False) is not True) or g.get('follow_unconfirmed') or g.get('follow_pending'):
             return '灵巧手停用结果尚未确认 / Hand stop is unconfirmed'
@@ -529,6 +552,7 @@ class ConnectionSwitch:
                 raise ValueError('请确认手套左右手 / Confirm the selected glove hand side')
             with self.lock:
                 begun=True;self._thread=threading.get_ident();self.cancelled=False;self.viewer_token=None
+                self._cleanup_owner=None
                 self.deadline=self.clock()+45
                 self.state.update(busy=True,phase='preflight',source=copy.deepcopy(source),cancel_requested=False,
                     target=dict(mode='calibration',serial=source['serial']),source_released=False,
@@ -581,6 +605,7 @@ class ConnectionSwitch:
             with self.lock:
                 attempt_started=True
                 self._thread=threading.get_ident();self.cancelled=False
+                self._cleanup_owner=None
                 self.deadline=self.clock()+45
                 self.viewer_token=source['session'] if source and source['mode']=='official' else None
                 self.state.update(busy=True,phase='preflight',request_id=request_id,error=None,cleanup_error=None,cancel_requested=False,
@@ -715,7 +740,7 @@ class ConnectionSwitch:
                     text=str(error)
                     if 'ownership is not confirmed' in text:return None
                     raise
-            after=self._wait(poll_connected,12,'New device connection was not confirmed')
+            after=self._wait(poll_connected,max(0,self.deadline-self.clock()) if '_saved_profile' in target else 12,'New device connection was not confirmed')
             if 'hand_serial' in target:
                 self._check_cancel();self._check_mapping(target)
                 self.controller.action(dict(name='glove_prepare',serial=target['hand_serial'],address=target.get('address','')))
@@ -769,7 +794,11 @@ class ConnectionSwitch:
                         try:self.controller.glove.disconnect_session(new_session,pending_only=True)
                         except CancellationNotDispatched:pass
                     self.controller.glove.stop_session_confirmed(new_session)
-                except Exception as cleanup:self._set(cleanup_error=str(cleanup)[:700])
+                except Exception as cleanup:
+                    with self.lock:
+                        if stopped and type(new_session) is int and new_session>0:
+                            self._cleanup_owner=dict(attempt_id=self.state.get('attempt_id'),session=new_session)
+                        self.state['cleanup_error']=str(cleanup)[:700]
             raise
         finally:
             if attempt_started:

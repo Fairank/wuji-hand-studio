@@ -429,8 +429,12 @@ class SwitchTests(unittest.TestCase):
 
     def test_failed_switch_does_not_reuse_earlier_attempt_error_or_release_flag(self):
         with self.environment() as e:
-            e.service.state.update(source_released=True,cleanup_error='old failure',phase='failed')
-            e.gs['session_cleanup']={'cleanup_confirmed':True}
+            e.service.state.update(source_released=True,cleanup_error='old failure',phase='failed',
+                source=dict(mode='teleoperation',kind='glove',serial=SN,session=e.gs['session_id'],user_id=USER,profile='hand2_left'))
+            e.gs.update(busy=False,connection='disconnected',session_cleanup=dict(
+                session_id=e.gs['session_id'],acknowledged=True,cleanup_confirmed=True,retryable=False,
+                reader_finished=True,transport_closed=True,error=None,
+                identity=dict(glove_serial=SN,sdk_user_id=USER,profile='hand2_left')))
             result=e.service.start(self.command(e))
             self.assertIsNone(result['connection_switch']['cleanup_error'])
             self.assertTrue(result['connection_switch']['source_released'])

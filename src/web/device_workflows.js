@@ -148,7 +148,7 @@
   else if(purpose==='hand'){location.hash='#library';window.WujiWorkspace.showPage();}
   else{window.WujiConnectionHub.show(purpose==='calibration'?'calibration':'official');if(purpose==='official')window.WujiOfficialViz?.showDeviceMode();}
  }
- async function useFeature(purpose,device=null){
+ async function useFeature(purpose,device=null,options={}){
   if(!['official','teleoperation','calibration','hand'].includes(purpose)||featureOwner)return;
   const ticket={epoch:serviceEpoch,purpose,serial:serialOf(device)};featureOwner=ticket;useError='';useFailure=null;renderContexts();
   const current=()=>featureOwner===ticket&&ticket.epoch===serviceEpoch;
@@ -157,12 +157,12 @@
    const chosen=device||selectedDevice(purpose,before),serial=serialOf(chosen);
    if(!serial||['teleoperation','calibration'].includes(purpose)&&chosen?.kind!=='glove'||purpose==='hand'&&chosen?.kind!=='hand'){chooseDevice(purpose==='official'?'all':'glove');return;}
    ticket.serial=serial;if(chosen.kind==='glove')chooseGlove({...chosen,sn:serial,serial});
-   navigate(purpose,serial);renderContexts();
+   if(options.navigate!==false)navigate(purpose,serial);renderContexts();
    if(purpose==='calibration')return; // The final Start atomically hands over this exact glove.
    const target={mode:purpose,serial,...purpose==='official'?{theme:document.documentElement.dataset.theme==='dark'?'dark':'light'}:{}};
    if(purpose==='teleoperation'&&device?.mode==='teleoperation')for(const key of ['user_id','profile','hand_serial','timeout_ms','address'])if(Object.hasOwn(device,key))target[key]=device[key];
    const switched=await switchConnection(target);if(!current())return;if(switched.routed)return switched;
-   const latest=await window.WujiConnection?.refresh?.();if(current()&&latest)observedState=latest;if(current())directory.select?.(serial);if(current()&&purpose==='hand'&&latest?.device_profile?.id){window.WujiDemonstration?.selectProfile(latest.device_profile.id);const select=document.getElementById('demonstration-hand');if(select){select.value=serial;select.dispatchEvent(new Event('change'));}}
+   const latest=await window.WujiConnection?.refresh?.();if(current()&&latest)observedState=latest;if(current())directory.select?.(serial);if(current()&&purpose==='hand'&&options.navigate!==false&&latest?.device_profile?.id){window.WujiDemonstration?.selectProfile(latest.device_profile.id);const select=document.getElementById('demonstration-hand');if(select){select.value=serial;select.dispatchEvent(new Event('change'));}}
    if(current()&&purpose==='official')await window.WujiOfficialViz?.selectDevice(serial);
    return {...switched,state:latest||switched.state};
   }catch(error){if(current()){useError=error.name==='SwitchCancelled'?'':error?.message||t('设备用途切换未完成，请核对当前会话。','The device switch did not complete. Review the current session.');useFailure={...(switchFailures.get(error)||{owner_context:ticket.owner_context,request_id:null,before_transition:ticket.before_transition}),retired:false};}throw error;}
@@ -197,12 +197,12 @@
   if(!found?.selectable||serialOf(directory.selection())!==serial)throw Error(t('设备列表或所选设备已改变，请重新选择后继续。','The device list or selected device changed. Select it again to continue.'));
   if(mode==='official'){
    if(!found.official_available)throw Error(t('请先完成官方设备发现','Run official discovery first'));
-   await useFeature('official',found);return;
+   await useFeature('official',found,{navigate:found.kind!=='glove'||currentOwner()?.mode==='official'&&currentOwner()?.serial===serial});return;
   }
   if(mode==='hand'){
    if(found.kind!=='hand')throw Error(t('所选设备不是灵巧手','Selected device is not a hand'));
    // Exact serial identity selects the backend's original discovered route.
-   await useFeature('hand',found);return;
+   await useFeature('hand',found,{navigate:currentOwner()?.mode==='hand'&&currentOwner()?.serial===serial});return;
   }
   if(found.kind!=='glove')throw Error(t('请先选择手套','Select a glove first'));
   chooseGlove(found);
