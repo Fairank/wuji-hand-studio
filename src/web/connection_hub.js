@@ -9,9 +9,10 @@
  const old=[...body.children];
  const tabs=document.createElement('div');tabs.className='hub-tabs';tabs.setAttribute('role','tablist');tabs.setAttribute('aria-label',t('连接与校准分区','Connection sections'));
  const sections={};
- const definitions=[['device','设备连接','Devices'],['official','官方 CLI','Official CLI'],['retarget','映射调校','Mapping']];
+ const definitions=[['device','设备连接','Devices'],['official','CLI 与标定','CLI & calibration'],['retarget','映射调校','Mapping']];
+ const visibleDefinitions=definitions.filter(([key])=>key!=='device');
  for(const [key,zh,en] of definitions){
-  const button=document.createElement('button');button.type='button';button.id='hub-tab-'+key;button.dataset.hubTab=key;button.setAttribute('role','tab');button.setAttribute('aria-controls','hub-'+key);button.textContent=t(zh,en);tabs.append(button);
+  const button=document.createElement('button');button.type='button';button.id='hub-tab-'+key;button.dataset.hubTab=key;button.setAttribute('role','tab');button.setAttribute('aria-controls','hub-'+key);button.textContent=t(zh,en);if(key==='device'){button.hidden=true;button.setAttribute('aria-hidden','true');button.tabIndex=-1;}tabs.append(button);
   const section=document.createElement('section');section.className='hub-section';section.id='hub-'+key;section.setAttribute('role','tabpanel');section.setAttribute('aria-labelledby',button.id);section.hidden=true;sections[key]=section;
  }
  body.replaceChildren(tabs,...Object.values(sections));
@@ -60,7 +61,7 @@
  calib.querySelector('.hub-calibration-preparation').append(advanced);
  const previous=document.createElement('details');previous.id='hub-calib-previous';previous.hidden=true;previous.innerHTML='<summary id="hub-calib-previous-label"></summary>';calib.append(previous);
  window.WujiConnectionHub={show(key){if(key==='visual'||key==='glove'){location.hash='#glove';ws.showPage();return;}location.hash='#connection';ws.showPage();select(key)}};
- let active='device',calibration=null,calibrationFresh=false,consoleState=null,busy=false,calibrationStartPending=false,cancelStartPending=false,startCancelRequested=false,refreshPending=false,scanPending=false,calibrationReadAt=0,actionError='',refreshError='',wantedGlove='',newProfileOpen=false,nextAction=null,lastActiveProfile='',replacementContext='',lastStartedRunId='',calibrationEpoch=0,previewEndPending=false,previewErrorOwner=null;
+ let active='official',calibration=null,calibrationFresh=false,consoleState=null,busy=false,calibrationStartPending=false,cancelStartPending=false,startCancelRequested=false,refreshPending=false,scanPending=false,calibrationReadAt=0,actionError='',refreshError='',wantedGlove='',newProfileOpen=false,nextAction=null,lastActiveProfile='',replacementContext='',lastStartedRunId='',calibrationEpoch=0,previewEndPending=false,previewErrorOwner=null;
  // Service lifetime and each pending slot have independent owners.
  let serviceEpoch=0,serviceToken=null,selectionEpoch=0,requestSequence=0,actionOwner=null,startOwner=null,cancelOwner=null,refreshOwner=null,scanOwner=null,previewOwner=null;
  const owner=()=>({service:serviceEpoch,token:serviceToken,id:++requestSequence,view:calibrationEpoch,selection:selectionEpoch});
@@ -82,7 +83,7 @@
  window.addEventListener('official-viz-update',()=>renderCalibration());
  function calibrationVisible(){return active==='official'&&officialViz?.snapshot()?.task==='calibration';}
  function openCalibration(locate=false){officialViz?.setTask('calibration');window.WujiDeviceInventory?.refresh();refresh(true);if(locate)requestAnimationFrame(()=>{$('ov-device')?.scrollIntoView({block:'nearest',behavior:'instant'});$('ov-task-calibration')?.focus({preventScroll:true});});}
- function select(key){if(key==='visual'||key==='glove'){location.hash='#glove';ws.showPage();return;}const prepare=key==='calibration';if(prepare)key='official';if(!sections[key])key='device';const changed=active!==key;active=key;for(const [name,section] of Object.entries(sections)){
+ function select(key){if(key==='device'){location.hash='#home';ws.showPage();return;}if(key==='visual'||key==='glove'){location.hash='#glove';ws.showPage();return;}const prepare=key==='calibration';if(prepare)key='official';if(!sections[key])key='official';const changed=active!==key;active=key;for(const [name,section] of Object.entries(sections)){
    section.hidden=name!==key;const button=$('hub-tab-'+name);button.setAttribute('aria-selected',String(name===key));button.tabIndex=name===key?0:-1;
   }
   if(window.wujiFloating?.isFloating()!==true)ws.viewerHome()?.append($('pose-console'));
@@ -98,7 +99,7 @@
   if(prepare)openCalibration(true);
  }
  tabs.addEventListener('click',event=>{const key=event.target.closest('[data-hub-tab]')?.dataset.hubTab;if(key)select(key)});
- tabs.addEventListener('keydown',event=>{if(!['ArrowRight','ArrowLeft','Home','End'].includes(event.key))return;const index=definitions.findIndex(x=>x[0]===active),next=event.key==='Home'?0:event.key==='End'?definitions.length-1:(index+(event.key==='ArrowRight'?1:-1)+definitions.length)%definitions.length;event.preventDefault();const key=definitions[next][0];select(key);$('hub-tab-'+key).focus()});
+ tabs.addEventListener('keydown',event=>{if(!['ArrowRight','ArrowLeft','Home','End'].includes(event.key))return;const index=visibleDefinitions.findIndex(x=>x[0]===active),next=event.key==='Home'?0:event.key==='End'?visibleDefinitions.length-1:(index+(event.key==='ArrowRight'?1:-1)+visibleDefinitions.length)%visibleDefinitions.length;event.preventDefault();const key=visibleDefinitions[next][0];select(key);$('hub-tab-'+key).focus()});
  window.addEventListener('workspace-page',event=>{if(event.detail==='connection')select(active)});
 
  function renderStatus(){const hand=consoleState?.connection,glove=consoleState?.glove?.connection;

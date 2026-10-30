@@ -188,3 +188,10 @@ html body #page-connection #hub-calibration[data-guided-native=true] #hub-calib-
 html body #page-connection #hub-calibration[data-session-stage=disconnected] .hub-calibration-session{min-height:240px;justify-content:center;margin:0}
 html body #page-connection #hub-calibration[data-guided-native=true] .hub-calibration-actions{margin:0}
 @media(max-width:600px){html body #page-connection #hub-calibration[data-guided-native=true]>.hub-calibration{padding:18px}}
+
+.device-use-context{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:5px 18px;padding:16px 0;margin-bottom:14px;border-bottom:1px solid var(--line,#dedee3)}
+.device-use-context>strong{font-size:14px;font-weight:650;overflow-wrap:anywhere}.device-use-context>span{grid-column:1;font-size:13px;color:var(--muted,#72727a)}.device-use-context>span[data-error="true"]{color:#b83c31}.device-use-context>button{grid-column:2;grid-row:1/3;white-space:nowrap}
+.glove-controls>.device-use-context{padding:0 0 14px;margin:0 0 14px}.glove-source-fields>div:first-child{display:none}
+@media(max-width:700px){.device-use-context{gap:6px 10px}.device-use-context>button{padding-inline:12px}}
+
+.device-use-context>.device-use-calibration{grid-column:1;justify-self:start;font-size:13px;text-decoration:none}

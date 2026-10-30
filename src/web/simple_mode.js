@@ -16,7 +16,7 @@
  const discoveryDock=document.createElement('section');discoveryDock.id='home-device-discovery';discoveryDock.className='experience-discovery-dock';grid.append(historyDock,discoveryDock);
  function mountShared(page=document.body.dataset.page){
   if(!historyMounted&&window.WujiDeviceHistory?.mount){window.WujiDeviceHistory.mount(historyDock);historyMounted=true;}
-  window.WujiDeviceInventory?.mount?.(page==='home'?discoveryDock:null);
+  window.WujiDeviceInventory?.mount?.(discoveryDock);
  }
  // One persistent selector. Existing controls and frames stay in their places.
  const switcher=document.createElement('section');switcher.className='experience-switcher';switcher.id='experience-switcher';const switchTitle=document.createElement('span');switchTitle.className='experience-switch-label';

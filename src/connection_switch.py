@@ -75,7 +75,7 @@ class ConnectionSwitch:
     def __init__(self,controller,*,clock=time.monotonic,sleep=time.sleep):
         self.controller=controller;self.workflow_lock=controller.calibration_handover.workflow_lock
         self.lock=threading.RLock();self._thread=None;self.viewer_token=None;self.cancelled=False
-        self.clock=clock;self.sleep=sleep;self.resume=None;self.resume_config=None;self.deadline=None
+        self.clock=clock;self.sleep=sleep;self.resume=None;self.resume_config=None;self.deadline=None;self._saved_resume=None
         self.state=dict(busy=False,phase='idle',attempt_id=None,error=None,receipt=None,target=None,source=None,cancel_requested=False,
                         automatically_follows=False,automatically_enables=False)
         self.catalog=dict(busy=False,status='idle',users=[],error=None,checked_at=None)
@@ -105,6 +105,7 @@ class ConnectionSwitch:
                     or any(command[k]!=self.state.get(k) for k in ('request_id','attempt_id'))):
                 raise ValueError('切换已完成或任务已变化，请核对当前设备任务 / Switch finished or changed; review the current device task')
             self.cancelled=True;self.state['cancel_requested']=True
+            self.requests.add(command['request_id'])
         return dict(connection_switch=self.snapshot(self.controller.snapshot()))
 
     def _check_cancel(self):
@@ -132,6 +133,12 @@ class ConnectionSwitch:
     def _config(self):
         from bridge_config import load_config
         return hashlib.sha256(json.dumps(load_config(),sort_keys=True).encode()).hexdigest()
+
+    def _saved_supported(self):
+        from bridge_config import load_config
+        from official_device_discovery import use_native
+        try:return use_native(load_config()) is True
+        except (OSError,ValueError,RuntimeError):return False
 
     def _cleanup_error(self,state):
         error=self.state.get('cleanup_error');source=self.state.get('source') or {}
@@ -201,8 +208,16 @@ class ConnectionSwitch:
             if self.resume_config!=self._config():resume=None
         except (OSError,ValueError,RuntimeError):resume=None
         result['cleanup_error']=self._cleanup_error(state)
+        try:
+            current=owner(state);owner_error=None
+            if current is not None:
+                current={**current,'purpose':{'official':'cli_view','teleoperation':'teleoperation','hand':'hand_feedback'}[current['mode']]}
+        except ValueError as error:
+            current=None;owner_error=str(error)[:700]
         return {**result,'expected_owner':context_digest(state),'can_switch':reason is None,
-                'blocked_reason':reason,'resume':resume,'user_catalog':catalog}
+                'blocked_reason':reason,'resume':resume,'user_catalog':catalog,
+                'current_owner':current,'owner_error':owner_error,
+                'saved_profile_supported':self._saved_supported()}
 
     def users(self):
         if not self.workflow_lock.acquire(blocking=False):raise ValueError('Another device task is switching')
@@ -288,8 +303,15 @@ class ConnectionSwitch:
         if mode=='teleoperation':
             self.controller.teleoperation_handover._runtime()
             from device_profiles import profile
-            selected=profile(target.get('profile') or state['device_profile']['id'])
-            if row['kind']!='glove' or row.get('side')!=selected['side']:
+            side=row.get('side')
+            if source and source['serial']==sn:
+                if source['mode']=='official':
+                    with gate(self.controller.official_viz.folder):
+                        side=self.controller.official_viz.connection_record(sn,source['session']).get('side')
+                elif source['mode']=='teleoperation':side=source['profile'].rsplit('_',1)[-1]
+            selected=profile(target['profile'] if 'profile' in target else
+                (state['device_profile']['generation']+'_'+str(side)))
+            if row['kind']!='glove' or side!=selected['side']:
                 raise ValueError('手套左右与目标型号不符 / Glove side differs from target profile')
             target['profile']=selected['id']
             if 'timeout_ms' not in target:
@@ -297,6 +319,11 @@ class ConnectionSwitch:
                     self.resume.get('timeout_ms') if self.resume and self.resume_config==self._config() and self.resume['serial']==sn else None)
                 if type(timeout) is int and 100<=timeout<=2000:target['timeout_ms']=timeout
             continuation=state.get('calibrated_teleoperation') or {}
+            # A purpose change is not a request to reimport/reopen the exact
+            # SDK glove already owned by this workspace. Its current user is
+            # authoritative even if an earlier calibration remains offered.
+            if 'user_id' not in target and source and source.get('mode')=='teleoperation' and source['serial']==sn:
+                target['user_id']=source['user_id']
             if ('user_id' not in target and continuation.get('can_continue') and continuation.get('serial')==sn
                     and continuation.get('side')==selected['side']):
                 target['_continuation']={k:continuation[k] for k in ('run_id','expected_revision')}
@@ -307,6 +334,22 @@ class ConnectionSwitch:
                         target['user_id']=source['user_id']
                     elif (self.resume and self.resume_config==self._config() and self.resume['serial']==sn
                           and self.resume['profile']==target['profile']):target['user_id']=self.resume['user_id']
+                saved_hint=self._saved_resume
+                saved_resume=(saved_hint and saved_hint['config']==self._config()
+                    and saved_hint['serial']==sn and saved_hint['profile']==selected['id']
+                    and target.get('user_id')==saved_hint['user_id']
+                    and (not source or source['mode']!='teleoperation'))
+                if (('user_id' not in target or saved_resume) and self._saved_supported()
+                        and callable(getattr(self.controller,'_saved_profile_preflight',None))):
+                    proof=self.controller._saved_profile_preflight(sn,selected['side'],
+                        **({'profile':saved_hint['source_profile']} if saved_resume else {}),cancel_check=self._check_cancel)
+                    self._check_cancel()
+                    if (not isinstance(proof,dict) or proof.get('source_kind')!='saved_profile'
+                            or proof.get('serial')!=sn or proof.get('side')!=selected['side']
+                            or not isinstance(proof.get('source_user_id'),str)
+                            or saved_resume and proof.get('source_user_id')!=saved_hint['user_id']):
+                        raise ValueError('已存标定资料的设备或佩戴者不符 / Saved calibration device or wearer differs')
+                    target['_saved_profile']=proof;target['user_id']=proof['source_user_id']
                 if not isinstance(target.get('user_id'),str):raise ValueError('请选择控制端佩戴者 / Select a controller wearer first')
                 glove=state.get('glove') or {};known=glove.get('users') or []
                 actual=(source and source['mode']=='teleoperation' and glove.get('controller_config')==self._config()
@@ -316,11 +359,11 @@ class ConnectionSwitch:
                 catalog=(self.catalog_config==self._config() and self.catalog.get('status')=='ready'
                          and self.catalog.get('checked_at') and 0<=time.time()-self.catalog['checked_at']<120
                          and any(u['user_id']==target['user_id'] for u in self.catalog['users']))
-                if not (actual or resumed or catalog):raise ValueError('请刷新并选择实际SDK佩戴者 / Refresh and select an actual SDK wearer')
+                if not ('_saved_profile' in target or actual or resumed or catalog):raise ValueError('请刷新并选择实际SDK佩戴者 / Refresh and select an actual SDK wearer')
                 from glove_protocol import validate
                 validate(dict(name='glove_open',serial=sn,user_id=target['user_id'],timeout_ms=target.get('timeout_ms',250)))
             if 'hand_serial' in target:
-                if '_continuation' in target:raise ValueError('Continue calibration before selecting a hand')
+                if '_continuation' in target or '_saved_profile' in target:raise ValueError('Continue calibration before selecting a hand')
                 from glove_protocol import validate
                 validate(dict(name='glove_prepare',serial=target['hand_serial'],address=target.get('address','')))
                 feedback=(state.get('glove') or {}).get('feedback') or {};identity=feedback.get('identified_device') or {}
@@ -496,7 +539,23 @@ class ConnectionSwitch:
             if request_id in self.requests:raise ValueError('This switch request was already submitted; read its saved result')
             state=self.controller.snapshot();reason=self._blocked(state)
             if reason:raise ValueError(reason)
-            source=owner(state);target=self._target(command,state,source,pair_target)
+            if (set(command)!={'name','request_id','expected_owner','target'}
+                    or command.get('name')!='connection_switch' or command.get('expected_owner')!=context_digest(state)):
+                raise ValueError('设备会话已变化，请重新选择 / Device session changed; select again')
+            source=owner(state)
+            with self.lock:
+                attempt_started=True
+                self._thread=threading.get_ident();self.cancelled=False
+                self.deadline=self.clock()+45
+                self.viewer_token=source['session'] if source and source['mode']=='official' else None
+                self.state.update(busy=True,phase='preflight',request_id=request_id,error=None,cleanup_error=None,cancel_requested=False,
+                    unchanged=False,source_released=False,receipt=None,attempt_id=secrets.token_hex(16),
+                    source=copy.deepcopy(source),target=None)
+            # Inventory, saved-profile reads and component checks may wait.
+            # Their exact cancellable intent must be visible before they run.
+            target=self._target(command,state,source,pair_target)
+            self._check_cancel()
+            self.requests.add(request_id)
             attach=self._can_attach(state,target) if 'hand_serial' in target else False
             same=source and all(source.get(k)==target.get(k) for k in ('mode','serial'))
             if same and target['mode']=='teleoperation':same=(source['profile']==target['profile'] and source['user_id']==target.get('user_id')
@@ -512,19 +571,14 @@ class ConnectionSwitch:
                     and ((state.get('glove') or {}).get('stream') or {}).get('retarget')==target['_mapping']['settings']
                     and (((state.get('glove') or {}).get('stream') or {}).get('solver') or {}).get('engine')=='sdk'
                     and (((state.get('glove') or {}).get('stream') or {}).get('solver') or {}).get('applied') is True)
-            self.requests.add(request_id)
             if same:
-                self._set(busy=False,phase='connected',unchanged=True,request_id=request_id,attempt_id=secrets.token_hex(16),
-                    target=copy.deepcopy(target),source=copy.deepcopy(source),receipt=None,error=None,cleanup_error=None,source_released=False,cancel_requested=False)
+                with self.lock:
+                    self._check_cancel()
+                    self.state.update(busy=False,phase='connected',unchanged=True,
+                        target={k:copy.deepcopy(v) for k,v in target.items() if not k.startswith('_')},
+                        source=copy.deepcopy(source),receipt=None,error=None,cleanup_error=None,source_released=False,cancel_requested=False)
                 return dict(connection_switch=self.snapshot(state))
-            with self.lock:
-                attempt_started=True
-                self._thread=threading.get_ident();self.cancelled=False
-                self.deadline=self.clock()+45
-                self.viewer_token=source['session'] if source and source['mode']=='official' else None
-                self.state.update(busy=True,phase='preflight',request_id=request_id,error=None,cleanup_error=None,cancel_requested=False,
-                    unchanged=False,source_released=False,receipt=None,attempt_id=secrets.token_hex(16),
-                    source=copy.deepcopy(source),target={k:v for k,v in target.items() if not k.startswith('_')})
+            self._set(target={k:v for k,v in target.items() if not k.startswith('_')})
             from studio_component import enforce_session_owner
             enforce_session_owner(dict(name='glove_scan'))
             if target['mode']=='official':self._official_preflight()
@@ -542,6 +596,10 @@ class ConnectionSwitch:
                     and (state.get('glove') or {}).get('controller_config')==self._config()):
                 self.resume={k:source[k] for k in ('serial','profile','user_id')}
                 self.resume['binding']=copy.deepcopy(state.get('retarget_binding'))
+                saved=self._saved_resume
+                if (saved and saved['config']==self._config()
+                        and all(saved.get(k)==source.get(k) for k in ('serial','profile','user_id'))):
+                    self.resume.update(saved_profile=True,source_profile=saved['source_profile'])
                 timeout=((state.get('glove') or {}).get('stream') or {}).get('timeout_ms')
                 if type(timeout) is int and 100<=timeout<=2000:self.resume['timeout_ms']=timeout
                 self.resume_config=self._config()
@@ -566,6 +624,13 @@ class ConnectionSwitch:
                     self.controller.action(dict(name='official_viz_start',serial=target['serial'],theme=target.get('theme','light')))
                 elif target['mode']=='hand':
                     self.controller.action(dict(name='connect',serial=target['serial'],auto_detect=True))
+                elif '_saved_profile' in target:
+                    proof=target['_saved_profile']
+                    bundle=self.controller._prepare_saved_profile(proof,cancel_check=self._check_cancel)
+                    self._check_cancel()
+                    new_session=self.controller._start_saved_profile_session(bundle,proof,expected_profile=target['profile'],
+                        timeout_ms=target.get('timeout_ms',250))
+                    if type(new_session) is not int or new_session<=0:raise ValueError('Saved profile did not return an exact SDK session')
                 elif '_continuation' in target:
                     self.controller._continuation_profile=target['profile']
                     continued=self.controller.calibrated_teleoperation.execute(target['_continuation'],synchronous=True)
@@ -575,7 +640,7 @@ class ConnectionSwitch:
                 else:
                     self.controller.action(dict(name='glove_scan'))
                     new_session=self.controller.glove.snapshot()['session_id']
-            if target['mode']=='teleoperation' and '_continuation' not in target and not attach:
+            if target['mode']=='teleoperation' and not {'_continuation','_saved_profile'}&set(target) and not attach:
                 def ready():
                     g=self.controller.glove.snapshot()
                     if g.get('session_id')!=new_session:raise ValueError('SDK session changed before opening')
@@ -599,6 +664,10 @@ class ConnectionSwitch:
                 if actual and actual['mode']==target['mode'] and actual['serial']==target['serial']:
                     if target['mode']=='teleoperation' and (actual['profile']!=target['profile']
                             or 'user_id' in target and actual['user_id']!=target['user_id']):raise ValueError('SDK wearer identity differs')
+                    if '_saved_profile' in target:
+                        stream=(current.get('glove') or {}).get('stream') or {};solver=stream.get('solver') or {}
+                        if (stream.get('fresh') is not True or solver.get('engine')!='sdk'
+                                or solver.get('applied') is not True):return None
                     return current
                 if target['mode']=='official' and (current.get('official_viz') or {}).get('phase')=='error':raise ValueError('Viewer connection failed')
                 if target['mode']=='hand' and current.get('connection')=='error':raise ValueError(current.get('message') or 'Hand connection failed')
@@ -643,6 +712,10 @@ class ConnectionSwitch:
             with self.lock:
                 self._check_cancel()
                 self.state.update(phase='connected',receipt=receipt)
+                if '_saved_profile' in target:
+                    proof=target['_saved_profile']
+                    self._saved_resume=dict(serial=target['serial'],profile=target['profile'],user_id=target['user_id'],
+                        source_profile=proof['source_profile'],config=self._config())
             return dict(connection_switch={**self.snapshot(after),'busy':False},connection_switch_receipt=receipt)
         except Exception as error:
             if not attempt_started:raise

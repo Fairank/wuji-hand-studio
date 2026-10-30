@@ -181,6 +181,112 @@ class Controller:
         self.sdk_session_configs[session]=config
         return session
 
+    def _saved_profile_scope(self,proof=None,*,attempt=None,config=None,expected_profile=None,internal=False):
+        """Only the exact live purpose switch may consume a saved native profile."""
+        switch=self.connection_switch
+        with switch.lock:
+            current=copy.deepcopy(switch.state)
+            if (current.get('busy') is not True or not current.get('attempt_id')
+                    or internal and not switch.internal or attempt is not None and current['attempt_id']!=attempt):
+                raise ValueError('设备用途切换已改变，未接入手套 / Device purpose switch changed; glove was not opened')
+        switch._check_cancel()
+        if config is not None and switch._config()!=config:raise ValueError('Controller configuration changed during saved-profile transfer')
+        with self.lock:
+            if getattr(self,'desktop_closing',False):raise ValueError('Session is closing')
+            if proof is not None and (proof.get('source_kind')!='saved_profile' or proof.get('source_run_id') is not None
+                    or proof.get('source_workspace')!=(os.environ.get('WUJI_FLEET_ID') or 'main')):
+                raise ValueError('Saved profile belongs to another workspace or source')
+            if expected_profile is not None:
+                selected=self.state['device_profile']
+                if selected['id']!=expected_profile or proof is None or selected['side']!=proof.get('side'):
+                    raise ValueError('Saved profile side or teleoperation target changed')
+        return current
+
+    def _saved_profile_preflight(self,serial,side,profile=None,*,cancel_check=None):
+        from saved_calibration import preflight_saved_profile
+        from cli_coordination import gate,reservation
+        from connection_switch import owner
+        from bridge_config import load_config
+        from official_device_discovery import use_native
+        if not use_native(load_config()):raise ValueError('Saved native profiles are unavailable for this controller')
+        scope=self._saved_profile_scope(internal=True);attempt=scope['attempt_id'];config=self.connection_switch._config()
+        def check():
+            if cancel_check is not None:cancel_check()
+            self._saved_profile_scope(attempt=attempt,config=config)
+        # Pin the exact owner around read-only official profile export. This
+        # allows its own Viewer, never an unrelated reservation or SDK session.
+        with gate(self.official_viz.folder):
+            check();source=owner(self.snapshot())
+            if source!=scope.get('source'):raise ValueError('Device owner changed before saved-profile preflight')
+            marker=reservation(self.official_viz.folder)
+            if marker and not (source and source['mode']=='official' and marker.get('kind')=='viz' and marker.get('token')==source['session']):
+                raise ValueError('Another device task owns the official profile')
+            proof=preflight_saved_profile(serial,side,profile,folder=self.reports.parent/'saved_profile_transfer',
+                workspace=os.environ.get('WUJI_FLEET_ID') or 'main',cancel_check=check)
+            check()
+            if owner(self.snapshot())!=source:raise ValueError('Device owner changed during saved-profile preflight')
+            return proof
+
+    def _prepare_saved_profile(self,proof,*,cancel_check=None):
+        from saved_calibration import prepare_saved_profile
+        scope=self._saved_profile_scope(proof,internal=True);config=self.connection_switch._config()
+        def check():
+            if cancel_check is not None:cancel_check()
+            self._saved_profile_scope(proof,attempt=scope['attempt_id'],config=config)
+        return prepare_saved_profile(proof,cancel_check=check)
+
+    def _start_saved_profile_session(self,bundle,proof,*,expected_profile,timeout_ms=250):
+        from calibration_portability import CONTEXT_FIELDS,validate_continuation
+        from saved_calibration import verify_saved_snapshot
+        if type(timeout_ms) is not int or not 100<=timeout_ms<=2000:
+            raise ValueError('Invalid saved-profile glove timeout')
+        proof=copy.deepcopy(proof)
+        private={k:copy.deepcopy(v) for k,v in bundle.items() if k in CONTEXT_FIELDS|{'bundle_path','glove_route','source_kind','transfer_id'}}
+        private=validate_continuation(private,path=True)
+        keys=('source_kind','source_run_id','transfer_id','source_workspace','serial','side','source_profile',
+              'source_user_id','model_sha256','model_bytes','bundle_sha256','bundle_bytes')
+        if any(private.get(k)!=proof.get(k) for k in keys):raise ValueError('Saved profile transfer identity changed')
+        scope=self._saved_profile_scope(proof,expected_profile=expected_profile,internal=True)
+        attempt=scope['attempt_id'];config=self.connection_switch._config();started={}
+        def check():self._saved_profile_scope(proof,attempt=attempt,config=config,expected_profile=expected_profile)
+        # The source has already been released. Use the existing exact official
+        # route across Windows/managed-controller broadcast domains.
+        from bridge_config import load_config
+        from official_device_discovery import use_native
+        if use_native(load_config()):
+            from calibration_transport import route_from_discovery
+            check()
+            route=route_from_discovery(self.calibration_devices(fresh=True),proof['serial'])
+            check()
+            if route is not None:private['glove_route']=route
+        def ready(receipt):
+            check()
+            expected={k:proof[k] for k in ('source_kind','source_run_id','transfer_id','source_workspace','source_profile','serial','side','model_sha256')}
+            if (not isinstance(receipt,dict) or any(receipt.get(k)!=v for k,v in expected.items())
+                    or receipt.get('owner_user_id')!=proof['source_user_id'] or type(receipt.get('imported')) is not bool):
+                raise ValueError('Saved profile SDK readback identity differs')
+            # The switch's main thread owns the workflow/file gate while it
+            # awaits this reader. Do not acquire that gate again in the reader.
+            verify_saved_snapshot(proof,cancel_check=check)
+            with self.lock:
+                check()
+                with self.glove.lock:
+                    context=self.glove._continuation or {}
+                    if (self.glove.stopping or self.glove.session!=started.get('session')
+                            or any(context.get(k)!=private.get(k) for k in keys)):
+                        raise ValueError('Saved profile SDK session changed')
+                selected=self.state['device_profile'];binding=self.retarget.context(selected)['binding']
+                context=self.retarget.select({**binding,'glove_serial':proof['serial'],'sdk_user':proof['source_user_id']},selected)
+                tuning=self.tuning.context(context['binding'])
+                if tuning['engine']!='sdk':self.tuning.select_engine(context['binding'],'sdk')
+                self.state['view_source']='glove'
+                return dict(timeout_ms=timeout_ms,retarget=context['settings'],solver=dict(engine='sdk',values=tuning['values']))
+        with self.lock:
+            check()
+            started['session']=self.glove.start_calibrated(private,ready,expected_profile=expected_profile)
+            self.sdk_session_configs[started['session']]=config
+        return started['session']
+
     def _continuation_calibration(self):
         # No discovery, user refresh or SDK access in this read-only view.
         with self.calibration.lock:

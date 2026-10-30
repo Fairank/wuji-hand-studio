@@ -165,11 +165,26 @@ CONTEXT_FIELDS={'source_run_id','source_workspace','serial','side','source_profi
                 'model_sha256','model_bytes','bundle_sha256','bundle_bytes'}
 
 
+def continuation_source(value):
+    """Keep saved-profile identity separate from a completed calibration run."""
+    return ({key:value[key] for key in ('source_kind','transfer_id')}
+            if value.get('source_kind')=='saved_profile' else {})
+
+
+def model_provenance(context,owner_user_id,imported):
+    return dict({key:context[key] for key in ('source_run_id','source_workspace','source_profile','serial','side','model_sha256')},
+                owner_user_id=owner_user_id,imported=imported,**continuation_source(context))
+
+
 def validate_continuation(value, *, path=False):
     required=CONTEXT_FIELDS|({'bundle_path'} if path else set())
-    if not isinstance(value,dict) or not required<=set(value) or set(value)-required-{'glove_route'}:raise ValueError('Invalid private calibration continuation')
-    if (not isinstance(value['source_run_id'],str) or not RUN.fullmatch(value['source_run_id'])
-            or not isinstance(value['serial'],str) or not IDENT.fullmatch(value['serial'])
+    if not isinstance(value,dict) or not required<=set(value) or set(value)-required-{'glove_route','source_kind','transfer_id'}:raise ValueError('Invalid private calibration continuation')
+    saved=value.get('source_kind')=='saved_profile'
+    if (saved and (value['source_run_id'] is not None or not isinstance(value.get('transfer_id'),str) or not RUN.fullmatch(value['transfer_id']))
+            or not saved and ('source_kind' in value or 'transfer_id' in value
+                or not isinstance(value['source_run_id'],str) or not RUN.fullmatch(value['source_run_id']))):
+        raise ValueError('Invalid private calibration source identity')
+    if (not isinstance(value['serial'],str) or not IDENT.fullmatch(value['serial'])
             or not isinstance(value['source_workspace'],str) or not 1<=len(value['source_workspace'])<=100
             or value['side'] not in ('left','right') or not isinstance(value['source_profile'],str)
             or not PROFILE.fullmatch(value['source_profile']) or value['source_profile'].lower()=='default'
@@ -307,7 +322,24 @@ def prepare_controller_model(manager, context, *, folder=None, receipt_folder=No
     binding=dict(owner_user_id=owner,source_profile=context['source_profile'],source_run_id=context['source_run_id'],
         source_workspace=context['source_workspace'],bundle_sha256=context['bundle_sha256'],
         bundle_bytes=context['bundle_bytes'],model_sha256=context['model_sha256'],model_bytes=context['model_bytes'],
-        side=context['side'],prior_receipt_sha256=prior_digest)
+        side=context['side'],prior_receipt_sha256=prior_digest,**continuation_source(context))
+    if context.get('source_kind')=='saved_profile':binding['serial']=context['serial']
+    def saved_pending_matches(commit):
+        # A new explicit saved-profile request gets a new transfer identity and
+        # the exporter may stamp a new archive. Neither authorizes another
+        # import or adoption of unrelated SDK data. Only a fully verified
+        # candidate for this exact wearer/workspace/glove/side/model and prior
+        # receipt may proceed to the complete SDK/content readback below.
+        if context.get('source_kind')!='saved_profile' or not isinstance(commit,dict):return False
+        try:
+            old={key:context[key] for key in CONTEXT_FIELDS}
+            old.update(source_kind='saved_profile',transfer_id=commit['transfer_id'],
+                       bundle_sha256=commit['bundle_sha256'],bundle_bytes=commit['bundle_bytes'])
+            validate_continuation(old)
+            expected=dict(binding,state='verified',transfer_id=old['transfer_id'],
+                          bundle_sha256=old['bundle_sha256'],bundle_bytes=old['bundle_bytes'])
+            return commit==expected
+        except (KeyError,TypeError,ValueError):return False
     def audit_current():
         audit=receipt_root/(uuid.uuid4().hex+'.zip')
         try:
@@ -351,7 +383,8 @@ def prepare_controller_model(manager, context, *, folder=None, receipt_folder=No
                 candidate=json.loads(path.read_text(encoding='utf8'))
             except (OSError,ValueError):continue
             commit=candidate.get('_commit') if isinstance(candidate,dict) else None
-            if isinstance(commit,dict) and commit==dict(binding,state='verified'):candidates.append((path,candidate))
+            if isinstance(commit,dict) and (commit==dict(binding,state='verified') or saved_pending_matches(commit)):
+                candidates.append((path,candidate))
         if len(candidates)>1:raise ValueError('标定保存记录不唯一，请核对后重试 / Calibration receipt recovery is ambiguous; review it first')
         if candidates:
             path,candidate=candidates[0]
@@ -362,6 +395,10 @@ def prepare_controller_model(manager, context, *, folder=None, receipt_folder=No
                     or file_digest(owned[model_key]['path'])!=(context['model_sha256'],context['model_bytes'])
                     or receipt_digest()!=prior_digest):
                 raise ValueError('待保存的标定资料与官方档案不一致 / Pending calibration receipt differs from official data')
+            if context.get('source_kind')=='saved_profile':
+                if (set(rows)!=set(owned)
+                        or any(_bundle_signature(bundle,row)!=owned[key]['signature'] for key,row in rows.items())):
+                    raise ValueError('本次资料与待保存的完整官方档案不一致，未重新导入 / This bundle differs from the complete pending official profile; nothing was reimported')
             try:path.replace(receipt_path)
             except OSError:raise ValueError('标定资料已验证但保存记录未完成，请检查存储后重试 / Calibration data verified; receipt save is incomplete. Check storage and retry') from None
             return dict(context,owner_user_id=owner,model_path=owned[model_key]['path'],imported=False)
@@ -409,7 +446,7 @@ def prepare_controller_model(manager, context, *, folder=None, receipt_folder=No
         components[key]=dict(path=row.get('path'),signature=signature)
     if any(key not in installed for key in rows):raise ValueError('Official SDK did not confirm every imported calibration component')
     receipt=dict(schema=1,owner_user_id=owner,source_profile=context['source_profile'],
-        source_workspace=context['source_workspace'],source_run_id=context['source_run_id'],
+        source_workspace=context['source_workspace'],source_run_id=context['source_run_id'],**continuation_source(context),
         components=components,_commit=dict(binding,state='verified'))
     try:
         with pending.open('w',encoding='utf-8') as output:json.dump(receipt,output,sort_keys=True);output.flush();os.fsync(output.fileno())

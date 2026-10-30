@@ -178,7 +178,8 @@ def worker_glove(requests,events,continuation=None,sdk_requirement=None):
                 raise ValueError('SDK user changed during calibration import; glove was not opened')
             bootstrap_not_cancelled()
             users=manager.list_users()
-            model_provenance={k:model_receipt[k] for k in ('source_run_id','source_workspace','source_profile','serial','side','model_sha256','owner_user_id','imported')}
+            from calibration_portability import model_provenance as provenance
+            model_provenance=provenance(model_receipt,model_receipt['owner_user_id'],model_receipt['imported'])
         def new_solver(settings):
             if settings.get('engine','sdk')=='official_open':
                 from solver_session import SolverSession

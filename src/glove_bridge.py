@@ -162,6 +162,8 @@ class GloveBridge:
         """
         from calibration_portability import CONTEXT_FIELDS,validate_continuation,file_digest,MAX_BUNDLE
         private={k:bundle[k] for k in CONTEXT_FIELDS|{'bundle_path'}}
+        if bundle.get('source_kind')=='saved_profile':
+            private.update({key:bundle[key] for key in ('source_kind','transfer_id')})
         if 'glove_route' in bundle:private['glove_route']=copy.deepcopy(bundle['glove_route'])
         context=validate_continuation(private,path=True)
         if not callable(on_model_ready):raise ValueError('Continuation requires a workspace binding callback')
@@ -317,7 +319,7 @@ class GloveBridge:
         return dict(context,bundle_path=remote)
 
     def _calibrated_ready(self,event,context):
-        from calibration_portability import IDENT
+        from calibration_portability import IDENT,model_provenance
         receipt=event.get('receipt')
         if (not isinstance(receipt,dict) or receipt.get('source_run_id')!=context['source_run_id']
                 or receipt.get('serial')!=context['serial'] or receipt.get('side')!=context['side']
@@ -327,7 +329,7 @@ class GloveBridge:
                 or not isinstance(receipt.get('owner_user_id'),str) or not IDENT.fullmatch(receipt['owner_user_id'])
                 or receipt.get('owner_user_id')!=context.get('source_user_id')
                 or type(receipt.get('imported')) is not bool
-                or set(receipt)!={'source_run_id','source_workspace','source_profile','serial','side','model_sha256','owner_user_id','imported'}):
+                or receipt!=model_provenance(context,receipt.get('owner_user_id'),receipt.get('imported'))):
             raise ValueError('Controller calibration identity differs from this task')
         with self.lock:
             if self.stopping:return
@@ -545,7 +547,7 @@ class GloveBridge:
             self.remember_termination()
 
     def run(self):
-        client=None;ready=False;model_ready=False;sdk_ready=False
+        client=None;ready=False;model_ready=False;sdk_ready=False;bootstrap_rejected=False
         with self.lock:continuation=copy.deepcopy(self._continuation);session=self.session
         try:
             from sdk_release import resolve_release,requirement,select_wheel
@@ -567,6 +569,13 @@ class GloveBridge:
                     if session!=self.session:break
                 if not line.startswith('WUJI_JSON:'):continue
                 event=json.loads(line[len('WUJI_JSON:'):])
+                if bootstrap_rejected:
+                    # Keep the original reader until its exact worker reports
+                    # resource release. Closing the transport first discards
+                    # that ACK, and a late state must not revive this source.
+                    if event.get('type') in ('glove_closed','closed'):
+                        self.receive(event,session=session)
+                    continue
                 if event.get('type')=='ready':
                     if ready:raise ValueError('Controller repeated startup')
                     if event.get('teleop_version')!=1:raise ValueError('控制端需更新到支持手套遥操作的版本 / Update controller for glove teleoperation')
@@ -590,7 +599,15 @@ class GloveBridge:
                 elif event.get('type')=='calibrated_ready' and continuation is not None:
                     if not ready or not sdk_ready or model_ready:raise ValueError('Controller calibration readiness is out of order')
                     model_ready=True
-                    self._calibrated_ready(event,continuation)
+                    try:self._calibrated_ready(event,continuation)
+                    except Exception as error:
+                        text=str(error) if isinstance(error,ValueError) else '无法核对本次标定接续，请检查资料 / Calibration continuation could not be verified; review its data'
+                        self.receive(dict(type='glove_error',message=text),session=session)
+                        with self.lock:
+                            if session!=self.session:raise CancellationNotDispatched('Teleoperation session changed before bootstrap cleanup') from error
+                            already_stopping=self.stopping;self.stopping=True
+                            if not already_stopping:self.send(dict(name='glove_disconnect'))
+                        bootstrap_rejected=True
                 else:
                     if event.get('type')=='glove_state' and not sdk_ready:
                         raise ValueError('控制端尚未确认实际运行的 SDK，请修复组件 / Actual worker SDK was not confirmed; repair components')

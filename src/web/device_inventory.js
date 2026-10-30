@@ -23,14 +23,16 @@
  const advanced=make('details','di-advanced'),advancedSummary=make('summary','',advanced),advancedLabel=make('strong','',advancedSummary),advancedNote=make('span','',advancedSummary),advancedBody=make('div','di-advanced-body',advanced);
  advanced.id='di-workspace-settings';
  for(const element of [...host.children])if(element.matches('.cr-device-grid,.cr-next'))advancedBody.append(element);
- root.after(advanced);const oldIntro=host.querySelector(':scope > .hub-intro');if(oldIntro)oldIntro.hidden=true;
+ document.getElementById('settings-devices')?.append(advanced);const oldIntro=host.querySelector(':scope > .hub-intro');if(oldIntro)oldIntro.hidden=true;
  let inventory=null,previousDisplayRows=[],scanFocus='',online=false,loading=null,scanning=false,using=false,pendingMode='',filter='all',activeSerial='',useHandler=null,timer=0,lastRead=0,backoffUntil=0,lastErrorKey='',localError='',consumerError='',consoleState=null,destroyed=false,discoveryWanted=true,sessionBaseline=new Set(),sessionCount=0,pausedForSession=false,serviceRevision=0;
  const selectedByKind=new Map(),cards=new Map(),discoveryHolds=new Set();
  const getTime=value=>{if(typeof value==='number'&&Number.isFinite(value))return value<1e12?value*1000:value;if(typeof value==='string'){const parsed=Date.parse(value);return Number.isFinite(parsed)?parsed:0;}return 0;};
- const rows=()=>{const current=Array.isArray(inventory?.devices)?inventory.devices.filter(d=>d&&typeof(d.sn||d.serial)==='string'):[],observed=online&&inventory?.scanning===true&&!inventory.error&&!localError&&!current.length?previousDisplayRows:current;return observed.filter(fresh);};
+ const sessionOwner=()=>window.WujiDeviceUse?.current();
+ const isOwned=row=>{const owner=sessionOwner();return !!owner&&owner.serial===(row?.sn||row?.serial)&&owner.kind===row?.kind;};
+ const rows=()=>{const current=Array.isArray(inventory?.devices)?inventory.devices.filter(d=>d&&typeof(d.sn||d.serial)==='string'):[],observed=online&&inventory?.scanning===true&&!inventory.error&&!localError&&!current.length?previousDisplayRows:current;const visible=observed.filter(fresh),owner=sessionOwner();if(online&&owner&&!visible.some(row=>(row.sn||row.serial)===owner.serial))visible.push({sn:owner.serial,serial:owner.serial,kind:owner.kind,selectable:true,in_use:true,session_verified:true,...owner.kind==='hand'&&/^hand[12]_(left|right)$/.test(owner.profile||'')?{generation:owner.profile.split('_')[0],side:owner.profile.split('_')[1]}:{}});return visible;};
  const sn=row=>row?.sn||row?.serial||'';
  const fresh=row=>{const seen=getTime(row?.last_seen),ttl=Number(inventory?.ttl_s),age=Date.now()-seen;return online&&row?.stale!==true&&seen>0&&age>=0&&age<((Number.isFinite(ttl)&&ttl>0?ttl:30)*1000);};
- const usable=row=>!scanning&&inventory?.scanning!==true&&!!row&&['hand','glove'].includes(row.kind)&&row.selectable===true&&fresh(row);
+ const usable=row=>!scanning&&inventory?.scanning!==true&&!!row&&['hand','glove'].includes(row.kind)&&row.selectable===true&&(fresh(row)||isOwned(row));
  const visible=()=>!document.hidden&&!root.closest('[hidden]')&&root.getClientRects().length>0&&getComputedStyle(root).visibility!=='hidden';
  const selected=()=>rows().find(row=>sn(row)===activeSerial)||null;
  const clone=row=>row?JSON.parse(JSON.stringify(row)):null;
@@ -39,7 +41,7 @@
  function deviceName(row){const kind=row.kind==='glove'?'Wuji Glove':row.kind==='hand'?'Wuji Hand':t('待识别设备','Unidentified device');const generation=row.generation==='hand2'?' 2':row.generation==='hand1'?' 1':row.generation==='glove1'?' 1':'';return kind+generation;}
  function brief(row){return deviceName(row)+' · '+sideLabel(row);}
  function ownerLabel(row){
-  if(!online||!row)return '';const serial=sn(row),state=consoleState||{},calibration=state.calibration||{},run=calibration.run||calibration;
+  if(!online||!row)return '';const owner=sessionOwner();if(owner?.serial===sn(row))return owner.purpose==='teleoperation'?t('遥操作','Teleoperation'):owner.purpose==='cli_view'?'CLI':t('灵巧手反馈','Hand feedback');const serial=sn(row),state=consoleState||{},calibration=state.calibration||{},run=calibration.run||calibration;
   if(serial&&run.serial===serial&&typeof run.id==='string'&&run.id&&(run.running===true||run.cleanup_required===true||calibration.cleanup_required===true))return run.running===true?run.status==='starting'?t('标定准备中','Preparing calibration'):run.status==='solving'?t('正在生成手型','Creating model'):run.status==='cancelling'?t('正在结束标定','Ending calibration'):t('标定中','Calibrating'):t('会话待核对','Session unverified');
   const viewer=state.official_viz||{},device=viewer.reported_device||viewer.device;if(serial&&sn(device)===serial&&viewer.active===true&&viewer.phase==='running'&&viewer.session_id)return t('画面会话','Viewer session');
   return row.in_use===true?t('会话占用','Session in use'):'';
@@ -106,7 +108,7 @@
  function render(){
   syncDiscoveryIntent();
   const all=rows().slice().sort((a,b)=>(a.kind||'').localeCompare(b.kind||'')||(a.side||'').localeCompare(b.side||'')||sn(a).localeCompare(sn(b)));
-  const busy=scanning||inventory?.scanning===true,hasSelection=!!selected(),row=selected(),canUse=usable(row)&&!using&&!busy;
+  const busy=scanning||inventory?.scanning===true,globalBusy=window.WujiConnectionSwitch?.busy()===true,hasSelection=!!selected(),row=selected(),canUse=usable(row)&&!using&&!busy&&!globalBusy;
   if(busy&&document.activeElement?.name==='inventory-device'&&!scanFocus)scanFocus=document.activeElement.value;
   setText(title,root.closest('#page-home')?t('当前设备','Current devices'):t('发现你的设备','Your devices'));setText(description,t('自动查找手套与灵巧手，选中后再进入需要的功能。','Find gloves and hands automatically. Select one, then choose how to use it.'));
   const scanState=busy?'scanning':!online?'offline':discoveryHolds.size||!discoveryWanted?'paused':inventory?.scan_allowed!==true?'waiting':'ready';
@@ -122,7 +124,7 @@
   const shown=all.filter(d=>filter==='all'||d.kind===filter);list.setAttribute('aria-label',t('已发现设备，按编号选择','Discovered devices; select by serial number'));
   const existing=new Set();for(let index=0;index<shown.length;index++){
    const item=shown[index],serial=sn(item);existing.add(serial);const itemCard=cards.get(serial)||createCard(serial),{card,radio,icon,name,meta,identity,status}=itemCard;
-   radio.disabled=using||!usable(item);radio.checked=activeSerial===serial;card.dataset.selected=String(radio.checked);card.dataset.available=String(usable(item));card.dataset.kind=item.kind||'unknown';
+   radio.disabled=using||globalBusy||!usable(item);radio.checked=activeSerial===serial;card.dataset.selected=String(radio.checked);card.dataset.available=String(usable(item));card.dataset.kind=item.kind||'unknown';
    icon.hidden=true;icon.replaceChildren();icon.dataset.kind=item.kind||'unknown';
    const owner=ownerLabel(item);setText(name,deviceName(item));setText(meta,sideLabel(item)+(item.side_source==='serial_hint'?t(' · 身份提示，待设备核对',' · Identity hint; verify on connection'):item.side_source==='device'?t(' · 设备报告',' · Device reported'):'')+(owner&&!fresh(item)?t(' · 发现记录已过期',' · Discovery record expired'):''));setText(identity,serial);
    setText(status,owner||(busy?t('正在核对','Checking'):!fresh(item)?t('已过期','Stale'):item.kind==='unknown'?t('待识别','Unidentified'):item.selectable!==true?t('暂不可用','Unavailable'):t('已发现','Discovered')));status.dataset.state=owner||busy?'busy':!fresh(item)||item.kind==='unknown'?'muted':'ready';
@@ -144,7 +146,7 @@
   selectedArea.hidden=!hasSelection;
   const preparing={official:['正在准备官方画面…','Preparing official view…'],preview:['正在打开遥操作…','Opening teleoperation…'],hand:['正在连接所选灵巧手反馈…','Connecting the selected hand feedback…'],calibration:['正在打开所选手套的标定设置…','Opening calibration settings for the selected glove…']};
   setText(useStatus,consumerError||(using&&preparing[pendingMode]?t(...preparing[pendingMode]):''));useStatus.hidden=!useStatus.textContent;useStatus.dataset.error=String(!!consumerError);
-  setText(advancedLabel,t('工作区连接设置','Workspace connection settings'));setText(advancedNote,t('映射用户、配对与当前会话','Mapping user, pairing and current sessions'));advanced.hidden=!advancedBody.children.length;
+  setText(advancedLabel,t('高级连接设置','Advanced connection settings'));setText(advancedNote,t('手动地址与兼容选项','Manual addresses and compatibility options'));advanced.hidden=!advancedBody.children.length;
   if(!busy&&scanFocus){const previous=cards.get(scanFocus)?.radio;if(previous&&!previous.disabled&&document.activeElement===document.body)previous.focus({preventScroll:true});scanFocus='';}
  }
  function schedule(delay=1000){clearTimeout(timer);if(!destroyed)timer=setTimeout(tick,delay);}
@@ -181,7 +183,7 @@
  function visibilityChanged(){if(visible())schedule(0);}
  const observer=new MutationObserver(visibilityChanged);for(let element=host;element;element=element.parentElement)observer.observe(element,{attributes:true,attributeFilter:['hidden','class','style','data-page','data-hub-tab']});
  window.addEventListener('workspace-page',visibilityChanged);window.addEventListener('hashchange',visibilityChanged);document.addEventListener('visibilitychange',visibilityChanged);window.addEventListener('wuji-language',render);
- window.addEventListener('console-state',event=>{consoleState=event.detail;render();});
+ window.addEventListener('console-state',event=>{consoleState=event.detail;render();});window.addEventListener('device-use-update',render);
  window.addEventListener('console-offline',()=>{serviceRevision++;consoleState=null;online=false;localError=t('工作台服务已离线，连接状态未核对。','Workbench service offline. Connection state is unverified.');render();});
  window.WujiDeviceInventory={
   selection(kind){const serial=kind?selectedByKind.get(kind):activeSerial;const row=rows().find(item=>sn(item)===serial);return usable(row)?clone(row):null;},
@@ -189,9 +191,9 @@
   select,refresh,findMore,scan:()=>scan(true),snapshot:()=>inventory?JSON.parse(JSON.stringify(inventory)):null,
   pauseDiscovery(reason){if(typeof reason!=='string'||!reason)return;const changed=!discoveryHolds.has(reason);discoveryHolds.add(reason);if(changed)render();},
   resumeDiscovery(reason){if(discoveryHolds.delete(reason)){render();schedule(0);}},
-  show(kind='all'){filter=['hand','glove'].includes(kind)?kind:'all';window.WujiConnectionHub.show('device');render();schedule(0);scanButton.focus();},
+  show(kind='all'){filter=['hand','glove'].includes(kind)?kind:'all';location.hash='#home';window.WujiWorkspace.showPage();render();schedule(0);scanButton.focus();},
   setUseHandler(handler){if(typeof handler!=='function')throw TypeError('Device inventory requires a use handler');useHandler=handler;},
-  showSettings(kind){if(kind==='glove'){location.hash='#glove';window.WujiWorkspace?.showPage();document.getElementById('glove-device')?.focus({preventScroll:true});return;}advanced.open=true;advancedBody.querySelector('#connect')?.focus();advanced.scrollIntoView({block:'nearest'});},
+  showSettings(kind){location.hash='#settings';window.WujiWorkspace?.showPage();document.getElementById('settings-tab-devices')?.click();if(kind==='glove'){location.hash='#glove';window.WujiWorkspace?.showPage();document.getElementById('glove-device')?.focus({preventScroll:true});return;}advanced.open=true;advancedBody.querySelector('#connect')?.focus();advanced.scrollIntoView({block:'nearest'});},
   destroy(){destroyed=true;clearTimeout(timer);observer.disconnect();root.remove();}
  };
  render();visibilityChanged();

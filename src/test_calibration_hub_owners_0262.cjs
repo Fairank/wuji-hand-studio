@@ -3,7 +3,7 @@
 const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm'),assert=require('node:assert/strict'),{test}=require('node:test');
 const source=fs.readFileSync(path.join(__dirname,'web/connection_hub.js'),'utf8');
 function section(begin,end){const a=source.indexOf(begin),b=source.indexOf(end,a);assert(a>=0&&b>a);return source.slice(a,b);}
-const declarations=source.split('\n').find(line=>line.startsWith(" let active='device'"));assert(declarations);
+const declarations=source.split('\n').find(line=>line.startsWith(' let active='));assert(declarations);
 const ownership=section(' // Service lifetime and each pending slot',' function selectSharedDevice');
 const requests=section(' async function refresh(force=false)',' async function scanGloves()');
 const listeners=section(" window.addEventListener('console-state',event=>",' function labels()');
