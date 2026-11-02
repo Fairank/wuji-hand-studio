@@ -204,10 +204,23 @@ class ConnectionSwitch:
                     and hw.get('active') is False and hw.get('stop_confirmed') is True):return None
         return error
 
+    def _catalog_busy(self):
+        # A timed-out request can return while its metadata reader is still
+        # unwinding. Retire only that reader's confirmed lifecycle; its late
+        # directory/result remains rejected and must be explicitly read again.
+        # No close, transport, or device action is performed by this observer.
+        with self.lock:
+            thread=self.catalog_thread;finished=self.catalog_finished
+            if (self.catalog.get('busy') and thread is not None and finished is not None
+                    and finished.is_set() and not thread.is_alive()
+                    and self.catalog_cleanup_error is None):
+                self.catalog['busy']=False
+            return self.catalog.get('busy') is True
+
     def _blocked(self,state,*,_own_transition=False):
         from device_termination import unconfirmed
         from desktop_lifecycle import calibration_cleanup_required
-        if (self.state['busy'] and not (_own_transition and self.internal)) or self.catalog['busy']:
+        if (self.state['busy'] and not (_own_transition and self.internal)) or self._catalog_busy():
             return '设备任务正在切换 / Device transition is in progress'
         try:current=owner(state)
         except ValueError as error:return str(error)
@@ -241,6 +254,7 @@ class ConnectionSwitch:
         return None
 
     def snapshot(self,state):
+        self._catalog_busy()
         with self.lock:
             result=copy.deepcopy(self.state);catalog=copy.deepcopy(self.catalog);resume=copy.deepcopy(self.resume)
         reason=self._blocked(state)
@@ -271,7 +285,11 @@ class ConnectionSwitch:
             if self.state['busy'] or self.catalog['busy']:raise ValueError('A device transition is in progress')
             self.controller.teleoperation_handover._runtime()
             config=self._config()
-            with self.lock:self.catalog.update(busy=True,status='loading',error=None)
+            with self.lock:
+                # Retire A's proof before publishing B as loading. A snapshot
+                # during B's Thread construction must not reuse A's EOF.
+                self.catalog_client=None;self.catalog_thread=None;self.catalog_finished=None
+                self.catalog.update(busy=True,status='loading',error=None)
             def read():
                 nonlocal client
                 try:
@@ -296,8 +314,15 @@ class ConnectionSwitch:
                         result['error']='Controller metadata cleanup unconfirmed: '+str(error)[:500]
                         self.catalog_cleanup_error=result['error']
                     finished.set()
-            thread=threading.Thread(target=read,name='SDK wearer directory',daemon=True)
-            self.catalog_thread=thread;self.catalog_finished=finished;thread.start();started=True
+            try:thread=threading.Thread(target=read,name='SDK wearer directory',daemon=True)
+            except Exception:
+                # Thread construction has not entered read()/factory(), so
+                # this request owns no transport to keep reserved. A start()
+                # failure is deliberately outside this known-no-reader case.
+                with self.lock:self.catalog['busy']=False
+                raise
+            with self.lock:self.catalog_thread=thread;self.catalog_finished=finished
+            thread.start();started=True
             if not finished.wait(12):
                 cancel.set()
                 if client and client.close() is False:

@@ -15,7 +15,7 @@
   const slot = document.getElementById('visual-slot') || document.querySelector('main') || document.body;
   slot.append(host);
   const byId = id => document.getElementById(id);
-  let state = null, selected = null, mappingKey = '', mappingPending = false, decodedImage = null,serviceOffline=false;
+  let state = null, selected = null, mappingKey = '', mappingPending = false, mappingFormContext = null, decodedImage = null,serviceOffline=false;
   let hasImage=false,lastImageMode=null,lastImageScope=null,sourceScope=null,viewStatus={kind:'loading',message:'正在载入原生手部模型'};
   const sourceKind=mode=>mode==='glove_constrained_unavailable'?'glove_constrained':mode;
   const virtualTeleoperation=()=>location.hash==='#virtual-glove';
@@ -152,8 +152,8 @@
   }
   async function showFrame(payload, current, started=performance.now(), deadline=started+2500, signal=null) {
     if(!current())return;
-    const meta=payload?.meta||{};
-    if(!payloadMatches(meta)){discardImage();clearVisual(text('设备已切换，等待新画面','Device changed; waiting for a new view'),'unavailable',meta);return;}
+    const meta=payload?.meta||{},service=typeof state?.csrf==='string'&&state.csrf?state.csrf:null;
+    if(!service||payload?.service_token!==service||!payloadMatches(meta)){discardImage();clearVisual(text('设备已切换，等待新画面','Device changed; waiting for a new view'),'unavailable',meta);return;}
     const scope=imageScope(meta);
     if(hasImage&&lastImageScope!==scope){discardImage();viewStatus={kind:'loading',message:text('正在准备画面','Preparing view'),meta};renderStatus();}
     if(meta.mode==='glove_live'&&(meta.feedback?.stale!==false||meta.source_seq==null)){clearVisual(meta.message||'实机反馈已过期','stale',meta);return;}
@@ -161,7 +161,8 @@
     const expires=frameDeadline(meta,started,deadline);if(performance.now()>=expires)throw frameExpired();
     const decoded=new Image();decodedImage=decoded;decoded.src=payload.image;
     try{await decodeFrame(decoded,signal,expires);}catch(error){if(['AbortError','TimeoutError'].includes(error.name))throw error;throw new Error(text('画面图像无法解码：','View image could not be decoded: ')+String(error.message||error));}finally{if(decodedImage===decoded)decodedImage=null;}
-    if(!current()||!payloadMatches(meta)||scope!==imageScope(meta))return;
+    if(!current())return;
+    if(state?.csrf!==service||!payloadMatches(meta)||scope!==imageScope(meta)){discardImage();clearVisual(text('设备已切换，等待新画面','Device changed; waiting for a new view'),'unavailable',meta);return;}
     if(performance.now()>=expires)throw frameExpired();
     byId('pose-image').src=payload.image;
     hasImage=true;lastImageMode=meta.mode;lastImageScope=scope;viewStatus={kind:'ready',meta};renderStatus();
@@ -184,11 +185,20 @@
     if(!rows.length){const tr=document.createElement('tr'),td=document.createElement('td');td.colSpan=8;td.textContent=text('尚无实机数据','No measured hand data');tr.append(td);rows.push(tr);}
     byId('joint-detail-body').replaceChildren(...rows);
   }
+  function mappingContext(value){
+    if(value?.connection!=='connected'||typeof value.csrf!=='string'||!value.csrf
+        ||!Number.isSafeInteger(value.session_generation)||value.session_generation<=0
+        ||typeof value.device_id!=='string'||!value.device_id
+        ||typeof value.device_profile?.id!=='string'||!/^hand[12]_(left|right)$/.test(value.device_profile.id))return null;
+    return {service_token:value.csrf,session_generation:value.session_generation,device_id:value.device_id,profile:value.device_profile.id};
+  }
+  function currentMappingSave(ticket){return mappingPending===ticket&&!serviceOffline&&mappingKey===ticket.key&&JSON.stringify(mappingContext(state))===JSON.stringify(ticket.context);}
   function mappingForm(next) {
     const nids=(next.joint_rates||[]).map(r=>r.nid).sort((a,b)=>a-b);
-    const key=JSON.stringify([next.device_id,nids]);
-    byId('save-mapping').disabled=next.connection!=='connected'||next.stale||mappingPending;
-    if(key===mappingKey)return;mappingKey=key;
+    const context=mappingContext(next),key=JSON.stringify([context,nids]),sameForm=key===mappingKey;
+    if(!sameForm){mappingKey=key;mappingFormContext=context;mappingPending=false;byId('mapping-notice').textContent='';}
+    byId('save-mapping').disabled=serviceOffline||!context||next.stale||!!mappingPending;
+    if(sameForm)return;
     byId('mapping-device').textContent=next.device_id?`已连接设备 · ${nids.length}个已观测关节`:'连接设备后可配置，映射按设备分别保存。';
     const same=next.mapping_device_id===next.device_id;
     const saved=new Map((same?next.mapping:[]).map(e=>[e.index,e]));
@@ -206,7 +216,9 @@
     byId('mapping-rows').replaceChildren(...rows);
   }
   byId('save-mapping').addEventListener('click',async()=>{
-    mappingPending=true;byId('save-mapping').disabled=true;
+    if(mappingPending||serviceOffline||!mappingFormContext)return;
+    const ticket={key:mappingKey,context:{...mappingFormContext}};
+    mappingPending=ticket;byId('save-mapping').disabled=true;
     try {
       const entries=[];
       [...byId('mapping-rows').rows].forEach((row,index)=>{
@@ -215,12 +227,12 @@
         if(get('nid').value==='')throw new Error(`第${index+1}个模型关节尚未选择设备编号`);
         entries.push({index,nid:Number(get('nid').value),sign:Number(get('sign').value),offset:Number(get('offset').value),verified:true});
       });
-      await action({name:'display_mapping',entries});byId('mapping-notice').textContent=`已保存${entries.length}个显示对应，没有发送灵巧手动作。`;
-    }catch(e){byId('mapping-notice').textContent=e.message;}
-    finally{mappingPending=false;}
+      await action({name:'display_mapping',entries,expected_context:ticket.context});if(currentMappingSave(ticket))byId('mapping-notice').textContent=`已保存${entries.length}个显示对应，没有发送灵巧手动作。`;
+    }catch(e){if(currentMappingSave(ticket))byId('mapping-notice').textContent=e.message;}
+    finally{if(mappingPending===ticket){mappingPending=false;if(state)mappingForm(state);else byId('save-mapping').disabled=true;}}
   });
   window.addEventListener('console-state',event=>{syncSource(event.detail);mappingForm(state);});
-  window.addEventListener('console-offline',()=>{serviceOffline=true;viewRevision++;viewRequest?.abort();if(decodedImage)decodedImage.src='';byId('save-mapping').disabled=true;clearVisual('本机服务连接中断');});
+  window.addEventListener('console-offline',()=>{serviceOffline=true;mappingPending=false;byId('mapping-notice').textContent='';viewRevision++;viewRequest?.abort();if(decodedImage)decodedImage.src='';byId('save-mapping').disabled=true;clearVisual('本机服务连接中断');});
   window.addEventListener('wuji-language',renderStatus);
   renderStatus();
   // Display work only. Device feedback and all control keepalives use separate lanes.

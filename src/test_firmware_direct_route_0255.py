@@ -568,6 +568,8 @@ class DirectFirmwareRouteTests(unittest.TestCase):
         catalog_busy=[True];controller.firmware_catalog_observer=lambda:dict(busy=catalog_busy[0])
         switch=ConnectionSwitch.__new__(ConnectionSwitch)
         switch.state=dict(busy=False);switch.catalog=dict(busy=False);switch.controller=controller
+        switch.lock=threading.RLock();switch.catalog_client=None
+        switch.catalog_thread=None;switch.catalog_finished=None;switch.catalog_cleanup_error=None
         switch._cleanup_error=lambda state:None
         with patch('cli_coordination.reservation',side_effect=lambda *a:copy.deepcopy(self.h.marker)):
             state=controller.snapshot()

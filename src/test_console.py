@@ -179,6 +179,9 @@ class ConsoleTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 c.action(command)
             c.state.update(connection='connected', device_id='synthetic-device', joint_rates=[dict(nid=1)])
+            c.generation=1
+            command['expected_context']=dict(service_token=c.csrf,session_generation=c.generation,
+                device_id=c.state['device_id'],profile=c.state['device_profile']['id'])
             c.action(command)
             config = json.loads((Path(tmp)/'display_mapping.json').read_text())
             self.assertEqual(config['device_id'], 'synthetic-device')

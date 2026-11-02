@@ -1195,6 +1195,16 @@ class Controller:
             with self.lock:
                 if self.state['connection'] != 'connected' or not self.state['device_id']:
                     raise ValueError('连接左手后再核对显示映射')
+                context=command.get('expected_context')
+                expected=dict(service_token=self.csrf,session_generation=self.generation,
+                    device_id=self.state['device_id'],profile=self.state['device_profile']['id'])
+                if (type(context) is not dict or set(context)!=set(expected)
+                        or type(context.get('session_generation')) is not int
+                        or not 1<=context['session_generation']<=2**53-1
+                        or any(type(context.get(key)) is not str or not context[key]
+                               for key in ('service_token','device_id','profile'))
+                        or context!=expected):
+                    raise ValueError('Display device changed; review the mapping before saving')
                 entries = validate_mapping(command.get('entries'))
                 observed = {r['nid'] for r in self.state['joint_rates']}
                 if any(e['nid'] not in observed for e in entries):
@@ -1738,7 +1748,7 @@ class Handler(BaseHTTPRequestHandler):
                 else:
                     return self.reply(400,dict(error='Unknown display selector'))
             else:jpeg, meta = self.server.pose.get()
-            return self.reply(200, dict(meta=meta, image='data:image/jpeg;base64,'+base64.b64encode(jpeg).decode('ascii') if jpeg else None))
+            return self.reply(200, dict(meta=meta, image='data:image/jpeg;base64,'+base64.b64encode(jpeg).decode('ascii') if jpeg else None, service_token=self.server.controller.csrf))
         if url.path in {'/api/joints', '/api/joint-reference'}:
             from joint_reference import catalog as joint_catalog, image_path
             query = parse_qs(url.query)
@@ -2374,9 +2384,15 @@ class ConsoleHTTPServer(ThreadingHTTPServer):
                     catalog=getattr(self,'_firmware_catalog',None)
                     if catalog is not None and catalog.snapshot().get('busy'):raise ValueError('Wait for official firmware package preparation')
                 from desktop_tools import update_discovery_priority
+                from contextlib import contextmanager
+                @contextmanager
+                def update_start_scope():
+                    with self.controller.lock:
+                        if getattr(self.controller,'desktop_closing',False):raise ValueError('Workbench is closing')
+                        yield
                 self._workbench_updates=WorkbenchUpdate(DATA,EDITION,
                     idle_check=update_idle,desktop=lambda:getattr(self,'desktop',None),availability_check=update_available,
-                    priority=lambda **kw:update_discovery_priority(self.controller,**kw))
+                    priority=lambda **kw:update_discovery_priority(self.controller,**kw),start_scope=update_start_scope)
             return self._workbench_updates
 
     @property

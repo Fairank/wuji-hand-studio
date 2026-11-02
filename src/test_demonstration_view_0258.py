@@ -104,7 +104,7 @@ class DisplayRouteTests(unittest.TestCase):
     def test_http_model_selector_is_single_validated_and_never_an_action(self):
         handler=object.__new__(Handler);handler.allowed_host=Mock(return_value=True);handler.reply=Mock()
         pose=N(get=Mock(return_value=(None,{'ready':False})))
-        controller=N(action=Mock())
+        controller=N(action=Mock(),csrf='synthetic-display-service')
         handler.server=N(pose=pose,controller=controller)
         for profile in PROFILES:
             pose.get.reset_mock();handler.reply.reset_mock()

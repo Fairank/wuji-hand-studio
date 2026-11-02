@@ -26,7 +26,7 @@ async function fixture(kind='main',options={}){
    if(fetchFailures-->0)return{ok:false,status:503,json:async()=>({error:'Synthetic frame unavailable'})};
    const meta={ready:true,mode:options.defaultDisplay?'preview':'glove_constrained',device_profile:state.device_profile.id,view_source:'glove',glove_seq:state.glove.stream.seq,collision_preview:{profile:state.glove.profile,bridge_session_id:state.glove.session_id,glove_serial:state.glove.glove_serial},feedback:{},joints:[],render_hz:20};
    if(options.frameAge!==undefined)meta.frame_age_ms=options.frameAge;if(options.frameTimeout!==undefined)meta.frame_timeout_ms=options.frameTimeout;
-   return{ok:true,json:async()=>({meta,image:'data:synthetic-frame-'+ordinal})};
+   return{ok:true,json:async()=>({meta,image:'data:synthetic-frame-'+ordinal,service_token:state.csrf})};
   }
  };
  let code;

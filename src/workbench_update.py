@@ -21,12 +21,13 @@ APP_ID='44DF38B2-39A0-491F-B154-E587231C83CE'
 
 
 class WorkbenchUpdate:
-    def __init__(self,data_dir,edition,*,idle_check=None,desktop=None,store=None,availability_check=None,priority=None,clock=time.monotonic):
+    def __init__(self,data_dir,edition,*,idle_check=None,desktop=None,store=None,availability_check=None,priority=None,start_scope=None,clock=time.monotonic):
         self.data=Path(data_dir);self.edition=edition;self.idle_check=idle_check or (lambda:None)
         self.desktop=desktop or (lambda:None)
         self.store=store or WorkbenchRelease(self.data,edition['version'])
         self.availability_check=availability_check or self._idle
         self.priority=priority or (lambda **kw:nullcontext())
+        self.start_scope=start_scope or nullcontext
         self.clock=clock
         self.lock=threading.RLock();self.closed=threading.Event();self.thread=None;self.latest=None;self.started=False
         self.result_file=None;self.apply_token=None;self.helper=None
@@ -114,7 +115,9 @@ class WorkbenchUpdate:
         # Observe the exact helper result before a deliberate retry. A previous
         # failure must not keep overwriting the next check's ready state.
         if self.result_file:self.snapshot()
-        with self.lock:
+        # Match apply's update -> controller lock order. Close publishes its
+        # intent before taking this lock to capture/cancel the accepted worker.
+        with self.lock,self.start_scope():
             if self.state['busy']:raise ValueError('软件更新正在处理 / Application update is busy')
             if operation=='prepare' and (not self.latest or self.latest.get('available') is not True):raise ValueError('先检查可用的新版本 / Check for an available release first')
             if self.result_file:
@@ -219,7 +222,7 @@ class WorkbenchUpdate:
         deadline=self.clock()+10.
         if not self.snapshot()['supported']:raise ValueError('请在 Windows 已安装版本中使用软件更新 / Use software update in the installed Windows application')
         # Discovery must finish outside gate(): its cleanup needs the same gate.
-        with self.priority(deadline=deadline,clock=self.clock),self.lock,gate():
+        with self.priority(deadline=deadline,clock=self.clock),gate(),self.lock:
             update_remaining(deadline,self.clock)
             if self.state['busy'] or not self.state.get('prepared'):raise ValueError('Download and verify the new installer first')
             if not self._helper_settled():raise ValueError('更新助手正在结束，请稍候重试 / Update helper is still finishing; retry shortly')
@@ -255,6 +258,7 @@ class WorkbenchUpdate:
         return self.snapshot()
 
     def cancel_and_wait(self,timeout=16):
-        self.closed.set()
-        if self.thread and self.thread is not threading.current_thread():self.thread.join(timeout)
-        return not self.thread or not self.thread.is_alive()
+        with self.lock:
+            self.closed.set();worker=self.thread
+        if worker and worker is not threading.current_thread():worker.join(timeout)
+        with self.lock:return not self.thread or not self.thread.is_alive()

@@ -4,7 +4,7 @@ const text=(zh,en)=>window.WujiLocale?.lang==='en'?en:zh;
 const sourceKind=mode=>mode==='glove_constrained_unavailable'?'glove_constrained':mode;
 function stateScope(value){
  if(!value)return null;const g=value.glove||{},feedback=g.feedback||{};
- return JSON.stringify([value.view_source||'feedback',value.teleoperation_view_mode||'automatic',value.device_profile?.id||null,
+ return JSON.stringify([value.csrf||null,value.view_source||'feedback',value.teleoperation_view_mode||'automatic',value.device_profile?.id||null,
   value.device_id||null,g.profile||null,g.session_id??null,g.glove_serial||null,g.user?.user_id??null,
   feedback.device_id||null,feedback.connection==='disconnected',g.model_provenance?.model_sha256||null,
   value.view_source==='glove'?g.connection==='disconnected':value.view_source!=='preview'&&value.connection==='disconnected']);
@@ -66,6 +66,8 @@ function decodeFrame(image,signal,deadline){
 async function poll(){const started=performance.now(),controller=new AbortController();let timeout=setTimeout(()=>controller.abort(),2500);try{
  const [s,v]=await Promise.all([fetch('/api/state',{cache:'no-store',signal:controller.signal}),fetch('/api/view',{cache:'no-store',signal:controller.signal})]);
  if(!s.ok||!v.ok)throw Error('Local service unavailable / 本机服务未连接');syncSource(await s.json());const data=await v.json();if(!pointer&&!busy&&!dirty)camera=state.camera;
+ const service=typeof state.csrf==='string'&&state.csrf?state.csrf:null;
+ if(!service||data.service_token!==service){discardImage();throw Error(text('设备已切换，等待新画面','Device changed; waiting for a new view'));}
  const scope=imageScope(data.meta);
  if(!payloadMatches(data.meta)){discardImage();throw Error(text('设备已切换，等待新画面','Device changed; waiting for a new view'));}
  if(lastImageScope!==scope)discardImage();
@@ -82,7 +84,7 @@ async function poll(){const started=performance.now(),controller=new AbortContro
  // source after decoding so a late A frame cannot land in a new B session.
  const confirmed=await fetch('/api/state',{cache:'no-store',signal:controller.signal});
  if(!confirmed.ok)throw Error('Local service unavailable / 本机服务未连接');syncSource(await confirmed.json());
- if(scope!==imageScope(data.meta)||!payloadMatches(data.meta)){discardImage();throw Error(text('设备已切换，等待新画面','Device changed; waiting for a new view'));}
+ if(state.csrf!==service||scope!==imageScope(data.meta)||!payloadMatches(data.meta)){discardImage();throw Error(text('设备已切换，等待新画面','Device changed; waiting for a new view'));}
  if(performance.now()>=expires)throw frameExpired();
  $('image').src=data.image;$('image').hidden=false;$('image').style.removeProperty('display');$('stale').hidden=true;lastImageMode=mode;lastImageScope=scope;
  $('notice').textContent=`${source} · ${Number(data.meta.render_hz||0).toFixed(1)} fps`+(glove?'':` · ${data.meta.message||''}`);

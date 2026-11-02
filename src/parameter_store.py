@@ -29,9 +29,18 @@ class ParameterStore:
         self.path=Path(path);self.history=self.path.parent/'parameter_history'
         self.sync_status=dict(busy=False,state='not_synced',message='尚未通过网页同步',revision=None)
         record=self.history/'web-last-sync.json'
-        if record.exists():
-            try:self.sync_status.update(json.loads(record.read_text(encoding='utf-8')),busy=False)
-            except (OSError,ValueError):pass
+        try:
+            with record.open('rb') as stream:raw=stream.read(65537)
+            if len(raw)<=65536:
+                saved=json.loads(raw.decode('utf-8'))
+                if isinstance(saved,dict):
+                    state,message,revision=(saved.get(key) for key in ('state','message','revision'))
+                    valid_revision=(isinstance(revision,str) and len(revision)==64
+                        and all(c in '0123456789abcdef' for c in revision))
+                    if (isinstance(state,str) and state in ('not_synced','failed','synced')
+                            and isinstance(message,str) and (valid_revision or revision is None and state!='synced')):
+                        self.sync_status.update(state=state,message=message,revision=revision,busy=False)
+        except (OSError,ValueError,TypeError,RecursionError):pass
 
     def source(self):return self.path.read_text(encoding='utf-8-sig')
 
