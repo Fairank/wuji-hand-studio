@@ -97,7 +97,11 @@ class CalibratedTeleoperation:
                         and glove.get('glove_serial')==state.get('serial')):
                     stream=glove.get('stream') or {};solver=stream.get('solver') or {}
                     fresh=(stream.get('fresh') is True and solver.get('engine')=='sdk' and solver.get('applied') is True)
-                    state.update(busy=not fresh,phase='preview' if fresh else 'connecting',connected=fresh)
+                    # The exact SDK session is already receiving. A stale
+                    # frame withholds preview success, but does not restart
+                    # the completed transfer or block an explicit reconnect.
+                    # Retain an actually running continuation worker's flag.
+                    state.update(phase='preview' if fresh else 'connecting',connected=fresh)
                     offered['can_continue']=False
                 elif glove.get('connection')=='error':
                     state.update(busy=False,phase='error',connected=False,error=glove.get('message') or 'Controller continuation failed')

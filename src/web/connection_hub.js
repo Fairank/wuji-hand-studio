@@ -61,7 +61,7 @@
  calib.querySelector('.hub-calibration-preparation').append(advanced);
  const previous=document.createElement('details');previous.id='hub-calib-previous';previous.hidden=true;previous.innerHTML='<summary id="hub-calib-previous-label"></summary>';calib.append(previous);
  window.WujiConnectionHub={show(key){if(key==='visual'||key==='glove'){location.hash='#glove';ws.showPage();return;}location.hash='#connection';ws.showPage();select(key)}};
- let active='official',calibration=null,calibrationFresh=false,consoleState=null,busy=false,calibrationStartPending=false,cancelStartPending=false,startCancelRequested=false,refreshPending=false,scanPending=false,calibrationReadAt=0,actionError='',refreshError='',wantedGlove='',newProfileOpen=false,nextAction=null,lastActiveProfile='',replacementContext='',lastStartedRunId='',calibrationEpoch=0,previewEndPending=false,previewErrorOwner=null;
+ let active='official',calibration=null,calibrationFresh=false,consoleState=null,busy=false,calibrationStartPending=false,cancelStartPending=false,startCancelRequested=false,refreshPending=false,scanPending=false,calibrationReadAt=0,actionError='',refreshError='',wantedGlove='',newProfileOpen=false,nextAction=null,lastActiveProfile='',replacementContext='',lastStartedRunId='',previousResultRunId='',calibrationEpoch=0,previewEndPending=false,previewErrorOwner=null;
  // Service lifetime and each pending slot have independent owners.
  let serviceEpoch=0,serviceToken=null,selectionEpoch=0,requestSequence=0,actionOwner=null,startOwner=null,cancelOwner=null,refreshOwner=null,scanOwner=null,previewOwner=null;
  const owner=()=>({service:serviceEpoch,token:serviceToken,id:++requestSequence,view:calibrationEpoch,selection:selectionEpoch});
@@ -70,7 +70,7 @@
   serviceEpoch++;serviceToken=token;calibrationEpoch++;selectionEpoch++;
   actionOwner=startOwner=cancelOwner=refreshOwner=scanOwner=previewOwner=null;
   busy=calibrationStartPending=cancelStartPending=startCancelRequested=refreshPending=scanPending=previewEndPending=false;
-  calibrationFresh=false;calibrationReadAt=0;actionError=refreshError='';previewErrorOwner=null;nextAction=null;lastStartedRunId='';replacementContext='';
+  calibrationFresh=false;calibrationReadAt=0;actionError=refreshError='';previewErrorOwner=null;nextAction=null;lastStartedRunId=previousResultRunId='';replacementContext='';
   $('hub-replace').checked=false;
  }
  function requestId(){
@@ -264,7 +264,9 @@
   const runtime=typeof c.runtime==='string'?c.runtime:object(c.runtime)?[c.runtime.label,c.runtime.version].filter(Boolean).join(' · '):'';
   const continuation=consoleState?.calibrated_teleoperation;
   const continuationCurrent=object(continuation)&&typeof run.id==='string'&&!!run.id&&continuation.run_id===run.id&&(continuation.can_continue===true||continuation.busy===true||continuation.connected===true||typeof continuation.error==='string'&&!!continuation.error);
-  const ownResult=!running&&typeof run.id==='string'&&!!run.id&&run.serial===serial&&run.user===profile&&run.side===side&&(run.id===lastStartedRunId||continuationCurrent);
+  // A successor Viewer retires this ended run even if that Viewer later closes.
+  if(connected&&!running&&!cleanup&&typeof run.id==='string'&&run.id&&run.serial===serial)previousResultRunId=run.id;
+  const ownResult=!running&&!connected&&typeof run.id==='string'&&!!run.id&&run.id!==previousResultRunId&&run.serial===serial&&run.user===profile&&run.side===side&&(run.id===lastStartedRunId||continuationCurrent);
   calib.dataset.currentResult=String(ownResult);
   const message=cleanup||!consoleState||!calibrationFresh?reason:running?'':actionError||(ownResult?'':reason);
   calib.querySelector('.hub-calib-readiness').dataset.state=running?'running':ready?'ready':'blocked';write('hub-calib-ready-title','');write('hub-calib-ready-note',message);
