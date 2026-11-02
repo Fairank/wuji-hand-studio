@@ -61,6 +61,13 @@ class ParameterStore:
         staged=self.path.with_suffix('.py.saving');staged.write_text(updated,encoding='utf-8');os.replace(staged,self.path)
         return self.snapshot()
 
+    def prepare(self,values,revision):
+        """Validate a complete draft without saving it or touching a device."""
+        if self.sync_status['busy']:raise ValueError('正在同步，请稍后保存')
+        source=self.source()
+        if revision!=digest(source):raise ValueError('参数文件已被其他窗口或代码修改；请重新读取后再保存')
+        return render_parameters(source,values)
+
     def begin_sync(self,revision):
         if self.sync_status['busy']:raise ValueError('已有参数同步正在进行')
         source=self.source();parse_parameters(source)

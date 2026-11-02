@@ -83,6 +83,7 @@ class ConnectionSwitch:
         self.catalog_config=None;self.requests=set();self.catalog_cleanup_error=None
         self.catalog_client=None;self.catalog_thread=None;self.catalog_finished=None
         self._cleanup_owner=None
+        self._parameter_cleanup=None
         self.idle_check=lambda:None
         self.preflight_check=lambda source:None
 
@@ -103,7 +104,9 @@ class ConnectionSwitch:
                        for k in ('request_id','attempt_id'))):
             raise ValueError('Invalid connection switch cancellation')
         with self.lock:
-            if (self.state.get('busy') is not True or self.state.get('phase') not in ('preflight','stopping','connecting')
+            cancellable=self.state.get('phase') in ('preflight','stopping','connecting') or (
+                self.state.get('operation')=='parameters_sync' and self.state.get('phase')=='syncing')
+            if (self.state.get('busy') is not True or not cancellable
                     or any(command[k]!=self.state.get(k) for k in ('request_id','attempt_id'))):
                 raise ValueError('切换已完成或任务已变化，请核对当前设备任务 / Switch finished or changed; review the current device task')
             self.cancelled=True;self.state['cancel_requested']=True
@@ -158,6 +161,7 @@ class ConnectionSwitch:
         except (OSError,ValueError,RuntimeError):return False
 
     def _cleanup_error(self,state):
+        if getattr(self,'_parameter_cleanup',None) is not None:return '参数传输退出尚未确认，请明确重试同步 / Parameter transfer cleanup is unconfirmed; explicitly retry sync'
         with self.lock:
             error=self.state.get('cleanup_error');source=self.state.get('source') or {}
             responsibility=copy.deepcopy(self._cleanup_owner);attempt=self.state.get('attempt_id')
@@ -203,6 +207,145 @@ class ConnectionSwitch:
                     and state.get('session_generation')==source.get('session')
                     and hw.get('active') is False and hw.get('stop_confirmed') is True):return None
         return error
+
+    def disconnect_hand(self,command):
+        if not self.workflow_lock.acquire(blocking=False):raise ValueError('Another device task is switching')
+        try:
+            c=self.controller;state=c.snapshot()
+            if (not isinstance(command,dict) or set(command)!={'name','expected_owner','serial','expected_session'}
+                    or command.get('name')!='hand_feedback_disconnect'
+                    or command.get('expected_owner')!=context_digest(state)
+                    or type(command.get('expected_session')) is not int or command['expected_session']<=0
+                    or not isinstance(command.get('serial'),str) or not SERIAL.fullmatch(command['serial'])):
+                raise ValueError('反馈会话已变化，请重新核对 / Feedback session changed; review it again')
+            session,sn=command['expected_session'],command['serial']
+            if state.get('glove',{}).get('busy'):raise ValueError('Another SDK session owns the workspace')
+            c.stop_feedback_confirmed(session,sn,allow_unidentified=True)
+            return dict(disconnected=True,serial=sn,session=session,cleanup_confirmed=True)
+        finally:self.workflow_lock.release()
+
+    def synchronize_parameters(self,command):
+        """One explicit save/sync/read-only reconnect, using existing owners."""
+        if not self.workflow_lock.acquire(blocking=False):raise ValueError('Another device task is switching')
+        c=self.controller;accepted=False;synced=False;source=None;new_session=None;client=None;planned=None
+        try:
+            if (not isinstance(command,dict) or set(command)!={'name','request_id','expected_owner','revision','values'}
+                    or command.get('name')!='parameters_sync_reconnect'
+                    or not isinstance(command.get('request_id'),str) or not re.fullmatch('[0-9a-f]{32}',command['request_id'])):
+                raise ValueError('Invalid parameter synchronization transaction')
+            request=command['request_id']
+            if request in self.requests:raise ValueError('This parameter sync request was already accepted; read its current result')
+            if getattr(c,'desktop_closing',False):raise ValueError('Workbench is closing')
+            values=copy.deepcopy(command['values']);revision=command['revision']
+            state=c.snapshot()
+            if command.get('expected_owner')!=context_digest(state):raise ValueError('设备会话已变化，请重新核对 / Device owner changed')
+            if self._parameter_cleanup is not None:
+                retained=self._parameter_cleanup
+                if owner(state) is not None or self._config()!=retained['config']:raise ValueError('Original parameter cleanup owner changed')
+                if retained['client'].close() is False:raise ValueError('Parameter transfer cleanup remains unconfirmed')
+                self._parameter_cleanup=None;c.parameters.sync_status.update(busy=False,cleanup_required=False)
+                self._set(cleanup_error=None);state=c.snapshot()
+            reason=self._blocked(state)
+            if reason:raise ValueError(reason)
+            source=owner(state);profile=copy.deepcopy(state['device_profile'])
+            if source is not None:
+                hw=state.get('hardware') or {}
+                if (source['mode']!='hand' or state.get('stale') is not False or hw.get('active') is not False
+                        or hw.get('stop_confirmed') is not True or c.hardware_lease
+                        or state.get('recording',{}).get('active') or state.get('glove',{}).get('busy')):
+                    raise ValueError('仅可同步已确认的只读灵巧手反馈；请先停止动作并核对退出 / Sync only a confirmed read-only hand feedback session')
+            planned=c.parameters.prepare(values,revision)
+            config=self._config();c.teleoperation_handover._runtime()
+            with self.lock:
+                self._thread=threading.get_ident();self.cancelled=False;self.deadline=self.clock()+45
+                self.requests.add(request);accepted=True;self._cleanup_owner=None
+                self.state.update(busy=True,phase='stopping' if source else 'syncing',request_id=request,
+                    attempt_id=secrets.token_hex(16),source=copy.deepcopy(source),target=None,error=None,cleanup_error=None,
+                    source_released=False,cancel_requested=False,receipt=None,operation='parameters_sync')
+                attempt=self.state['attempt_id']
+            metadata=dict(serial=source['serial'] if source else None,profile=profile['id'],
+                          session_before=source['session'] if source else None,session_after=None,
+                          reconnect_state='pending' if source else 'not_requested')
+            with c.lock:c.parameters.sync_status.update(busy=True,state='syncing',message='正在确认反馈退出并同步参数',**metadata)
+            if source:
+                self._check_cancel();self._stop(source);self._set(source_released=True)
+            self._check_cancel()
+            if self._config()!=config or owner(c.snapshot()) is not None or c.state['device_profile']!=profile:
+                raise ValueError('参数同步的设备或控制端已变化 / Parameter synchronization owner/configuration changed')
+            with c.lock:
+                c.parameters.sync_status['busy']=False
+                saved=c.parameters.save(values,revision)
+                actual=c.parameters.begin_sync(saved['revision'])
+                if actual!=planned:raise ValueError('Parameter draft changed before transfer')
+                c.parameters.sync_status.update(**metadata)
+            self._set(phase='syncing');client=c.factory()
+            try:c.parameters.transfer(client,planned)
+            finally:
+                try:closed=client.close() is not False
+                except Exception:closed=False
+                if not closed:
+                    self._parameter_cleanup=dict(client=client,config=config);client=None
+                    with c.lock:c.parameters.sync_status.update(busy=True,cleanup_required=True,message='参数传输退出尚未确认，请明确重试同步')
+                    raise ValueError('Parameter transfer cleanup is unconfirmed')
+                client=None
+            if self._config()!=config:raise ValueError('Controller configuration changed during parameter transfer')
+            if c.parameters.source()!=planned:raise ValueError('Local parameters changed during synchronization; no reconnect was started')
+            with c.lock:
+                c.parameters.finish_sync(planned);synced=True
+                c.parameters.sync_status.update(**metadata)
+            self._check_cancel()
+            if source:
+                if getattr(c,'desktop_closing',False):raise ValueError('Workbench is closing; feedback was not reopened')
+                if owner(c.snapshot()) is not None or c.state['device_profile']!=profile:raise ValueError('Device owner changed before reconnect')
+                self._set(phase='connecting')
+                with gate(c.official_viz.folder):
+                    if reservation(c.official_viz.folder):raise ValueError('Another official session acquired the workspace')
+                    self.idle_check();self._check_cancel()
+                    if self._config()!=config:raise ValueError('Controller configuration changed before reconnect')
+                    guard=lambda:self.open_guard(attempt)
+                    c._parameter_reconnect_guard=guard
+                    try:c.action(dict(name='connect',serial=source['serial'],auto_detect=True))
+                    finally:
+                        if getattr(c,'_parameter_reconnect_guard',None) is guard:del c._parameter_reconnect_guard
+                    new_session=c.generation
+                def connected():
+                    current=c.snapshot()
+                    if c.generation!=new_session:raise ValueError('Feedback session changed before reconnect confirmation')
+                    if current.get('connection')=='error':raise ValueError(current.get('message') or 'Feedback reconnect failed')
+                    if current.get('connection')!='connected' or current.get('stale') is not False:return None
+                    actual=owner(current)
+                    if (not actual or actual['mode']!='hand' or actual['serial']!=source['serial']
+                            or current['device_profile']!=profile):raise ValueError('Reconnected hand identity differs from the original hand')
+                    from parameter_file import parse_parameters
+                    loaded=((current.get('hardware') or {}).get('commissioning_policy') or {}).get('editable_parameters')
+                    if loaded!=parse_parameters(planned):raise ValueError('Reconnected controller did not confirm the synchronized parameters')
+                    return current
+                self._wait(connected,12,'Parameters synced, but hand feedback reconnect was not confirmed')
+                with c.lock:c.parameters.sync_status.update(reconnect_state='connected',session_after=new_session,message='参数已同步并在原灵巧手反馈中加载；动作仍需明确启动')
+            self._set(busy=False,phase='connected' if source else 'synced',receipt=dict(parameters_synced=True,feedback_reconnected=bool(source),serial=metadata['serial']))
+            return dict(parameters=c.parameters.snapshot(),connection_switch=self.snapshot(c.snapshot()))
+        except Exception as error:
+            cleanup=None
+            if accepted and source and new_session is None and not self.state.get('source_released'):
+                cleanup=str(error)[:500];self._set(cleanup_error=cleanup)
+            if accepted and new_session is not None and c.generation==new_session:
+                try:c.stop_feedback_confirmed(new_session,source['serial'],allow_unidentified=True)
+                except Exception as failure:
+                    cleanup=str(failure)[:500]
+                    self._set(source=dict(mode='hand',kind='hand',serial=source['serial'],session=new_session),cleanup_error=cleanup)
+            if accepted:
+                with c.lock:
+                    if self._parameter_cleanup is None:
+                        if not synced:c.parameters.finish_sync(planned,str(error)[:500])
+                        c.parameters.sync_status['busy']=False
+                    c.parameters.sync_status.update(reconnect_state='failed' if source else 'not_requested',reconnect_error=str(error)[:500])
+                    if synced:c.parameters.sync_status['message']='参数已同步；反馈未恢复，请核对连接后明确重试'
+                self._set(phase='error',error=str(error)[:900],cleanup_error=cleanup or self._cleanup_error(c.snapshot()))
+            raise
+        finally:
+            if accepted:
+                with self.lock:self.state['busy']=False;self._thread=None;self.deadline=None
+            self.workflow_lock.release()
 
     def _catalog_busy(self):
         # A timed-out request can return while its metadata reader is still
@@ -476,7 +619,14 @@ class ConnectionSwitch:
             self.controller.teleoperation_handover._runtime()
             if row['kind']!='hand':raise ValueError('Select a robotic hand')
             from device_profiles import profile
-            selected=profile((row.get('generation') or '')+'_'+(row.get('side') or ''))
+            if row.get('side') is None:
+                # A scan descriptor need not report handedness. This is only
+                # mapping intent; the original SDK connector still verifies
+                # actual serial/side before accepting any feedback or driver.
+                selected=profile(target.get('profile') or state['device_profile']['id'])
+                if selected['generation']!=row.get('generation'):
+                    raise ValueError('请选择同代灵巧手的显示型号和左右手 / Select a mapping profile for this hand generation')
+            else:selected=profile((row.get('generation') or '')+'_'+row['side'])
             target['profile']=selected['id']
             # The original connector verifies serial again. Caller-supplied
             # addresses never override the directory's exact target identity.

@@ -48,6 +48,8 @@ def validate_command(command):
     if name not in {'connect', 'discover', 'disconnect', 'record', 'stop'} | HARDWARE_COMMANDS:
         raise ValueError('Unsupported console operation')
     if name in {'connect','discover'}:
+        if name=='discover' and 'include_gloves' in command and type(command['include_gloves']) is not bool:
+            raise ValueError('Invalid typed discovery option')
         if type(command.get('auto_detect', False)) is not bool:
             raise ValueError('Invalid discovery mode')
         serial = command.get('serial', '')
@@ -438,7 +440,8 @@ def main():
                         if process:raise ValueError('Discovery requires a separate session')
                         from device_discovery import scan_only
                         from wuji_sdk import SdkManager
-                        emit(dict(type='discovery',devices=scan_only(SdkManager.instance(),command.get('address',''))))
+                        options={'include_gloves':True} if command.get('include_gloves') is True else {}
+                        emit(dict(type='discovery',devices=scan_only(SdkManager.instance(),command.get('address',''),**options)))
                         break
                     if name == 'glove_session':
                         if process:raise ValueError('Already connected')

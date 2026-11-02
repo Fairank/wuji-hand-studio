@@ -494,6 +494,23 @@ class Controller:
         with self.lock:
             result = copy.deepcopy(self.state)
             result['session_generation']=getattr(self,'generation',0)
+            # The current feedback reader remains an owned transport after a
+            # stale/error event clears live device identity. This projection
+            # authorizes only an exact explicit cleanup request, never connect.
+            result['hand_feedback_session']=None
+            record=getattr(self,'feedback_sessions',{}).get(result['session_generation'])
+            if record is not None and result.get('connection')!='disconnected':
+                serial=record.get('serial');actual=getattr(self,'session_devices',{}).get(result['session_generation'])
+                if (isinstance(serial,str) and re.fullmatch('[A-Za-z0-9][A-Za-z0-9_-]{0,79}',serial)
+                        and actual in (None,serial)):
+                    hardware=result.get('hardware') or {};identity=record.get('identity') or {}
+                    result['hand_feedback_session']=dict(source='owned_feedback_reader',serial=serial,
+                        session=result['session_generation'],profile=identity.get('profile'),
+                        can_disconnect=hardware.get('active') is False and not self.hardware_lease and not self.glove.busy,
+                        exit_confirmed=bool(record.get('worker_closed') and record.get('reader_finished')
+                            and record.get('transport_closed') and not record['thread'].is_alive()
+                            and (record.get('hardware') or {}).get('active') is False
+                            and (record.get('hardware') or {}).get('stop_confirmed') is True))
             try:result['retarget_binding']=self.retarget.selection(result['device_profile'])
             except (ValueError,OSError):result['retarget_binding']=None
             result['solver_runtime']=self.solver_runtime.snapshot()
@@ -582,6 +599,7 @@ class Controller:
             row['official_available']=row['sn'] in local_official
             if row['sn'] in owners:row['workspace_owners']=owners[row['sn']]
         reason=None
+        sdk_scan=False
         if viz.get('scanning'):reason='正在扫描设备 / Device discovery is running'
         elif reservation(self.official_viz.folder):reason='官方 CLI 会话正在使用设备目录 / An official CLI session is active'
         else:
@@ -590,10 +608,15 @@ class Controller:
         # Explain the common local owner instead of an opaque global failure.
         if reason and state['glove'].get('busy'):
             reason='手套预览或遥操作正在使用设备；已有设备仍可查看，请先在原会话中断开再重新扫描 / Glove preview or teleoperation owns the device; disconnect in its session before rescanning'
+            check=getattr(self,'sdk_hand_scan_check',None)
+            if callable(check):
+                try:check();reason=None;sdk_scan=True
+                except (ValueError,OSError,RuntimeError):pass
         if workspace_errors and not reason:reason='无法确认其他工作区的状态 / Another workspace state is unavailable'
         result.update(scanning=bool(viz.get('scanning')),scanned_at=viz.get('scanned_at'),
-                      error=viz.get('error'),scan_allowed=not reason and bool(viz.get('supported')),
-                      blocked_reason=reason,backend=viz.get('backend'),workspace_errors=workspace_errors)
+                      error=viz.get('error') or (viz.get('sdk_error') if not result['devices'] else None),scan_allowed=not reason and bool(viz.get('supported')),
+                      blocked_reason=reason,backend='sdk_session' if sdk_scan else viz.get('backend'),
+                      sdk_error=viz.get('sdk_error'),workspace_errors=workspace_errors)
         return result
 
     def calibration_devices(self,fresh=False):
@@ -692,7 +715,7 @@ class Controller:
                 if not isinstance(expected,str) or not re.fullmatch('[0-9a-f]{32}',expected):raise ValueError('Invalid calibration run identity')
                 return dict(calibration=self.calibration.cancel(expected_run=expected))
             raise ValueError('Invalid scoped calibration cancellation')
-        if isinstance(command,dict) and ('expected_session' in command
+        if isinstance(command,dict) and command.get('name')!='hand_feedback_disconnect' and ('expected_session' in command
                 or command.get('name') in ('glove_stop','glove_disconnect','glove_follow','glove_open') and 'expected_revision' in command):
             if command.get('name') in ('glove_stop','glove_disconnect'):return self._scoped_glove_stop(command)
             self._validate_glove_intent(command)
@@ -728,6 +751,11 @@ class Controller:
         name=command.get('name') if isinstance(command,dict) else None
         switch=getattr(self,'connection_switch',None)
         if switch is not None:
+            if name=='parameters_sync_reconnect':
+                from studio_component import enforce_session_owner
+                enforce_session_owner(dict(name='parameters_sync'))
+                return switch.synchronize_parameters(command)
+            if name=='hand_feedback_disconnect':return switch.disconnect_hand(command)
             if name=='connection_switch':return switch.start(command)
             if name=='connection_switch_users':
                 if set(command)!={'name'}:raise ValueError('Invalid wearer directory request')
@@ -787,7 +815,13 @@ class Controller:
             if name=='official_cli_check':return dict(official_cli=self.official_cli.start(check_only=True))
             if name=='official_cli_update':return dict(official_cli=self.official_cli.start())
             if name=='official_cli_rollback':return dict(official_cli=self.official_cli.rollback())
-            if name in {'official_viz_scan','device_inventory_scan'}:return dict(official_viz=self.official_viz.scan())
+            if name in {'official_viz_scan','device_inventory_scan'}:
+                if name=='device_inventory_scan' and self.glove.snapshot().get('busy'):
+                    check=getattr(self,'sdk_hand_scan_check',None)
+                    if not callable(check):raise ValueError('SDK session discovery is unavailable')
+                    check();self.glove.action(dict(name='glove_hand_scan'))
+                    return dict(glove=self.glove.snapshot())
+                return dict(official_viz=self.official_viz.scan(supplement=True) if name=='device_inventory_scan' else self.official_viz.scan())
             if name=='official_viz_start':return dict(official_viz=self.official_viz.start(command.get('serial'),command.get('theme','light')))
             return dict(official_viz=self.official_viz.stop())
         from cli_coordination import gate,enforce
@@ -1257,7 +1291,9 @@ class Controller:
                     thread=threading.Thread(target=self.read_session,args=(command,generation),daemon=True)
                     self.feedback_sessions[generation]=dict(serial=command.get('serial'),thread=thread,
                         worker_closed=False,transport_closed=False,reader_finished=False)
-                    thread.start()
+                    from contextlib import nullcontext
+                    guard=getattr(self,'_parameter_reconnect_guard',None)
+                    with guard() if callable(guard) else nullcontext():thread.start()
                 except Exception as error:
                     # No transport was opened. Retire only this new attempt,
                     # retaining older records and any uncertain hardware stop.
@@ -1371,6 +1407,9 @@ class Controller:
             # may confirm that stop, but must never revive the new connection.
             if event.get('device_id'):self.session_devices[generation]=event['device_id']
             feedback_record=getattr(self,'feedback_sessions',{}).get(generation)
+            if kind=='identity' and feedback_record is not None:
+                if feedback_record.get('serial') is None:feedback_record['serial']=event.get('device_id')
+                feedback_record['identity']=dict(serial=event.get('device_id'),profile=event.get('profile'))
             if kind=='closed' and 'hardware' in event and feedback_record is not None:
                 feedback_record['worker_closed']=True
                 feedback_record['hardware']=copy.deepcopy(event['hardware'])
@@ -1429,6 +1468,9 @@ class Controller:
         client = None
         try:
             client = self.factory()
+            with self.lock:
+                record=self.feedback_sessions.get(generation)
+                if record is not None:record['client']=client
             stdin, stdout, stderr = client.exec_command(client.agent_command, timeout=25)
             # Drain SDK diagnostics locally without placing them in the web UI.
             def drain_diagnostics():
@@ -1467,17 +1509,28 @@ class Controller:
                     self.state['recording']['active'] = False
                     self.clear_live()
 
-    def stop_feedback_confirmed(self,generation,serial,timeout=8.):
+    def stop_feedback_confirmed(self,generation,serial,timeout=8.,*,allow_unidentified=False):
         """Release exactly one inactive feedback reader, preserving uncertainty."""
         with self.lock:
             record=self.feedback_sessions.get(generation)
-            if (generation!=self.generation or self.state.get('device_id')!=serial or record is None
-                    or record.get('serial')!=serial or self.state['hardware'].get('active') is not False
-                    or self.hardware_lease):
+            retry=allow_unidentified and generation!=self.generation
+            if (record is None or record.get('serial')!=serial
+                    or self.state['hardware'].get('active') is not False or self.hardware_lease
+                    or allow_unidentified and self.session_devices.get(generation,serial)!=serial
+                    or retry and (self.state.get('connection')!='disconnected' or self.client is not None)
+                    or not retry and (generation!=self.generation
+                        or self.state.get('device_id')!=serial and not (allow_unidentified
+                            and self.state.get('connection') in ('connecting','error','disconnected')
+                            and self.state.get('device_id') in (None,serial)))):
                 raise ValueError('Hand feedback owner changed or stop is unconfirmed')
             thread=record['thread']
-        self.action(dict(name='disconnect'))
+            # Validation and the exact stop request share Controller.lock.
+            # A delayed scoped click cannot disconnect a replacement owner.
+            if not retry:self.action(dict(name='disconnect'))
         thread.join(timeout)
+        if not thread.is_alive() and record.get('reader_finished') and not record.get('transport_closed'):
+            original=record.get('client')
+            if original is not None and original.close() is not False:record['transport_closed']=True
         with self.lock:
             if (thread.is_alive() or not record.get('reader_finished') or not record.get('transport_closed')
                     or not record.get('worker_closed') or (record.get('hardware') or {}).get('active') is not False
@@ -2339,6 +2392,34 @@ class ConsoleHTTPServer(ThreadingHTTPServer):
         self.switch_siblings_idle=lambda ident:check_workspaces(__import__('studio_component').require_idle,exclude_workspace=ident)
         self.controller.official_viz.idle_check=all_idle
         self.controller.official_viz.scan_check=scan_idle
+        def sdk_hand_scan_check():
+            from cli_coordination import reservation
+            from official_device_discovery import sdk_preview_scan_allowed
+            from studio_component import require_idle
+            if reservation(self.controller.official_viz.folder):raise ValueError('An official CLI session is active')
+            def check(state,doctor):
+                if state.get('csrf')==self.controller.csrf:
+                    if not sdk_preview_scan_allowed(state):raise ValueError('Fresh unpaired SDK preview is required for hand discovery')
+                    state={**state,'glove':{**state['glove'],'busy':False}}
+                require_idle(state,doctor)
+            check_workspaces(check)
+        self.controller.sdk_hand_scan_check=sdk_hand_scan_check
+        def supplement_scan(config,cancelled,token):
+            from bridge_config import load_config
+            from official_device_discovery import sdk_devices,use_native,DiscoveryDeferred
+            from studio_component import require_idle
+            from task_sessions import context_digest
+            if not use_native(config):return None
+            self.controller.teleoperation_handover._runtime()
+            def current():
+                if cancelled() or config!=load_config():raise DiscoveryDeferred('Discovery controller configuration changed')
+                check_workspaces(require_idle,allow_local_scan=token)
+                return context_digest(self.controller.snapshot())
+            expected=current()
+            result=sdk_devices(self.controller.factory,cancelled=cancelled)
+            if current()!=expected:raise DiscoveryDeferred('Discovery workspace owner changed')
+            return result
+        self.controller.official_viz.supplement_scan=supplement_scan
         self.controller.calibration.device_provider=self.controller.calibration_devices
         def calibration_idle():
             from cli_coordination import reservation

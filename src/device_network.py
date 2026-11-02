@@ -58,10 +58,16 @@ def analyse(adapters, address='', side='left'):
         code = 'network_in_use'
     # A custom device network is detected but never silently re-numbered.
     automatic_subnet = host in ipaddress.IPv4Network('192.168.1.0/24')
+    # Disconnected and non-Ethernet interfaces still own their local addresses.
+    assigned = {ipaddress.IPv4Interface(value).ip
+                for adapter in adapters for value in adapter.get('addresses', [])}
+    proposed = next((value + '/24' for value in ('192.168.1.50', '192.168.1.51')
+                     if ipaddress.IPv4Address(value) != host
+                     and ipaddress.IPv4Address(value) not in assigned), None) if automatic_subnet else None
     return dict(code=code, target=target, adapters=wired,
                 adapter=selected, candidates=candidates,
-                can_configure=not matching and bool(candidates) and automatic_subnet,
-                proposed_address=('192.168.1.51/24' if str(host)=='192.168.1.50' else '192.168.1.50/24') if automatic_subnet else None,
+                can_configure=not matching and bool(candidates) and proposed is not None,
+                proposed_address=proposed,
                 hardware_connected=False)
 
 
@@ -77,12 +83,15 @@ def read_windows():
     script = r"""
 $ErrorActionPreference='Stop'
 [Console]::OutputEncoding=[System.Text.UTF8Encoding]::new()
+$allIps=@(Get-NetIPAddress -AddressFamily IPv4 -ErrorAction Stop)
 $rows=@(Get-NetAdapter -Physical | Where-Object { $_.InterfaceType -eq 6 } | ForEach-Object {
   $a=$_
-  $ips=@(Get-NetIPAddress -InterfaceIndex $a.ifIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue | ForEach-Object { "$($_.IPAddress)/$($_.PrefixLength)" })
+  $ips=@($allIps | Where-Object { $_.InterfaceIndex -eq $a.ifIndex } | ForEach-Object { "$($_.IPAddress)/$($_.PrefixLength)" })
   $gateway=@(Get-NetRoute -InterfaceIndex $a.ifIndex -AddressFamily IPv4 -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue).Count -gt 0
   [pscustomobject]@{id=$a.InterfaceGuid.ToString();name=$a.Name;ethernet=$true;up=($a.Status -eq 'Up');addresses=$ips;gateway=$gateway}
 })
+# Occupancy-only row: never a selectable/configurable Ethernet adapter.
+$rows+= [pscustomobject]@{ethernet=$false;addresses=@($allIps | ForEach-Object { "$($_.IPAddress)/$($_.PrefixLength)" })}
 ConvertTo-Json -InputObject $rows -Depth 5 -Compress
 """
     return json.loads(_run(['powershell.exe', '-NoProfile', '-Command', script]))

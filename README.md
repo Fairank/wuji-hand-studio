@@ -8,7 +8,19 @@
 
 ## Windows 下载和启动
 
-在 [Releases](../../releases) 选择实际已上传的安装包，各版本沿用同一 Windows 软件、安装身份和用户数据目录。当前验证范围见 [0.2.76记录](docs/VALIDATION_0.2.76.md)；构建、安装和公开发布结果另记于外部最终交付清单，源码版本不代表安装包已经上传。Windows 当前用户安装无需另装 Python；安装器检查微软 WebView2 运行时，缺少时联网安装。包暂未进行发布者代码签名，下载需核对实际发布的 SHA-256。
+在 [Releases](../../releases) 选择实际已上传的安装包，各版本沿用同一 Windows 软件、安装身份和用户数据目录。当前验证范围见 [0.2.78记录](docs/VALIDATION_0.2.78.md)；构建、安装和公开发布结果另记于外部最终交付清单，源码版本不代表安装包已经上传。Windows 当前用户安装无需另装 Python；安装器检查微软 WebView2 运行时，缺少时联网安装。包暂未进行发布者代码签名，下载需核对实际发布的 SHA-256。
+
+## 代码审查与软件回归
+
+每次改动使用 `python scripts/run_review.py` 执行统一软件检查，并按 [代码审查流程](docs/CODE_REVIEW.md) 复查受影响的真实操作链和异步顺序。仓库工作流 `.github/workflows/code-review.yml` 在 push、PR 或手动触发时运行同一入口；远端实际结果以当前提交的 Actions 状态为准。Codex 自动审查还需在账号设置中为仓库开启，CI 文件本身不代替 AI 审查、分支保护或非作者流程验收。
+
+## 0.2.78 设备发现与参数同步
+
+统一设备目录补齐官方 SDK 的灵巧手发现，扫描仍不自动连接。网络检查沿用现有面板，区分实际接手网口和已占用的主机地址；失效的当前反馈任务可明确结束。参数页“前往连接”进入设备页，只有“同步到控制端”会执行准确原手的断开、同步核对和一次重新接入，普通保存不重新连接。保留原设计、人员和标定资料。范围见[本轮记录](docs/VALIDATION_0.2.78.md)。
+
+## 0.2.77 手发现观测时间
+
+新查到的灵巧手使用独立观测时间，不再因旧手套扫描时间而立刻过期；失败和空结果按准确列表处理，不自动接入。原生发现返回空的实物原因与这处软件修复分开记录。范围见[本轮记录](docs/VALIDATION_0.2.77.md)。
 
 ## 0.2.76 标定异步回复与取消
 
@@ -316,7 +328,7 @@ Windows 内置 WSL 的默认配置改由主机原生官方 CLI 发现手套并�
 
 手套所选 SDK 用户保持到该连接结束，再在断开后恢复先前用户。Hand 1 实测显示使用其 0–19 编号；Hand 2 保留各指四关节的设备编号，代际未知或反馈不完整时不把目标姿态当作实测。断线后的停用未知按设备和会话保留，新的只读连接或另一只设备的确认不能把旧记录清为已停用。
 
-本机升级缓存支持在中断或校验失败后重新暂存完整安装器；构建会核对缓存可执行文件的版本与产品身份，避免把旧程序包装为新版本。提供 [Windows 隔离软件检查 CI 模板](ci/windows-checks.yml.example)，覆盖语法、模拟升级失败及选定回归。当前上传凭据没有修改 GitHub 工作流的权限，模板尚未启用为 Actions；本机实测结果与远端 CI 分开记录。源码、模拟界面、安装版与实机结果分别记录，不将其中一项代替其余验收。
+本机升级缓存支持在中断或校验失败后重新暂存完整安装器；构建会核对缓存可执行文件的版本与产品身份，避免把旧程序包装为新版本。当时提供的 [Windows 隔离软件检查 CI 模板](ci/windows-checks.yml.example) 仅覆盖选定回归，且当时未获工作流写入权限；这些是历史状态。当前完整审查入口与工作流见 [代码审查流程](docs/CODE_REVIEW.md)，远端是否成功须核当前 Actions 记录。源码、模拟界面、安装版与实机结果分别记录，不将其中一项代替其余验收。
 
 ## 历史：0.2.18 完整 Ubuntu Wuji Studio
 
@@ -506,7 +518,7 @@ Ubuntu 24.04 x86_64 从 Git 克隆后，可在项目 `.venv` 安装官方 CLI / 
 
 离线检查：`python src/desktop.py --self-check --render-check`。测试：`python -m unittest discover -s src`。
 
-`--self-check` 输出包含产品身份与版本；构建器读取独立自检文件，二者与当前版本配置不符就拒绝打包。`ci/windows-checks.yml.example` 是尚未启用的 Windows 软件检查模板，使用独立临时数据、模拟安装器和模拟进程；模板本身不代表远端 CI、全套测试、安装版或实机验收通过。
+`--self-check` 输出包含产品身份与版本；构建器读取独立自检文件，二者与当前版本配置不符就拒绝打包。`ci/windows-checks.yml.example` 保留为历史模板；当前统一入口为 `scripts/run_review.py`，实际工作流为 `.github/workflows/code-review.yml`。本机检查、远端 Actions、安装版和实机验收分别留证。
 
 Windows 构建需要先按 `src/runtime_manifest.json` 准备对应压缩镜像到 `runtime_payload/`（发布包附带镜像），不把运行环境提交到 Git。然后安装 `requirements-build.txt` 后运行 `python build.py`，再使用 `python build_installer.py --iscc PATH_TO_ISCC --webview-bootstrap PATH_TO_SIGNED_MICROSOFT_BOOTSTRAP --zh-language PATH_TO_CHINESE_ISL`。安装器使用 Inno Setup 6.4.3 和对应版本中文翻译。
 

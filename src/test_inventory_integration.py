@@ -28,7 +28,13 @@ class InventoryIntegrationTests(unittest.TestCase):
     def test_alias_dispatches_only_shared_scanner(self):
         with patch.object(self.c.official_viz,'scan',return_value={}) as scan,patch.object(self.c.glove,'action') as glove:
             self.c.action(dict(name='device_inventory_scan'))
-        scan.assert_called_once_with();glove.assert_not_called()
+        scan.assert_called_once_with(supplement=True);glove.assert_not_called()
+        # Only the shared directory requests SDK supplementation. The original
+        # CLI viewer scan keeps its native-only contract for its own consumers.
+        scan.reset_mock()
+        with patch.object(self.c.official_viz,'scan',return_value={}) as native_scan,patch.object(self.c.glove,'action') as glove:
+            self.c.action(dict(name='official_viz_scan'))
+        native_scan.assert_called_once_with();glove.assert_not_called()
 
     def test_preflight_blocker_does_not_silently_end_preview(self):
         self.c.official_viz.idle_check=Mock(side_effect=ValueError('owning workspace'))

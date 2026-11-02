@@ -10,7 +10,7 @@ function fixture({calibration={run:run()},devices=[oldRow()],online=true,owner=n
  const calls=[],window={WujiDeviceUse:{current:()=>owner},WujiConnectionHub:{show:value=>calls.push(value)}};
  const c={window,consoleState:{calibration},inventory:{devices,ttl_s:30},online,scanning:false,previousDisplayRows:[],localError:'',Date,Number};
  const begin=source.indexOf(' const rows=()=>'),end=source.indexOf(' const visible=()=>',begin);assert(begin>=0&&end>begin);
- vm.runInNewContext('const sessionOwner=()=>window.WujiDeviceUse?.current();\n'+source.slice(source.indexOf(' const getTime='),source.indexOf(' const sessionOwner='))+'\n'+fn('calibrationOwner')+'\n'+source.slice(begin,end)+'\n'+fn('openCalibrationSession')+'\nthis.rows=rows;this.usable=usable;this.open=openCalibrationSession;',c);
+ vm.runInNewContext('const sessionOwner=()=>window.WujiDeviceUse?.current();\n'+source.slice(source.indexOf(' const getTime='),source.indexOf(' const sessionOwner='))+'\n'+fn('retainedHand')+'\n'+fn('calibrationOwner')+'\n'+source.slice(begin,end)+'\n'+fn('openCalibrationSession')+'\nthis.rows=rows;this.usable=usable;this.open=openCalibrationSession;',c);
  return {c,calls,rows:()=>JSON.parse(JSON.stringify(c.rows())),state:value=>c.consoleState={calibration:value},event:()=>({preventDefault(){},stopPropagation(){}})};
 }
 test('active exact calibration retains its stale session card without connection authority',()=>{const f=fixture(),r=f.rows();assert.equal(r.length,1);assert.equal(r[0].serial,SN);assert.equal(r[0].stale,true);assert.equal(r[0].identity_verified,false);assert.equal(r[0].selectable,false);assert.equal(f.c.usable(r[0]),false);});

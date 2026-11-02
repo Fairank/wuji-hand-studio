@@ -234,9 +234,14 @@ def build_inventory(viz=None, controller=None, glove=None, *, now=None, ttl=30):
             observations.append(row)
 
     add(viz.get('devices', []), 'official_cli', viz.get('scanned_at'), error=bool(viz.get('error')))
+    add(viz.get('sdk_devices', []), 'controller_discovery', viz.get('sdk_scanned_at'),error=bool(viz.get('sdk_error')))
     add(controller.get('devices', []), 'controller_discovery', controller.get('devices_at'))
     add(glove.get('devices', []), 'glove_discovery', glove.get('devices_at'))
-    add(glove.get('hands', []), 'glove_hand_discovery', glove.get('devices_at'))
+    # New hand-only searches do not renew the independent glove advertisements.
+    # An explicit unknown hand timestamp stays unknown; only old workers which
+    # omit the field retain their original shared-clock compatibility.
+    add(glove.get('hands', []), 'glove_hand_discovery',
+        glove['hands_at'] if 'hands_at' in glove else glove.get('devices_at'))
     identified = controller.get('identified_device') or {}
     serial = identified.get('serial')
     profile = controller.get('device_profile') or {}

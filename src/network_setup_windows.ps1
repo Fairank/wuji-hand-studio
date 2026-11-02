@@ -13,6 +13,9 @@ try {
     $before=@(Get-NetIPAddress -InterfaceIndex $index -AddressFamily IPv4 -ErrorAction SilentlyContinue)
     if($before|Where-Object {$_.IPAddress -notlike '169.254.*'}){throw 'The adapter configuration changed; refresh before setting up'}
     $dhcp=(Get-NetIPInterface -InterfaceIndex $index -AddressFamily IPv4).Dhcp
+    # A down/virtual/Wi-Fi interface may still own the address selected before UAC.
+    $conflicts=@(Get-NetIPAddress -AddressFamily IPv4 -ErrorAction Stop | Where-Object { $_.IPAddress -eq $HostAddress -and $_.InterfaceIndex -ne $index })
+    if($conflicts.Count -gt 0){throw 'The host address is already assigned to another adapter; refresh the network check'}
     # Default store writes a persistent static address. No gateway or DNS edit.
     $started=$true
     New-NetIPAddress -InterfaceIndex $index -IPAddress $HostAddress -PrefixLength 24 | Out-Null

@@ -136,7 +136,7 @@ def worker_glove(requests,events,continuation=None,sdk_requirement=None):
     selected=controller_profile();source=GloveSource();glove=sub=session=None
     hand_thread=None;hand_requests=queue.Queue();hand_events=queue.Queue()
     hand_state={};hand_identity={};hand_error='';manager=None;previous_user=None
-    devices=[];hands=[];users=[];current=None;state='starting';message='正在加载官方SDK'
+    devices=[];hands=[];hands_at=None;users=[];current=None;state='starting';message='正在加载官方SDK'
     glove_sn='';device_version=None;last_emit=0.;next_map=0.;last_source_seq=None
     from retarget_settings import OutputMapping, defaults
     mapping=OutputMapping(defaults())
@@ -188,14 +188,16 @@ def worker_glove(requests,events,continuation=None,sdk_requirement=None):
             side=sdk.Handedness.Left if selected['side']=='left' else sdk.Handedness.Right
             return sdk.RetargetSession.for_hand(model,side=side)
         def scan():
-            nonlocal hands
+            nonlocal hands,hands_at
             from device_discovery import candidates
-            all_devices=list(manager.scan());hands=candidates(all_devices)
+            all_devices=list(manager.scan());found_hands=candidates(all_devices)
             from glove_discovery import scan_gloves
             from zenoh_route import managed_wsl
             # Discovery must never open even a temporary device handle. A
             # direct-address connection belongs only to an explicit connect.
-            return scan_gloves(manager,sdk,all_devices)
+            found_gloves=scan_gloves(manager,sdk,all_devices)
+            hands=found_hands;hands_at=time.time()
+            return found_gloves
         # A verified continuation already carries the user's exact glove and
         # model choice. Let SDK connect(sn=...) perform its own resolution;
         # one preliminary broadcast snapshot cannot disprove that target.
@@ -221,6 +223,7 @@ def worker_glove(requests,events,continuation=None,sdk_requirement=None):
                     elif name=='glove_hand_scan':
                         hands=scan_preview_hands(manager,glove,state,solver_engine,source,now,
                                                  hand_thread,hand_state,hand_unpairing)
+                        hands_at=time.time()
                         hand_scan_error=''
                         message='灵巧手查找完成，请选择后连接 / Hand search completed; choose a hand to connect'
                     elif name=='glove_open':
@@ -416,7 +419,7 @@ def worker_glove(requests,events,continuation=None,sdk_requirement=None):
                 if feedback.get('latest'):
                     feedback['metrics']['age_ms']=max(0,now-feedback['latest']['host_s'])*1000
                 events.put(dict(type='glove_state',state=dict(version=1,connection=state,message=message,
-                    devices=devices,devices_at=devices_at,hands=hands,users=users,user=current,profile=selected['id'],glove_serial=glove_sn,device_version=device_version,
+                    devices=devices,devices_at=devices_at,hands=hands,hands_at=hands_at,users=users,user=current,profile=selected['id'],glove_serial=glove_sn,device_version=device_version,
                     stream=snapshot,hardware=hw,feedback=feedback,hand_error=hand_error,hand_scan_error=hand_scan_error,
                     can_prepare=can_prepare,prepare_blocked_reason=prepare_reason,
                     hand_cleanup_confirmed=hand_state.get('cleanup_confirmed'),

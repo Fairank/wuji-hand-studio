@@ -37,6 +37,7 @@ class OfficialVisualization:
     def __init__(self,folder=None,idle_check=None,scan_check=None):
         self.folder=Path(folder or root_folder());self.idle_check=idle_check or (lambda:None)
         self.scan_check=scan_check
+        self.supplement_scan=None
         self.lock=threading.RLock();self.process=None;self.thread=None;self.token=None;self.config=None
         self.native_job=None;self.native_stop=threading.Event()
         self.transport=None
@@ -44,7 +45,7 @@ class OfficialVisualization:
         self.scan_finished=threading.Event();self.scan_finished.set()
         self.scan_token=None;self.scan_job=None;self.scan_needs_close=False
         self.scan_pauses=0
-        self.state=dict(supported=sys.platform=='win32' or sys.platform.startswith('linux'),busy=False,active=False,phase='idle',device=None,devices=[],scanning=False,scan_cleanup_required=False,scanned_at=None,viewer_url=None,cli_version=None,error=None,logs=[],started_at=None,stream_freshness='not_reported',zero_on_start=False)
+        self.state=dict(supported=sys.platform=='win32' or sys.platform.startswith('linux'),busy=False,active=False,phase='idle',device=None,devices=[],scanning=False,scan_cleanup_required=False,scanned_at=None,sdk_devices=[],sdk_scanned_at=None,sdk_error=None,viewer_url=None,cli_version=None,error=None,logs=[],started_at=None,stream_freshness='not_reported',zero_on_start=False)
 
     def snapshot(self,theme=None):
         with self.lock:row=copy.deepcopy(self.state)
@@ -87,10 +88,11 @@ class OfficialVisualization:
             if closed:self.transport=None;self.state['loopback_forwarding']=False
             return closed
 
-    def scan(self):
+    def scan(self,*,supplement=False):
         token=self._begin_scan()
         try:
-            threading.Thread(target=self._collect_scan,args=(token,True),name='Official CLI device discovery',daemon=True).start()
+            args=(token,True,True) if supplement else (token,True)
+            threading.Thread(target=self._collect_scan,args=args,name='Official CLI device discovery',daemon=True).start()
         except Exception as error:
             self._set(devices=[],scanned_at=None,error=str(error)[:700])
             self._finish_scan(token)
@@ -124,7 +126,8 @@ class OfficialVisualization:
             token=reserve('scan',self.folder)
             with self.lock:
                 self.scan_token=token;self.scan_job=None;self.scan_needs_close=False
-                self.state.update(busy=True,scanning=True,scan_cleanup_required=False,error=None,devices=[],scanned_at=None)
+                self.state.update(busy=True,scanning=True,scan_cleanup_required=False,error=None,devices=[],scanned_at=None,
+                                  sdk_devices=[],sdk_scanned_at=None,sdk_error=None)
                 self.scan_cancel.clear();self.scan_done.clear();self.scan_finished=threading.Event()
         return token
 
@@ -153,18 +156,39 @@ class OfficialVisualization:
                         error='设备查找退出未确认，请重试结束查找 / Device discovery cleanup unconfirmed; retry Stop: '+str(error)[:400])
             return False
 
-    def _collect_scan(self,token,cancellable=False):
+    def _collect_scan(self,token,cancellable=False,supplement=False):
         clean=True;devices=None;finished=False
         try:
             from bridge_config import load_config
             from calibration_cli import cli_json
+            from official_device_discovery import DiscoveryDeferred,DiscoveryCleanupUnconfirmed,_sdk_rows
             config=load_config()
             value=cli_json(config,'devices',cancelled=self.scan_cancel.is_set) if cancellable else cli_json(config,'devices')
-            self._set(backend='windows_native' if native_network(config) else 'linux_controller')
             devices=value.get('devices')
             if not isinstance(devices,list):raise ValueError('Invalid official device list')
             devices=[copy.deepcopy(x) for x in devices if isinstance(x,dict)]
-            self._set(devices=devices,scanned_at=time.time())
+            with self.lock:
+                if self.scan_token!=token or self.scan_cancel.is_set() or config!=load_config():
+                    raise DiscoveryDeferred('Device discovery scope changed')
+                self.state.update(devices=devices,scanned_at=time.time(),
+                                  backend='windows_native' if native_network(config) else 'linux_controller')
+            if supplement and callable(self.supplement_scan):
+                try:
+                    result=self.supplement_scan(config,self.scan_cancel.is_set,token)
+                    with self.lock:
+                        if self.scan_token!=token or self.scan_cancel.is_set() or config!=load_config():
+                            raise DiscoveryDeferred('SDK discovery scope changed')
+                        if result is not None:
+                            rows=_sdk_rows(result.get('devices'))
+                            observed=result.get('observed_at')
+                            if type(observed) not in (int,float) or not 0<=time.time()-observed<=30:
+                                raise ValueError('SDK discovery observation time is unconfirmed')
+                            self.state.update(sdk_devices=rows,sdk_scanned_at=observed,sdk_error=None)
+                except DiscoveryCleanupUnconfirmed:raise
+                except DiscoveryDeferred:raise
+                except Exception as error:
+                    with self.lock:
+                        if self.scan_token==token:self.state.update(sdk_devices=[],sdk_scanned_at=None,sdk_error=str(error)[:700])
             devices=copy.deepcopy(devices)
         except Exception as error:
             from official_device_discovery import DiscoveryDeferred,DiscoveryCleanupUnconfirmed
@@ -173,7 +197,10 @@ class OfficialVisualization:
                 with self.lock:
                     self.scan_job=error.owned;self.scan_needs_close=True
                 self._set(busy=True,scanning=True,phase='error',scan_cleanup_required=True)
-            self._set(devices=[],scanned_at=None,error=None if isinstance(error,DiscoveryDeferred) else str(error)[:700])
+            with self.lock:
+                if self.scan_token==token:
+                    self.state.update(devices=[],scanned_at=None,sdk_devices=[],sdk_scanned_at=None,
+                                      error=None if isinstance(error,DiscoveryDeferred) else str(error)[:700])
             devices=None
         finally:
             if clean:finished=self._finish_scan(token)

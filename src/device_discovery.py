@@ -38,7 +38,7 @@ class Routes:
         self.routes.clear()
 
 
-def scan_only(manager,address=''):
+def scan_only(manager,address='',*,include_gloves=False):
     """Read discovery advertisements without connecting to or enabling a hand."""
     bundle=Routes()
     try:
@@ -51,7 +51,18 @@ def scan_only(manager,address=''):
                 else:bundle.routes.append(route)
         found={};deadline=time.monotonic()+3
         while time.monotonic()<deadline:
-            for item in candidates(manager.scan()):found[item['serial']]=item
+            advertisements=list(manager.scan())
+            if include_gloves:
+                # This directory is typed metadata only. Legacy hand-only
+                # callers retain their existing routed Unknown-SN behavior.
+                advertisements=[d for d in advertisements if str(d.device_type).lower().replace('_','')
+                    in ('devicetype.wujihand','devicetype.wujihand2','devicetype.wujiglove')]
+            for item in candidates(advertisements):found[item['serial']]=item
+            if include_gloves:
+                import wuji_sdk as sdk
+                from glove_discovery import scan_gloves
+                for item in scan_gloves(manager,sdk,advertisements,allow_direct=False):
+                    found[item['serial']]={**item,'device_type':'wuji_glove'}
             time.sleep(.1)
         return sorted(found.values(),key=lambda r:r['serial'])
     finally:bundle.close()
