@@ -13,7 +13,7 @@ function fixture(){
  const context={window:{crypto:{getRandomValues(array){array.fill(++nonce);return array;}},addEventListener:(name,fn)=>events[name]=fn},
   Uint8Array,AbortSignal:{timeout:()=>undefined},Date,queueMicrotask:fn=>queue.push(fn),
   $:field,object:v=>v!==null&&typeof v==='object'&&!Array.isArray(v),t:(zh,en)=>en,
-  calibrationVisible:()=>true,renderStatus:()=>{},renderCalibration:()=>{},previewIntent:()=>null,samePreviewIntent:()=>false,
+  calibrationVisible:()=>true,renderStatus:()=>{},renderCalibration:()=>{},previewIntent:()=>null,samePreviewIntent:()=>false,officialViz:{snapshot:()=>null},
   fetch:(url,options)=>new Promise(resolve=>calls.push({url,options,resolve})),};
  vm.createContext(context);vm.runInContext(declarations+'\n'+ownership+'\n'+requests+'\n'+listeners+`\nthis.api={action,refresh,snapshot:()=>({busy,calibrationStartPending,cancelStartPending,refreshPending,calibrationFresh,calibration,serviceEpoch,serviceToken,actionError}),setMetadata:value=>{calibration=value;calibrationFresh=true;}};`,context);
  return {calls,fields,queue,api:context.api,event:(name,detail)=>events[name]({detail}),reply(index,calibration){calls[index].resolve({ok:true,json:async()=>({ok:true,calibration})});},replyMetadata(index,calibration){calls[index].resolve({ok:true,json:async()=>calibration});}};

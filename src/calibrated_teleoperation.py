@@ -4,6 +4,7 @@ Callbacks keep workspace/fleet policy in the controller. This adapter owns no
 SDK handle and never prepares a robot hand or starts motor following.
 """
 import copy
+from contextlib import contextmanager
 import hashlib
 import json
 import re
@@ -39,6 +40,21 @@ class CalibratedTeleoperation:
 
     def _not_cancelled(self):
         if self._cancel.is_set():raise ValueError('接续已取消，未开启新的跟随 / Continuation cancelled; no following was started')
+
+    @contextmanager
+    def open_guard(self,run_id,attempt_id):
+        """Serialize the existing final open/write with this exact cancel.
+
+        The worker may already have returned before SDK readiness arrives.
+        Read only local intent fields here, never controller/bridge state.
+        """
+        with self.lock:
+            if (any(not isinstance(value,str) or not re.fullmatch('[0-9a-f]{32}',value)
+                    for value in (run_id,attempt_id))
+                    or (run_id,attempt_id)!=(self.state.get('run_id'),self.state.get('attempt_id'))):
+                raise ValueError('接续任务已改变，未接入手套 / Continuation attempt changed; glove was not opened')
+            self._not_cancelled()
+            yield
 
     def _current_proof(self):
         snapshot=self.get_calibration()

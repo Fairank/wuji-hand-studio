@@ -14,7 +14,7 @@ function fixture(){
  const device={sn:SN,device_type:'wuji_glove',side:'right'};
  const person={name:PROFILE,right_hand:{calibrated:true},left_hand:{calibrated:false}};
  const data={available:true,calibration_supported:true,guided_native:true,metadata_current:true,current:person,users:[person],run:{id:ID,serial:SN,user:PROFILE,side:'right',running:false,status:'completed',source:'official_jsonl_native',interface:'guided',exit_code:0,cleanup_confirmed:true}};
- const ctx={consoleState:{csrf:'A',calibrated_teleoperation:{run_id:ID,can_continue:true}},calibrationFresh:true,busy:false,cancelStartPending:false,calibrationStartPending:false,startCancelRequested:false,refreshPending:false,actionError:'',refreshError:'',replacementContext:'',lastStartedRunId:ID,previousResultRunId:'',nextAction:null,
+ const ctx={consoleState:{csrf:'A',calibrated_teleoperation:{run_id:ID,can_continue:true}},calibrationFresh:true,busy:false,cancelStartPending:false,calibrationStartPending:false,startCancelRequested:false,refreshPending:false,actionError:'',refreshError:'',replacementContext:'',lastStartedRunId:ID,lastStartedContext:null,previousResultRunId:'',nextAction:null,
   object:v=>!!v&&typeof v==='object'&&!Array.isArray(v),t:(zh,en)=>en,$:field,calib,previous,guideHost,advanced,calibrationPanel,
   officialViz:{snapshot:()=>viewer,selection:()=>({serial:SN,device}),setCalibrationState:value=>lastMeta=value},
   sideOf:row=>row?.side||row?.handedness||'',calibrationSdkOwner:()=>false,gloveFresh:()=>true,sessionBlock:()=>'',calibrationVisible:()=>true,

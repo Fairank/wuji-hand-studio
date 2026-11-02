@@ -61,21 +61,29 @@
  calib.querySelector('.hub-calibration-preparation').append(advanced);
  const previous=document.createElement('details');previous.id='hub-calib-previous';previous.hidden=true;previous.innerHTML='<summary id="hub-calib-previous-label"></summary>';calib.append(previous);
  window.WujiConnectionHub={show(key){if(key==='visual'||key==='glove'){location.hash='#glove';ws.showPage();return;}location.hash='#connection';ws.showPage();select(key)}};
- let active='official',calibration=null,calibrationFresh=false,consoleState=null,busy=false,calibrationStartPending=false,cancelStartPending=false,startCancelRequested=false,refreshPending=false,scanPending=false,calibrationReadAt=0,actionError='',refreshError='',wantedGlove='',newProfileOpen=false,nextAction=null,lastActiveProfile='',replacementContext='',lastStartedRunId='',previousResultRunId='',calibrationEpoch=0,previewEndPending=false,previewErrorOwner=null;
+ let active='official',calibration=null,calibrationFresh=false,consoleState=null,busy=false,calibrationStartPending=false,cancelStartPending=false,startCancelRequested=false,refreshPending=false,scanPending=false,calibrationReadAt=0,actionError='',refreshError='',wantedGlove='',newProfileOpen=false,nextAction=null,lastActiveProfile='',replacementContext='',lastStartedRunId='',lastStartedContext=null,previousResultRunId='',calibrationEpoch=0,previewEndPending=false,previewErrorOwner=null;
  // Service lifetime and each pending slot have independent owners.
- let serviceEpoch=0,serviceToken=null,selectionEpoch=0,requestSequence=0,actionOwner=null,startOwner=null,cancelOwner=null,refreshOwner=null,scanOwner=null,previewOwner=null;
+ let serviceEpoch=0,serviceToken=null,publishedRunId=null,selectionEpoch=0,requestSequence=0,actionOwner=null,startOwner=null,cancelOwner=null,refreshOwner=null,scanOwner=null,previewOwner=null;
  const owner=()=>({service:serviceEpoch,token:serviceToken,id:++requestSequence,view:calibrationEpoch,selection:selectionEpoch});
  const sameService=value=>!!value&&value.service===serviceEpoch&&value.token===serviceToken;
  function retireService(token=null){
   serviceEpoch++;serviceToken=token;calibrationEpoch++;selectionEpoch++;
   actionOwner=startOwner=cancelOwner=refreshOwner=scanOwner=previewOwner=null;
   busy=calibrationStartPending=cancelStartPending=startCancelRequested=refreshPending=scanPending=previewEndPending=false;
-  calibrationFresh=false;calibrationReadAt=0;actionError=refreshError='';previewErrorOwner=null;nextAction=null;lastStartedRunId=previousResultRunId='';replacementContext='';
+  calibrationFresh=false;calibrationReadAt=0;actionError=refreshError='';previewErrorOwner=null;nextAction=null;lastStartedRunId=previousResultRunId='';lastStartedContext=null;publishedRunId=null;replacementContext='';
   $('hub-replace').checked=false;
  }
  function requestId(){
   const bytes=new Uint8Array(16);window.crypto.getRandomValues(bytes);
   return Array.from(bytes,value=>value.toString(16).padStart(2,'0')).join('');
+ }
+ function calibrationRunId(value){const run=object(value?.run)?value.run:value;return typeof run?.id==='string'&&/^[a-f0-9]{32}$/.test(run.id)?run.id:null;}
+ function observePublicRun(value){
+  const id=calibrationRunId(value);if(!id||id===publishedRunId)return;publishedRunId=id;
+  const local=calibrationRunId(calibration);
+  // A delayed pre-start poll cannot undo this page's accepted start receipt.
+  if(id===local||lastStartedContext?.runId===local&&id===lastStartedContext.publicRun)return;
+  calibrationEpoch++;refreshOwner=null;refreshPending=false;calibrationFresh=false;
  }
  function selectSharedDevice(serial,row){if(serial!==wantedGlove){calibrationEpoch++;selectionEpoch++;$('hub-side').value=sideOf(row);}wantedGlove=serial||'';renderCalibration();}
  window.addEventListener('device-inventory-selection',event=>{const row=event.detail?.device;if(row)selectSharedDevice(row.sn||row.serial,row);});
@@ -163,7 +171,11 @@
    else{const run=calibration?.run;if(!calibrationFresh||!run||!/^[a-f0-9]{32}$/.test(run.id||''))return;payload={name,expected_run:run.id};}
   }
   if(name==='calibration_begin')payload.request_id=requestId();
-  calibrationEpoch++;const ticket=owner();ticket.publicRun=consoleState?.calibration?.run?.id||consoleState?.calibration?.id||null;
+  calibrationEpoch++;const ticket=owner();ticket.publicRun=calibrationRunId(consoleState?.calibration);
+  if(name==='calibration_begin'){
+   const before=officialViz?.snapshot(),viewer=before?.state||{},device=viewer.reported_device||viewer.device||{};
+   ticket.viewerSession=before?.fresh===true&&viewer.active===true&&viewer.phase==='running'&&(device.sn||device.serial)===payload.serial&&typeof viewer.session_id==='string'&&viewer.session_id?viewer.session_id:null;
+  }
   if(cancelStarting){cancelOwner=ticket;cancelStartPending=true;startCancelRequested=true;startOwner.cancelled=true;}
   else{actionOwner=ticket;busy=true;if(name==='calibration_begin'){startOwner=ticket;ticket.requestId=payload.request_id;calibrationStartPending=true;startCancelRequested=false;}}
   actionError='';previewErrorOwner=null;
@@ -185,13 +197,14 @@
     startOwner=null;calibrationStartPending=false;
    }
    if(object(data.calibration)){
+    if(publishedRunId&&publishedRunId!==ticket.publicRun&&calibrationRunId(data.calibration)!==publishedRunId)return;
     calibrationEpoch++;
     const complete=typeof data.calibration.available==='boolean'&&Array.isArray(data.calibration.users)&&Array.isArray(data.calibration.devices);
     calibration=complete?data.calibration:{...calibration,...data.calibration};
     calibrationFresh=complete;if(complete)calibrationReadAt=Date.now();
    }
    if(name==='calibration_start')$('hub-replace').checked=false;
-   if(['calibration_handover','calibration_begin','calibration_backup_restore'].includes(name)&&object(data.calibration?.run)){lastStartedRunId=data.calibration.run.id||'';$('hub-replace').checked=false;}
+   if(['calibration_handover','calibration_begin','calibration_backup_restore'].includes(name)&&object(data.calibration?.run)){lastStartedRunId=data.calibration.run.id||'';lastStartedContext=name==='calibration_begin'&&calibrationRunId(data.calibration)?{runId:lastStartedRunId,viewerSession:ticket.viewerSession,publicRun:ticket.publicRun}:null;$('hub-replace').checked=false;}
    if(name==='calibration_profile_create'||name==='calibration_profile_switch')$('hub-profile').value='';
    if(name==='calibration_profile_create'){newProfileOpen=false;$('hub-new-profile').value='';}
   }catch(error){if(acceptable()&&(!endingPreview||samePreviewIntent(endingPreview,consoleState))){actionError=error.message;previewErrorOwner=endingPreview;}}
@@ -264,9 +277,10 @@
   const runtime=typeof c.runtime==='string'?c.runtime:object(c.runtime)?[c.runtime.label,c.runtime.version].filter(Boolean).join(' · '):'';
   const continuation=consoleState?.calibrated_teleoperation;
   const continuationCurrent=object(continuation)&&typeof run.id==='string'&&!!run.id&&continuation.run_id===run.id&&(continuation.can_continue===true||continuation.busy===true||continuation.connected===true||typeof continuation.error==='string'&&!!continuation.error);
-  // A successor Viewer retires this ended run even if that Viewer later closes.
-  if(connected&&!running&&!cleanup&&typeof run.id==='string'&&run.id&&run.serial===serial)previousResultRunId=run.id;
-  const ownResult=!running&&!connected&&typeof run.id==='string'&&!!run.id&&run.id!==previousResultRunId&&run.serial===serial&&run.user===profile&&run.side===side&&(run.id===lastStartedRunId||continuationCurrent);
+  // The pre-start Viewer may still be cached when the new run completes.
+  const successorViewer=connected&&!(lastStartedContext?.runId===run.id&&lastStartedContext.viewerSession===v.session_id);
+  if(successorViewer&&!running&&!cleanup&&typeof run.id==='string'&&run.id&&run.serial===serial)previousResultRunId=run.id;
+  const ownResult=!running&&!successorViewer&&typeof run.id==='string'&&!!run.id&&run.id!==previousResultRunId&&run.serial===serial&&run.user===profile&&run.side===side&&(run.id===lastStartedRunId||continuationCurrent);
   calib.dataset.currentResult=String(ownResult);
   const message=cleanup||!consoleState||!calibrationFresh?reason:running?'':actionError||(ownResult?'':reason);
   calib.querySelector('.hub-calib-readiness').dataset.state=running?'running':ready?'ready':'blocked';write('hub-calib-ready-title','');write('hub-calib-ready-note',message);
@@ -364,7 +378,7 @@
  window.addEventListener('console-state',event=>{
   const next=event.detail,token=typeof next?.csrf==='string'&&next.csrf?next.csrf:null;
   if(serviceToken!==null&&token!==serviceToken)retireService(token);else serviceToken=token;
-  consoleState=next;if(previewErrorOwner&&!samePreviewIntent(previewErrorOwner,consoleState)){actionError='';previewErrorOwner=null;}
+  consoleState=next;observePublicRun(next?.calibration);if(previewErrorOwner&&!samePreviewIntent(previewErrorOwner,consoleState)){actionError='';previewErrorOwner=null;}
   renderStatus();renderCalibration();if(token&&!calibrationFresh&&!busy&&calibrationVisible())queueMicrotask(()=>refresh(true));
  });
  window.addEventListener('console-offline',event=>{

@@ -45,16 +45,19 @@ class RouteTests(unittest.TestCase):
                 manager.connect.assert_called_once_with(address=route()['address'],device_name='studio_glove')
 
     def test_controller_uses_fresh_official_directory_only_after_explicit_continue(self):
+        from calibrated_teleoperation import CalibratedTeleoperation
+        continuation=CalibratedTeleoperation(Mock(),Mock(),Mock(),Mock(),Mock(),Mock())
+        continuation.state.update(run_id='a'*32,attempt_id='b'*32)
         controller=N(connection_switch=N(_config=Mock(return_value='config')),
             calibration_devices=Mock(return_value=[dict(sn=SN,device_type='wuji_glove',address=route()['address'])]),
             glove=N(start_calibrated=Mock(return_value=42)),_continuation_model_ready=Mock(),
-            _continuation_profile='hand2_right',sdk_session_configs={})
-        bundle={'serial':SN}
+            _continuation_profile='hand2_right',sdk_session_configs={},calibrated_teleoperation=continuation)
+        bundle={'serial':SN,'source_run_id':'a'*32}
         with patch('bridge_config.load_config',return_value={}),patch('official_device_discovery.use_native',return_value=True):
             self.assertEqual(Controller._start_calibrated_session(controller,bundle),42)
         controller.calibration_devices.assert_called_once_with(fresh=True)
         self.assertEqual(controller.glove.start_calibrated.call_args.args[0]['glove_route'],route())
-        self.assertEqual(bundle,{'serial':SN})
+        self.assertEqual(bundle,{'serial':SN,'source_run_id':'a'*32})
 
 
 class VirtualDisplayTests(unittest.TestCase):

@@ -167,6 +167,12 @@ class Controller:
             owner_check=self._continuation_owner_check)
 
     def _start_calibrated_session(self,bundle):
+        continuation=self.calibrated_teleoperation
+        with continuation.lock:
+            run_id=continuation.state.get('run_id');attempt_id=continuation.state.get('attempt_id')
+        if bundle.get('source_run_id')!=run_id:raise ValueError('Calibration continuation source changed')
+        guard=lambda:continuation.open_guard(run_id,attempt_id)
+        with guard():pass
         config=self.connection_switch._config()
         # Windows native discovery and a managed Linux controller can be on
         # different broadcast domains. Carry only this freshly observed exact
@@ -177,7 +183,13 @@ class Controller:
             from calibration_transport import route_from_discovery
             route=route_from_discovery(self.calibration_devices(fresh=True),bundle['serial'])
             if route is not None:bundle={**bundle,'glove_route':route}
-        session=self.glove.start_calibrated(bundle,self._continuation_model_ready,expected_profile=self._continuation_profile)
+        def ready(receipt):
+            # A late receipt must not change mapping settings after its exact
+            # intent was cancelled. The same guard is repeated at mutations
+            # and by the Bridge around its final open dispatch.
+            with guard():pass
+            return self._continuation_model_ready(receipt,_open_guard=guard)
+        session=self.glove.start_calibrated(bundle,ready,expected_profile=self._continuation_profile,open_guard=guard)
         self.sdk_session_configs[session]=config
         return session
 
@@ -329,8 +341,9 @@ class Controller:
                     or proof['source_workspace']!=os.environ.get('WUJI_FLEET_ID','main')):
                 raise ValueError('工作区或目标型号已变化，请重新核对 / Workspace or target profile changed; review it first')
 
-    def _continuation_model_ready(self,receipt):
+    def _continuation_model_ready(self,receipt,*,_open_guard=None):
         from calibration_portability import file_digest,IDENT
+        from contextlib import nullcontext
         with self.lock:
             proof=self.calibrated_teleoperation._current_proof()
             self._continuation_owner_check(proof)
@@ -346,18 +359,21 @@ class Controller:
                 if (self.glove.stopping or context.get('source_user_id')!=proof.get('source_user_id')
                         or any(context.get(k)!=v for k,v in expected.items())):
                     raise ValueError('Calibration controller session changed')
-            profile=self.state['device_profile']
-            binding=self.retarget.context(profile)['binding']
-            binding=dict(binding,glove_serial=proof['serial'],sdk_user=receipt['owner_user_id'])
-            context=self.retarget.select(binding,profile)
-            tuning=self.tuning.context(context['binding'])
-            if tuning['engine']!='sdk':self.tuning.select_engine(context['binding'],'sdk')
-            # The human URDF stays in the official SDK user store. The worker
-            # applies a missing online-IK model parameter and verifies readback;
-            # it never replaces a foreign override or the robot model.
-            self.state['view_source']='glove'
-            return dict(timeout_ms=250,retarget=context['settings'],
-                solver=dict(engine='sdk',values=tuning['values']))
+            # Bridge.lock above is released before taking the local intent
+            # guard. Never invert the final Bridge -> continuation lock order.
+            with _open_guard() if _open_guard is not None else nullcontext():
+                profile=self.state['device_profile']
+                binding=self.retarget.context(profile)['binding']
+                binding=dict(binding,glove_serial=proof['serial'],sdk_user=receipt['owner_user_id'])
+                context=self.retarget.select(binding,profile)
+                tuning=self.tuning.context(context['binding'])
+                if tuning['engine']!='sdk':self.tuning.select_engine(context['binding'],'sdk')
+                # The human URDF stays in the official SDK user store. The worker
+                # applies a missing online-IK model parameter and verifies readback;
+                # it never replaces a foreign override or the robot model.
+                self.state['view_source']='glove'
+                return dict(timeout_ms=250,retarget=context['settings'],
+                    solver=dict(engine='sdk',values=tuning['values']))
 
     def task_context_action(self,expected_context,action,payload=None):
         from task_control import execute
