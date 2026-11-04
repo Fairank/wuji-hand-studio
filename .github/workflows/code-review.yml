@@ -1,0 +1,70 @@
+name: Code review checks
+
+"on":
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: code-review-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  software-checks:
+    name: Windows source checks
+    runs-on: windows-latest
+    timeout-minutes: 20
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+      WUJI_CLI_AUTO_CHECK: '0'
+      WUJI_APP_AUTO_CHECK: '0'
+      WUJI_NO_UPDATE_CHECK: '1'
+      WUJI_TELEMETRY_DISABLE: '1'
+      REVIEW_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+      REVIEW_RECORD: ${{ runner.temp }}/workbench-review-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Check the reviewed diff
+        shell: pwsh
+        run: |
+          if ($env:REVIEW_BASE_SHA -match '^[a-f0-9]{40}$' -and $env:REVIEW_BASE_SHA -ne ('0' * 40)) {
+            git diff --check $env:REVIEW_BASE_SHA HEAD
+          } else {
+            git show --check --oneline HEAD
+          }
+          exit $LASTEXITCODE
+      - name: Install the existing test requirements
+        run: python -m pip install -r requirements.txt
+      - name: First complete isolated acceptance pass
+        run: python scripts/run_review.py --record-dir "${{ env.REVIEW_RECORD }}/pass-1"
+      - name: Second complete isolated acceptance pass
+        run: python scripts/run_review.py --record-dir "${{ env.REVIEW_RECORD }}/pass-2"
+      - name: Confirm identical frozen sources across both passes
+        run: python -c "import os; from pathlib import Path; from scripts.run_review import verify_passes; root=Path(os.environ['REVIEW_RECORD']); verify_passes(root/'pass-1',root/'pass-2')"
+      - name: Retain review summaries and logs
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: code-review-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ env.REVIEW_RECORD }}/pass-1/*.json
+            ${{ env.REVIEW_RECORD }}/pass-1/*.log
+            ${{ env.REVIEW_RECORD }}/pass-2/*.json
+            ${{ env.REVIEW_RECORD }}/pass-2/*.log
+          retention-days: 14
+          if-no-files-found: warn

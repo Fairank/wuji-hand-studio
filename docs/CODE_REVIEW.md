@@ -1,6 +1,6 @@
 # 工作台代码审查
 
-**当前状态（2026-11-04）：** 本地检查入口、PR 核对表与 `src/AGENTS.md` 已上传。新增工作流此前被 GitHub 授权拒绝，远端 `.github/workflows/code-review.yml` 仍不存在。完整内容作为[非执行模板](ci/code-review.yml)一并保存；模板和本机工作流字节相同，但不触发 Actions。远端自动检查、Codex 账号自动审查和分支规则均不能据此标成已开启。项目待办与验收范围见 [PROJECT_STATUS.md](PROJECT_STATUS.md)。
+**当前状态（2026-11-05）：** 本地检查入口、PR 核对表与 `src/AGENTS.md` 已在原开发分支。此次本地候选补充根目录 `AGENTS.md`，并准备 `.github/workflows/code-review.yml`，与[模板](ci/code-review.yml)字节一致：push、PR 和手动触发均连续执行两轮全新隔离检查。四个官方 Actions 的 v7 引用已核对并固定到提交。当前 GitHub 写入被拒绝（403），本机 Git 也没有登录凭据，正式文件尚未同步，不能声称远端 Actions、Codex 自动审查或分支规则已经开启。项目待办及本轮模拟证据见 [PROJECT_STATUS.md](PROJECT_STATUS.md)。
 
 每次改动先复现具体问题，再检查共享调用链和不同回复顺序。作者完成修复与真实源流程验证后，由非作者换一个失败位置或顺序复查。检查设备/人员/左右手/模型身份、异步请求归属、退出未知保护、资料保留，以及页面资源和实际入口；不要只凭测试总数或截图放行。原设计和导航沿用 [QA_WORKFLOW.md](QA_WORKFLOW.md) 的约束。
 
@@ -11,6 +11,8 @@
 ```powershell
 python scripts/run_review.py
 ```
+
+每次源码冻结后连续运行两轮，使用不同的新隔离目录；任意失败或新修改都重新开始两轮。每个受影响流程还须保留原失败顺序和另一种顺序的独立复验。见根目录 `AGENTS.md` 与 [QA_WORKFLOW.md](QA_WORKFLOW.md)。
 
 默认创建一个新的系统临时验收目录并打印位置。也可传入一个**尚不存在**的目录，避免覆盖原证据：
 
@@ -26,11 +28,11 @@ Python 主测试进程拒绝真实默认 SDK 资料读取、真实 `wuji_sdk` �
 
 完整 Python 集合包含已有 MuJoCo 静态模型/几何检查，不能称其未加载 MuJoCo；它们不代表实物动作、标定质量、渲染或物理稳定性验收。第三方原版前端资源仍由既有摘要/打包检查负责，JS 语法检查不改写 `vendor`。
 
-目录保留 `summary.json`、`python.json` 和各阶段日志，记录源码前后摘要、隔离根、失败/跳过与被拒绝操作。摘要覆盖 `src`、`scripts`、`.github` 下的 Python、JS/MJS/CJS、YAML、Markdown、HTML、CSS、SVG、JSON，以及构建入口、依赖清单和本审查文档。其他二进制资源仍需既有摘要/打包和实际界面验收。CI 只收取这些摘要和日志，不上传隔离用户目录。分享本机证据前仍须排除私有数据。
+目录保留 `summary.json`、`python.json` 和各阶段日志，记录源码前后摘要、隔离根、失败/跳过与被拒绝操作。摘要覆盖 `src`、`scripts`、`.github` 下的 Python、JS/MJS/CJS、YAML、Markdown、HTML、CSS、SVG、JSON，以及构建入口、依赖清单、根目录 `AGENTS.md`、`QA_WORKFLOW.md`、CI 模板和本审查文档。两轮完成后，现有检查器的 `verify_passes` 比对完整成功状态及四份源码摘要，拒绝在两轮之间更换代码后仍报告通过。其他二进制资源仍需既有摘要/打包和实际界面验收。CI 只收取摘要和日志，不上传隔离用户目录。分享本机证据前仍须排除私有数据。
 
 ## PR 审查与 GitHub 设置
 
-模板在取得工作流写入授权并放入 `.github/workflows/code-review.yml` 后，才会在 push、PR 和手动触发时运行 Windows 检查。它仅有 `contents: read`，不构建/发布安装包、不写入仓库、不启动设备。启用后仍须核对一次实际运行结果。PR 模板要求记录实际复现、正常与异常流程、非作者复查和未验证范围。CI 结果应关联本次提交；旧报告不能替代本次流程。
+正式文件在取得工作流写入授权并上传远端后，才会在 push、PR 和手动触发时连续运行两轮 Windows 检查。它仅有 `contents: read`，不构建/发布安装包、不写入仓库、不启动设备。每轮只上传根目录摘要和日志，不递归上传隔离资料。启用后仍须核对实际运行结果。PR 模板要求记录实际复现、正常与异常流程、非作者复查和未验证范围。CI 结果应关联本次提交；旧报告不能替代本次流程。
 
 若要阻止未通过检查或未获批准的合并，还需在 GitHub 仓库规则中要求 **Windows source checks** 和非作者批准。提交工作流文件本身不会创建分支保护或证明远端检查已经成功。
 
@@ -38,4 +40,4 @@ Python 主测试进程拒绝真实默认 SDK 资料读取、真实 `wuji_sdk` �
 
 这套 CI 是确定性的测试，**不是 AI 审查服务**，无需新增模型 API key。要让 Codex 在 GitHub PR 上审查，还需把仓库连接到 Codex，在 [Codex code review 设置](https://chatgpt.com/settings/code-review) 选择仓库并开启 Automatic review；自动触发还受个人偏好控制。配置后可在代表性 PR 中请求 `@codex review`，核实实际收到审查结果。这里不声称账号开关已经开启，也不代发评论。
 
-`src/AGENTS.md` 的四条规则覆盖源码审查；根目录本机 AGENTS 不强行提交。Codex 规则和 AI 反馈不能代替测试、完整流程、非作者审批或 GitHub 合并规则。设置步骤与规则作用参照 [OpenAI 官方 GitHub 审查说明](https://developers.openai.com/codex/integrations/github/) 和 [自定义审查规则](https://developers.openai.com/blog/custom-code-review-rules-for-codex)。
+根目录 `AGENTS.md` 记录持续双轮验收要求；`src/AGENTS.md` 的四条规则覆盖源码审查。Codex 规则和 AI 反馈不能代替测试、完整流程、非作者审批或 GitHub 合并规则。设置步骤与规则作用参照 [OpenAI 官方 GitHub 审查说明](https://developers.openai.com/codex/integrations/github/) 和 [自定义审查规则](https://developers.openai.com/blog/custom-code-review-rules-for-codex)。

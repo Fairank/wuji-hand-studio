@@ -52,7 +52,8 @@ def fresh_record_directory(value=None):
 def source_hashes(root):
     files={p for folder in ('src','scripts','.github') for p in (root/folder).rglob('*')
            if p.is_file() and p.suffix in ('.py','.js','.mjs','.cjs','.yml','.yaml','.md','.html','.css','.svg','.json')}
-    files.update(p for p in (root/'build.py',root/'requirements.txt',root/'requirements-build.txt',root/'docs/CODE_REVIEW.md') if p.is_file())
+    files.update(p for p in (root/'build.py',root/'requirements.txt',root/'requirements-build.txt',
+        root/'AGENTS.md',root/'docs/CODE_REVIEW.md',root/'docs/QA_WORKFLOW.md',root/'docs/ci/code-review.yml') if p.is_file())
     return {p.relative_to(root).as_posix():hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(files)}
 
 
@@ -92,6 +93,26 @@ def console_text(value):
     # UTF-8 log intact while escaping characters this display cannot encode.
     encoding=getattr(sys.stdout,'encoding',None) or 'utf-8'
     print(str(value).encode(encoding,errors='backslashreplace').decode(encoding),flush=True)
+
+
+def verify_passes(first,second):
+    """Require two complete successful reports for the same frozen source."""
+    folders=[Path(first).resolve(),Path(second).resolve()]
+    if folders[0]==folders[1]:raise ValueError('Acceptance passes require different evidence directories')
+    reports=[json.loads((folder/'summary.json').read_text(encoding='utf8')) for folder in folders]
+    for report in reports:
+        if (report.get('successful') is not True or report.get('mode')!='all'
+                or report.get('changed_sources')!=[] or not isinstance(report.get('sources_before'),dict)
+                or not report.get('sources_before')
+                or report.get('sources_before')!=report.get('sources_after')):
+            raise ValueError('Both complete acceptance passes must succeed without source changes')
+    sources=reports[0]['sources_after']
+    if sources!=reports[1]['sources_before']:
+        raise ValueError('Acceptance source changed between passes; restart both passes')
+    result=dict(successful=True,passes=[str(folder) for folder in folders],source_files=len(sources),
+        source_fingerprint=hashlib.sha256(json.dumps(sources,sort_keys=True).encode('utf8')).hexdigest())
+    console_text(json.dumps(result,ensure_ascii=False))
+    return result
 
 
 def run_command(command,log,root,env,timeout=900):

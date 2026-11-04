@@ -78,6 +78,15 @@ class ReviewRunnerTests(unittest.TestCase):
                 path.write_text('changed',encoding='utf8')
                 self.assertNotEqual(before,self.runner.source_hashes(root))
 
+    def test_source_fingerprint_includes_persistent_acceptance_rules_and_template(self):
+        for name in ('AGENTS.md','docs/QA_WORKFLOW.md','docs/ci/code-review.yml'):
+            with self.subTest(name=name),tempfile.TemporaryDirectory() as folder:
+                root=Path(folder);path=root/name;path.parent.mkdir(parents=True,exist_ok=True)
+                path.write_text('original acceptance policy',encoding='utf8');before=self.runner.source_hashes(root)
+                self.assertIn(name,before)
+                path.write_text('changed acceptance policy',encoding='utf8')
+                self.assertNotEqual(before,self.runner.source_hashes(root))
+
     def test_command_failure_retains_output_and_nonzero_status(self):
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder);log=root/'failure.log'
@@ -95,6 +104,56 @@ class ReviewRunnerTests(unittest.TestCase):
             self.assertEqual(result['returncode'],3)
             self.assertEqual((root/'unicode.log').read_text(encoding='utf8').strip(),'\u4e2d\U0001f9ea')
             self.assertIn(b'\\U0001f9ea',output.getvalue())
+
+    def test_workflow_keeps_two_isolated_passes_and_only_publishes_summary_logs(self):
+        import yaml
+        root=Path(__file__).resolve().parents[1]
+        active=root/'.github/workflows/code-review.yml'
+        self.assertEqual(active.read_bytes(),(root/'docs/ci/code-review.yml').read_bytes())
+        workflow=yaml.safe_load(active.read_text(encoding='utf8'))
+        self.assertEqual(set(workflow['on']),{'push','pull_request','workflow_dispatch'})
+        self.assertEqual(workflow['permissions'],{'contents':'read'})
+        steps=workflow['jobs']['software-checks']['steps']
+        passes=[step['run'] for step in steps if 'run_review.py' in step.get('run','')]
+        self.assertEqual(len(passes),2)
+        self.assertIn('/pass-1',passes[0]);self.assertIn('/pass-2',passes[1])
+        artifact=next(step for step in steps if step.get('name')=='Retain review summaries and logs')
+        self.assertEqual(artifact['if'],'always()')
+        self.assertEqual(artifact['with']['path'].splitlines(),[
+            '${{ env.REVIEW_RECORD }}/pass-1/*.json','${{ env.REVIEW_RECORD }}/pass-1/*.log',
+            '${{ env.REVIEW_RECORD }}/pass-2/*.json','${{ env.REVIEW_RECORD }}/pass-2/*.log'])
+        self.assertNotIn('**',artifact['with']['path'])
+        comparison=next(step for step in steps if step.get('name')=='Confirm identical frozen sources across both passes')
+        self.assertIn('verify_passes',comparison['run'])
+        self.assertGreater(steps.index(comparison),max(i for i,step in enumerate(steps) if 'run_review.py' in step.get('run','')))
+        self.assertLess(steps.index(comparison),steps.index(artifact))
+
+    def test_repeated_acceptance_requires_identical_successful_complete_reports(self):
+        import json
+        with tempfile.TemporaryDirectory() as folder:
+            first,second=Path(folder)/'first',Path(folder)/'second'
+            report=dict(successful=True,mode='all',changed_sources=[],sources_before={'src/app.py':'a'*64},sources_after={'src/app.py':'a'*64})
+            for directory in (first,second):
+                directory.mkdir();(directory/'summary.json').write_text(json.dumps(report),encoding='utf8')
+            with redirect_stdout(io.StringIO()):result=self.runner.verify_passes(first,second)
+            self.assertTrue(result['successful']);self.assertEqual(result['source_files'],1)
+            with self.assertRaisesRegex(ValueError,'different evidence'):self.runner.verify_passes(first,first)
+
+    def test_repeated_acceptance_rejects_between_pass_changes_or_incomplete_passes(self):
+        import json
+        with tempfile.TemporaryDirectory() as folder:
+            first,second=Path(folder)/'first',Path(folder)/'second'
+            original=dict(successful=True,mode='all',changed_sources=[],sources_before={'src/app.py':'a'*64},sources_after={'src/app.py':'a'*64})
+            for directory in (first,second):directory.mkdir()
+            (first/'summary.json').write_text(json.dumps(original),encoding='utf8')
+            cases=[dict(original,sources_before={'src/app.py':'b'*64},sources_after={'src/app.py':'b'*64}),
+                dict(original,successful=False),dict(original,mode='node'),dict(original,changed_sources=['src/app.py']),
+                dict(original,sources_after={'src/app.py':'b'*64}),dict(original,sources_before={},sources_after={}),
+                dict(original,sources_before=['invalid'],sources_after=['invalid'])]
+            for report in cases:
+                with self.subTest(report=report):
+                    (second/'summary.json').write_text(json.dumps(report),encoding='utf8')
+                    with self.assertRaises(ValueError):self.runner.verify_passes(first,second)
 
 
 if __name__=='__main__':unittest.main()
