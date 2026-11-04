@@ -2,6 +2,8 @@
 
 [English](#english) · [Linux 安装 / Installation](docs/LINUX.md) · [Ubuntu CLI 操作指南](docs/UBUNTU_CLI_QUICKSTART_ZH.md) · [更新记录 / Changelog](docs/CHANGELOG.md)
 
+**当前进度与下一步：见[项目状态与后续验收](docs/PROJECT_STATUS.md)。** 最新工作代码位于 [`feature/hand-workbench-0.2.1`](https://github.com/Fairank/wuji-hand-studio/tree/feature/hand-workbench-0.2.1)，尚未合并到默认主分支。0.2.78 运行源码已同步；自动审查工作流目前仅提供[完整模板](docs/ci/code-review.yml)，尚未在 GitHub 启用。本轮未重新发布安装包。
+
 **非官方个人展示工具，不是舞肌科技发布、维护或背书的产品。** 官方名称、示例和标识仅说明兼容对象和来源。
 
 一个软件、一个图标、一个安装包。公开展示与自用模型共用同一套程序；私有模型通过菜单导入为本机数据，不再提供独立“基础版 / 研究版”软件。
@@ -12,7 +14,7 @@
 
 ## 代码审查与软件回归
 
-每次改动使用 `python scripts/run_review.py` 执行统一软件检查，并按 [代码审查流程](docs/CODE_REVIEW.md) 复查受影响的真实操作链和异步顺序。仓库工作流 `.github/workflows/code-review.yml` 在 push、PR 或手动触发时运行同一入口；远端实际结果以当前提交的 Actions 状态为准。Codex 自动审查还需在账号设置中为仓库开启，CI 文件本身不代替 AI 审查、分支保护或非作者流程验收。
+每次改动使用 `python scripts/run_review.py` 执行统一软件检查，并按 [代码审查流程](docs/CODE_REVIEW.md) 复查受影响的真实操作链和异步顺序。自动工作流模板使用同一入口；当前受 GitHub 授权限制，远端尚未放入生效目录，不代表推送后已经自动检查。Codex 账号审查、分支保护和非作者流程验收另行核对，不能以提供模板代替已开启。
 
 ## 0.2.78 设备发现与参数同步
 
