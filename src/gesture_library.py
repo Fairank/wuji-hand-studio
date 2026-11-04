@@ -4,6 +4,7 @@ Letters are approximate finger shapes, not certified ASL: a fixed wrist cannot
 reproduce palm orientations or the moving J/Z. Never infer touch from a pose.
 """
 from datetime import datetime
+import copy
 import json
 import math
 from pathlib import Path
@@ -137,12 +138,42 @@ def route(action, *, at=None):
     raise ValueError('Unknown gesture')
 
 
-def catalog():
-    return dict(actions=CATALOG,official_inventory=OFFICIAL_INVENTORY,
+def opposition_metadata(profile_id):
+    from device_profiles import profile
+    selected=profile(profile_id)
+    if selected['generation']=='hand1':
+        return dict(zh='一代对指候选姿态 · 仅预览',en='Hand 1 opposition candidate · preview only',
+                    source='project_geometry_candidate',hardware=False,
+                    note='Hand 1 geometric candidate; not an official recording or a hardware motion.')
+    from official_replay import recording_metadata
+    side=selected['side']
+    return dict(zh='官方'+('左' if side=='left' else '右')+'手对指录制',
+                en='Official '+side+' opposition replay',source='official',hardware=True,
+                **recording_metadata(side))
+
+
+def catalog(profile_id=None):
+    result=copy.deepcopy(dict(actions=CATALOG,official_inventory=OFFICIAL_INVENTORY,
         digits_convention=CONVENTION,digits_source=DIGIT_REFERENCE,
         digits_note='Mainland-common Chinese counting gestures; regional variants exist. Authored Hand 2 joint poses, not official WUJI recordings. Reduced amplitude may not form a readable digit.',
         letters_note='Project-authored shapes inspired by ASL fingerspelling, not official Wuji actions or a universal sign language. 24 static letters exclude moving J/Z. Fixed-base approximations do not reproduce wrist/palm orientation.',
         choreography_note='Human-inspired authored joint curves, not motion capture. Nominal preview timing; hardware uses configured speed and amplitude. Hand 1: preview only.',
         clock_note='Local server time captured once at start, HH:MM, 24-hour format.',
         interaction=dict(recognition_ready=False,hardware_grasp_ready=False,
-            reason='Real-device current-to-load calibration and withdrawal validation have not passed. No real grasp is enabled.'))
+            reason='Real-device current-to-load calibration and withdrawal validation have not passed. No real grasp is enabled.')))
+    if profile_id is not None:
+        from device_profiles import profile
+        selected=profile(profile_id);result['device_profile']=selected
+        metadata=opposition_metadata(profile_id)
+        for action in result['actions']:
+            if action['id']=='official_opposition':
+                action.update(metadata)
+                action['note']=metadata.get('source_url',metadata.get('note',''))
+            if selected['generation']=='hand1':action['hardware']=action['id'] in {'open','fist'}
+        inventory=result['official_inventory'][0]
+        if selected['generation']=='hand1':
+            inventory.update(status='preview_only',detail=metadata['note'])
+        else:
+            inventory['detail']=selected['side'].title()+' recording integrated; entry/return, amplitude and timing adapted.'
+            inventory.update({key:value for key,value in metadata.items() if key.startswith('source_') or key=='recording_side'})
+    return result

@@ -563,7 +563,7 @@ class Controller:
                 for joint in result['joint_rates']:
                     joint.update(host_hz=None, device_hz=None, status='stale')
             result['csrf'] = self.csrf
-            result['playback'] = self.player.snapshot()
+            result['playback'] = self.player.snapshot(profile_id=result['device_profile']['id'])
             result['demonstration_playback'] = self._demonstration_scope().snapshot()
             result['parameter_sync']=dict(self.parameters.sync_status)
             result['glove']=self.glove.snapshot()
@@ -1844,11 +1844,10 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == '/api/catalog':
             query=parse_qs(url.query,keep_blank_values=True)
             try:
-                from demonstration_scope import query_profile,display_profile
+                from demonstration_scope import query_profile
                 if set(query)-{'profile'}:raise ValueError('Unknown demonstration catalog selector')
                 selected=query_profile(query)
-                result=catalog()
-                if selected is not None:result=dict(result,device_profile=display_profile(selected))
+                result=catalog(selected)
                 return self.reply(200,result)
             except (ValueError,TypeError) as error:return self.reply(400,dict(error=str(error)))
         if url.path == '/api/performance':

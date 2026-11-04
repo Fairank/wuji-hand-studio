@@ -15,9 +15,16 @@ from motion_timing import SMOOTH_PEAK_RATIO
 COMMIT='b0e48652dd94f4bc33df61cdc23a6d5dc598f93d'
 SOURCE_URL=f'https://github.com/wuji-technology/wuji-sdk/tree/{COMMIT}/examples/python/wuji_hand_2/6_opposition'
 LEFT_SHA256='696784c4a64c204a50b10919c9671b44844de6b3f8349819af8350e44403c32e'
+RIGHT_SHA256='fcbbebd96c0080a141b96ebaaf3ce7107816cd1bc0a7152f277879a796ce23cb'
 HEADER=struct.Struct('<8sHBBI')
 FRAME=struct.Struct('<I20f')
 DATA=Path(__file__).with_name('official_data')/'left.replay'
+
+
+def recording_metadata(side='left'):
+    if side not in ('left','right'):raise ValueError('Invalid replay side')
+    return dict(recording_side=side,source_file=side+'.replay',source_url=SOURCE_URL,
+                source_commit=COMMIT,source_sha256=LEFT_SHA256 if side=='left' else RIGHT_SHA256)
 
 
 def decode_replay(raw,expected_side='left'):
@@ -43,7 +50,7 @@ def load_left_replay():
 @lru_cache(maxsize=2)
 def load_replay(side='left'):
     raw=(DATA if side=='left' else DATA.with_name('right.replay')).read_bytes()
-    if hashlib.sha256(raw).hexdigest()!=(LEFT_SHA256 if side=='left' else 'fcbbebd96c0080a141b96ebaaf3ce7107816cd1bc0a7152f277879a796ce23cb'):raise ValueError('官方左手动作文件校验失败')
+    if hashlib.sha256(raw).hexdigest()!=recording_metadata(side)['source_sha256']:raise ValueError('官方动作文件校验失败')
     return tuple(decode_replay(raw,side))
 
 
@@ -102,7 +109,7 @@ def build_points(q,amplitude,lower,upper):
             interpolation='minimum_jerk' if smooth else 'linear'))
     for k,i in enumerate(selected):
         goal=[a+amplitude*(b-a) for a,b in zip(q,poses[i])]
-        append(goal,f'官方左手对指 · 原轨迹{i/1000:.2f}秒',MIN_TRANSITION_S if k==0 else (i-selected[k-1])*.001,smooth=k==0)
+        append(goal,f'官方{"左" if side=="left" else "右"}手对指 · 原轨迹{i/1000:.2f}秒',MIN_TRANSITION_S if k==0 else (i-selected[k-1])*.001,smooth=k==0)
         if k==0:append(goal[:],'官方起点 · 稳定',OFFICIAL_ENDPOINT_HOLD_S,True)
     append(points[-1]['q'][:],'官方末点 · 稳定',OFFICIAL_ENDPOINT_HOLD_S,True)
     append(q[:],'返回本次实测起点',MIN_TRANSITION_S,smooth=True)

@@ -59,13 +59,13 @@ def make_trial(q,action,amplitude,cycles,path=POSES,*,speed=1.,clock_at=None,tex
             text=data['text'],source=data['source'],source_url=data['source_url'],choreography_schema=data['schema'],
             nominal_duration_s=data['duration_s'],time_scale=scale,physical_contact_verified=False,sign_language_certified=False))
     if action=='official_opposition':
-        from official_replay import build_points,SOURCE_URL,COMMIT,LEFT_SHA256
+        from official_replay import build_points,recording_metadata
+        side=__import__('device_profiles').controller_profile()['side']
         points=build_points(q,amplitude,lo,hi)
         if points[-1]['t']*cycles>MAX_TRIAL_DURATION_S:raise ValueError(f'官方动作限速后超过{MAX_TRIAL_DURATION_S/60:g}分钟播放设置')
         return retime(dict(points=points,lower_rad=lo,upper_rad=hi,current_limit_A=CURRENT_LIMIT_A,
-            max_velocity_rad_s=COMMAND_SPEED_RAD_S,cycles=cycles,action=action,label=NAMES[action],amplitude=amplitude,
-            source='official_wuji_hand2_'+__import__('device_profiles').controller_profile()['side']+'_recording_retimed',source_url=SOURCE_URL,
-            source_commit=COMMIT,source_sha256=LEFT_SHA256 if __import__('device_profiles').controller_profile()['side']=='left' else 'fcbbebd96c0080a141b96ebaaf3ce7107816cd1bc0a7152f277879a796ce23cb',physical_contact_verified=False))
+            max_velocity_rad_s=COMMAND_SPEED_RAD_S,cycles=cycles,action=action,label='官方'+('左' if side=='left' else '右')+'手对指 · 限速适配',amplitude=amplitude,
+            source='official_wuji_hand2_'+side+'_recording_retimed',**recording_metadata(side),physical_contact_verified=False))
     if action in CUSTOM_IDS:
         from datetime import datetime
         stamp=datetime.fromisoformat(clock_at) if clock_at else None

@@ -21,7 +21,7 @@
   const officialOption=new Option('官方二代对指 · 限速适配','official_opposition');
   get('trial-action').add(officialOption,0);get('trial-action').value='official_opposition';
   const officialNote=document.createElement('p');officialNote.className='hint';
-  officialNote.textContent='官方左手录制约30秒，实机按现有速度上限降速、按所选幅度缩放，并从当前姿态过渡。其余动作仍为原仿真候选；当前手尚未通过官方动作实测。';
+  officialNote.textContent='二代对应左右手官方录制约30秒，实机按现有速度上限降速、按所选幅度缩放，并从当前姿态过渡。其余动作仍为原仿真候选；当前手尚未通过官方动作实测。';
   get('trial-action').after(officialNote);
   const history=document.createElement('div');history.className='hardware-controls';
   history.innerHTML='<h3>最近实机试运行记录</h3><p id="motion-history-summary" class="hint"></p><ol id="motion-history" class="hint"></ol>';
