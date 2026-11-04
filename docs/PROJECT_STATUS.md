@@ -8,10 +8,10 @@
 
 | 项目 | 已确认的状态 |
 | --- | --- |
-| 最新工作分支 | `feature/hand-workbench-0.2.1`，尚未合并 `main` |
+| 本轮修复分支 | `codex/handbench-0.2.78-bugfix`，基于 `feature/hand-workbench-0.2.1` 的 `182c4d4`；尚未合并 `main` |
 | 运行代码基线 | 0.2.78，远端提交 `3edd2a7718c55fff043680eab643f1797074fff6`；本次文档更新不改变程序版本 |
-| 源码同步 | 上轮 0.2.78 的 37 项源码、测试和文档变更已上传，逐项比对通过；本次只补充说明和工作流模板 |
-| 自动审查源码 | [完整工作流模板](ci/code-review.yml)随本文提供；生效路径 `.github/workflows/code-review.yml` 因授权限制尚未上传，自动运行未启用 |
+| 源码同步 | 本轮连接、归属、动作选择及渲染修复已随修复分支上传；程序仍为 0.2.78。后续 CI 修正沿用该分支，不把源码上传当作安装更新 |
+| 自动检查 | 正式 `.github/workflows/code-review.yml` 已上传并实际触发；[首次运行](https://github.com/Fairank/wuji-hand-studio/actions/runs/41921308929) 在启动测试前拒绝 job 环境中的 `runner.temp`。原失败保留，修正须通过 actionlint 和真实双轮 Actions；[修复分支的实际运行列表](https://github.com/Fairank/wuji-hand-studio/actions/workflows/code-review.yml?query=branch%3Acodex%2Fhandbench-0.2.78-bugfix)单独记录各次提交的结果，本机通过不代表远端通过 |
 | 本机交付 | 2026-11-02 已用 22 个变更文件更新到 0.2.78，安装后程序与页面资源核对通过；本次不再次安装 |
 | 安装包与主分支 | 按当前交付方式，不重新上传安装包，也没有合并主分支；GitHub 源码更新不等于软件更新服务已有新安装包 |
 | 私有资料 | 用户配置、序列号、标定模型、备份、凭据和原始本机日志不上传；不属于应公开的源代码 |
@@ -82,7 +82,7 @@
 ### 5. 让后续审查真正自动运行
 
 - 保留 `scripts/run_review.py`、PR 核对表、`src/AGENTS.md` 及[完整工作流模板](ci/code-review.yml)。
-- 取得工作流写入授权后，将模板放入生效目录，再核对该提交实际产生的 Actions 结果。当前模板只供读取，不会自动运行。
+- 正式工作流已进入生效目录。修改时先用官方 actionlint 核对工作流及模板，再核对该提交实际产生的两轮 Actions 与同源校验，失败则继续修复并重跑。
 - Codex 账号自动审查与仓库合并规则另行开启并验证，不能把确定性测试称为 AI 审查，也不能假定账号开关已经开启。
 
 ## 后续修改必须遵守

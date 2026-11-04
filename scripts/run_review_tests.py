@@ -4,6 +4,8 @@ import io
 from contextlib import redirect_stdout
 import os
 from pathlib import Path
+import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -113,12 +115,15 @@ class ReviewRunnerTests(unittest.TestCase):
         workflow=yaml.safe_load(active.read_text(encoding='utf8'))
         self.assertEqual(set(workflow['on']),{'push','pull_request','workflow_dispatch'})
         self.assertEqual(workflow['permissions'],{'contents':'read'})
+        self.assertNotIn('REVIEW_RECORD',workflow['jobs']['software-checks']['env'])
         steps=workflow['jobs']['software-checks']['steps']
+        self.assertEqual(steps[0]['id'],'review-record')
+        self.assertEqual(steps[0]['shell'],'pwsh')
         passes=[step['run'] for step in steps if 'run_review.py' in step.get('run','')]
         self.assertEqual(len(passes),2)
         self.assertIn('/pass-1',passes[0]);self.assertIn('/pass-2',passes[1])
         artifact=next(step for step in steps if step.get('name')=='Retain review summaries and logs')
-        self.assertEqual(artifact['if'],'always()')
+        self.assertEqual(artifact['if'],"always() && steps.review-record.outcome == 'success'")
         self.assertEqual(artifact['with']['path'].splitlines(),[
             '${{ env.REVIEW_RECORD }}/pass-1/*.json','${{ env.REVIEW_RECORD }}/pass-1/*.log',
             '${{ env.REVIEW_RECORD }}/pass-2/*.json','${{ env.REVIEW_RECORD }}/pass-2/*.log'])
@@ -154,6 +159,51 @@ class ReviewRunnerTests(unittest.TestCase):
                 with self.subTest(report=report):
                     (second/'summary.json').write_text(json.dumps(report),encoding='utf8')
                     with self.assertRaises(ValueError):self.runner.verify_passes(first,second)
+
+
+class ReviewRecordInitializationTests(unittest.TestCase):
+    def initialization(self,folder,values):
+        import yaml
+        shell=shutil.which('pwsh')
+        if not shell:self.skipTest('Workflow initialization requires PowerShell 7')
+        workflow=yaml.safe_load((Path(__file__).resolve().parents[1]/'.github/workflows/code-review.yml').read_text(encoding='utf8'))
+        step=next(step for step in workflow['jobs']['software-checks']['steps'] if step.get('id')=='review-record')
+        script=folder/'initialize.ps1';script.write_text(step['run'],encoding='utf8')
+        env=dict(os.environ)
+        for key in ('RUNNER_TEMP','GITHUB_ENV','GITHUB_RUN_ID','GITHUB_RUN_ATTEMPT','REVIEW_RECORD'):env.pop(key,None)
+        env.update({key:str(value) for key,value in values.items() if value is not None})
+        return subprocess.run([shell,'-NoProfile','-NonInteractive','-File',str(script)],
+            cwd=folder,env=env,capture_output=True,text=True,encoding='utf8',timeout=20,check=False)
+
+    def test_step_appends_unique_run_attempt_path_under_runner_temp_before_checkout(self):
+        with tempfile.TemporaryDirectory() as directory:
+            folder=Path(directory);temporary=folder/'runner temp 中文';temporary.mkdir()
+            output=folder/'github-env';prefix='EXISTING=preserved\n'
+            paths=[]
+            for run,attempt in [('41921308929','1'),('41921308929','2'),('41921308930','1')]:
+                output.write_text(prefix,encoding='utf8')
+                result=self.initialization(folder,dict(RUNNER_TEMP=temporary,GITHUB_ENV=output,GITHUB_RUN_ID=run,GITHUB_RUN_ATTEMPT=attempt))
+                self.assertEqual(result.returncode,0,result.stderr)
+                expected=temporary/('workbench-review-'+run+'-'+attempt)
+                self.assertEqual(output.read_text(encoding='utf8'),prefix+'REVIEW_RECORD='+str(expected)+'\n')
+                self.assertFalse(expected.exists(),'The runner must create each fresh pass directory itself')
+                paths.append(expected)
+            self.assertEqual(len(set(paths)),3)
+
+    def test_missing_or_invalid_temp_and_run_context_fail_without_publishing_a_path(self):
+        with tempfile.TemporaryDirectory() as directory:
+            folder=Path(directory);temporary=folder/'runner-temp';temporary.mkdir()
+            output=folder/'github-env';file=folder/'not-a-directory';file.write_text('keep',encoding='utf8')
+            base=dict(RUNNER_TEMP=temporary,GITHUB_ENV=output,GITHUB_RUN_ID='41921308929',GITHUB_RUN_ATTEMPT='1')
+            for changes in ({'RUNNER_TEMP':None},{'RUNNER_TEMP':' '},{'RUNNER_TEMP':folder/'absent'},
+                    {'RUNNER_TEMP':file},{'RUNNER_TEMP':'runner-temp'},{'GITHUB_RUN_ID':None},
+                    {'GITHUB_RUN_ATTEMPT':None},{'GITHUB_ENV':None}):
+                with self.subTest(changes=changes):
+                    output.write_text('EXISTING=preserved\n',encoding='utf8')
+                    result=self.initialization(folder,{**base,**changes})
+                    self.assertNotEqual(result.returncode,0)
+                    self.assertEqual(output.read_text(encoding='utf8'),'EXISTING=preserved\n')
+            self.assertEqual(list(temporary.iterdir()),[])
 
 
 if __name__=='__main__':unittest.main()

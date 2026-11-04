@@ -1,6 +1,6 @@
 # 工作台代码审查
 
-**当前状态（2026-11-05）：** 本地检查入口、PR 核对表与 `src/AGENTS.md` 已在原开发分支。此次本地候选补充根目录 `AGENTS.md`，并准备 `.github/workflows/code-review.yml`，与[模板](ci/code-review.yml)字节一致：push、PR 和手动触发均连续执行两轮全新隔离检查。四个官方 Actions 的 v7 引用已核对并固定到提交。当前 GitHub 写入被拒绝（403），本机 Git 也没有登录凭据，正式文件尚未同步，不能声称远端 Actions、Codex 自动审查或分支规则已经开启。项目待办及本轮模拟证据见 [PROJECT_STATUS.md](PROJECT_STATUS.md)。
+**流程与来源（2026-11-05）：** 根目录 `AGENTS.md`、本地检查入口、PR 核对表及正式 `.github/workflows/code-review.yml` 已随修复分支上传；正式文件与[模板](ci/code-review.yml)保持字节一致，push、PR 和手动触发均执行两轮全新隔离检查。四个官方 Actions 的 v7 引用已核对并固定到提交。最初的写入 403／Git 未登录已通过用户的官方授权解除；首次远端运行保留了表达式作用域失败，不能把本地通过写成远端通过。具体提交、后续 Actions 结果及边界见 [PROJECT_STATUS.md](PROJECT_STATUS.md) 和 [模拟验收记录](DEMO_SIMULATION_VALIDATION.md)。这些文件不证明 Codex 自动审查或分支规则已经开启。
 
 每次改动先复现具体问题，再检查共享调用链和不同回复顺序。作者完成修复与真实源流程验证后，由非作者换一个失败位置或顺序复查。检查设备/人员/左右手/模型身份、异步请求归属、退出未知保护、资料保留，以及页面资源和实际入口；不要只凭测试总数或截图放行。原设计和导航沿用 [QA_WORKFLOW.md](QA_WORKFLOW.md) 的约束。
 
@@ -13,6 +13,8 @@ python scripts/run_review.py
 ```
 
 每次源码冻结后连续运行两轮，使用不同的新隔离目录；任意失败或新修改都重新开始两轮。每个受影响流程还须保留原失败顺序和另一种顺序的独立复验。见根目录 `AGENTS.md` 与 [QA_WORKFLOW.md](QA_WORKFLOW.md)。
+
+工作流变更另须先运行[官方 actionlint](https://github.com/rhysd/actionlint) 校验 GitHub 语法及表达式上下文，核对正式文件和模板。首次远端运行的 `runner.temp` 作用域错误由此加入复现记录；后续修改沿用该现成工具，不自建表达式校验器。检查目录由执行步骤中的 `RUNNER_TEMP` 确定并通过 `GITHUB_ENV` 交给后续步骤。
 
 默认创建一个新的系统临时验收目录并打印位置。也可传入一个**尚不存在**的目录，避免覆盖原证据：
 
