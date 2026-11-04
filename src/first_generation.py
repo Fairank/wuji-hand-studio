@@ -45,6 +45,7 @@ def worker_first(address,requests,events,prepared_hand=None,source=None):
     selected=controller_profile();manager=SdkManager.instance();hand=sub=publisher=lowpass=None
     latest=None;seq=0;recent=collections.deque(maxlen=500);recorder=Recorder();last=time.monotonic();last_emit=0.
     active=False;paused=False;owned=False;disable_confirmed=False;lease='';last_beat=0.;elapsed=0.;tick=0.;next_send=0.;sent=0;run_started=0.
+    handled_lease=None
     action='';reason='一代手仅开放官方张开/握拳适配，其他动作可预览';plan=None;duration=0.;applied=None;raw_target=None
     from device_profiles import native_ranges
     from motion_parameters import COMMAND_SPEED_RAD_S, PATH_SPEED_RAD_S
@@ -126,6 +127,7 @@ def worker_first(address,requests,events,prepared_hand=None,source=None):
                         lease=command['lease'];last_beat=now;tick=now;next_send=now;elapsed=0.;sent=0;active=True;paused=False;action='glove_teleoperation' if following else plan['action'];reason='一代官方LowPass示例适配'
                         run_started=now
                     except Exception as error:stop(str(error));events.put(dict(type='notice',message=reason))
+                    finally:handled_lease=command.get('lease')
                 elif name=='record':
                     if active or owned:events.put(dict(type='notice',message='先停止动作再采集'))
                     else:recorder.start(command['label'],command['seconds'],now)
@@ -154,7 +156,7 @@ def worker_first(address,requests,events,prepared_hand=None,source=None):
                 span=recent[-1]['host_s']-recent[0]['host_s'] if len(recent)>1 else 0.
                 hz=(len(recent)-1)/span if span>.2 else None
                 rates=[dict(nid=i,host_hz=hz,device_hz=None,age_ms=(now-last)*1000,status='fresh' if now-last<=.1 else 'stale',missing_in_received_frames=0,missing_stream_slots=None,samples=len(recent)) for i in range(20)]
-                hw=dict(active=None if owned and not active else active,ready=False,trial_ready=latest is not None and not owned,probe_ready=False,probe_reason=reason,reason=reason,actions=['open','fist'],trial_controls_version=3,gesture_library_version=1,paused=paused,elapsed_s=elapsed,action=action,trial_phase='LowPass · '+action,trial_amplitude=plan['amplitude'] if plan else None,planned_duration_s=duration,cycles=plan['cycles'] if plan else 1,cycle=1,stop_confirmed=disable_confirmed and not owned,warnings=[],command_timing=dict(requested_hz=PUB_HZ),source='official_hand1_lowpass_adaptation',action_source=SOURCE,diagnostics_available=False,effort_unit='unavailable',kp_kd_applicable=False)
+                hw=dict(active=None if owned and not active else active,ready=False,trial_ready=latest is not None and not owned,probe_ready=False,probe_reason=reason,reason=reason,actions=['open','fist'],trial_controls_version=3,gesture_library_version=1,paused=paused,elapsed_s=elapsed,action=action,trial_phase='LowPass · '+action,trial_amplitude=plan['amplitude'] if plan else None,planned_duration_s=duration,cycles=plan['cycles'] if plan else 1,cycle=1,stop_confirmed=disable_confirmed and not owned,handled_lease=handled_lease,warnings=[],command_timing=dict(requested_hz=PUB_HZ),source='official_hand1_lowpass_adaptation',action_source=SOURCE,diagnostics_available=False,effort_unit='unavailable',kp_kd_applicable=False)
                 if source is not None:
                     hw.update(probe_ready=latest is not None and not owned and now-last<=.1,raw_target_rad=raw_target,applied_target_rad=applied,
                               action_source='Wuji Glove → RetargetSession → Hand 1 LowPass',hardware_validated=False,
@@ -167,4 +169,4 @@ def worker_first(address,requests,events,prepared_hand=None,source=None):
         stop('连接结束');finish_record('disconnected')
         if sub:sub.close()
         if hand:hand.disconnect()
-        events.put(dict(type='closed',hardware=dict(active=None if owned else False,stop_confirmed=disable_confirmed and not owned,reason=reason)))
+        events.put(dict(type='closed',hardware=dict(active=None if owned else False,stop_confirmed=disable_confirmed and not owned,handled_lease=handled_lease,reason=reason)))

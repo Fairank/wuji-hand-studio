@@ -45,6 +45,13 @@ def idle_state():
                 parameter_sync={}, calibration={}, recording={}, program={}, group={})
 
 
+def initialize_hardware_owner(controller):
+    controller.hardware_lease = None
+    controller.hardware_seen_active = False
+    controller.hardware_lease_generation = None
+    controller.hardware_lease_device = None
+
+
 class JournalCrosscheck(unittest.TestCase):
     def setUp(self):
         (QA/'temp').mkdir(parents=True, exist_ok=True)
@@ -140,6 +147,7 @@ class JournalCrosscheck(unittest.TestCase):
             REPORTS=Path(self.temp.name)/'reports', copy=copy, json=json, re=re, time=time,
             threading=threading, Path=Path, socket=socket))
         c = Controller.__new__(Controller)
+        initialize_hardware_owner(c)
         c.calibration_handover = CalibrationHandover(c)
         c.lock, c.termination, c.glove = threading.RLock(), self.journal, bridge
         c.session_devices, c.session_epochs = {3: 'X'}, {3: direct_epoch}
@@ -181,6 +189,7 @@ class JournalCrosscheck(unittest.TestCase):
             vm_client=lambda: None, REPORTS=Path(self.temp.name)/'reports', copy=copy, json=json,
             re=re, time=time, threading=threading, Path=Path, socket=socket))
         c = Controller.__new__(Controller)
+        initialize_hardware_owner(c)
         c.calibration_handover = CalibrationHandover(c)
         old, new = self.epoch(), self.epoch()
         c.lock = threading.RLock()
@@ -207,6 +216,7 @@ class JournalCrosscheck(unittest.TestCase):
             REPORTS=Path(self.temp.name)/'reports', copy=copy, json=json, re=re, time=time,
             threading=threading, Path=Path, socket=socket))
         c = Controller.__new__(Controller)
+        initialize_hardware_owner(c)
         c.calibration_handover = CalibrationHandover(c)
         c.lock, c.termination, c.glove = threading.RLock(), self.journal, bridge
         c.session_devices, c.session_epochs = {3: current_serial}, {3: direct_epoch}
@@ -263,6 +273,7 @@ class ShutdownCrosscheck(unittest.TestCase):
         for name in ('program_start', 'group_prepare', 'runtime_install', 'runtime_select', 'hardware_start', 'connect', 'calibration_start'):
             with self.subTest(command=name), patch.dict(sys.modules, modules):
                 c = Controller.__new__(Controller)
+                initialize_hardware_owner(c)
                 c.calibration_handover = CalibrationHandover(c)
                 c.lock, c.desktop_closing, c.state = threading.RLock(), True, idle_state()
                 c.group = NS(active=False, internal=False, handle=started('group'))
@@ -282,6 +293,7 @@ class ShutdownCrosscheck(unittest.TestCase):
             threading=threading, Path=Path, socket=socket, HARDWARE_COMMANDS={'hardware_stop'},
             validate_command=lambda command: None))
         c = Controller.__new__(Controller)
+        initialize_hardware_owner(c)
         c.calibration_handover = CalibrationHandover(c)
         c.lock, c.generation = threading.RLock(), 1
         c.session_devices, c.session_epochs = {}, {}

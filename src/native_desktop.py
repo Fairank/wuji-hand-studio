@@ -106,8 +106,14 @@ class NativeDesktop:
 
     def configure_device_network(self,adapter_id,address=''):
         from device_network import configure
+        from device_termination import unconfirmed
+        from connection_switch import unsettled
         state=self.server.controller.snapshot()
-        if state['connection'] not in ('disconnected','error') or state['hardware'].get('active') or self.server.controller.glove.busy:
+        if (state['connection'] not in ('disconnected','error') or state['hardware'].get('active') is not False
+                or state.get('hardware_control_id') or unconfirmed(state) or unsettled(state) or self.server.controller.glove.busy
+                or any(state.get('official_viz',{}).get(k) for k in ('active','busy','reserved','session_id'))
+                or any(state.get('official_studio',{}).get(k) for k in ('active','busy','reserved'))
+                or state.get('calibration',{}).get('running') or state.get('calibration',{}).get('cleanup_required')):
             raise ValueError('Disconnect the device before network setup / 先断开设备再配置网络')
         if state['device_profile']['generation']!='hand2':raise ValueError('Hand 1 uses USB')
         return configure(adapter_id,address,state['device_profile']['side'])

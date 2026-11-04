@@ -135,6 +135,9 @@ class Controller:
         self.state['device_profile']=selected_profile()
         self.state['hardware'] = dict(ready=False,active=False,actions=[],probe_ready=False,reason='先连接左手，进行单关节试动')
         self.hardware_lease = None
+        self.hardware_seen_active = False
+        self.hardware_lease_generation = None
+        self.hardware_lease_device = None
         motion_dir=self.reports.parent/'motion_reports'
         for path in sorted(motion_dir.glob('*.json'),key=lambda p:p.stat().st_mtime,reverse=True)[:20]:
             try:self.state['motion_history'].append(summarize_motion(json.loads(path.read_text(encoding='utf-8'))))
@@ -288,11 +291,21 @@ class Controller:
                             or any(context.get(k)!=private.get(k) for k in keys)):
                         raise ValueError('Saved profile SDK session changed')
                 selected=self.state['device_profile'];binding=self.retarget.context(selected)['binding']
-                context=self.retarget.select({**binding,'glove_serial':proof['serial'],'sdk_user':proof['source_user_id']},selected)
-                tuning=self.tuning.context(context['binding'])
-                if tuning['engine']!='sdk':self.tuning.select_engine(context['binding'],'sdk')
-                self.state['view_source']='glove'
-                return dict(timeout_ms=timeout_ms,retarget=context['settings'],solver=dict(engine='sdk',values=tuning['values']))
+                # Binding reads may block while this exact switch is cancelled
+                # or its bridge changes. Guard the writes in the same Bridge ->
+                # switch order used by the bridge's final open dispatch.
+                with self.glove.lock:
+                    with self.connection_switch.open_guard(attempt):
+                        check()
+                        context=self.glove._continuation or {}
+                        if (self.glove.stopping or self.glove.session!=started.get('session')
+                                or any(context.get(k)!=private.get(k) for k in keys)):
+                            raise ValueError('Saved profile SDK session changed')
+                        context=self.retarget.select({**binding,'glove_serial':proof['serial'],'sdk_user':proof['source_user_id']},selected)
+                        tuning=self.tuning.context(context['binding'])
+                        if tuning['engine']!='sdk':self.tuning.select_engine(context['binding'],'sdk')
+                        self.state['view_source']='glove'
+                        return dict(timeout_ms=timeout_ms,retarget=context['settings'],solver=dict(engine='sdk',values=tuning['values']))
         with self.lock:
             check()
             started['session']=self.glove.start_calibrated(private,ready,expected_profile=expected_profile,
@@ -493,6 +506,8 @@ class Controller:
     def snapshot(self):
         with self.lock:
             result = copy.deepcopy(self.state)
+            result['hardware'].pop('handled_lease',None)
+            result['hardware']['start_pending'] = bool(self.hardware_lease and not self.hardware_seen_active)
             result['session_generation']=getattr(self,'generation',0)
             # The current feedback reader remains an owned transport after a
             # stale/error event clears live device identity. This projection
@@ -552,6 +567,7 @@ class Controller:
             result['demonstration_playback'] = self._demonstration_scope().snapshot()
             result['parameter_sync']=dict(self.parameters.sync_status)
             result['glove']=self.glove.snapshot()
+            (result['glove'].get('hardware') or {}).pop('handled_lease',None)
             result['glove']['controller_config']=getattr(self,'sdk_session_configs',{}).get(result['glove'].get('session_id'))
             result['unconfirmed_devices']=self.termination.snapshot()
             result['program']=self.program.snapshot()
@@ -1188,16 +1204,38 @@ class Controller:
                         if command.get('action')=='clock':outgoing['clock_at']=datetime.now().astimezone().isoformat()
                     if name=='hardware_trial' and {'expected_profile','expected_serial'}&set(command):
                         require_expected_profile(command,self.state['device_profile']['id'],self.state.get('device_id'))
-                    self.hardware_lease=secrets.token_hex(16)
+                    lease=secrets.token_hex(16)
+                    pending=dict(hardware,active=None,stop_confirmed=False,start_pending=True)
+                    # Nothing has reached the transport yet. If persistence
+                    # fails, restore only this locked journal transaction and
+                    # retain its dirty/error evidence for a later save retry.
+                    with self.termination.lock:
+                        prior_rows=copy.deepcopy(self.termination.rows)
+                        prior_confirmed=dict(self.termination.confirmed)
+                        try:self.termination.observe('hand',self.state.get('device_id'),pending,
+                            self.session_epochs.get(self.generation,0))
+                        except Exception:
+                            self.termination.rows=prior_rows
+                            self.termination.confirmed=prior_confirmed
+                            self.termination.dirty=True
+                            self.log('停用记录未保存，启动请求未发送 / Stop journal could not be saved; start was not sent')
+                            raise
+                    self.hardware_lease=lease
+                    self.hardware_lease_generation=self.generation
+                    self.hardware_lease_device=self.state.get('device_id')
+                    self.hardware_seen_active=False
                     outgoing['lease']=self.hardware_lease
                     self.player.command(dict(name='demo_stop'))
                     self.state['view_source']='feedback'
+                    # A write/flush may fail after delivering the request. Keep
+                    # this exact session uncertain until its worker acknowledges.
+                    hardware.update(pending)
+                    self.state.update(motion_enabled=None,read_only=False)
                     try:self.send(outgoing)
                     except Exception:
-                        self.hardware_lease=None
+                        self.log('启动请求发送结果未确认，请停止并等待同一设备确认 / Start delivery is unconfirmed; stop and wait for the same device')
                         raise
                     self.hardware_requested_at=time.monotonic()
-                    self.hardware_seen_active=False
                     self.log('请求低力度整套试运行，候选姿态尚未实机验收' if name=='hardware_trial' else '请求实机单关节3°试动' if name=='hardware_probe' else '请求实机展示；画面将使用实际关节反馈')
                     return dict(lease=self.hardware_lease)
                 if name!='hardware_stop' and command.get('lease')!=self.hardware_lease:
@@ -1216,7 +1254,7 @@ class Controller:
             if source not in {'feedback','preview'}:
                 raise ValueError('请选择实机反馈或动作预览')
             with self.lock:
-                if source=='preview' and self.state['hardware'].get('active') is not False:
+                if source=='preview' and (self.hardware_lease or self.state['hardware'].get('active') is not False):
                     raise ValueError('实机展示期间画面保持跟随实际反馈')
                 self.state['view_source'] = source
                 if source=='feedback':self.player.command(dict(name='demo_stop'))
@@ -1227,7 +1265,7 @@ class Controller:
             self.state['teleoperation_view_mode']=command['mode'];self.state['view_source']='glove'
             return dict(teleoperation_view_mode=command['mode'])
         if isinstance(command, dict) and str(command.get('name','')).startswith('demo_'):
-            if command['name']=='demo_start' and self.state['hardware'].get('active') is not False:
+            if command['name']=='demo_start' and (self.hardware_lease or self.state['hardware'].get('active') is not False):
                 raise ValueError('先停止实机展示，再播放仿真预览')
             self.player.command(command)
             with self.lock:
@@ -1275,6 +1313,8 @@ class Controller:
                 if self.parameters.sync_status['busy']:raise ValueError('参数同步中，请完成后连接')
                 if self.state['connection'] in {'connected', 'connecting'}:
                     raise ValueError('已有连接正在进行')
+                if self.hardware_lease:
+                    raise ValueError('启动或停用结果尚未确认，请先核对原设备 / Confirm the original hardware start or stop before reconnecting')
                 self.clear_live()
                 retained_hardware=copy.deepcopy(self.state['hardware']);retained_hardware_generation=self.hardware_generation
                 self.generation += 1
@@ -1303,6 +1343,8 @@ class Controller:
                         message='反馈任务未启动，请重试 / Feedback task did not start; retry: '+str(error)[:300])
                     raise
             elif name == 'disconnect':
+                if self.hardware_lease or self.state['hardware'].get('active') is not False:
+                    raise ValueError('先停止动作并等待停用确认；旧控制端若一直等待启动确认，请升级 / Stop and wait for confirmation; update an older controller if startup remains pending')
                 self.generation += 1
                 # Ask the worker to flush recordings; its reader may still save
                 # final reports, but stale states cannot revive the connection.
@@ -1380,8 +1422,29 @@ class Controller:
             try:pending.unlink(missing_ok=True)
             except OSError:pass
 
+    def _hardware_event(self,event,generation):
+        hardware=copy.deepcopy(event['hardware'])
+        acknowledgment=hardware.pop('handled_lease',None)
+        lease=self.hardware_lease
+        if not lease or generation!=self.hardware_lease_generation:return hardware
+        serial=event.get('device_id') or self.session_devices.get(generation)
+        exact=self.hardware_lease_device is not None and serial==self.hardware_lease_device
+        confirmed=(hardware.get('active') is False and hardware.get('stop_confirmed') is True)
+        handled=acknowledgment==lease
+        if exact and confirmed and (handled or self.hardware_seen_active or event.get('type')=='closed'):
+            self.hardware_lease=None
+        elif exact and hardware.get('active') is True:
+            self.hardware_seen_active=True
+        elif not self.hardware_seen_active or not exact:
+            # A pre-request idle frame is not a start rejection or a stop ACK.
+            # Project uncertainty before the journal sees this event as well.
+            hardware.update(active=None,stop_confirmed=False)
+        hardware['start_pending']=bool(self.hardware_lease and not self.hardware_seen_active)
+        return hardware
+
     def event(self, event, generation):
         with self.lock:
+            if 'hardware' in event:event=dict(event,hardware=self._hardware_event(event,generation))
             kind = event.get('type')
             if kind=='motion_report':
                 report=event['report']
@@ -1420,6 +1483,7 @@ class Controller:
                 if kind=='closed' and self.hardware_generation==generation and self.state['connection']=='disconnected' and self.state.get('device_id')==self.session_devices.get(generation):
                     self.state['hardware']=event['hardware']
                     self.state['motion_enabled']=event['hardware'].get('active')
+                    self.state['read_only']=self.state['motion_enabled'] is False
             if generation != self.generation:
                 return
             if kind == 'identity':
@@ -1446,8 +1510,6 @@ class Controller:
                 if 'hardware' in event:
                     self.state['hardware']=event['hardware'];self.hardware_generation=generation
                 if self.state['hardware'].get('active'):self.hardware_seen_active=True
-                elif self.hardware_lease and (self.hardware_seen_active or time.monotonic()-self.hardware_requested_at>3):
-                    self.hardware_lease=None
                 self.state['motion_enabled']=self.state['hardware']['active']
                 self.state['read_only']=self.state['motion_enabled'] is False
             elif kind == 'error':
@@ -1463,6 +1525,7 @@ class Controller:
             elif kind == 'closed' and 'hardware' in event:
                 self.state['hardware']=event['hardware']
                 self.state['motion_enabled']=event['hardware'].get('active')
+                self.state['read_only']=self.state['motion_enabled'] is False
 
     def read_session(self, command, generation):
         client = None

@@ -8,6 +8,7 @@ import unittest
 from unittest.mock import Mock,patch
 
 from console_server import Controller
+from connection_switch import ConnectionSwitch
 from device_profiles import profile
 from retarget_workspace import RetargetWorkspace
 from retarget_tuning import TuningStore
@@ -27,6 +28,9 @@ class SavedControllerTests(unittest.TestCase):
             def check():
                 if switch.cancelled:raise ValueError('Synthetic exact switch cancelled')
             switch._check_cancel=check
+            # Keep the production phase/attempt/cancellation gate on this
+            # isolated switch; a no-op guard would conceal stale callbacks.
+            switch.open_guard=lambda attempt:ConnectionSwitch.open_guard(switch,attempt)
             c=Controller.__new__(Controller)
             c.__dict__.update(dict(lock=threading.RLock(),connection_switch=switch,desktop_closing=False,reports=root/'reports',
                 state=dict(device_profile=profile('hand2_right'),view_source='feedback'),sdk_session_configs={},

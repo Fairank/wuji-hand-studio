@@ -89,16 +89,16 @@
     async refresh(){await freshState();return service?state:null;},
     connect:(address='',serial='')=>action({name:'connect',auto_detect:true,address,serial}),
     async disconnect(){
-      if(state?.hardware?.active){
+      if(state?.hardware?.active!==false||state.hardware.start_pending){
         if(!await action({name:'hardware_stop'}))return false;
         const deadline=Date.now()+6000;
-        while(Date.now()<deadline){await freshState();if(state?.hardware?.active===false&&state.hardware.stop_confirmed===true)break;await new Promise(r=>setTimeout(r,100));}
-        if(state?.hardware?.active!==false||state.hardware.stop_confirmed!==true){showError('停止尚未确认，请检查设备 / Stop not confirmed');return false;}
+        while(Date.now()<deadline){await freshState();if(state?.hardware?.active===false&&state.hardware.stop_confirmed===true&&!state.hardware.start_pending)break;await new Promise(r=>setTimeout(r,100));}
+        if(state?.hardware?.active!==false||state.hardware.stop_confirmed!==true||state.hardware.start_pending){showError('停止尚未确认，请检查设备 / Stop not confirmed');return false;}
       }
       return action({name:'disconnect'});
     }};
   el('connect').addEventListener('click',()=>{if(!deviceChoice.hidden&&!deviceChoice.value){showError('请选择一只灵巧手 / Select a hand');return;}action({name:'connect',auto_detect:true,serial:deviceChoice.hidden?'':deviceChoice.value,address:el('device-address').value.trim()});});
-  el('disconnect').addEventListener('click',()=>action({name:'disconnect'}));
+  el('disconnect').addEventListener('click',()=>window.WujiConnection.disconnect());
   el('record').addEventListener('click',()=>action({name:'record',label:el('annotation').value,seconds:Number(el('duration').value)}));
   el('stop').addEventListener('click',()=>action({name:'stop'}));
   window.addEventListener('wuji-language',()=>{controls();if(service&&state){renderCapture(state.recording);renderSessions(state.sessions);}else el('record-progress').textContent=t('采集状态未知，请恢复连接后核对','Recording state is unknown. Reconnect to verify it.');});

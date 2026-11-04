@@ -50,6 +50,10 @@ class LocalEnvironmentTests(unittest.TestCase):
             directory=absolute.as_posix()
             if absolute.drive:directory=directory[len(absolute.drive):]
             def runner(_command,**kwargs):
+                self.assertEqual(kwargs['cwd'],directory)
+                # The selected controller uses a POSIX path. A Windows test
+                # child needs the corresponding host drive, not the CWD drive.
+                kwargs['cwd']=str(absolute)
                 return subprocess.run([sys.executable,'-c',
                     'import json,os;print(json.dumps({"proof_version":1,"cwd":os.getcwd()}))'],**kwargs)
             with patch('sdk_environment_update.sys.platform','linux'):

@@ -1,5 +1,7 @@
 """Review runner contracts; only temporary files and synthetic Python children."""
 import importlib.util
+import io
+from contextlib import redirect_stdout
 import os
 from pathlib import Path
 import sys
@@ -26,6 +28,8 @@ class ReviewRunnerTests(unittest.TestCase):
             self.assertTrue(all(path.is_relative_to(base) for path in roots.values()))
             self.assertEqual(env['WUJI_CLI_AUTO_CHECK'],'0')
             self.assertEqual(env['WUJI_APP_AUTO_CHECK'],'0')
+            self.assertEqual(env['PYTHONIOENCODING'],'utf-8')
+            self.assertEqual(env['PYTHONUTF8'],'1')
         self.assertEqual(dict(os.environ),original)
 
     def test_guard_refuses_external_network_and_default_sdk_files(self):
@@ -80,6 +84,17 @@ class ReviewRunnerTests(unittest.TestCase):
             result=self.runner.run_command([sys.executable,'-c',"print('synthetic failure'); raise SystemExit(3)"],log,root,dict(os.environ))
             self.assertEqual(result['returncode'],3)
             self.assertIn('synthetic failure',log.read_text(encoding='utf8'))
+
+    def test_unicode_failure_keeps_utf8_log_and_status_on_an_ascii_console(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder);env,_=self.runner.isolated_environment(root/'isolated')
+            output=io.BytesIO();console=io.TextIOWrapper(output,encoding='ascii',write_through=True)
+            with redirect_stdout(console):
+                result=self.runner.run_command([sys.executable,'-c',
+                    "print(chr(0x4e2d)+chr(0x1f9ea)); raise SystemExit(3)"],root/'unicode.log',root,env)
+            self.assertEqual(result['returncode'],3)
+            self.assertEqual((root/'unicode.log').read_text(encoding='utf8').strip(),'\u4e2d\U0001f9ea')
+            self.assertIn(b'\\U0001f9ea',output.getvalue())
 
 
 if __name__=='__main__':unittest.main()

@@ -84,7 +84,7 @@
     const timing=h?.command_timing;
     const timingValue=(v,d=1)=>Number.isFinite(v)?v.toFixed(d):'—';
     get('command-timing').textContent=!connected?'指令频率：重新连接后显示实际加载的发送节拍。':!timing?'当前连接仍使用旧控制程序；停止并重新连接后加载可调频率版本。':
-      `指令目标 ${timing.target_hz} Hz · ${h.active?'运行中':'未运行 / 上次统计'} · 实测发布 ${timingValue(timing.host_publish_hz)} Hz · 最长间隔 ${timingValue(timing.max_interval_ms,2)} ms。统计为本机SDK发布，不代表设备每帧均已执行。项目动作平滑起停，官方录制保留中间轨迹。`;
+      `指令目标 ${timing.target_hz??timing.requested_hz??'—'} Hz · ${h.active?'运行中':'未运行 / 上次统计'} · 实测发布 ${timingValue(timing.host_publish_hz)} Hz · 最长间隔 ${timingValue(timing.max_interval_ms,2)} ms。统计为本机SDK发布，不代表设备每帧均已执行。项目动作平滑起停，官方录制保留中间轨迹。`;
     const config=h?.commissioning_policy;
     get('active-motion-parameters').textContent=connected&&config?`已加载参数：Kp=${config.kp}，Kd=${config.kd}，电流上限=${config.current_limit_A} A。`:'尚未连接：连接后显示设备控制程序实际加载的Kp、Kd和电流设置。';
     const p=config?.editable_parameters;
@@ -126,8 +126,22 @@
   }
   function returnText(r){return r.return_evaluated===true||r.completed?`实际回位误差 ${degree(r.return_error_deg)}`:`未完成回位验收 · 中止时偏离起点 ${degree(r.displacement_at_stop_deg??r.return_error_deg)}`;}
   let ownedLease=null,hardwarePending=false,leaseDeadline=0,leaseSeenActive=false,hardwareGeneration=0;
-  async function hardwarePost(body){
-    const r=await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json','X-Console-Token':state.csrf},body:JSON.stringify(body),signal:AbortSignal.timeout(2000)});
+  let hardwareRequest=null,leaseOwner=null,ownedControl=null;
+  function hardwareOwner(value=state){
+    if(typeof value?.csrf!=='string'||!value.csrf)return null;
+    const glove=value.glove||{},paired=glove.feedback||{};
+    const serial=glove.busy?glove.glove_serial:value.device_id||value.hand_feedback_session?.serial;
+    const session=glove.busy?glove.session_id:value.session_generation;
+    if(typeof serial!=='string'||!serial||!Number.isSafeInteger(session)||session<0)return null;
+    return JSON.stringify([value.csrf,glove.busy?'glove':'hand',serial,session,glove.busy?glove.profile:value.device_profile?.id,
+      glove.busy?glove.user?.user_id:null,glove.busy?paired.device_id:null,glove.busy?glove.action_revision:null]);
+  }
+  function clearHardwareLease(){ownedLease=null;leaseOwner=null;ownedControl=null;}
+  function currentHardware(request){return hardwareRequest===request&&request.generation===hardwareGeneration&&request.owner===hardwareOwner();}
+  function retireHardware(){hardwareGeneration++;hardwareRequest=null;hardwarePending=false;clearHardwareLease();}
+  async function hardwarePost(body,request){
+    if(!request?.owner||request.owner!==hardwareOwner())throw Error(tr('实机控制会话已变化，请核对当前设备。','The hardware session changed. Review the current device.'));
+    const r=await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json','X-Console-Token':request.token},body:JSON.stringify(body),signal:AbortSignal.timeout(2000)});
     const result=await r.json();if(!r.ok||!result.ok)throw Error(result.error||'实机操作失败');return result;
   }
   function renderHardware(){
@@ -164,19 +178,27 @@
   }
   async function hardwareAction(name){
     if(!state||(hardwarePending&&name!=='hardware_stop'))return;
+    const owner=hardwareOwner();if(!owner)return;
     if(name==='hardware_trial'&&!matchesDisplayHand()){get('motion-blocker').textContent=tr('所选手型或设备与当前灵巧手不一致。','The selected model or device differs from this hand.');return;}
-    const generation=++hardwareGeneration;hardwarePending=true;renderHardware();
+    const request={generation:++hardwareGeneration,owner,token:state.csrf,control:ownedControl||state.hardware_control_id};hardwareRequest=request;hardwarePending=true;renderHardware();
     const body={name,lease:ownedLease};
     if(name==='hardware_start')Object.assign(body,{action:get('play-action').value,speed:Number(get('play-speed').value),cycles:Number(get('play-cycles').value)});
     if(name==='hardware_probe')Object.assign(body,{index:Number(get('probe-joint').value),direction:Number(get('probe-direction').value),workspace_clear:get('probe-clear').checked});
     if(name==='hardware_trial')Object.assign(body,{expected_profile:displayProfile(),expected_serial:window.WujiDemonstration.selectedHand(),action:get('trial-action').value,amplitude:Number(get('trial-amplitude').value),speed:Number(get('trial-speed').value),cycles:Number(get('trial-cycles').value),workspace_clear:get('trial-clear').checked},window.WujiPerformancePayload?.()||{});
     try{
-      const result=await hardwarePost(body);
-      if(generation!==hardwareGeneration){if(result.lease)await hardwarePost({name:'hardware_stop'});return;}
-      if(result.lease){ownedLease=result.lease;leaseDeadline=performance.now()+3000;leaseSeenActive=false;get('probe-clear').checked=false;get('trial-clear').checked=false;}
-      if(name==='hardware_stop')ownedLease=null;
-    }catch(e){document.getElementById('service-error').hidden=false;document.getElementById('service-error').textContent=e.message;}
-    finally{hardwarePending=false;renderHardware();}
+      const result=await hardwarePost(body,request);
+      // The user may already have stopped this request or selected another
+      // session. A late response has no authority to send a cleanup command.
+      if(!currentHardware(request))return;
+      if(result.lease){
+        if(typeof result.lease!=='string'||!/^[a-f0-9]{32}$/.test(result.lease))throw Error(tr('实机控制标识尚未核对。','The hardware control identity is unverified.'));
+        const control=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(result.lease))),v=>v.toString(16).padStart(2,'0')).join('');
+        if(!currentHardware(request)||state.hardware_control_id&&state.hardware_control_id!==control)return;
+        ownedLease=result.lease;leaseOwner=request.owner;ownedControl=control;leaseDeadline=performance.now()+3000;leaseSeenActive=false;get('probe-clear').checked=false;get('trial-clear').checked=false;
+      }
+      if(name==='hardware_stop')clearHardwareLease();
+    }catch(e){if(currentHardware(request)){document.getElementById('service-error').hidden=false;document.getElementById('service-error').textContent=e.message;}}
+    finally{if(currentHardware(request)){hardwareRequest=null;hardwarePending=false;renderHardware();}}
   }
   get('hardware-start').addEventListener('click',()=>hardwareAction('hardware_start'));
   get('probe-start').addEventListener('click',()=>hardwareAction('hardware_probe'));
@@ -188,8 +210,9 @@
   globalStop.addEventListener('click',()=>hardwareAction('hardware_stop'));
   get('play-action').addEventListener('change',renderHardware);
   async function beat(){
-    try{if(ownedLease&&state)await hardwarePost({name:'hardware_keepalive',lease:ownedLease});}
-    catch{ownedLease=null;}
+    const lease=ownedLease,owner=leaseOwner;
+    try{if(lease&&state)await hardwarePost({name:'hardware_keepalive',lease},{owner,token:state.csrf});}
+    catch{if(ownedLease===lease&&leaseOwner===owner)clearHardwareLease();}
     finally{setTimeout(beat,200);}
   }
   beat();
@@ -219,8 +242,8 @@
   get('play-start').addEventListener('click',()=>send({name:'demo_start',action:get('play-action').value,speed:Number(get('play-speed').value),cycles:Number(get('play-cycles').value),...(window.WujiPerformancePayload?.()||{})}));
   get('play-pause').addEventListener('click',()=>send({name:displayPlayback().running?'demo_pause':'demo_resume'}));
   get('play-stop').addEventListener('click',()=>send({name:'demo_stop'}));
-  window.addEventListener('console-state',e=>{state=e.detail;if(state.hardware?.active)leaseSeenActive=true;else if(ownedLease&&(leaseSeenActive||performance.now()>leaseDeadline))ownedLease=null;render();renderHardware();});
-  window.addEventListener('console-offline',()=>{previewUIEpoch++;state=null;ownedLease=null;render();renderHardware();});
+  window.addEventListener('console-state',e=>{const next=e.detail,owner=hardwareOwner(next);if(hardwareRequest&&(hardwareRequest.owner!==owner||hardwareRequest.control&&next.hardware_control_id&&hardwareRequest.control!==next.hardware_control_id)||leaseOwner&&leaseOwner!==owner)retireHardware();state=next;if(ownedControl&&state.hardware_control_id&&state.hardware_control_id!==ownedControl)clearHardwareLease();if(state.hardware?.active)leaseSeenActive=true;else if(ownedLease&&state.hardware?.active===false&&state.hardware.stop_confirmed===true&&!state.hardware.start_pending&&(leaseSeenActive||performance.now()>leaseDeadline))clearHardwareLease();render();renderHardware();});
+  window.addEventListener('console-offline',()=>{previewUIEpoch++;retireHardware();state=null;render();renderHardware();});
   window.addEventListener('hashchange',()=>{previewUIEpoch++;});
   window.addEventListener('demonstration-mode',()=>{previewUIEpoch++;});
   window.addEventListener('demonstration-profile',()=>{get('trial-clear').checked=false;render();renderHardware();});

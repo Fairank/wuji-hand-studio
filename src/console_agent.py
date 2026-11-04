@@ -201,6 +201,7 @@ def worker(address, requests, events, motion_factory=HardwareShowcase, prepared=
         from first_generation import worker_first
         return worker_first(address,requests,events)
     hand = sub = diagnostics = motion = protocol_route = ownership = None
+    handled_lease = None
     recorder = Recorder()
     def finish(reason,retry=False):
         if recorder.pending_report is not None and not retry:return
@@ -323,6 +324,9 @@ def worker(address, requests, events, motion_factory=HardwareShowcase, prepared=
                         motion.command(command,recent[-1] if recent else None,diagnostic,now)
                     except (ValueError,RuntimeError) as error:
                         events.put(dict(type='notice',message=str(error)))
+                    finally:
+                        if name in {'hardware_start','hardware_probe','hardware_trial'}:
+                            handled_lease=command.get('lease')
                 if name == 'record' and motion.active:
                     events.put(dict(type='notice',message='请先停止实机展示，再进行只读采集'))
                     continue
@@ -364,7 +368,7 @@ def worker(address, requests, events, motion_factory=HardwareShowcase, prepared=
                     latest=recent[-1] if recent else None,
                     device_id=device_id, device_version=device_version, joint_rates=joint_rates.snapshot(now),
                     metrics=dict(host_hz=rate(recent, 'host_s'), device_hz=rate(recent, 'device_timestamp_us'), age_ms=(now-last)*1000 if recent else None),
-                    recording=recorder.state(),hardware=motion.status()))
+                    recording=recorder.state(),hardware=dict(motion.status(),handled_lease=handled_lease)))
                 last_emit = now
             if motion.active:
                 # Reserve the final 150 us for the next command deadline. This
@@ -389,7 +393,7 @@ def worker(address, requests, events, motion_factory=HardwareShowcase, prepared=
                 protocol_route.close()
             if ownership is not None:
                 ownership.close()
-        events.put(dict(type='closed',hardware=motion.status() if motion is not None else {}))
+        events.put(dict(type='closed',hardware=dict(motion.status(),handled_lease=handled_lease) if motion is not None else {}))
 
 
 def emit(event):

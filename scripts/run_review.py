@@ -37,7 +37,8 @@ def isolated_environment(base,original=None):
         value.mkdir(parents=True,exist_ok=True);env[key]=str(value)
     env.update(WUJI_CLI_AUTO_CHECK='0',WUJI_APP_AUTO_CHECK='0',
                WUJI_NO_UPDATE_CHECK='1',WUJI_TELEMETRY_DISABLE='1',
-               PYTHONDONTWRITEBYTECODE='1',PYTHONNOUSERSITE='1')
+               PYTHONDONTWRITEBYTECODE='1',PYTHONNOUSERSITE='1',
+               PYTHONIOENCODING='utf-8',PYTHONUTF8='1')
     for key in ('WUJI_FLEET_PARENT','WUJI_FLEET_ID','WUJI_STUDIO_PORT'):
         env.pop(key,None)
     return env,roots
@@ -86,6 +87,13 @@ def audit_guard(events,sdk_roots=()):
     return guard
 
 
+def console_text(value):
+    # A redirected Windows console can still use GBK/ASCII. Keep the original
+    # UTF-8 log intact while escaping characters this display cannot encode.
+    encoding=getattr(sys.stdout,'encoding',None) or 'utf-8'
+    print(str(value).encode(encoding,errors='backslashreplace').decode(encoding),flush=True)
+
+
 def run_command(command,log,root,env,timeout=900):
     started=time.monotonic()
     with log.open('x',encoding='utf8') as stream:
@@ -96,7 +104,7 @@ def run_command(command,log,root,env,timeout=900):
             stream.write('\nReview command timed out.\n');code=124
         except OSError as error:
             stream.write(str(error)+'\n');code=127
-    if code:print(log.read_text(encoding='utf8',errors='replace')[-7000:],flush=True)
+    if code:console_text(log.read_text(encoding='utf8',errors='replace')[-7000:])
     return {'returncode':code,'elapsed_seconds':round(time.monotonic()-started,3),'log':log.name}
 
 
@@ -177,7 +185,7 @@ def main(argv=None):
             checks['python_tests']=run_command([sys.executable,str(Path(__file__).resolve()),'--python-worker','--record-dir',str(out)],out/'python-tests.log',ROOT,env)
     except Exception as error:
         checks['runner_error']={'returncode':1,'error':str(error),'traceback':traceback.format_exc()}
-        print(traceback.format_exc(),flush=True)
+        console_text(traceback.format_exc())
     after=source_hashes(ROOT);changed=sorted(k for k in set(before)|set(after) if before.get(k)!=after.get(k))
     report={'successful':bool(checks) and all(v['returncode']==0 for v in checks.values()) and not changed,
             'scope':'Source regression checks; not native UI, installer, device or hardware acceptance',
@@ -185,7 +193,7 @@ def main(argv=None):
             'checks':checks,'changed_sources':changed,'sources_before':before,'sources_after':after,
             'isolated_environment':{k:str(v) for k,v in roots.items()},'evidence_directory':str(out)}
     (out/'summary.json').write_text(json.dumps(report,ensure_ascii=False,indent=2)+'\n',encoding='utf8')
-    print(json.dumps({k:report[k] for k in ('successful','mode','checks','changed_sources','evidence_directory')},ensure_ascii=False,indent=2),flush=True)
+    console_text(json.dumps({k:report[k] for k in ('successful','mode','checks','changed_sources','evidence_directory')},ensure_ascii=False,indent=2))
     return 0 if report['successful'] else 1
 
 
