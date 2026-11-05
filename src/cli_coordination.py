@@ -8,6 +8,7 @@ import threading
 import time
 
 from user_dirs import user_data_dir
+from filesystem_commit import CommitConflict, move_with_retry, path_identity
 _local=threading.local()
 _mutex=threading.RLock()
 
@@ -95,10 +96,18 @@ def reserve(kind, folder=None, *, metadata=None):
 def atomic(path,value):
     path=Path(path);path.parent.mkdir(parents=True,exist_ok=True)
     stage=path.with_name(path.name+'.'+secrets.token_hex(6)+'.pending')
+    stage_identity=None;preserve_stage=False
     try:
-        with stage.open('x',encoding='utf-8') as f:json.dump(value,f,ensure_ascii=False,indent=2);f.flush();os.fsync(f.fileno())
-        os.replace(stage,path)
-    finally:stage.unlink(missing_ok=True)
+        with stage.open('x',encoding='utf-8') as f:
+            stage_identity=path_identity(stage)
+            json.dump(value,f,ensure_ascii=False,indent=2);f.flush();os.fsync(f.fileno())
+        move_with_retry(stage,path,os.replace)
+    except CommitConflict:
+        preserve_stage=True
+        raise
+    finally:
+        if not preserve_stage and stage_identity is not None and path_identity(stage)==stage_identity:
+            stage.unlink(missing_ok=True)
 
 
 def release(token,folder=None):

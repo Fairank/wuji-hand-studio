@@ -41,8 +41,11 @@ REPORT_MEMORY_FILE_BYTES=8*1024*1024
 
 def local_file_error(error):
     """Describe known local file failures without publishing arbitrary exceptions."""
+    from filesystem_commit import CommitConflict
     number=getattr(error,'errno',None);windows=getattr(error,'winerror',None)
-    if isinstance(error,PermissionError) or number in (errno.EACCES,errno.EPERM):
+    if isinstance(error,CommitConflict):
+        reason='保存记录已被替换，请重新打开工作台核对 / Saved record changed; reopen the workbench to review'
+    elif isinstance(error,PermissionError) or number in (errno.EACCES,errno.EPERM):
         reason='没有文件访问权限 / File access denied'
     elif number==errno.ENOSPC or windows==112:
         reason='本机存储空间不足 / Local storage is full'
@@ -2082,7 +2085,7 @@ class Handler(BaseHTTPRequestHandler):
             # OS failure category; device/session exceptions retain their guard.
             file_action=(self.path=='/api/action' and isinstance(locals().get('payload'),dict)
                 and payload.get('name') in {'workbench_update_check','workbench_update_prepare','workbench_update_apply',
-                    'parameters_save','retarget_tuning_save','retarget_tuning_export'})
+                    'parameters_save','retarget_tuning_save','retarget_tuning_export','workspace_create','workspace_remove'})
             file_desktop=(self.path=='/api/desktop' and isinstance(locals().get('payload'),dict)
                 and payload.get('operation') in {'import_model','prepare_update'})
             if (file_action or file_desktop) and isinstance(error,OSError) and not isinstance(error,TimeoutError):

@@ -36,24 +36,32 @@ class FileActionErrors(unittest.TestCase):
         controller=SimpleNamespace(csrf='synthetic',action=Mock(side_effect=error))
         target=SimpleNamespace(path=path,headers={'Content-Type':'application/json','Content-Length':str(len(body)),'X-Console-Token':'synthetic'},
             rfile=io.BytesIO(body),reply=Mock(),allowed_host=lambda:True,_task_view_headers=lambda:None,
-            server=SimpleNamespace(controller=controller,updates=SimpleNamespace(apply=Mock(side_effect=error)),desktop=object()))
+            server=SimpleNamespace(controller=controller,updates=SimpleNamespace(apply=Mock(side_effect=error)),
+                workspaces=SimpleNamespace(action=Mock(side_effect=error)),desktop=object()))
         with patch('desktop_tools.dispatch',side_effect=error),patch.dict(os.environ,{'WUJI_FLEET_PARENT':''}):method('do_POST')(target)
         return target.reply.call_args.args
 
     def test_known_file_actions_keep_category_and_filename_without_arbitrary_exception_text(self):
-        for action in ('workbench_update_apply','parameters_save','retarget_tuning_save','retarget_tuning_export'):
+        for action in ('workbench_update_apply','parameters_save','retarget_tuning_save','retarget_tuning_export','workspace_create','workspace_remove'):
             with self.subTest(action=action):
                 code,body=self.post(action,PermissionError(13,'private arbitrary exception string','synthetic-data/updates/file'))
                 self.assertEqual(code,503);self.assertEqual(body['error_code'],'local_file_error')
                 self.assertIn('access denied',body['error']);self.assertIn('synthetic-data/updates/file',body['error'])
                 self.assertNotIn('private arbitrary',body['error']);self.assertNotIn('反馈通道',body['error'])
 
+    def test_workspace_conflict_requests_reload_without_exception_details(self):
+        from filesystem_commit import CommitConflict
+        _,body=self.post('workspace_create',CommitConflict('private exception detail'))
+        self.assertEqual(body['error_code'],'local_file_error')
+        self.assertIn('reopen the workbench',body['error'])
+        self.assertNotIn('private exception detail',body['error'])
+
     def test_disk_full_has_specific_category(self):
         _,body=self.post('workbench_update_apply',OSError(errno.ENOSPC,'sensitive','synthetic-data/updates/file'))
         self.assertIn('storage is full',body['error']);self.assertNotIn('sensitive',body['error'])
 
     def test_device_and_unknown_runtime_failures_keep_existing_guard(self):
-        for action,error in [('connect',PermissionError(13,'sensitive','controller-path')),('workbench_update_apply',RuntimeError('sensitive runtime detail')),('workbench_update_apply',TimeoutError('sensitive timeout'))]:
+        for action,error in [('connect',PermissionError(13,'sensitive','controller-path')),('workspace_move',PermissionError(13,'sensitive','remote-controller-path')),('workbench_update_apply',RuntimeError('sensitive runtime detail')),('workbench_update_apply',TimeoutError('sensitive timeout'))]:
             with self.subTest(action=action,error=type(error).__name__):
                 code,body=self.post(action,error)
                 self.assertEqual(code,503);self.assertNotIn('error_code',body);self.assertNotIn('sensitive',body['error'])

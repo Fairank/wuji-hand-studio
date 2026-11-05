@@ -7,6 +7,8 @@ import secrets
 import threading
 import time
 from group_coordinator import GroupCoordinator
+from cli_coordination import atomic
+from filesystem_commit import CommitConflict
 
 
 class Discovery:
@@ -95,7 +97,7 @@ class WorkspaceGroups:
         self.fleet,self.controller=fleet,controller;self.path=Path(data)/'hand_workspaces.json';self.lock=threading.RLock()
         self.discovery=Discovery(controller.factory,inventory=getattr(controller,'device_inventory',None),
             scan=lambda:controller.action(dict(name='device_inventory_scan')));self.coordinators={}
-        self.pending_serials={};self.persistence_error=None
+        self.pending_serials={};self.persistence_error=None;self.persistence_conflict=False
         try:self.rows=json.loads(self.path.read_text(encoding='utf-8'))
         except FileNotFoundError:self.rows=[dict(id='main',label='主工作区 / Main workspace',members=['main'])]
         if not isinstance(self.rows,list) or any(not isinstance(r,dict) or not isinstance(r.get('members'),list) for r in self.rows):raise ValueError('Invalid workspace catalog')
@@ -105,7 +107,13 @@ class WorkspaceGroups:
             if r['id'] not in assigned:self.rows.append(dict(id=r['id'],label=r['label'],members=[r['id']]))
 
     def save(self):
-        temp=self.path.with_suffix('.pending');temp.write_text(json.dumps(self.rows,ensure_ascii=False),encoding='utf-8');temp.replace(self.path)
+        with self.lock:
+            if self.persistence_conflict:raise CommitConflict(self.persistence_error)
+            try:atomic(self.path,self.rows)
+            except CommitConflict:
+                self.persistence_conflict=True
+                self.persistence_error='工作区记录已被替换，请重新打开工作台核对 / Workspace catalog changed; reopen the workbench to review'
+                raise
 
     def _commit_rows(self, candidate):
         """Caller holds lock; readers never see a failed metadata edit."""

@@ -64,6 +64,20 @@ python src/desktop.py --self-check --render-check
 
 作用域修正将目录初始化移入实际 PowerShell 步骤，从 `RUNNER_TEMP` 生成每次 run／attempt 的独立路径，使用 `GITHUB_ENV` 传给两轮、同源比对及日志上传。无效临时目录或运行上下文明确失败，初始化失败时不上传空路径。官方 actionlint v1.7.12 已复现原错误并确认两份修后 YAML 全部通过；独立换序执行验证环境导出、特殊字符路径、失败后纠正及写入失败。没有新增表达式解析器或放宽原测试。
 
-`0bcb756` 的独立 CI 预检使用干净检出、全新 Python 3.12.7 venv、无缓存安装 requirements 及 Node 24。在系统临时目录连续两轮完整通过，585 个受检文件同源。另一次把记录放在桌面工作区内的全量运行出现五处 Windows 原子替换／重命名 `WinError 5`；原失败及跨解释器、等长同卷路径对照保留，具体占用者尚未确认。非作者用真实 Windows 共享删除拒绝句柄复现相同错误，验证四条提交路径的旧资料保留、清理／回滚及明确重试；这不能证明原故障原因或将其标记为已修。CI 的记录目录保持在 `RUNNER_TEMP`、checkout 之外。
+`0bcb756` 的独立 CI 预检在干净检出、全新 Python 3.12.7 venv 和系统临时目录完成两轮，585 个受检文件同源。后续 `bb14db0` 的实际 [push](https://github.com/Fairank/wuji-hand-studio/actions/runs/41923021214) 与 [PR](https://github.com/Fairank/wuji-hand-studio/actions/runs/41923044316) 工作流也均完成两轮及同源比对；这些历史通过不代替下面的 WinError 5 修复验收。CI 记录仍在 `RUNNER_TEMP`、checkout 之外。
+
+### Windows 文件提交的短暂拒绝
+
+原桌面工作区全量检查曾在版本目录发布、Windows 合成组件替换及工作区保存中出现五处 `WinError 5`。原失败和纯标准库／原生 `MoveFileExW` 的失败保留；同一对象数毫秒后可成功改名，原始 `NTSTATUS` 为 `STATUS_ACCESS_DENIED`。在用户批准的自建 QA 目录中，以已验证 Microsoft 签名的 Procmon 仅采集文件事件，使用两条准确路径规则、Drop Filtered Events 与 30 秒硬上限。原生配置载入及持久化核验通过，实际进程约 9.4 秒后正常退出；7513 个保留事件全部属于该目录内的 File System 类别，原始 PML 只留本机。
+
+这次原始错误样本显示 `ChatGPT.exe` 的子目录枚举与失败的 `SetRenameInformationFile` 执行区间重叠；不能再凭早先的一次 PID 4 观测归因安全软件。独立受控实验确认：子目录即使允许共享删除，仍会使祖先目录改名返回 5，关闭该句柄后立即恢复；同样的共享句柄只打开源目录自身则可正常改名。该机制与 Microsoft 的 [FileRenameInformation](https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-fsa/87f86c9b-6c2a-4803-84b7-131a74a434fa) 及[目录内打开对象检查](https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-fsa/133840e4-778e-44ca-9b41-da2323615075)一致。该样本不能证明每种权限错误都有相同原因。
+
+修复复用既有原子 writer、版本锁与取消谓词，只对 Windows 原子提交的 5／32 错误做最多九次 10 毫秒等待；不重跑下载、软件探测或设备操作。每次未完成尝试前重查源、目标和直接父目录身份；已经完成的移动按准确目标对象核对，换物则停止并保留现场。工作区使用唯一候选文件，失败仍经原 `_commit_rows` 回滚内存。三个 CLI 版本仓库的清理只删除准确原 stage。Windows 合成组件的正向移动和回滚沿用同一保护；Linux 控制端仍单文件下发，直接执行一次原 rename，不引入 helper 依赖。
+
+原五条失败路径在原工作区交替正／逆顺序执行 20 组、100 项，零失败／错误／意外外部访问，其中捕获三次底层拒绝并恢复。之后的第一次完整本机验收另抓到退出确认日志的文件替换拒绝；该失败保留，`TerminationJournal.save` 也接入同一原子提交保护，保持原 session epoch 与 dirty 状态语义，并补充四项实际源流程回归，再从新目录重新开始完整两轮。新增专项覆盖真实子目录共享句柄、持续拒绝、取消、源／目标／父目录换物、文件被编辑、完成后回执失败、持久化与组件回滚及单文件 POSIX 分支。非作者另在回滚新 CLI 时用真实 reader 阻塞，再在另一顺序替换旧 backup，分别验证准确恢复与现场保留。后续复查还发现冲突后的旧内存可能被被动刷新或下一次保存重新写回；退出日志与工作区现锁存冲突，旧实例不再写盘，退出日志仍显示未确认，重新打开后才按磁盘新 epoch／资料继续。映射库沿用原来每次调用重新读取的方式，接入同一提交保护，不重复递增 revision。实际完整页面和真实 HTTP handler 配合隔离 Controller／fleet 验证短暂拒绝、持续拒绝、明确重试及页面刷新，单次创建只发一个请求；持续拒绝保留原文件和输入名称，并显示本机文件错误，不再误报反馈通道。无设备／电机启动、无意外外部访问；唯一控制台错误为预期的失败请求。
+
+全量检查保留的另一处错误为独立静态 Viewer 拒绝 POST 时连接被中止。该静态来源仍不提供 Workbench API；仅对不超过 4096 字节的普通请求体，在一秒总期限内读完或结束，再返回 501，避免正常小请求因未读正文而直接重置连接。使用 [Python 3.12 BufferedIOBase.read1](https://docs.python.org/3.12/library/io.html#io.BufferedIOBase.read1) 每次最多一次底层读取，并用剩余总期限限制每次等待，缓慢分片不能续期。事件控制的真实 TCP 分片、总期限及静态资源字节保留另有回归；未修改原版 Viewer 的 JS／WASM。
+
+冻结后的完整本机双轮及新提交的真实 Actions 结果另存本机交付记录，必须核对[修复分支运行列表](https://github.com/Fairank/wuji-hand-studio/actions/workflows/code-review.yml?query=branch%3Acodex%2Fhandbench-0.2.78-bugfix)，不能沿用上述历史 CI。
 
 本轮没有执行真实固件刷写、物理标定、实机动作、真实插拔或场地网络测试；也没有构建／安装新版程序。远端工作流的运行结果与本机模拟结果分开记录。合成固件回复和 SDK 替身不是实体固件仿真精度的证明。用户选择的三条模拟演示链已获得上述证据，不能由此承诺任何物理现场绝无故障。

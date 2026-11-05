@@ -18,6 +18,7 @@ import stat
 import subprocess
 import tarfile
 import tempfile
+from filesystem_commit import CommitConflict, move_with_retry, path_identity
 import time
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, unquote, urljoin, urlsplit
@@ -599,6 +600,7 @@ class CLIReleaseStore:
             if final.exists() or _is_redirect(final):
                 return self._cached(final, version, asset, digest)
             stage = Path(tempfile.mkdtemp(prefix='.prepare-' + version + '-', dir=self.root))
+            stage_identity=path_identity(stage);preserve_stage=False
             try:
                 partial = stage / (asset['name'] + '.partial')
                 with partial.open('xb') as stream:
@@ -608,7 +610,7 @@ class CLIReleaseStore:
                 if actual_digest != digest:
                     raise ReleaseStoreError('Official CLI archive failed SHA-256 verification')
                 archive = stage / asset['name']
-                os.replace(partial, archive)
+                move_with_retry(partial, archive, os.replace, check_cancel=self._check_cancel)
                 files, binary = self._extract(archive, stage / 'payload')
                 metadata = stage / 'metadata'
                 metadata.mkdir()
@@ -622,10 +624,15 @@ class CLIReleaseStore:
                                 prepared_at=datetime.now(timezone.utc).isoformat())
                 self._write_json(stage / 'manifest.json', manifest)
                 self._check_cancel()
-                os.replace(stage, final)
+                move_with_retry(stage, final, os.replace, check_cancel=self._check_cancel)
                 return dict(manifest, directory=str(final))
+            except CommitConflict:
+                preserve_stage=True
+                raise
             finally:
-                if stage.exists():
+                if not preserve_stage and stage.exists():
+                    if stage_identity is None or path_identity(stage)!=stage_identity:
+                        raise ReleaseStoreError('Staging identity changed; preserve files for recovery')
                     # Only delete this invocation's verified, direct staging child.
                     if stage.parent != self.root or not stage.name.startswith('.prepare-') or _is_redirect(stage) or stage.resolve().parent != self.root.resolve():
                         raise ReleaseStoreError('Unsafe staging cleanup path')

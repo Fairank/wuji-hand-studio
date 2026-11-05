@@ -9,6 +9,9 @@ import os
 from pathlib import Path
 import tempfile
 import threading
+from filesystem_commit import CommitConflict,move_with_retry,path_identity
+
+_CONFLICT_REASON='退出确认记录已被替换，请重新打开工作台核对 / Stop acknowledgement record changed; reopen the workbench to review'
 
 
 def unconfirmed(state):
@@ -26,7 +29,7 @@ def unconfirmed(state):
 
 class TerminationJournal:
     def __init__(self, path):
-        self.path = Path(path); self.lock = threading.RLock(); self.rows = []; self.next_session=1;self.confirmed={};self.dirty=False
+        self.path = Path(path); self.lock = threading.RLock(); self.rows = []; self.next_session=1;self.confirmed={};self.dirty=False;self.write_conflict=False
         if self.path.exists():
             try:
                 saved = json.loads(self.path.read_text(encoding='utf-8'))
@@ -46,6 +49,7 @@ class TerminationJournal:
 
     def new_session(self):
         with self.lock:
+            self._check_writable()
             session=self.next_session;self.next_session+=1;self.dirty=True;self.save();return session
 
     def observe(self, source, device, hardware, session=0):
@@ -66,20 +70,42 @@ class TerminationJournal:
             if self.rows != before or self.confirmed!=old_confirmed:self.dirty=True
             if self.dirty:self.save()
 
+    def _check_writable(self):
+        if self.write_conflict:raise CommitConflict(_CONFLICT_REASON)
+
     def save(self):
+        with self.lock:
+            self._check_writable()
+            try:return self._save_current()
+            except CommitConflict:
+                # A stale journal must not overwrite its replacement on the
+                # next passive snapshot or explicit save. Reopen to re-read it.
+                self.write_conflict=True
+                raise
+
+    def _save_current(self):
         self.path.parent.mkdir(parents=True, exist_ok=True)
         fd, name = tempfile.mkstemp(prefix=self.path.name + '.', suffix='.partial', dir=self.path.parent)
         stage = Path(name)
+        stage_identity=path_identity(stage);preserve_stage=False
         try:
             with os.fdopen(fd, 'w', encoding='utf-8') as stream:
                 json.dump(dict(version=1,rows=self.rows,next_session=self.next_session,confirmed=self.confirmed), stream, ensure_ascii=False);stream.flush();os.fsync(stream.fileno())
-            os.replace(stage, self.path)
+            move_with_retry(stage,self.path,os.replace)
             self.dirty=False
-        finally:stage.unlink(missing_ok=True)
+        except CommitConflict:
+            preserve_stage=True
+            raise
+        finally:
+            if not preserve_stage and stage_identity is not None and path_identity(stage)==stage_identity:
+                stage.unlink(missing_ok=True)
 
     def snapshot(self):
         with self.lock:
             if self.dirty:
                 try:self.save()
                 except OSError:pass  # Keep the in-memory uncertainty visible.
-            return copy.deepcopy(self.rows)
+            rows=copy.deepcopy(self.rows)
+            if self.write_conflict:
+                rows.append(dict(source='journal',device_id=None,reason=_CONFLICT_REASON))
+            return rows
