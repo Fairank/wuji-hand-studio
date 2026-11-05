@@ -133,6 +133,7 @@ class Controller:
         self.sdk_session_configs={}
         from program_runner import ProgramRunner
         self.program=ProgramRunner(self)
+        self._program_hardware_owner=None
         from group_participant import GroupParticipant
         self.group=GroupParticipant(self)
         self.client = self.stdin = None
@@ -969,6 +970,12 @@ class Controller:
             if (not isinstance(expected,str) or not re.fullmatch('[a-f0-9]{32}',expected)
                     or expected!=self.program.snapshot().get('run_id')):
                 raise ValueError('节目单已切换，请核对当前播放后重试 / Playlist changed; check the current run and retry')
+        if name in {'demo_pause','demo_resume','demo_stop'} and 'expected_run' in command:
+            # Validate before a global stop could cascade into a different group.
+            with self.player.lock:
+                expected=command['expected_run']
+                if not isinstance(expected,str) or not expected or expected!=self.player.run_id:
+                    raise ValueError('预览已切换，请核对当前动作后重试 / Preview changed; check the current routine and retry')
         if name in {'hardware_trial','demo_start'} and threading.current_thread() is self.program.thread:
             # This is the final start boundary under the controller lock. A
             # pause between playlist entries cannot leak one more start.
@@ -982,7 +989,12 @@ class Controller:
             return dict(group=self.group.handle(command))
         if self.group.active and not self.group.internal:
             if name in {'hardware_stop','demo_stop','disconnect','session_close','program_stop'}:
-                self.group.stop('手动停止 / Manually stopped')
+                scoped_program=name=='program_stop' and 'expected_run' in command
+                scoped_demo=name=='demo_stop' and 'expected_run' in command
+                same_preview=(getattr(self.group,'mode',None)=='preview'
+                    and getattr(self.group,'_preview_run',None)==command.get('expected_run'))
+                if not scoped_program and (not scoped_demo or same_preview):
+                    self.group.stop('手动停止 / Manually stopped')
             elif name not in {'session_keepalive','hardware_keepalive','view_camera','display_selected'}:
                 raise ValueError('请先停止编组 / Stop the group before changing this hand')
         if self.calibration.run['running'] and name in {'program_start','connect','hardware_start','hardware_trial','hardware_probe','demo_start','glove_scan','glove_hand_scan','glove_open','glove_prepare','glove_follow','doctor_run','doctor_version','doctor_support'}:
@@ -998,7 +1010,13 @@ class Controller:
         if name=='program_keepalive':return self.program.keepalive(command.get('lease'))
         if name=='program_stop':
             self.program.stop()
-            if self.state['hardware'].get('active') is not False:self._action(dict(name='hardware_stop'))
+            owner=getattr(self,'_program_hardware_owner',None)
+            owns_hardware=owner is not None and owner==(
+                self.program.snapshot().get('run_id'),getattr(self,'generation',None),
+                self.state.get('device_id'),self.hardware_lease) and (
+                owner[1],owner[2])==(self.hardware_lease_generation,self.hardware_lease_device)
+            if self.state['hardware'].get('active') is not False and ('expected_run' not in command or owns_hardware):
+                self._action(dict(name='hardware_stop'))
             return dict(stopping=True)
         if name=='program_pause':return self.program.pause(True)
         if name=='program_resume':return self.program.pause(False)
@@ -1274,6 +1292,11 @@ class Controller:
                     self.hardware_lease_generation=self.generation
                     self.hardware_lease_device=self.state.get('device_id')
                     self.hardware_seen_active=False
+                    if name=='hardware_trial' and threading.current_thread() is self.program.thread:
+                        # Bind only this playlist thread's actual allocated start,
+                        # including a later failed write/flush, never a UI lease.
+                        self._program_hardware_owner=(self.program.snapshot().get('run_id'),
+                            self.generation,self.state.get('device_id'),lease)
                     outgoing['lease']=self.hardware_lease
                     self.player.command(dict(name='demo_stop'))
                     self.state['view_source']='feedback'

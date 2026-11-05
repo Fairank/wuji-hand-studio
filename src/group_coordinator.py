@@ -187,12 +187,20 @@ class GroupCoordinator:
             phase='stopped' if self.cancel.is_set() else 'failed';reason=str(e)
         finally:
             futures={i:self.pool.submit(self.post,i,dict(name='group_abort',token=token)) for i in ids}
+            read_only_released=set()
             for i,f in futures.items():
-                try:f.result()
+                try:
+                    result=f.result()
+                    receipt=result.get('group') if isinstance(result,dict) else None
+                    if (isinstance(receipt,dict) and receipt.get('token')==token
+                            and receipt.get('mode')=='hardware' and receipt.get('stopping') is True
+                            and receipt.get('read_only_released') is True):read_only_released.add(i)
                 except Exception:cleanup.append(i)
             if spec['mode']=='hardware':
                 deadline=time.monotonic()+2
-                pending=set(ids)
+                # This receipt releases only a reservation that never owned a
+                # hardware start. It does not change any motor/stop state.
+                pending=set(ids)-read_only_released
                 while pending and time.monotonic()<deadline:
                     for i in list(pending):
                         try:

@@ -247,8 +247,11 @@ class ColdStopJournalGuardTests(unittest.TestCase):
         with patch('group_participant.threading.Thread',DeferredThread):
             result=self.c.action(self.group_command())
         self.assertEqual(result['group']['token'],'a'*32)
+        sent=list(self.transport.sent);journal=self.c.termination.snapshot()
         self.c.action(dict(name='group_abort',token='a'*32))
-        self.wait(lambda:self.c.state['hardware'].get('stop_confirmed') is True)
+        self.assertEqual(self.transport.sent,sent)
+        self.assertEqual(self.c.termination.snapshot(),journal)
+        self.assertFalse(self.c.group.active)
         with patch('program_runner.threading.Thread',DeferredThread):
             result=self.c.action(self.program_command())
         self.assertIn('program_run_id',result)
