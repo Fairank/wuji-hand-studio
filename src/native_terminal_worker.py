@@ -38,11 +38,22 @@ def _validate_argv(argv):
     return list(argv)
 
 
-def _spawn(argv, *, env=None):
-    # Import is deliberately lazy; importing the worker starts no process.
+def prepare_spawn():
+    """Validate the pinned API without a child; pin the exact spawn callable.
+
+    Firmware may classify a failure here as definitely unstarted. Exceptions
+    from the returned callable carry no such guarantee, even if spawn fails.
+    """
     from winpty import Backend, PtyProcess, __version__
-    if __version__ != PYWINPTY_VERSION or Backend.ConPTY != 0:
+    native_spawn = getattr(PtyProcess, 'spawn', None)
+    if __version__ != PYWINPTY_VERSION or Backend.ConPTY != 0 or not callable(native_spawn):
         raise RuntimeError('The pinned pywinpty 3.1.0 ConPTY API is required')
+    def spawn(argv, *, env=None):
+        return _spawn_prepared(native_spawn, argv, env=env)
+    return spawn
+
+
+def _spawn_prepared(native_spawn, argv, *, env=None):
     # In 3.1.0 spawn uses ``backend or PYWINPTY_BACKEND`` before int(). A
     # truthy numeric string preserves explicit ConPTY=0 against that fallback.
     # The pinned high-level reader otherwise blocks inside pty.read after a
@@ -51,14 +62,19 @@ def _spawn(argv, *, env=None):
     previous = os.environ.get('PYWINPTY_BLOCK')
     os.environ['PYWINPTY_BLOCK'] = '0'
     try:
-        options=dict(dimensions=DIMENSIONS,backend=str(Backend.ConPTY))
+        options=dict(dimensions=DIMENSIONS,backend='0')
         if env is not None:options['env']=dict(env)
-        return PtyProcess.spawn(argv, **options)
+        return native_spawn(argv, **options)
     finally:
         if previous is None:
             os.environ.pop('PYWINPTY_BLOCK', None)
         else:
             os.environ['PYWINPTY_BLOCK'] = previous
+
+
+def _spawn(argv, *, env=None):
+    # Import remains lazy; importing the worker starts no process.
+    return prepare_spawn()(argv, env=env)
 
 
 def _command(line):

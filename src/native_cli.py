@@ -16,6 +16,7 @@ import shutil
 import stat
 import subprocess
 import tempfile
+from filesystem_commit import CommitConflict, move_with_retry, path_identity
 import threading
 import time
 import zipfile
@@ -305,6 +306,7 @@ class NativeCLIStore(CLIReleaseStore):
             if digest != ARCHIVE_SHA256:
                 raise ReleaseStoreError('Official asset digest differs from the pinned Windows CLI')
             stage = Path(tempfile.mkdtemp(prefix='.prepare-' + version + '-', dir=self.root))
+            stage_identity=path_identity(stage);preserve_stage=False
             try:
                 candidate = stage / ARCHIVE_NAME
                 if archive is None:
@@ -342,10 +344,15 @@ class NativeCLIStore(CLIReleaseStore):
                                 prepared_at=datetime.now(timezone.utc).isoformat())
                 self._write_json(stage / 'manifest.json', manifest)
                 self._check_cancel()
-                os.replace(stage, final)
+                move_with_retry(stage, final, os.replace, check_cancel=self._check_cancel)
                 return self._cached(final, version,strict=strict)
+            except CommitConflict:
+                preserve_stage=True
+                raise
             finally:
-                if stage.exists():
+                if not preserve_stage and stage.exists():
+                    if stage_identity is None or path_identity(stage)!=stage_identity:
+                        raise ReleaseStoreError('Staging identity changed; preserve files for recovery')
                     if (stage.parent != self.root or not stage.name.startswith('.prepare-') or
                             _redirect(stage) or stage.resolve().parent != self.root.resolve()):
                         raise ReleaseStoreError('Unsafe native CLI staging cleanup path')

@@ -63,7 +63,7 @@
 
   let root = null, topBtn = null, panel = null, viewer = null, management = null, panelKey = '', snap = null, csrf = null, forced = null;
   let sel = 'main', selAt = 0, polling = false, again = false, pollErr = '';
-  const leases = new Map(), leaseAt = new Map(), beatErr = new Map(), beating = new Set();
+  const leases = new Map(), leaseServices = new Map(), leaseAt = new Map(), beatErr = new Map(), beating = new Map();
   const starting = new Set(), stopAsked = new Set(), inflight = new Set();
   try { sel = taskGroup || localStorage.getItem(STORE) || 'main'; } catch (_) { /* storage blocked */ }
 
@@ -102,13 +102,24 @@
       throw e && e.name === 'AbortError' ? new Error(T('timeout')) : e;
     } finally { clearTimeout(timer); }
   }
-  async function act(command, args = {}) {                              // single /api/action envelope; never auto-resent
-    if (!csrf) csrf = (await req('/api/state')).csrf || null;
+  async function serviceToken() {
+    if (!csrf) { const observed = (await req('/api/state')).csrf || null; if (!csrf) csrf = observed; }
     if (!csrf) throw new Error('CSRF token unavailable');
+    return csrf;
+  }
+  async function act(command, args = {}, service) {                     // single /api/action envelope; never auto-resent
+    const sentService = service === undefined ? await serviceToken() : service;
     try {
       return await req('/api/action', { method: 'POST', body: JSON.stringify({ ...args, name: command }),
-        headers: { 'Content-Type': 'application/json', 'X-Console-Token': csrf } });
-    } catch (e) { if (e.status === 401 || e.status === 403) csrf = null; throw e; }
+        headers: { 'Content-Type': 'application/json', 'X-Console-Token': sentService } });
+    } catch (e) { if ((e.status === 401 || e.status === 403) && csrf === sentService) csrf = null; throw e; }
+  }
+  async function stopOwned(ws, lease, service, keepalive = false) {
+    if (!lease || !service) throw new Error(T('noLease'));
+    if (!keepalive) return act('ensemble_stop', { workspace: ws, lease }, service);
+    return fetch('/api/action', { method: 'POST', keepalive: true, credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json', 'X-Console-Token': service },
+      body: JSON.stringify({ workspace: ws, name: 'ensemble_stop', lease }) });
   }
   function say(msg, bad) {
     if (!root) return;
@@ -138,7 +149,7 @@
       for (const ws of [...leases.keys()]) {                            // drop leases whose run ended, unless start pending
         const w = wss().find(x => x.id === ws);
         if (!(w && w.run && w.run.active) && !starting.has(ws) && (leaseAt.get(ws) || 0) < t0) {
-          leases.delete(ws); leaseAt.delete(ws); beatErr.delete(ws);
+          leases.delete(ws); leaseServices.delete(ws); leaseAt.delete(ws); beatErr.delete(ws);
         }
       }
       if (t0 > selAt && !wss().some(w => String(w.id) === sel) && cur()) sel = String(cur().id);
@@ -148,22 +159,19 @@
   const kick = () => poll(true);
   function beat() {                                                     // 250 ms tick; one in-flight beat per workspace
     for (const [ws, lease] of leases) {
-      if (beating.has(ws)) continue;
-      beating.add(ws);
-      act('ensemble_beat', { workspace: ws, lease })
-        .then(() => beatErr.delete(ws), e => { if (leases.get(ws) === lease) beatErr.set(ws, T('beatFail') + errMsg(e)); })
-        .finally(() => { beating.delete(ws); renderErr(); });
+      const service = leaseServices.get(ws), ticket = `${service}:${lease}`;
+      if (!service || beating.get(ws) === ticket) continue;
+      beating.set(ws, ticket);
+      act('ensemble_beat', { workspace: ws, lease }, service)
+        .then(() => { if (leases.get(ws) === lease && leaseServices.get(ws) === service) beatErr.delete(ws); },
+          e => { if (leases.get(ws) === lease && leaseServices.get(ws) === service) beatErr.set(ws, T('beatFail') + errMsg(e)); })
+        .finally(() => { if (beating.get(ws) === ticket) beating.delete(ws); renderErr(); });
     }
   }
   function stopAll() {                                                  // pagehide: best-effort stop, fire and forget
-    for (const ws of leases.keys()) {
-      try {
-        fetch('/api/action', { method: 'POST', keepalive: true, credentials: 'same-origin',
-          headers: { 'Content-Type': 'application/json', 'X-Console-Token': csrf || '' },
-          body: JSON.stringify({ workspace: ws, name: 'ensemble_stop' }) }).catch(() => {});
-      } catch (_) { /* ignore */ }
-    }
-    leases.clear(); leaseAt.clear(); beatErr.clear();
+    for (const ws of starting) stopAsked.add(ws);                       // bind cleanup when that exact late ACK supplies its lease
+    for (const [ws, lease] of leases) stopOwned(ws, lease, leaseServices.get(ws), true).catch(() => {});
+    leases.clear(); leaseServices.clear(); leaseAt.clear(); beatErr.clear();
   }
   async function onCommand(a, b) {                                      // the only path that can start a group run
     const env = a && typeof a === 'object' ? a : null;
@@ -174,13 +182,13 @@
     const w = cur(), ws = w ? w.id : null;                              // capture target workspace before any await
     if (ws == null) throw new Error(T('loading'));
     if (name === 'pause' || name === 'resume') {
-      const lease = leases.get(ws);
-      if (!lease) throw new Error(T('noLease'));
-      try { return await act('ensemble_' + name, { workspace: ws, lease }); }
+      const lease = leases.get(ws), service = leaseServices.get(ws);
+      if (!lease || !service) throw new Error(T('noLease'));
+      try { return await act('ensemble_' + name, { workspace: ws, lease }, service); }
       finally { kick(); }
     }
     if (/stop/i.test(name)) {
-      leases.delete(ws); leaseAt.delete(ws); beatErr.delete(ws);
+      leases.delete(ws); leaseServices.delete(ws); leaseAt.delete(ws); beatErr.delete(ws);
       if (starting.has(ws)) stopAsked.add(ws);
       try { const r = await act('ensemble_stop', { workspace: ws }); say(T('stopReq')); return r; }
       catch (e) { say(T('failed') + errMsg(e), true); throw e; } finally { renderErr(); kick(); }
@@ -189,11 +197,13 @@
     if (starting.has(ws)) throw new Error(T('starting'));
     starting.add(ws); stopAsked.delete(ws); render();
     try {
-      const r = await act('ensemble_start', { ...args, workspace: ws });
+      const service = await serviceToken();
+      const r = await act('ensemble_start', { ...args, workspace: ws }, service);
       const g = r.group_lease, lease = g && typeof g === 'object' ? g.id : g;
       if (lease == null || lease === '') throw new Error(T('noLease'));
-      if (!stopAsked.has(ws)) { leases.set(ws, String(lease)); leaseAt.set(ws, performance.now()); beat(); }
-      else await act('ensemble_stop', { workspace: ws });
+      if (csrf !== service) { stopOwned(ws, String(lease), service).catch(() => {}); return r; }
+      if (!stopAsked.has(ws)) { leases.set(ws, String(lease)); leaseServices.set(ws, service); leaseAt.set(ws, performance.now()); beat(); }
+      else await stopOwned(ws, String(lease), service);
       say(''); return r; // the group panel displays actual progress, not a lasting request receipt
     } catch (e) { say(T('failed') + errMsg(e), true); throw e; }
     finally { starting.delete(ws); stopAsked.delete(ws); render(); kick(); }

@@ -235,7 +235,12 @@ class OwnedUpdateTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             path,release=self.wheel(folder);mapped=Path(folder)/'transport';mapped.mkdir()
             class Files:
-                def path(self,value):return mapped/PurePosixPath(value).relative_to('/opt/hand-workbench')
+                # Model the guest's complete namespace, including receipts.
+                # Stable short host names avoid Windows MAX_PATH failures in
+                # a long isolated evidence root before the callback is reached.
+                def path(self,value):
+                    PurePosixPath(value).relative_to('/')
+                    return mapped/hashlib.sha256(value.encode('utf-8')).hexdigest()
                 def __enter__(self):return self
                 def __exit__(self,*_):pass
             runner=Mock(return_value=N(stdout=json.dumps(proof_fixture())))
@@ -246,6 +251,7 @@ class OwnedUpdateTests(unittest.TestCase):
                 with self.assertRaises(updates.SDKUpdateError) as caught:
                     updates.update_owned(config,release,idle=Mock(),run=runner,on_dispatch=callback)
             self.assertTrue(caught.exception.rollback_confirmed);self.assertFalse(caught.exception.switched)
+            self.assertIn('synthetic persistence failure',str(caught.exception.__cause__))
             callback.assert_called_once_with();self.assertEqual(runner.call_count,1)
 
 

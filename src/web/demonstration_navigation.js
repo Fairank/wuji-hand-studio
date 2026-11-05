@@ -33,47 +33,58 @@
     const retryCatalog=document.createElement('button');retryCatalog.id='demonstration-catalog-retry';retryCatalog.type='button';retryCatalog.hidden=true;retryCatalog.onclick=()=>window.WujiDemonstrationCatalog?.retry();
     handField.append(handLabel,handSelect);sources.append(modelSlot,handField,connect,status);
     sources.append(retryCatalog);
-    let consoleState=null,online=false,connecting=false,wantedHand=null,sourceEpoch=0,sourceError='',sourceOptions='';
+    let consoleState=null,online=false,connecting=null,wantedHand=null,sourceEpoch=0,sourceError='',sourceOptions='';
     const serial=row=>row?.serial||row?.sn||'',desired=()=>window.WujiDemonstration?.profile()||'hand2_left';
-    const compatible=row=>row?.kind==='hand'&&row.generation+'_'+row.side===desired();
-    const matching=value=>value?.connection==='connected'&&value.stale===false&&value.device_id===handSelect.value&&value.device_profile?.id===desired();
+    const supported=row=>row?.kind==='hand'&&['hand1','hand2'].includes(row.generation)&&(row.side==null||['left','right'].includes(row.side));
+    const available=row=>supported(row)&&row.selectable===true&&row.stale===false&&row.conflict!==true;
+    const verified=(value,sn)=>{const identity=value?.identified_device||{},owner=value?.connection_switch?.current_owner;return value?.connection==='connected'&&value.stale===false&&value.device_id===sn&&identity.source==='sdk_identity'&&identity.serial===sn&&/^hand[12]_(left|right)$/.test(value.device_profile?.id||'')&&identity.profile===value.device_profile.id&&owner?.mode==='hand'&&owner.kind==='hand'&&owner.serial===sn&&Number.isSafeInteger(owner.session)&&owner.session>0&&owner.session===value.session_generation;};
+    const matching=value=>verified(value,handSelect.value)&&value.device_profile.id===desired();
     if(window.WujiDemonstration){window.WujiDemonstration.selectedHand=()=>handSelect.value;window.WujiDemonstration.connectionMatches=matching;}
     function renderSources(){
       const inventory=window.WujiDeviceInventory?.snapshot(),rows=(Array.isArray(inventory?.devices)?inventory.devices:[]).filter(row=>row.kind==='hand'&&serial(row));
       const active=consoleState?.connection==='connected'&&consoleState.device_profile?.id===desired()?consoleState.device_id:'';
       const selected=wantedHand!==null?wantedHand:active||handSelect.value;
       const options=[new Option(text('选择灵巧手','Choose a hand'),'')];
-      for(const row of rows){const okay=compatible(row),option=new Option(serial(row)+(okay?'':text(' · 型号或左右手不匹配',' · Model or side mismatch')),serial(row));option.disabled=!okay||row.selectable!==true||row.stale===true;options.push(option);}
+      for(const row of rows){const option=new Option(serial(row)+(supported(row)&&row.side==null?text(' · 连接后识别左右手',' · Side identified on connection'):''),serial(row));option.disabled=!available(row);options.push(option);}
       if(active&&!rows.some(row=>serial(row)===active))options.push(new Option(active+text(' · 当前连接',' · Connected'),active));
       const key=JSON.stringify(options.map(option=>[option.text,option.value,option.disabled]));if(key!==sourceOptions){sourceOptions=key;handSelect.replaceChildren(...options);}const choice=options.some(option=>option.value===selected)?selected:'';if(handSelect.value!==choice)handSelect.value=choice;
       const row=rows.find(row=>serial(row)===handSelect.value),current=online&&matching(consoleState);
-      const canConnect=online&&!connecting&&!current&&row?.selectable===true&&row.stale!==true&&compatible(row)&&consoleState?.connection_switch?.can_switch===true&&consoleState.connection_switch.busy!==true;
+      const sharedPending=window.WujiDeviceUse?.snapshot?.().pending===true||window.WujiConnectionSwitch?.busy?.()===true;
+      const canConnect=online&&!connecting&&!sharedPending&&!current&&available(row)&&consoleState?.connection_switch?.can_switch===true&&consoleState.connection_switch.busy!==true;
       handSelect.disabled=connecting;connect.disabled=!canConnect;connect.textContent=connecting?text('正在连接…','Connecting…'):current?text('已连接','Connected'):text('连接灵巧手','Connect hand');
-      handLabel.textContent=text('实机目标','Physical hand');connect.title=canConnect||current?'':consoleState?.connection_switch?.blocked_reason||text('选择同型号、同侧的可用灵巧手。','Choose an available hand with the matching model and side.');
+      handLabel.textContent=text('实机目标','Physical hand');connect.title=canConnect||current?'':consoleState?.connection_switch?.blocked_reason||text('选择本次已发现的可用灵巧手。','Choose an available hand discovered now.');
       const catalog=window.WujiDemonstrationCatalog?.snapshot();retryCatalog.textContent=text('重新载入动作','Reload actions');retryCatalog.hidden=!catalog?.error;retryCatalog.disabled=!!catalog?.loading;
       status.textContent=sourceError||catalog?.error||'';status.hidden=!status.textContent;
     }
-    handSelect.onchange=()=>{wantedHand=handSelect.value;sourceEpoch++;sourceError='';renderSources();window.dispatchEvent(new Event('demonstration-target'));};
+    handSelect.onchange=()=>{wantedHand=handSelect.value;sourceEpoch++;connecting=null;sourceError='';renderSources();window.dispatchEvent(new Event('demonstration-target'));};
     connect.onclick=async()=>{
-      if(connect.disabled)return;const selected=handSelect.value,model=desired(),own=++sourceEpoch;connecting=true;sourceError='';renderSources();
+      if(connect.disabled)return;const selected=handSelect.value,model=desired(),own=++sourceEpoch,ticket={token:consoleState?.csrf,owner:consoleState?.connection_switch?.expected_owner};connecting=ticket;sourceError='';renderSources();
+      const current=()=>connecting===ticket&&online&&own===sourceEpoch&&consoleState?.csrf===ticket.token&&desired()===model&&handSelect.value===selected;
       try{
         await window.WujiDeviceInventory?.refresh();
         const row=window.WujiDeviceInventory?.snapshot()?.devices?.find(row=>serial(row)===selected);
-        if(!online||own!==sourceEpoch||desired()!==model||handSelect.value!==selected||!row||row.selectable!==true||row.stale===true||!compatible(row))throw Error(text('设备或所选手型已改变，请重新选择。','The device or model changed. Select it again.'));
-        const result=await window.WujiConnectionSwitch.run({mode:'hand',serial:selected});
-        if(result.routed||!online||own!==sourceEpoch)return;consoleState=result.state;
-        if(!matching(consoleState))throw Error(text('实际灵巧手与所选手型不一致，未允许开始动作。','The connected hand differs from the selected model. Starting is blocked.'));
-      }catch(error){if(own===sourceEpoch)sourceError=error?.message||text('连接未完成','Connection incomplete');}
-      finally{connecting=false;renderSources();window.dispatchEvent(new Event('demonstration-target'));}
+        if(!current())return;
+        if(consoleState?.connection_switch?.expected_owner!==ticket.owner)throw Error(text('当前设备连接已变化，请重新选择后连接。','The device connection changed. Select it again before connecting.'));
+        if(!available(row))throw Error(text('设备已变化，请重新选择。','The device changed. Select it again.'));
+        if(!window.WujiDeviceUse?.open)throw Error(text('连接入口尚未就绪，请稍后重试。','Connection switching is not ready. Retry shortly.'));
+        const result=await window.WujiDeviceUse.open('hand',{...row,profile:model},{navigate:false,expectedContext:ticket.owner});
+        if(!current()||result?.routed)return;
+        if(!result)throw Error(text('设备用途切换正在进行，请等待当前操作完成。','A device switch is in progress. Wait for it to finish.'));
+        const incoming=result?.state,owner=consoleState?.connection_switch?.expected_owner;
+        if(incoming?.csrf!==ticket.token||!verified(incoming,selected)||owner&&owner!==ticket.owner&&owner!==incoming.connection_switch?.expected_owner)throw Error(text('实际灵巧手身份或连接归属尚未核对，未允许开始动作。','Actual hand identity or connection ownership is unverified. Starting is blocked.'));
+        consoleState=incoming;connecting=null;window.WujiDemonstration.selectProfile(incoming.device_profile.id);wantedHand=selected;handSelect.value=selected;renderSources();window.dispatchEvent(new Event('demonstration-target'));
+      }catch(error){if(current())sourceError=error?.message||text('连接未完成','Connection incomplete');}
+      finally{if(connecting===ticket){connecting=null;renderSources();window.dispatchEvent(new Event('demonstration-target'));}}
     };
-    window.addEventListener('console-state',event=>{consoleState=event.detail;online=true;renderSources();});
-    window.addEventListener('console-offline',()=>{sourceEpoch++;consoleState=null;online=false;renderSources();});
+    window.addEventListener('console-state',event=>{if(consoleState?.csrf&&event.detail?.csrf!==consoleState.csrf){sourceEpoch++;connecting=null;sourceError='';}consoleState=event.detail;online=true;renderSources();});
+    window.addEventListener('console-offline',()=>{sourceEpoch++;connecting=null;consoleState=null;online=false;renderSources();});
     window.addEventListener('device-inventory-update',renderSources);
+    window.addEventListener('device-use-update',renderSources);
     window.addEventListener('demonstration-catalog',renderSources);
     const refreshSources=()=>window.WujiDeviceInventory?.refresh()?.catch(()=>{});
     window.addEventListener('workspace-page',event=>{if(event.detail==='library')refreshSources();});
     setInterval(()=>{if(document.body.dataset.page==='library'&&!document.hidden)refreshSources();},5000);
-    window.addEventListener('demonstration-profile',()=>{sourceEpoch++;wantedHand=null;handSelect.value='';sourceError='';renderSources();window.dispatchEvent(new Event('demonstration-target'));});
+    window.addEventListener('demonstration-profile',()=>{sourceEpoch++;connecting=null;wantedHand=null;handSelect.value='';sourceError='';renderSources();window.dispatchEvent(new Event('demonstration-target'));});
     const activeRoute = () => document.body.dataset.page || location.hash.slice(1);
 
     function select(option, focus) {

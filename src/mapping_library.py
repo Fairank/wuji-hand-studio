@@ -31,6 +31,7 @@ import threading
 import unicodedata
 from collections.abc import Mapping
 from typing import Any
+from filesystem_commit import CommitConflict,move_with_retry,path_identity
 
 __all__ = [
     "BINDING_FIELDS",
@@ -430,14 +431,18 @@ class MappingLibrary:
         fd, temp_path = tempfile.mkstemp(
             prefix="." + os.path.basename(self._path) + ".", suffix=".tmp", dir=directory
         )
+        stage_identity=path_identity(temp_path)
         try:
             with open(fd, "wb") as handle:
                 handle.write(payload)
                 handle.flush()
                 os.fsync(handle.fileno())
-            os.replace(temp_path, self._path)
+            move_with_retry(temp_path,self._path,os.replace)
+        except CommitConflict:
+            raise  # Keep the original candidate and the replacement for review.
         except BaseException:
-            with contextlib.suppress(OSError):
-                os.unlink(temp_path)
+            if stage_identity is not None and path_identity(temp_path)==stage_identity:
+                with contextlib.suppress(OSError):
+                    os.unlink(temp_path)
             raise
         _fsync_directory(directory)

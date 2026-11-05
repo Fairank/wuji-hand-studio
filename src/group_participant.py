@@ -11,6 +11,7 @@ class GroupParticipant:
         self.heartbeat=0.;self.start_s=None;self.reason='';self.spec={};self.watch=None
         self.control_epoch=0
         self.prepare_cleanup_required=False;self._preview_run=None
+        self._hardware_session=None;self._hardware_lease=None
 
     def snapshot(self):
         result=dict(active=self.active,mode=self.mode,phase='idle',reason=self.reason,token=self.token)
@@ -42,6 +43,9 @@ class GroupParticipant:
         if not isinstance(token,str) or len(token)!=32:raise ValueError('Invalid group token')
         mode=command.get('mode')
         if mode not in ('preview','hardware'):raise ValueError('Invalid group mode')
+        if mode=='hardware':
+            from device_termination import require_confirmed_stops
+            require_confirmed_stops(getattr(self.c,'termination',None))
         if type(command.get('speed')) not in (int,float) or command['speed'] not in PLAYBACK_SPEEDS:raise ValueError('Invalid speed')
         if type(command.get('cycles')) is not int or command['cycles'] not in (1,3):raise ValueError('Choose one or three cycles')
         if type(command.get('amplitude')) not in (int,float) or command['amplitude'] not in (.25,.5,.75,1.):raise ValueError('Invalid amplitude')
@@ -51,6 +55,8 @@ class GroupParticipant:
         self.token=token;self.mode=mode;self.heartbeat=time.monotonic();self.start_s=None;self.reason=''
         self.control_epoch=0
         self.prepare_cleanup_required=False;self._preview_run=None
+        self._hardware_session=(getattr(self.c,'generation',None),s.get('device_id')) if mode=='hardware' else None
+        self._hardware_lease=None
         self.spec=dict(command,action=action);self.active=True
         try:
             if mode=='preview':
@@ -92,8 +98,17 @@ class GroupParticipant:
                 self.call(dict(name='hardware_keepalive',lease=self.c.hardware_lease))
         elif name=='group_arm':
             if self.mode=='hardware':
+                if self._hardware_session!=(self.c.generation,self.c.state.get('device_id')):
+                    raise ValueError('Expired group hardware session')
                 if self.c.hardware_lease:raise ValueError('Group already armed')
-                self.call(dict(name='hardware_trial',action=self.spec['action'],speed=self.spec['speed'],cycles=self.spec['cycles'],amplitude=self.spec['amplitude'],workspace_clear=True))
+                try:self.call(dict(name='hardware_trial',action=self.spec['action'],speed=self.spec['speed'],cycles=self.spec['cycles'],amplitude=self.spec['amplitude'],workspace_clear=True))
+                finally:
+                    # A write/flush can fail after allocating and delivering
+                    # this exact start. Retain its ownership for explicit stop.
+                    if (self._hardware_session==(self.c.generation,self.c.state.get('device_id'))
+                            and self._hardware_session==(self.c.hardware_lease_generation,self.c.hardware_lease_device)
+                            and self.c.hardware_lease):
+                        self._hardware_lease=self.c.hardware_lease
         elif name=='group_commit':
             if self.mode=='preview':
                 from group_timing import number
@@ -120,8 +135,19 @@ class GroupParticipant:
             self.prepare_cleanup_required=False;self.active=False;self.mode=None;self.spec={};self.reason=reason
             return dict(stopping=True)
         self.active=False;self.reason=reason
-        if self.mode=='hardware':self.call(dict(name='hardware_stop'))
-        elif self.mode=='preview':self.call(dict(name='demo_stop'))
+        if self.mode=='hardware':
+            with self.c.lock:
+                # Read-only prepare owns no motion. A completed/old group may
+                # retry only its original pending lease, never a newer owner.
+                if (self._hardware_lease is not None and self._hardware_lease==self.c.hardware_lease
+                        and self._hardware_session==(self.c.generation,self.c.state.get('device_id'))
+                        and self._hardware_session==(self.c.hardware_lease_generation,self.c.hardware_lease_device)):
+                    self.call(dict(name='hardware_stop'))
+        elif self.mode=='preview':self.call(dict(name='demo_stop',expected_run=self._preview_run))
+        if self._hardware_session is not None and self._hardware_lease is None:
+            # This is only a software reservation receipt. It never claims a
+            # device disable ACK, and ever-armed leases remain stored above.
+            return dict(stopping=True,token=self.token,mode='hardware',read_only_released=True)
         return dict(stopping=True)
 
     def _watch(self,token):

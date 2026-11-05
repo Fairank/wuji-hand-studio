@@ -41,8 +41,11 @@ REPORT_MEMORY_FILE_BYTES=8*1024*1024
 
 def local_file_error(error):
     """Describe known local file failures without publishing arbitrary exceptions."""
+    from filesystem_commit import CommitConflict
     number=getattr(error,'errno',None);windows=getattr(error,'winerror',None)
-    if isinstance(error,PermissionError) or number in (errno.EACCES,errno.EPERM):
+    if isinstance(error,CommitConflict):
+        reason='保存记录已被替换，请重新打开工作台核对 / Saved record changed; reopen the workbench to review'
+    elif isinstance(error,PermissionError) or number in (errno.EACCES,errno.EPERM):
         reason='没有文件访问权限 / File access denied'
     elif number==errno.ENOSPC or windows==112:
         reason='本机存储空间不足 / Local storage is full'
@@ -73,6 +76,17 @@ def local_file_error(error):
 def vm_client():
     from bridge_config import bridge_client
     return bridge_client()
+
+
+class _FinishedFeedbackReader:
+    """A verified ended reader, without retaining Windows thread handles."""
+    __slots__=()
+
+    def is_alive(self):return False
+    def join(self,timeout=None):pass
+
+
+_FINISHED_FEEDBACK_READER=_FinishedFeedbackReader()
 
 
 class Controller:
@@ -115,9 +129,11 @@ class Controller:
         from connection_switch import ConnectionSwitch
         self.connection_switch=ConnectionSwitch(self)
         self.feedback_sessions={}
+        self._retired_feedback_through=-1
         self.sdk_session_configs={}
         from program_runner import ProgramRunner
         self.program=ProgramRunner(self)
+        self._program_hardware_owner=None
         from group_participant import GroupParticipant
         self.group=GroupParticipant(self)
         self.client = self.stdin = None
@@ -135,6 +151,9 @@ class Controller:
         self.state['device_profile']=selected_profile()
         self.state['hardware'] = dict(ready=False,active=False,actions=[],probe_ready=False,reason='先连接左手，进行单关节试动')
         self.hardware_lease = None
+        self.hardware_seen_active = False
+        self.hardware_lease_generation = None
+        self.hardware_lease_device = None
         motion_dir=self.reports.parent/'motion_reports'
         for path in sorted(motion_dir.glob('*.json'),key=lambda p:p.stat().st_mtime,reverse=True)[:20]:
             try:self.state['motion_history'].append(summarize_motion(json.loads(path.read_text(encoding='utf-8'))))
@@ -189,6 +208,7 @@ class Controller:
             # and by the Bridge around its final open dispatch.
             with guard():pass
             return self._continuation_model_ready(receipt,_open_guard=guard)
+        Controller._retire_sdk_session_config(self)
         session=self.glove.start_calibrated(bundle,ready,expected_profile=self._continuation_profile,open_guard=guard)
         self.sdk_session_configs[session]=config
         return session
@@ -288,13 +308,24 @@ class Controller:
                             or any(context.get(k)!=private.get(k) for k in keys)):
                         raise ValueError('Saved profile SDK session changed')
                 selected=self.state['device_profile'];binding=self.retarget.context(selected)['binding']
-                context=self.retarget.select({**binding,'glove_serial':proof['serial'],'sdk_user':proof['source_user_id']},selected)
-                tuning=self.tuning.context(context['binding'])
-                if tuning['engine']!='sdk':self.tuning.select_engine(context['binding'],'sdk')
-                self.state['view_source']='glove'
-                return dict(timeout_ms=timeout_ms,retarget=context['settings'],solver=dict(engine='sdk',values=tuning['values']))
+                # Binding reads may block while this exact switch is cancelled
+                # or its bridge changes. Guard the writes in the same Bridge ->
+                # switch order used by the bridge's final open dispatch.
+                with self.glove.lock:
+                    with self.connection_switch.open_guard(attempt):
+                        check()
+                        context=self.glove._continuation or {}
+                        if (self.glove.stopping or self.glove.session!=started.get('session')
+                                or any(context.get(k)!=private.get(k) for k in keys)):
+                            raise ValueError('Saved profile SDK session changed')
+                        context=self.retarget.select({**binding,'glove_serial':proof['serial'],'sdk_user':proof['source_user_id']},selected)
+                        tuning=self.tuning.context(context['binding'])
+                        if tuning['engine']!='sdk':self.tuning.select_engine(context['binding'],'sdk')
+                        self.state['view_source']='glove'
+                        return dict(timeout_ms=timeout_ms,retarget=context['settings'],solver=dict(engine='sdk',values=tuning['values']))
         with self.lock:
             check()
+            Controller._retire_sdk_session_config(self)
             started['session']=self.glove.start_calibrated(private,ready,expected_profile=expected_profile,
                 open_guard=lambda:self.connection_switch.open_guard(attempt))
             self.sdk_session_configs[started['session']]=config
@@ -493,6 +524,8 @@ class Controller:
     def snapshot(self):
         with self.lock:
             result = copy.deepcopy(self.state)
+            result['hardware'].pop('handled_lease',None)
+            result['hardware']['start_pending'] = bool(self.hardware_lease and not self.hardware_seen_active)
             result['session_generation']=getattr(self,'generation',0)
             # The current feedback reader remains an owned transport after a
             # stale/error event clears live device identity. This projection
@@ -548,10 +581,11 @@ class Controller:
                 for joint in result['joint_rates']:
                     joint.update(host_hz=None, device_hz=None, status='stale')
             result['csrf'] = self.csrf
-            result['playback'] = self.player.snapshot()
+            result['playback'] = self.player.snapshot(profile_id=result['device_profile']['id'])
             result['demonstration_playback'] = self._demonstration_scope().snapshot()
             result['parameter_sync']=dict(self.parameters.sync_status)
             result['glove']=self.glove.snapshot()
+            (result['glove'].get('hardware') or {}).pop('handled_lease',None)
             result['glove']['controller_config']=getattr(self,'sdk_session_configs',{}).get(result['glove'].get('session_id'))
             result['unconfirmed_devices']=self.termination.snapshot()
             result['program']=self.program.snapshot()
@@ -665,6 +699,35 @@ class Controller:
         else:
             self.state['hardware'].update(ready=False,actions=[])
         self.termination.observe('hand',self.state.get('device_id'),self.state['hardware'],self.session_epochs.get(self.hardware_generation,0))
+
+    def _retire_feedback_sessions(self):
+        """Called under lock; never discard a current or uncertain reader."""
+        pinned={self.generation,self.hardware_generation}
+        if self.hardware_lease:pinned.add(self.hardware_lease_generation)
+        for generation,record in list(self.feedback_sessions.items()):
+            if generation in pinned:continue
+            hardware=record.get('hardware') or {};thread=record.get('thread')
+            if thread is not None and not thread.is_alive():
+                # Retain unknown device/ACK evidence, not the dead thread's
+                # synchronization handles. This is not a worker-close ACK.
+                record['thread']=thread=_FINISHED_FEEDBACK_READER
+            if (not all(record.get(key) is True for key in ('worker_closed','reader_finished','transport_closed'))
+                    or thread is None or thread.is_alive()
+                    or hardware.get('active') is not False or hardware.get('stop_confirmed') is not True):continue
+            self.feedback_sessions.pop(generation)
+            self.session_epochs.pop(generation,None)
+            self.session_devices.pop(generation,None)
+            self._retired_feedback_through=max(getattr(self,'_retired_feedback_through',-1),generation)
+
+    def _retire_sdk_session_config(self):
+        """Retain current/unknown SDK ownership; retire one confirmed predecessor."""
+        if not self.sdk_session_configs:return
+        with self.lock:
+            state=self.glove.snapshot();session=state.get('session_id');cleanup=state.get('session_cleanup') or {}
+            if (state.get('busy') is False and type(session) is int
+                    and type(cleanup.get('session_id')) is int and cleanup['session_id']==session
+                    and cleanup.get('cleanup_confirmed') is True):
+                self.sdk_session_configs.pop(session,None)
 
     def send(self, command):
         if self.stdin is None:
@@ -826,7 +889,7 @@ class Controller:
             return dict(official_viz=self.official_viz.stop())
         from cli_coordination import gate,enforce
         # Stop/close must remain available while a component owns the gate.
-        if isinstance(command,dict) and command.get('name') in {'session_close','disconnect','hardware_stop','glove_stop','glove_disconnect','calibration_cancel','calibration_terminal_input','program_stop','group_stop'}:
+        if isinstance(command,dict) and command.get('name') in {'session_close','disconnect','hardware_stop','glove_stop','glove_disconnect','calibration_cancel','calibration_terminal_input','program_stop','group_stop','group_abort'}:
             return self._coordinated_action(command)
         with gate():
             from firmware_host import enforce_maintenance
@@ -907,6 +970,12 @@ class Controller:
             if (not isinstance(expected,str) or not re.fullmatch('[a-f0-9]{32}',expected)
                     or expected!=self.program.snapshot().get('run_id')):
                 raise ValueError('节目单已切换，请核对当前播放后重试 / Playlist changed; check the current run and retry')
+        if name in {'demo_pause','demo_resume','demo_stop'} and 'expected_run' in command:
+            # Validate before a global stop could cascade into a different group.
+            with self.player.lock:
+                expected=command['expected_run']
+                if not isinstance(expected,str) or not expected or expected!=self.player.run_id:
+                    raise ValueError('预览已切换，请核对当前动作后重试 / Preview changed; check the current routine and retry')
         if name in {'hardware_trial','demo_start'} and threading.current_thread() is self.program.thread:
             # This is the final start boundary under the controller lock. A
             # pause between playlist entries cannot leak one more start.
@@ -914,13 +983,18 @@ class Controller:
             if self.program.snapshot()['paused']:
                 from program_runner import ProgramEntryPaused
                 raise ProgramEntryPaused('Playlist is paused before the next entry')
-        if getattr(self,'desktop_closing',False) and name not in {'disconnect','hardware_stop','glove_stop','glove_disconnect','glove_keepalive','hardware_keepalive','demo_stop','calibration_cancel','group_stop','program_stop'}:
+        if getattr(self,'desktop_closing',False) and name not in {'disconnect','hardware_stop','glove_stop','glove_disconnect','glove_keepalive','hardware_keepalive','demo_stop','calibration_cancel','group_stop','group_abort','program_stop'}:
             raise ValueError('会话正在结束，请稍候 / Session is closing; please wait')
         if name.startswith('group_'):
             return dict(group=self.group.handle(command))
         if self.group.active and not self.group.internal:
             if name in {'hardware_stop','demo_stop','disconnect','session_close','program_stop'}:
-                self.group.stop('手动停止 / Manually stopped')
+                scoped_program=name=='program_stop' and 'expected_run' in command
+                scoped_demo=name=='demo_stop' and 'expected_run' in command
+                same_preview=(getattr(self.group,'mode',None)=='preview'
+                    and getattr(self.group,'_preview_run',None)==command.get('expected_run'))
+                if not scoped_program and (not scoped_demo or same_preview):
+                    self.group.stop('手动停止 / Manually stopped')
             elif name not in {'session_keepalive','hardware_keepalive','view_camera','display_selected'}:
                 raise ValueError('请先停止编组 / Stop the group before changing this hand')
         if self.calibration.run['running'] and name in {'program_start','connect','hardware_start','hardware_trial','hardware_probe','demo_start','glove_scan','glove_hand_scan','glove_open','glove_prepare','glove_follow','doctor_run','doctor_version','doctor_support'}:
@@ -936,7 +1010,13 @@ class Controller:
         if name=='program_keepalive':return self.program.keepalive(command.get('lease'))
         if name=='program_stop':
             self.program.stop()
-            if self.state['hardware'].get('active') is not False:self._action(dict(name='hardware_stop'))
+            owner=getattr(self,'_program_hardware_owner',None)
+            owns_hardware=owner is not None and owner==(
+                self.program.snapshot().get('run_id'),getattr(self,'generation',None),
+                self.state.get('device_id'),self.hardware_lease) and (
+                owner[1],owner[2])==(self.hardware_lease_generation,self.hardware_lease_device)
+            if self.state['hardware'].get('active') is not False and ('expected_run' not in command or owns_hardware):
+                self._action(dict(name='hardware_stop'))
             return dict(stopping=True)
         if name=='program_pause':return self.program.pause(True)
         if name=='program_resume':return self.program.pause(False)
@@ -1075,6 +1155,7 @@ class Controller:
                 raise ValueError('先结束其他设备会话或诊断 / Finish the other device session or diagnostics first')
             switch=getattr(self,'connection_switch',None)
             config=switch._config() if switch is not None and name in ('glove_scan','glove_connect') else None
+            if name in ('glove_scan','glove_connect'):Controller._retire_sdk_session_config(self)
             result=self.glove.action(command)
             if config is not None:self.sdk_session_configs[self.glove.session]=config
             if name in {'glove_scan','glove_open','glove_follow','glove_prepare'}:
@@ -1143,6 +1224,8 @@ class Controller:
                     raise ValueError('先连接左手并等待实时反馈')
                 name=command['name']
                 if name in {'hardware_start','hardware_probe','hardware_trial'}:
+                    from device_termination import require_confirmed_stops
+                    require_confirmed_stops(self.termination)
                     hardware=self.state['hardware']
                     if hardware.get('active') is not False:raise ValueError('实机动作进行中或停用状态待确认')
                     if self.hardware_lease:raise ValueError('已有实机启动请求，请等待或先停止')
@@ -1188,16 +1271,44 @@ class Controller:
                         if command.get('action')=='clock':outgoing['clock_at']=datetime.now().astimezone().isoformat()
                     if name=='hardware_trial' and {'expected_profile','expected_serial'}&set(command):
                         require_expected_profile(command,self.state['device_profile']['id'],self.state.get('device_id'))
-                    self.hardware_lease=secrets.token_hex(16)
+                    lease=secrets.token_hex(16)
+                    pending=dict(hardware,active=None,stop_confirmed=False,start_pending=True)
+                    # Nothing has reached the transport yet. If persistence
+                    # fails, restore only this locked journal transaction and
+                    # retain its dirty/error evidence for a later save retry.
+                    with self.termination.lock:
+                        require_confirmed_stops(self.termination)
+                        prior_rows=copy.deepcopy(self.termination.rows)
+                        prior_confirmed=dict(self.termination.confirmed)
+                        try:self.termination.observe('hand',self.state.get('device_id'),pending,
+                            self.session_epochs.get(self.generation,0))
+                        except Exception:
+                            self.termination.rows=prior_rows
+                            self.termination.confirmed=prior_confirmed
+                            self.termination.dirty=True
+                            self.log('停用记录未保存，启动请求未发送 / Stop journal could not be saved; start was not sent')
+                            raise
+                    self.hardware_lease=lease
+                    self.hardware_lease_generation=self.generation
+                    self.hardware_lease_device=self.state.get('device_id')
+                    self.hardware_seen_active=False
+                    if name=='hardware_trial' and threading.current_thread() is self.program.thread:
+                        # Bind only this playlist thread's actual allocated start,
+                        # including a later failed write/flush, never a UI lease.
+                        self._program_hardware_owner=(self.program.snapshot().get('run_id'),
+                            self.generation,self.state.get('device_id'),lease)
                     outgoing['lease']=self.hardware_lease
                     self.player.command(dict(name='demo_stop'))
                     self.state['view_source']='feedback'
+                    # A write/flush may fail after delivering the request. Keep
+                    # this exact session uncertain until its worker acknowledges.
+                    hardware.update(pending)
+                    self.state.update(motion_enabled=None,read_only=False)
                     try:self.send(outgoing)
                     except Exception:
-                        self.hardware_lease=None
+                        self.log('启动请求发送结果未确认，请停止并等待同一设备确认 / Start delivery is unconfirmed; stop and wait for the same device')
                         raise
                     self.hardware_requested_at=time.monotonic()
-                    self.hardware_seen_active=False
                     self.log('请求低力度整套试运行，候选姿态尚未实机验收' if name=='hardware_trial' else '请求实机单关节3°试动' if name=='hardware_probe' else '请求实机展示；画面将使用实际关节反馈')
                     return dict(lease=self.hardware_lease)
                 if name!='hardware_stop' and command.get('lease')!=self.hardware_lease:
@@ -1216,7 +1327,7 @@ class Controller:
             if source not in {'feedback','preview'}:
                 raise ValueError('请选择实机反馈或动作预览')
             with self.lock:
-                if source=='preview' and self.state['hardware'].get('active') is not False:
+                if source=='preview' and (self.hardware_lease or self.state['hardware'].get('active') is not False):
                     raise ValueError('实机展示期间画面保持跟随实际反馈')
                 self.state['view_source'] = source
                 if source=='feedback':self.player.command(dict(name='demo_stop'))
@@ -1227,7 +1338,7 @@ class Controller:
             self.state['teleoperation_view_mode']=command['mode'];self.state['view_source']='glove'
             return dict(teleoperation_view_mode=command['mode'])
         if isinstance(command, dict) and str(command.get('name','')).startswith('demo_'):
-            if command['name']=='demo_start' and self.state['hardware'].get('active') is not False:
+            if command['name']=='demo_start' and (self.hardware_lease or self.state['hardware'].get('active') is not False):
                 raise ValueError('先停止实机展示，再播放仿真预览')
             self.player.command(command)
             with self.lock:
@@ -1275,7 +1386,10 @@ class Controller:
                 if self.parameters.sync_status['busy']:raise ValueError('参数同步中，请完成后连接')
                 if self.state['connection'] in {'connected', 'connecting'}:
                     raise ValueError('已有连接正在进行')
+                if self.hardware_lease:
+                    raise ValueError('启动或停用结果尚未确认，请先核对原设备 / Confirm the original hardware start or stop before reconnecting')
                 self.clear_live()
+                self._retire_feedback_sessions()
                 retained_hardware=copy.deepcopy(self.state['hardware']);retained_hardware_generation=self.hardware_generation
                 self.generation += 1
                 generation = self.generation
@@ -1303,6 +1417,8 @@ class Controller:
                         message='反馈任务未启动，请重试 / Feedback task did not start; retry: '+str(error)[:300])
                     raise
             elif name == 'disconnect':
+                if self.hardware_lease or self.state['hardware'].get('active') is not False:
+                    raise ValueError('先停止动作并等待停用确认；旧控制端若一直等待启动确认，请升级 / Stop and wait for confirmation; update an older controller if startup remains pending')
                 self.generation += 1
                 # Ask the worker to flush recordings; its reader may still save
                 # final reports, but stale states cannot revive the connection.
@@ -1380,8 +1496,29 @@ class Controller:
             try:pending.unlink(missing_ok=True)
             except OSError:pass
 
+    def _hardware_event(self,event,generation):
+        hardware=copy.deepcopy(event['hardware'])
+        acknowledgment=hardware.pop('handled_lease',None)
+        lease=self.hardware_lease
+        if not lease or generation!=self.hardware_lease_generation:return hardware
+        serial=event.get('device_id') or self.session_devices.get(generation)
+        exact=self.hardware_lease_device is not None and serial==self.hardware_lease_device
+        confirmed=(hardware.get('active') is False and hardware.get('stop_confirmed') is True)
+        handled=acknowledgment==lease
+        if exact and confirmed and (handled or self.hardware_seen_active or event.get('type')=='closed'):
+            self.hardware_lease=None
+        elif exact and hardware.get('active') is True:
+            self.hardware_seen_active=True
+        elif not self.hardware_seen_active or not exact:
+            # A pre-request idle frame is not a start rejection or a stop ACK.
+            # Project uncertainty before the journal sees this event as well.
+            hardware.update(active=None,stop_confirmed=False)
+        hardware['start_pending']=bool(self.hardware_lease and not self.hardware_seen_active)
+        return hardware
+
     def event(self, event, generation):
         with self.lock:
+            if 'hardware' in event:event=dict(event,hardware=self._hardware_event(event,generation))
             kind = event.get('type')
             if kind=='motion_report':
                 report=event['report']
@@ -1403,6 +1540,10 @@ class Controller:
                 self.state['sessions'].insert(0, dict(report,workbench_storage=storage) if storage else report)
                 self.state['sessions'] = self.state['sessions'][:20]
                 if not storage:self.log(f"采集已保存：{report['frames']}帧，结束原因 {report['reason']}")
+            # Reports can arrive after a reader's UI lifetime. Retired readers
+            # cannot recreate device/epoch state or a new journal uncertainty.
+            if (generation<=getattr(self,'_retired_feedback_through',-1)
+                    and generation not in self.feedback_sessions and generation not in self.session_epochs):return
             # Late close acknowledgements still belong to the old serial. They
             # may confirm that stop, but must never revive the new connection.
             if event.get('device_id'):self.session_devices[generation]=event['device_id']
@@ -1420,6 +1561,7 @@ class Controller:
                 if kind=='closed' and self.hardware_generation==generation and self.state['connection']=='disconnected' and self.state.get('device_id')==self.session_devices.get(generation):
                     self.state['hardware']=event['hardware']
                     self.state['motion_enabled']=event['hardware'].get('active')
+                    self.state['read_only']=self.state['motion_enabled'] is False
             if generation != self.generation:
                 return
             if kind == 'identity':
@@ -1446,8 +1588,6 @@ class Controller:
                 if 'hardware' in event:
                     self.state['hardware']=event['hardware'];self.hardware_generation=generation
                 if self.state['hardware'].get('active'):self.hardware_seen_active=True
-                elif self.hardware_lease and (self.hardware_seen_active or time.monotonic()-self.hardware_requested_at>3):
-                    self.hardware_lease=None
                 self.state['motion_enabled']=self.state['hardware']['active']
                 self.state['read_only']=self.state['motion_enabled'] is False
             elif kind == 'error':
@@ -1463,6 +1603,7 @@ class Controller:
             elif kind == 'closed' and 'hardware' in event:
                 self.state['hardware']=event['hardware']
                 self.state['motion_enabled']=event['hardware'].get('active')
+                self.state['read_only']=self.state['motion_enabled'] is False
 
     def read_session(self, command, generation):
         client = None
@@ -1501,8 +1642,11 @@ class Controller:
                 if client and client.close() is False:raise ValueError('Feedback transport exit is unconfirmed')
                 closed=True
             finally:
-                record=getattr(self,'feedback_sessions',{}).get(generation)
-                if record is not None:record.update(transport_closed=closed,reader_finished=True)
+                with self.lock:
+                    record=getattr(self,'feedback_sessions',{}).get(generation)
+                    if record is not None:
+                        record.update(transport_closed=closed,reader_finished=True)
+                        if closed:record.pop('client',None)
             with self.lock:
                 if generation == self.generation:
                     self.client = self.stdin = None
@@ -1530,7 +1674,9 @@ class Controller:
         thread.join(timeout)
         if not thread.is_alive() and record.get('reader_finished') and not record.get('transport_closed'):
             original=record.get('client')
-            if original is not None and original.close() is not False:record['transport_closed']=True
+            if original is not None and original.close() is not False:
+                with self.lock:
+                    record['transport_closed']=True;record.pop('client',None)
         with self.lock:
             if (thread.is_alive() or not record.get('reader_finished') or not record.get('transport_closed')
                     or not record.get('worker_closed') or (record.get('hardware') or {}).get('active') is not False
@@ -1543,7 +1689,29 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, *_):
         pass
 
+    def _discard_post_body(self):
+        # The authorization/field decision is already made. A small refused
+        # POST still needs its bytes consumed before close, or Windows can
+        # reset the connection before the JSON refusal reaches the caller.
+        if getattr(self,'_post_body_read',False):return
+        self._post_body_read=True;self.close_connection=True
+        try:length=int(self.headers.get('Content-Length','0'))
+        except (ValueError,TypeError):return
+        if not 0<length<=4096 or self.headers.get('Transfer-Encoding'):return
+        previous=self.connection.gettimeout();deadline=time.monotonic()+1
+        try:
+            while length:
+                remaining=deadline-time.monotonic()
+                if remaining<=0:break
+                self.connection.settimeout(remaining)
+                chunk=self.rfile.read1(length)
+                if not chunk:break
+                length-=len(chunk)
+        except OSError:pass
+        finally:self.connection.settimeout(previous)
+
     def reply(self, status, body, mime='application/json; charset=utf-8', filename=None):
+        if status>=400 and getattr(self,'command',None)=='POST':Handler._discard_post_body(self)
         if not isinstance(body, bytes):
             body = json.dumps(body, ensure_ascii=False, allow_nan=False).encode('utf-8')
         style_nonce=None
@@ -1781,11 +1949,10 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == '/api/catalog':
             query=parse_qs(url.query,keep_blank_values=True)
             try:
-                from demonstration_scope import query_profile,display_profile
+                from demonstration_scope import query_profile
                 if set(query)-{'profile'}:raise ValueError('Unknown demonstration catalog selector')
                 selected=query_profile(query)
-                result=catalog()
-                if selected is not None:result=dict(result,device_profile=display_profile(selected))
+                result=catalog(selected)
                 return self.reply(200,result)
             except (ValueError,TypeError) as error:return self.reply(400,dict(error=str(error)))
         if url.path == '/api/performance':
@@ -1894,6 +2061,7 @@ class Handler(BaseHTTPRequestHandler):
         return self.reply(200, (HERE/'web'/name).read_bytes(), mime)
 
     def do_POST(self):
+        self._post_body_read=False
         origin = self.headers.get('Origin')
         if self.path=='/api/connection-switch-owner-check':
             if not self.allowed_host() or os.environ.get('WUJI_FLEET_PARENT') or origin or not hasattr(self.server,'_fleet'):
@@ -1901,6 +2069,7 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 size=int(self.headers.get('Content-Length','0'))
                 if not 0<size<=2048:raise ValueError('Invalid child switch check')
+                self._post_body_read=True
                 payload=json.loads(self.rfile.read(size))
                 if not isinstance(payload,dict) or set(payload)!={'workspace','request_id','attempt_id','expected_owner'}:
                     raise ValueError('Invalid child switch fields')
@@ -1927,6 +2096,7 @@ class Handler(BaseHTTPRequestHandler):
                 length=int(self.headers.get('Content-Length','0'))
                 if not 0<length<=4096 or self.headers.get('Content-Type','').split(';')[0]!='application/json':
                     raise ValueError('Invalid private task request')
+                self._post_body_read=True
                 payload=json.loads(self.rfile.read(length))
                 if not isinstance(payload,dict) or set(payload)!={'expected_context','action','payload'}:
                     raise ValueError('Invalid private task fields')
@@ -1945,6 +2115,8 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError('Invalid request length')
             if self.headers.get('Content-Type', '').split(';')[0] != 'application/json':
                 raise ValueError('JSON required')
+            # A partial/failed read must not wait again for the full body.
+            self._post_body_read=True
             payload=json.loads(self.rfile.read(length))
             if not isinstance(payload,dict):raise ValueError('JSON object required')
             task_scope=self._task_view_headers()
@@ -2020,7 +2192,7 @@ class Handler(BaseHTTPRequestHandler):
             # OS failure category; device/session exceptions retain their guard.
             file_action=(self.path=='/api/action' and isinstance(locals().get('payload'),dict)
                 and payload.get('name') in {'workbench_update_check','workbench_update_prepare','workbench_update_apply',
-                    'parameters_save','retarget_tuning_save','retarget_tuning_export'})
+                    'parameters_save','retarget_tuning_save','retarget_tuning_export','workspace_create','workspace_remove'})
             file_desktop=(self.path=='/api/desktop' and isinstance(locals().get('payload'),dict)
                 and payload.get('operation') in {'import_model','prepare_update'})
             if (file_action or file_desktop) and isinstance(error,OSError) and not isinstance(error,TimeoutError):

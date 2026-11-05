@@ -8,6 +8,7 @@ import socket
 import threading
 import time
 from glove_protocol import validate, validate_cleanup, cleanup_confirmed, CancellationNotDispatched
+from device_termination import require_confirmed_stops
 
 SDK_SOLVER_REQUIRED='请切回官方 SDK 映射预览后再接入或启动灵巧手 / Switch preview to the official SDK before preparing or following a real hand'
 
@@ -56,7 +57,39 @@ class GloveBridge:
     def remember_termination(self):
         if self.termination:
             device=self._follow_device if self._follow_unconfirmed else (self.state.get('feedback') or {}).get('device_id')
-            self.termination.observe('glove',device,self.state.get('hardware') or {},self.session)
+            self.termination.observe('glove',device,self._pending_follow_hardware(self.state.get('hardware') or {}),self.session)
+
+    def _pending_follow_hardware(self,hardware):
+        if self.lease and hardware.get('active') is not True:
+            return dict(hardware,active=None,stop_confirmed=False)
+        return hardware
+
+    def _save_follow_pending(self,device):
+        if self.termination is None:return
+        journal=self.termination
+        with journal.lock:
+            require_confirmed_stops(journal)
+            if self.session<journal.confirmed.get(device,-1):
+                raise ValueError('手套预览会话已过期，请结束后重新接入 / SDK preview session expired; close and reopen preview before following')
+            rows=copy.deepcopy(journal.rows);confirmed=dict(journal.confirmed)
+            try:journal.observe('glove',device,dict(active=None,stop_confirmed=False),self.session)
+            except Exception:
+                journal.rows=rows;journal.confirmed=confirmed;journal.dirty=True
+                raise
+
+    def _discard_rejected_follow(self):
+        if self.termination is None:return
+        journal=self.termination
+        with journal.lock:
+            rows=copy.deepcopy(journal.rows)
+            remaining=[row for row in rows if not (row.get('source')=='glove'
+                and row.get('device_id')==self._follow_device and row.get('session')==self._follow_session)]
+            if remaining==rows:return
+            journal.rows=remaining;journal.dirty=True
+            try:journal.save()
+            except Exception:
+                journal.rows=rows;journal.dirty=True
+                raise
 
     def _retain_follow_uncertainty(self):
         if self._follow_unconfirmed:
@@ -76,6 +109,7 @@ class GloveBridge:
     def snapshot(self):
         with self.lock:
             s=copy.deepcopy(self.state);age=max(0,time.monotonic()-self.last_update)*1000
+            s['hardware']=self._pending_follow_hardware(s.get('hardware') or {})
             s['busy']=self.busy;s['transport_age_ms']=age if self.last_update else None
             s['session_id']=self.session
             s['action_revision']=self.action_revision
@@ -460,11 +494,16 @@ class GloveBridge:
                 if s['feedback']['stale'] or not s['hardware'].get('probe_ready') or s['hardware'].get('active') is not False:
                     raise ValueError('等待完整灵巧手反馈 / Wait for ready hand feedback')
                 self._require_follow_sdk()
+                require_confirmed_stops(self.termination)
+                device=s['feedback'].get('device_id')
+                if not isinstance(device,str) or not device.strip() or device!=device.strip():
+                    raise ValueError('请先核对准确灵巧手身份 / Verify the exact hand identity before following')
+                self._save_follow_pending(device)
                 self._follow_sdk_requirement=None;self._follow_sdk_proof=None
                 self._follow_sdk_session=None
                 self.lease=secrets.token_hex(16);c=dict(c,lease=self.lease)
                 self.requested=time.monotonic();self.seen_active=False
-                self._follow_device=s['feedback'].get('device_id');self._follow_session=self.session
+                self._follow_device=device;self._follow_session=self.session
                 try:self.send(c)
                 except Exception:
                     self._mark_follow_unconfirmed('启动请求结果未确认，请先结束并核对会话 / Follow request is unconfirmed; end and review this session')
@@ -484,13 +523,14 @@ class GloveBridge:
                 self.state=copy.deepcopy(event['state']);self.last_update=time.monotonic()
                 if self.state.get('connection')=='receiving':self._open_pending=False
                 if self.state.get('hand_unpaired') is True:self._unpair_pending=False
-                active=self.state['hardware'].get('active')
+                hardware=self.state['hardware'];active=hardware.get('active')
+                acknowledgment=hardware.pop('handled_lease',None)
                 if self.lease:
                     if (self.state.get('feedback') or {}).get('device_id')!=self._follow_device:
                         self._mark_follow_unconfirmed('目标反馈身份已改变，原启动结果未确认 / Target feedback changed; original follow request is unconfirmed')
                         self.lease=None
-                    elif active:self.seen_active=True
-                    elif active is False and self.seen_active:self.lease=None
+                    elif active is True and acknowledgment==self.lease:self.seen_active=True
+                    elif active is False and hardware.get('stop_confirmed') is True and acknowledgment==self.lease:self.lease=None
                     elif active is False and time.monotonic()-self.requested>5:
                         self._mark_follow_unconfirmed('启动结果尚未确认，请先结束并核对会话 / Follow startup is unconfirmed; end and review this session')
                         self.lease=None
@@ -504,7 +544,9 @@ class GloveBridge:
                 # Only a current pre-forward refusal releases pending intent.
                 # It never changes hardware/disable confirmation, nor resolves
                 # write/flush/EOF uncertainty or a request that became active.
+                self._discard_rejected_follow()
                 self.lease=None;self.state['message']=str(event.get('message',''))[:400]
+                return  # A pre-forward refusal is not a physical stop ACK.
             elif kind in ('glove_error','glove_notice','notice'):
                 self.state['message']=str(event.get('message',''))[:400]
                 if kind=='glove_error':

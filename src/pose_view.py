@@ -18,6 +18,9 @@ from view_camera import DEFAULT as DEFAULT_CAMERA, preview_selected
 HERE = Path(__file__).resolve().parent
 MODEL = HERE/'assets/mjcf/left.xml'
 FINGERS = ['拇指', '食指', '中指', '无名指', '小指']
+# MuJoCo's GLFW backend initializes and mutates process-global window state.
+# Keep native context creation/destruction serial across existing view threads.
+_RENDERER_LIFECYCLE_LOCK = threading.Lock()
 
 
 def load_left_model():
@@ -341,7 +344,8 @@ class PoseView:
             m.vis.global_.offheight = 560
             m.vis.headlight.ambient[:] = [.65]*3
             m.vis.headlight.diffuse[:] = [.65]*3
-            renderer = mj.Renderer(m, height=560, width=760)
+            with _RENDERER_LIFECYCLE_LOCK:
+                renderer = mj.Renderer(m, height=560, width=760)
             render_times=deque(maxlen=60)
             camera = mj.MjvCamera()
             camera.lookat[:] = [0, 0, .115]
@@ -363,12 +367,16 @@ class PoseView:
                 state = self.controller.snapshot()
                 new_profile=state.get('device_profile',{}).get('id','hand2_left')
                 if new_profile!=profile_id:
-                    renderer.close();profile_id=new_profile;m=load_native_model(profile_id);d=mj.MjData(m)
+                    with _RENDERER_LIFECYCLE_LOCK:
+                        renderer.close()
+                    profile_id=new_profile;m=load_native_model(profile_id);d=mj.MjData(m)
                     
                     if profile_id.startswith("hand2"):m.body_quat[1]=[0,1,0,0]
                     m.vis.global_.offwidth=760;m.vis.global_.offheight=560
                     m.vis.headlight.ambient[:]=[.65]*3;m.vis.headlight.diffuse[:]=[.65]*3
-                    renderer=mj.Renderer(m,height=560,width=760);ids=m.actuator_trnid[:,0].astype(int)
+                    with _RENDERER_LIFECYCLE_LOCK:
+                        renderer=mj.Renderer(m,height=560,width=760)
+                    ids=m.actuator_trnid[:,0].astype(int)
                     library=FirstGenerationPreview(m) if profile_id.startswith('hand1') else PoseLibrary(m,profile_id.split('_')[1])
                 view = state.get('camera', DEFAULT_CAMERA)
                 camera.azimuth = view['azimuth']-(90 if profile_id.startswith('hand1') else 0)
@@ -502,4 +510,5 @@ class PoseView:
                 self.meta = dict(ready=False, mode='error', message='三维模型加载失败：'+str(error), joints=[], render_hz=0)
         finally:
             if renderer:
-                renderer.close()
+                with _RENDERER_LIFECYCLE_LOCK:
+                    renderer.close()

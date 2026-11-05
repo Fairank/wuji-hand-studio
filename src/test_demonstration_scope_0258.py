@@ -1,5 +1,7 @@
 """Actual controller/catalog/export scoped playback; no SDK, devices or sockets."""
 import copy
+from pathlib import Path
+import tempfile
 import threading
 from types import SimpleNamespace as N
 import unittest
@@ -9,6 +11,7 @@ from console_server import Controller,Handler
 from demonstration_scope import DemonstrationScope
 from device_profiles import PROFILES,profile
 from demo_player import DemoPlayer
+from device_termination import TerminationJournal
 
 
 class DemonstrationScopeTests(unittest.TestCase):
@@ -29,6 +32,11 @@ class DemonstrationScopeTests(unittest.TestCase):
         c.program=N(thread=None,snapshot=Mock(return_value={'active':busy}),check=Mock(side_effect=AssertionError('must not advance program')))
         c.glove=N(busy=busy,lease=None,action=Mock(side_effect=AssertionError('must not send to glove')))
         c.calibration=N(run={'running':busy});c.hardware_lease=None
+        c.hardware_seen_active=False;c.hardware_lease_generation=None;c.hardware_lease_device=None
+        folder=tempfile.TemporaryDirectory();self.addCleanup(folder.cleanup)
+        c.termination=TerminationJournal(Path(folder.name)/'termination.json')
+        c.generation=c.hardware_generation=0
+        c.session_devices={0:'WH_SYNTHETIC'};c.session_epochs={0:c.termination.new_session()}
         c.doctor=N(snapshot=lambda:{'running':False});c.parameters=N(sync_status={'busy':False})
         c.send=Mock();c.log=Mock()
         c.snapshot=lambda:dict(copy.deepcopy(c.state),playback=c.player.snapshot(),

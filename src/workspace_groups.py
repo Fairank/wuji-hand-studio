@@ -7,18 +7,55 @@ import secrets
 import threading
 import time
 from group_coordinator import GroupCoordinator
+from cli_coordination import atomic
+from filesystem_commit import CommitConflict
 
 
 class Discovery:
-    def __init__(self,factory):
+    def __init__(self,factory,*,inventory=None,scan=None):
         self.factory=factory;self.lock=threading.RLock();self.state=dict(running=False,devices=[],error='',updated=0.)
+        self.inventory=inventory if callable(inventory) else None
+        self.scan=scan
 
     def snapshot(self):
-        with self.lock:return copy.deepcopy(self.state)
+        with self.lock:state=copy.deepcopy(self.state)
+        # Ordinary multi-hand entry projects the same passive directory as the
+        # device page. An explicit custom address retains its existing route.
+        if self.inventory is None or state.get('address'):return state
+        try:
+            directory=self.inventory()
+            if not isinstance(directory,dict) or not isinstance(directory.get('devices'),list):
+                raise ValueError('统一设备目录不可用 / Shared device directory is unavailable')
+            devices=[];seen=set()
+            for row in directory['devices']:
+                if (not isinstance(row,dict) or row.get('kind')!='hand'
+                        or row.get('generation') not in ('hand1','hand2')
+                        or row.get('stale') is not False or row.get('selectable') is not True
+                        or row.get('conflict') or row.get('in_use') or row.get('workspace_owners')
+                        or not isinstance(row.get('serial'),str)
+                        or row['serial'] in seen):continue
+                seen.add(row['serial'])
+                devices.append({**copy.deepcopy(row),'side_hint':row.get('side')})
+            observed=[r['observed_at'] for r in devices if type(r.get('observed_at')) in (int,float)]
+            updated=directory.get('scanned_at') or 0.
+            if observed:updated=max(observed)
+            return dict(running=directory.get('scanning') is True,devices=devices,
+                error=directory.get('error') or '',updated=updated,address='',source='shared_inventory',
+                workspace_errors=copy.deepcopy(directory.get('workspace_errors') or []))
+        except (ValueError,OSError,RuntimeError,TypeError) as error:
+            return dict(running=False,devices=[],error=str(error)[:700],updated=0.,address='',source='shared_inventory')
 
     def start(self,address=''):
         from console_agent import validate_command
         validate_command(dict(name='discover',address=address))
+        if not address and self.inventory is not None:
+            with self.lock:
+                if self.state.get('address') and self.state['running']:
+                    raise ValueError('请等待自定义地址发现完成 / Wait for the custom-address discovery to finish')
+                self.state=dict(running=False,devices=[],error='',updated=0.,address='')
+            if not callable(self.scan):raise ValueError('统一设备发现不可用 / Shared device discovery is unavailable')
+            self.scan()
+            return self.snapshot()
         with self.lock:
             if self.state['running']:return self.snapshot()
             self.state=dict(running=True,devices=[],error='',updated=0.,address=address)
@@ -58,8 +95,9 @@ class Discovery:
 class WorkspaceGroups:
     def __init__(self,fleet,controller,data):
         self.fleet,self.controller=fleet,controller;self.path=Path(data)/'hand_workspaces.json';self.lock=threading.RLock()
-        self.discovery=Discovery(controller.factory);self.coordinators={}
-        self.pending_serials={};self.persistence_error=None
+        self.discovery=Discovery(controller.factory,inventory=getattr(controller,'device_inventory',None),
+            scan=lambda:controller.action(dict(name='device_inventory_scan')));self.coordinators={}
+        self.pending_serials={};self.persistence_error=None;self.persistence_conflict=False
         try:self.rows=json.loads(self.path.read_text(encoding='utf-8'))
         except FileNotFoundError:self.rows=[dict(id='main',label='主工作区 / Main workspace',members=['main'])]
         if not isinstance(self.rows,list) or any(not isinstance(r,dict) or not isinstance(r.get('members'),list) for r in self.rows):raise ValueError('Invalid workspace catalog')
@@ -69,7 +107,13 @@ class WorkspaceGroups:
             if r['id'] not in assigned:self.rows.append(dict(id=r['id'],label=r['label'],members=[r['id']]))
 
     def save(self):
-        temp=self.path.with_suffix('.pending');temp.write_text(json.dumps(self.rows,ensure_ascii=False),encoding='utf-8');temp.replace(self.path)
+        with self.lock:
+            if self.persistence_conflict:raise CommitConflict(self.persistence_error)
+            try:atomic(self.path,self.rows)
+            except CommitConflict:
+                self.persistence_conflict=True
+                self.persistence_error='工作区记录已被替换，请重新打开工作台核对 / Workspace catalog changed; reopen the workbench to review'
+                raise
 
     def _commit_rows(self, candidate):
         """Caller holds lock; readers never see a failed metadata edit."""
@@ -146,7 +190,17 @@ class WorkspaceGroups:
                     if not isinstance(c.get('members'),list) or any(m not in row['members'] for m in c['members']):raise ValueError('Members must belong to the selected workspace')
                     return run.start(c)
                 if name=='ensemble_beat':run.beat(c.get('lease'));return {}
-                if name=='ensemble_stop':return run.stop()
+                if name=='ensemble_stop':
+                    # Automatic page/late-start cleanup owns one reservation.
+                    # The explicit operator Stop remains an unscoped stop.
+                    if 'lease' in c:
+                        with run.lock:
+                            lease=c['lease']
+                            if (not isinstance(lease,str) or not lease.isascii()
+                                    or not secrets.compare_digest(lease,str(run.token))):
+                                raise ValueError('Expired group lease')
+                            return run.stop()
+                    return run.stop()
                 if name in ('ensemble_pause','ensemble_resume'):return run.request_control(name.removeprefix('ensemble_'),c.get('lease'))
             if any(r.snapshot()['active'] for r in self.coordinators.values()):raise ValueError('先停止编组再修改工作区 / Stop groups before editing workspaces')
             if name=='workspace_move':
@@ -166,12 +220,32 @@ class WorkspaceGroups:
                     p=profile(c['preview_profile']);label=p['zh'];serial=None
                 else:
                     scan=self.discovery.snapshot()
+                    if scan.get('workspace_errors'):raise ValueError('无法确认其他工作区状态，请先核对已有设备 / Another workspace state is unavailable; review the existing devices')
                     if scan['running'] or time.time()-scan['updated']>60:raise ValueError('请重新发现设备 / Discover devices again')
                     found=next((d for d in scan['devices'] if d['serial']==c.get('serial')),None)
                     if not found:raise ValueError('Device is not in the fresh discovery results')
-                    serial=found['serial'];p=dict(id=found['generation']+'_'+(found.get('side_hint') or 'left'));label=serial
+                    generation=found.get('generation');side=found.get('side_hint')
+                    if generation not in ('hand1','hand2') or side not in (None,'left','right'):
+                        raise ValueError('设备型号尚未确认，请重新发现 / Device model is unverified; discover again')
+                    # Missing advertised side is not a reason to guess the
+                    # physical hand. Keep the selected model side as intent;
+                    # exact-serial SDK connection synchronizes actual identity.
+                    if side is None:side=self.controller.snapshot()['device_profile']['side']
+                    serial=found['serial'];p=dict(id=generation+'_'+side);label=serial
                     for member in ['main']+list(self.fleet.children):
                         s=self.read(member)
+                        # A raw/custom-address result is not authority to open
+                        # a second SDK session over an existing CLI or glove
+                        # owner whose direct hand connection is disconnected.
+                        viz=s.get('official_viz') or {}
+                        if any(viz.get(k) for k in ('active','busy','reserved','session_id')):
+                            if any(serial in (d.get('sn'),d.get('serial'))
+                                    for d in (viz.get('device') or {},viz.get('reported_device') or {})):
+                                raise ValueError('该设备已有官方会话，请在原任务中继续 / An official session already owns this device; continue its existing task')
+                        glove=s.get('glove') or {};feedback=glove.get('feedback') or {}
+                        if glove.get('busy') and serial in (feedback.get('device_id'),
+                                (feedback.get('identified_device') or {}).get('serial'),glove.get('glove_serial')):
+                            raise ValueError('该设备已在手套会话中，请使用现有任务 / This device is already owned by a glove session; use its existing task')
                         # A stale disconnected/error poll cannot disprove a
                         # request whose dispatch acknowledgement was lost.
                         if s['connection']=='connected' and s.get('device_id'):
