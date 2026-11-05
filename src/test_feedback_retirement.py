@@ -97,6 +97,23 @@ class FeedbackRetirementTests(unittest.TestCase):
         self.assertNotIn(old,self.c.session_devices)
         self.assertIsNone(reference())
 
+    def test_ended_unknown_reader_releases_thread_without_inventing_a_close_ack(self):
+        old,_=self.connect('SYNTHETIC-UNKNOWN',complete=False)
+        thread=weakref.ref(self.c.feedback_sessions[old]['thread'])
+        epoch=self.c.session_epochs[old]
+        self.c.termination.observe('hand','SYNTHETIC-UNKNOWN',dict(active=None),epoch)
+        for _ in range(4):self.connect()
+        gc.collect()
+        self.assertIsNone(thread())
+        record=self.c.feedback_sessions[old]
+        self.assertFalse(record['thread'].is_alive())
+        record['thread'].join(0)
+        self.assertFalse(record['worker_closed'])
+        self.assertEqual(self.c.session_epochs[old],epoch)
+        self.assertEqual(self.c.session_devices[old],'SYNTHETIC-UNKNOWN')
+        self.assertEqual([r['device_id'] for r in self.c.termination.snapshot()],['SYNTHETIC-UNKNOWN'])
+        with self.assertRaises(ValueError):self.c.stop_feedback_confirmed(old,'SYNTHETIC-UNKNOWN',allow_unidentified=True)
+
     def test_failed_close_retains_exact_retry_client_until_confirmed(self):
         old,reference=self.connect(fail_close=True)
         self.assertIsNotNone(reference())

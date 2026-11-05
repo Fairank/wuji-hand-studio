@@ -78,6 +78,17 @@ def vm_client():
     return bridge_client()
 
 
+class _FinishedFeedbackReader:
+    """A verified ended reader, without retaining Windows thread handles."""
+    __slots__=()
+
+    def is_alive(self):return False
+    def join(self,timeout=None):pass
+
+
+_FINISHED_FEEDBACK_READER=_FinishedFeedbackReader()
+
+
 class Controller:
     def __init__(self, factory=vm_client, reports=REPORTS,parameter_path=None):
         self.factory, self.reports = factory, Path(reports)
@@ -695,6 +706,10 @@ class Controller:
         for generation,record in list(self.feedback_sessions.items()):
             if generation in pinned:continue
             hardware=record.get('hardware') or {};thread=record.get('thread')
+            if thread is not None and not thread.is_alive():
+                # Retain unknown device/ACK evidence, not the dead thread's
+                # synchronization handles. This is not a worker-close ACK.
+                record['thread']=thread=_FINISHED_FEEDBACK_READER
             if (not all(record.get(key) is True for key in ('worker_closed','reader_finished','transport_closed'))
                     or thread is None or thread.is_alive()
                     or hardware.get('active') is not False or hardware.get('stop_confirmed') is not True):continue
@@ -1648,7 +1663,29 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, *_):
         pass
 
+    def _discard_post_body(self):
+        # The authorization/field decision is already made. A small refused
+        # POST still needs its bytes consumed before close, or Windows can
+        # reset the connection before the JSON refusal reaches the caller.
+        if getattr(self,'_post_body_read',False):return
+        self._post_body_read=True;self.close_connection=True
+        try:length=int(self.headers.get('Content-Length','0'))
+        except (ValueError,TypeError):return
+        if not 0<length<=4096 or self.headers.get('Transfer-Encoding'):return
+        previous=self.connection.gettimeout();deadline=time.monotonic()+1
+        try:
+            while length:
+                remaining=deadline-time.monotonic()
+                if remaining<=0:break
+                self.connection.settimeout(remaining)
+                chunk=self.rfile.read1(length)
+                if not chunk:break
+                length-=len(chunk)
+        except OSError:pass
+        finally:self.connection.settimeout(previous)
+
     def reply(self, status, body, mime='application/json; charset=utf-8', filename=None):
+        if status>=400 and getattr(self,'command',None)=='POST':Handler._discard_post_body(self)
         if not isinstance(body, bytes):
             body = json.dumps(body, ensure_ascii=False, allow_nan=False).encode('utf-8')
         style_nonce=None
@@ -1998,6 +2035,7 @@ class Handler(BaseHTTPRequestHandler):
         return self.reply(200, (HERE/'web'/name).read_bytes(), mime)
 
     def do_POST(self):
+        self._post_body_read=False
         origin = self.headers.get('Origin')
         if self.path=='/api/connection-switch-owner-check':
             if not self.allowed_host() or os.environ.get('WUJI_FLEET_PARENT') or origin or not hasattr(self.server,'_fleet'):
@@ -2005,6 +2043,7 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 size=int(self.headers.get('Content-Length','0'))
                 if not 0<size<=2048:raise ValueError('Invalid child switch check')
+                self._post_body_read=True
                 payload=json.loads(self.rfile.read(size))
                 if not isinstance(payload,dict) or set(payload)!={'workspace','request_id','attempt_id','expected_owner'}:
                     raise ValueError('Invalid child switch fields')
@@ -2031,6 +2070,7 @@ class Handler(BaseHTTPRequestHandler):
                 length=int(self.headers.get('Content-Length','0'))
                 if not 0<length<=4096 or self.headers.get('Content-Type','').split(';')[0]!='application/json':
                     raise ValueError('Invalid private task request')
+                self._post_body_read=True
                 payload=json.loads(self.rfile.read(length))
                 if not isinstance(payload,dict) or set(payload)!={'expected_context','action','payload'}:
                     raise ValueError('Invalid private task fields')
@@ -2049,6 +2089,8 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError('Invalid request length')
             if self.headers.get('Content-Type', '').split(';')[0] != 'application/json':
                 raise ValueError('JSON required')
+            # A partial/failed read must not wait again for the full body.
+            self._post_body_read=True
             payload=json.loads(self.rfile.read(length))
             if not isinstance(payload,dict):raise ValueError('JSON object required')
             task_scope=self._task_view_headers()
