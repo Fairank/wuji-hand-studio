@@ -34,6 +34,8 @@ class SavedProfileReadyScopeTests(unittest.TestCase):
                 bundle_path=str(Path(folder)/'synthetic.zip'))
             callbacks=[]
             glove=N(lock=threading.RLock(),session=0,stopping=False,_continuation=None)
+            glove.snapshot=lambda:dict(session_id=glove.session,busy=True,
+                session_cleanup=dict(session_id=glove.session,cleanup_confirmed=False))
             def start(bundle,ready,**kwargs):
                 glove.session+=1;glove._continuation=copy.deepcopy(bundle)
                 callbacks.append(ready);return glove.session

@@ -190,7 +190,17 @@ class WorkspaceGroups:
                     if not isinstance(c.get('members'),list) or any(m not in row['members'] for m in c['members']):raise ValueError('Members must belong to the selected workspace')
                     return run.start(c)
                 if name=='ensemble_beat':run.beat(c.get('lease'));return {}
-                if name=='ensemble_stop':return run.stop()
+                if name=='ensemble_stop':
+                    # Automatic page/late-start cleanup owns one reservation.
+                    # The explicit operator Stop remains an unscoped stop.
+                    if 'lease' in c:
+                        with run.lock:
+                            lease=c['lease']
+                            if (not isinstance(lease,str) or not lease.isascii()
+                                    or not secrets.compare_digest(lease,str(run.token))):
+                                raise ValueError('Expired group lease')
+                            return run.stop()
+                    return run.stop()
                 if name in ('ensemble_pause','ensemble_resume'):return run.request_control(name.removeprefix('ensemble_'),c.get('lease'))
             if any(r.snapshot()['active'] for r in self.coordinators.values()):raise ValueError('先停止编组再修改工作区 / Stop groups before editing workspaces')
             if name=='workspace_move':

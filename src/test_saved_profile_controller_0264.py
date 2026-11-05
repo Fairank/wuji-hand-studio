@@ -38,6 +38,8 @@ class SavedControllerTests(unittest.TestCase):
             c.tuning=TuningStore(c.retarget.folder/'official_tuning')
             c.calibration_devices=Mock(return_value=[])
             bridge=N(lock=threading.RLock(),session=10,stopping=False,_continuation=None)
+            bridge.snapshot=lambda:dict(session_id=bridge.session,busy=True,
+                session_cleanup=dict(session_id=bridge.session,cleanup_confirmed=False))
             callbacks=[]
             def start(bundle,callback,expected_profile=None,open_guard=None):
                 bridge.session+=1;bridge._continuation=copy.deepcopy(bundle);callbacks.append(callback);return bridge.session

@@ -118,6 +118,7 @@ class Controller:
         from connection_switch import ConnectionSwitch
         self.connection_switch=ConnectionSwitch(self)
         self.feedback_sessions={}
+        self._retired_feedback_through=-1
         self.sdk_session_configs={}
         from program_runner import ProgramRunner
         self.program=ProgramRunner(self)
@@ -195,6 +196,7 @@ class Controller:
             # and by the Bridge around its final open dispatch.
             with guard():pass
             return self._continuation_model_ready(receipt,_open_guard=guard)
+        Controller._retire_sdk_session_config(self)
         session=self.glove.start_calibrated(bundle,ready,expected_profile=self._continuation_profile,open_guard=guard)
         self.sdk_session_configs[session]=config
         return session
@@ -311,6 +313,7 @@ class Controller:
                         return dict(timeout_ms=timeout_ms,retarget=context['settings'],solver=dict(engine='sdk',values=tuning['values']))
         with self.lock:
             check()
+            Controller._retire_sdk_session_config(self)
             started['session']=self.glove.start_calibrated(private,ready,expected_profile=expected_profile,
                 open_guard=lambda:self.connection_switch.open_guard(attempt))
             self.sdk_session_configs[started['session']]=config
@@ -684,6 +687,31 @@ class Controller:
         else:
             self.state['hardware'].update(ready=False,actions=[])
         self.termination.observe('hand',self.state.get('device_id'),self.state['hardware'],self.session_epochs.get(self.hardware_generation,0))
+
+    def _retire_feedback_sessions(self):
+        """Called under lock; never discard a current or uncertain reader."""
+        pinned={self.generation,self.hardware_generation}
+        if self.hardware_lease:pinned.add(self.hardware_lease_generation)
+        for generation,record in list(self.feedback_sessions.items()):
+            if generation in pinned:continue
+            hardware=record.get('hardware') or {};thread=record.get('thread')
+            if (not all(record.get(key) is True for key in ('worker_closed','reader_finished','transport_closed'))
+                    or thread is None or thread.is_alive()
+                    or hardware.get('active') is not False or hardware.get('stop_confirmed') is not True):continue
+            self.feedback_sessions.pop(generation)
+            self.session_epochs.pop(generation,None)
+            self.session_devices.pop(generation,None)
+            self._retired_feedback_through=max(getattr(self,'_retired_feedback_through',-1),generation)
+
+    def _retire_sdk_session_config(self):
+        """Retain current/unknown SDK ownership; retire one confirmed predecessor."""
+        if not self.sdk_session_configs:return
+        with self.lock:
+            state=self.glove.snapshot();session=state.get('session_id');cleanup=state.get('session_cleanup') or {}
+            if (state.get('busy') is False and type(session) is int
+                    and type(cleanup.get('session_id')) is int and cleanup['session_id']==session
+                    and cleanup.get('cleanup_confirmed') is True):
+                self.sdk_session_configs.pop(session,None)
 
     def send(self, command):
         if self.stdin is None:
@@ -1094,6 +1122,7 @@ class Controller:
                 raise ValueError('先结束其他设备会话或诊断 / Finish the other device session or diagnostics first')
             switch=getattr(self,'connection_switch',None)
             config=switch._config() if switch is not None and name in ('glove_scan','glove_connect') else None
+            if name in ('glove_scan','glove_connect'):Controller._retire_sdk_session_config(self)
             result=self.glove.action(command)
             if config is not None:self.sdk_session_configs[self.glove.session]=config
             if name in {'glove_scan','glove_open','glove_follow','glove_prepare'}:
@@ -1319,6 +1348,7 @@ class Controller:
                 if self.hardware_lease:
                     raise ValueError('启动或停用结果尚未确认，请先核对原设备 / Confirm the original hardware start or stop before reconnecting')
                 self.clear_live()
+                self._retire_feedback_sessions()
                 retained_hardware=copy.deepcopy(self.state['hardware']);retained_hardware_generation=self.hardware_generation
                 self.generation += 1
                 generation = self.generation
@@ -1469,6 +1499,10 @@ class Controller:
                 self.state['sessions'].insert(0, dict(report,workbench_storage=storage) if storage else report)
                 self.state['sessions'] = self.state['sessions'][:20]
                 if not storage:self.log(f"采集已保存：{report['frames']}帧，结束原因 {report['reason']}")
+            # Reports can arrive after a reader's UI lifetime. Retired readers
+            # cannot recreate device/epoch state or a new journal uncertainty.
+            if (generation<=getattr(self,'_retired_feedback_through',-1)
+                    and generation not in self.feedback_sessions and generation not in self.session_epochs):return
             # Late close acknowledgements still belong to the old serial. They
             # may confirm that stop, but must never revive the new connection.
             if event.get('device_id'):self.session_devices[generation]=event['device_id']
@@ -1567,8 +1601,11 @@ class Controller:
                 if client and client.close() is False:raise ValueError('Feedback transport exit is unconfirmed')
                 closed=True
             finally:
-                record=getattr(self,'feedback_sessions',{}).get(generation)
-                if record is not None:record.update(transport_closed=closed,reader_finished=True)
+                with self.lock:
+                    record=getattr(self,'feedback_sessions',{}).get(generation)
+                    if record is not None:
+                        record.update(transport_closed=closed,reader_finished=True)
+                        if closed:record.pop('client',None)
             with self.lock:
                 if generation == self.generation:
                     self.client = self.stdin = None
@@ -1596,7 +1633,9 @@ class Controller:
         thread.join(timeout)
         if not thread.is_alive() and record.get('reader_finished') and not record.get('transport_closed'):
             original=record.get('client')
-            if original is not None and original.close() is not False:record['transport_closed']=True
+            if original is not None and original.close() is not False:
+                with self.lock:
+                    record['transport_closed']=True;record.pop('client',None)
         with self.lock:
             if (thread.is_alive() or not record.get('reader_finished') or not record.get('transport_closed')
                     or not record.get('worker_closed') or (record.get('hardware') or {}).get('active') is not False
