@@ -119,6 +119,15 @@ class GroupCoordinator:
         if errors:raise ValueError('; '.join(errors))
         return out
 
+    @staticmethod
+    def completed_stop(state,token):
+        group=state.get('group') or {};hardware=state.get('hardware') or {}
+        return (group.get('token')==token and group.get('mode')=='hardware'
+            and group.get('phase')=='completed' and group.get('completed') is True
+            and group.get('active') is False and group.get('stop_confirmed') is True
+            and hardware.get('active') is False and hardware.get('stop_confirmed') is True
+            and hardware.get('start_pending',False) is False)
+
     def run(self,spec,token):
         ids=spec['members'];phase='failed';reason='';cleanup=[]
         try:
@@ -154,7 +163,11 @@ class GroupCoordinator:
                 states=list(self.pool.map(self.read,ids));groups=[s.get('group',{}) for s in states]
                 if any(g.get('token')!=token or g.get('phase') in ('failed','idle','preparing') or not g.get('active') and g.get('phase')!='completed' for g in groups):
                     raise ValueError(next((g.get('reason') for g in groups if g.get('reason')),None) or '编组成员中断 / A group member stopped')
-                if spec['mode']=='hardware' and any(s['stale'] or s['connection']!='connected' for s in states):raise ValueError('编组反馈中断 / Group feedback expired')
+                # A current, acknowledged completion is independent of report
+                # I/O delaying later telemetry. Live or uncertain members still
+                # require the unchanged fresh-feedback checks.
+                if spec['mode']=='hardware' and any((s['stale'] or s['connection']!='connected')
+                        and not self.completed_stop(s,token) for s in states):raise ValueError('编组反馈中断 / Group feedback expired')
                 phases=[g['phase'] for g in groups]
                 elapsed=[g.get('elapsed_s',0.) for g in groups]
                 if transition and self.control_complete(groups,transition):

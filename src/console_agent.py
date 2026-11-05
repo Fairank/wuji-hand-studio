@@ -202,9 +202,11 @@ def worker(address, requests, events, motion_factory=HardwareShowcase, prepared=
         return worker_first(address,requests,events)
     hand = sub = diagnostics = motion = protocol_route = ownership = None
     handled_lease = None
-    recorder = Recorder()
+    recorder = Recorder();emit_state=None
     def finish(reason,retry=False):
         if recorder.pending_report is not None and not retry:return
+        if emit_state is not None and (recorder.active or recorder.pending_report is not None):
+            emit_state(time.monotonic())
         try:report = recorder.finish(reason, time.monotonic())
         except (OSError,ValueError,TypeError):
             events.put(dict(type='notice',message='录制摘要尚未保存；已有原始文件保留，请检查存储后点击停止采集重试 / Recording summary is not saved; existing raw files are retained. Check storage, then use Stop recording to retry.'))
@@ -259,6 +261,16 @@ def worker(address, requests, events, motion_factory=HardwareShowcase, prepared=
         joint_rates = JointRates()
         last = time.monotonic()
         last_emit = 0.
+        def emit_state(now):
+            nonlocal last_emit
+            if not motion.active:motion.check_probe_ready(recent[-1] if recent else None,diagnostic,now)
+            events.put(dict(type='state', connection='connected' if recent else 'connecting',
+                message=('正在执行实机动作，画面跟随反馈' if motion.active else '已核对设备身份，正在接收反馈') if recent else '已连接，等待反馈',
+                latest=recent[-1] if recent else None,
+                device_id=device_id, device_version=device_version, joint_rates=joint_rates.snapshot(now),
+                metrics=dict(host_hz=rate(recent, 'host_s'), device_hz=rate(recent, 'device_timestamp_us'), age_ms=(now-last)*1000 if recent else None),
+                recording=recorder.state(),hardware=dict(motion.status(),handled_lease=handled_lease)))
+            last_emit = now
         def receive():
             nonlocal last,diagnostic
             frames,state_empty=drain_available(sub)
@@ -349,6 +361,9 @@ def worker(address, requests, events, motion_factory=HardwareShowcase, prepared=
                 if motion.trial:motion.trial['fault']=motion.latest_observation
                 motion.stop('反馈队列未及时排空，已停止，不能用积压旧帧继续动作')
             if motion.pending_report:
+                # Publish real disable/ownership facts before report formatting,
+                # disk I/O or transport can delay the next feedback state.
+                emit_state(time.monotonic())
                 report=motion.pending_report;motion.pending_report=None
                 if report.get('kind')=='low_current_showcase_trial':report['feedback_tail']=list(recent)[-300:]
                 report.update(id=uuid.uuid4().hex,device_id=device_id,side=selected['side'],generation=selected['generation'])
@@ -361,15 +376,8 @@ def worker(address, requests, events, motion_factory=HardwareShowcase, prepared=
                 finish('completed')
             if now-last > 3:
                 raise RuntimeError('连续3秒没有收到设备反馈，请检查连接')
-            if now-last_emit >= .05:
-                if not motion.active:motion.check_probe_ready(recent[-1] if recent else None,diagnostic,now)
-                events.put(dict(type='state', connection='connected' if recent else 'connecting',
-                    message=('正在执行实机动作，画面跟随反馈' if motion.active else '已核对设备身份，正在接收反馈') if recent else '已连接，等待反馈',
-                    latest=recent[-1] if recent else None,
-                    device_id=device_id, device_version=device_version, joint_rates=joint_rates.snapshot(now),
-                    metrics=dict(host_hz=rate(recent, 'host_s'), device_hz=rate(recent, 'device_timestamp_us'), age_ms=(now-last)*1000 if recent else None),
-                    recording=recorder.state(),hardware=dict(motion.status(),handled_lease=handled_lease)))
-                last_emit = now
+            emit_now=time.monotonic()
+            if emit_now-last_emit >= .05:emit_state(emit_now)
             if motion.active:
                 # Reserve the final 150 us for the next command deadline. This
                 # improves host cadence but is not a real-time OS guarantee.

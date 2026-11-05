@@ -73,6 +73,8 @@ def worker_first(address,requests,events,prepared_hand=None,source=None):
             except Exception as error:reason+='; disable 未确认: '+str(error)
     def finish_record(message,retry=False):
         if getattr(recorder,'pending_report',None) is not None and not retry:return
+        if latest is not None and (recorder.active or getattr(recorder,'pending_report',None) is not None):
+            emit_state(time.monotonic())
         try:report=recorder.finish(message,time.monotonic())
         except (OSError,ValueError,TypeError):
             events.put(dict(type='notice',message='录制摘要尚未保存；已有原始文件保留，请检查存储后点击停止采集重试 / Recording summary is not saved; existing raw files are retained. Check storage, then use Stop recording to retry.'))
@@ -81,6 +83,18 @@ def worker_first(address,requests,events,prepared_hand=None,source=None):
             if report.get('raw_feedback_flush_confirmed') is False:
                 events.put(dict(type='notice',message='录制摘要已保存，但原始数据写入完整性仍未确认 / Recording summary saved; raw feedback completeness remains unconfirmed.'))
             events.put(dict(type='report',report=report))
+    def emit_state(now):
+        nonlocal last_emit
+        span=recent[-1]['host_s']-recent[0]['host_s'] if len(recent)>1 else 0.
+        hz=(len(recent)-1)/span if span>.2 else None
+        rates=[dict(nid=i,host_hz=hz,device_hz=None,age_ms=(now-last)*1000,status='fresh' if now-last<=.1 else 'stale',missing_in_received_frames=0,missing_stream_slots=None,samples=len(recent)) for i in range(20)]
+        hw=dict(active=None if owned and not active else active,ready=False,trial_ready=latest is not None and not owned,probe_ready=False,probe_reason=reason,reason=reason,actions=['open','fist'],trial_controls_version=3,gesture_library_version=1,paused=paused,elapsed_s=elapsed,action=action,trial_phase='LowPass · '+action,trial_amplitude=plan['amplitude'] if plan else None,planned_duration_s=duration,cycles=plan['cycles'] if plan else 1,cycle=1,stop_confirmed=disable_confirmed and not owned,handled_lease=handled_lease,warnings=[],command_timing=dict(requested_hz=PUB_HZ),source='official_hand1_lowpass_adaptation',action_source=SOURCE,diagnostics_available=False,effort_unit='unavailable',kp_kd_applicable=False)
+        if source is not None:
+            hw.update(probe_ready=latest is not None and not owned and now-last<=.1,raw_target_rad=raw_target,applied_target_rad=applied,
+                      action_source='Wuji Glove → RetargetSession → Hand 1 LowPass',hardware_validated=False,
+                      current_limit_A=CURRENT_LIMIT_A,lowpass_cutoff_hz=CUTOFF_HZ,max_velocity_rad_s=min(COMMAND_SPEED_RAD_S,PATH_SPEED_RAD_S))
+            hw['command_timing']['host_publish_hz']=sent/(now-run_started) if active and now-run_started>.2 else None
+        events.put(dict(type='state',connection='connected' if latest else 'connecting',message='一代手反馈 · 设备频率/电流未由此接口提供，显示—',latest=latest,device_id=device_id,device_version=device_version,joint_rates=rates,metrics=dict(host_hz=hz,device_hz=None,age_ms=(now-last)*1000),recording=recorder.state(),hardware=hw));last_emit=now
     try:
         if prepared_hand is not None:hand=prepared_hand
         else:
@@ -152,17 +166,8 @@ def worker_first(address,requests,events,prepared_hand=None,source=None):
                     except Exception as error:stop(str(error))
             if recorder.active and recorder.pending_report is None and now-recorder.started>=recorder.seconds:finish_record('completed')
             if now-last>3:raise RuntimeError('连续3秒无反馈')
-            if now-last_emit>=.05:
-                span=recent[-1]['host_s']-recent[0]['host_s'] if len(recent)>1 else 0.
-                hz=(len(recent)-1)/span if span>.2 else None
-                rates=[dict(nid=i,host_hz=hz,device_hz=None,age_ms=(now-last)*1000,status='fresh' if now-last<=.1 else 'stale',missing_in_received_frames=0,missing_stream_slots=None,samples=len(recent)) for i in range(20)]
-                hw=dict(active=None if owned and not active else active,ready=False,trial_ready=latest is not None and not owned,probe_ready=False,probe_reason=reason,reason=reason,actions=['open','fist'],trial_controls_version=3,gesture_library_version=1,paused=paused,elapsed_s=elapsed,action=action,trial_phase='LowPass · '+action,trial_amplitude=plan['amplitude'] if plan else None,planned_duration_s=duration,cycles=plan['cycles'] if plan else 1,cycle=1,stop_confirmed=disable_confirmed and not owned,handled_lease=handled_lease,warnings=[],command_timing=dict(requested_hz=PUB_HZ),source='official_hand1_lowpass_adaptation',action_source=SOURCE,diagnostics_available=False,effort_unit='unavailable',kp_kd_applicable=False)
-                if source is not None:
-                    hw.update(probe_ready=latest is not None and not owned and now-last<=.1,raw_target_rad=raw_target,applied_target_rad=applied,
-                              action_source='Wuji Glove → RetargetSession → Hand 1 LowPass',hardware_validated=False,
-                              current_limit_A=CURRENT_LIMIT_A,lowpass_cutoff_hz=CUTOFF_HZ,max_velocity_rad_s=min(COMMAND_SPEED_RAD_S,PATH_SPEED_RAD_S))
-                    hw['command_timing']['host_publish_hz']=sent/(now-run_started) if active and now-run_started>.2 else None
-                events.put(dict(type='state',connection='connected' if latest else 'connecting',message='一代手反馈 · 设备频率/电流未由此接口提供，显示—',latest=latest,device_id=device_id,device_version=device_version,joint_rates=rates,metrics=dict(host_hz=hz,device_hz=None,age_ms=(now-last)*1000),recording=recorder.state(),hardware=hw));last_emit=now
+            emit_now=time.monotonic()
+            if emit_now-last_emit>=.05:emit_state(emit_now)
             time.sleep(.0005)
     except Exception as error:events.put(dict(type='error',message=str(error)))
     finally:
