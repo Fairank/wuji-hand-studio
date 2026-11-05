@@ -60,8 +60,9 @@ class PendingStartTests(unittest.TestCase):
                 with self.assertRaises(ValueError):self.c.action(self.command)
 
     def test_acknowledged_rejection_releases_only_this_start(self):
+        lease=self.start()
         self.c.termination.observe('hand','SYNTHETIC-OLDER',{'active':None},0)
-        lease=self.start();self.observe(handled=lease)
+        self.observe(handled=lease)
         self.assertIsNone(self.c.hardware_lease)
         self.assertIs(self.c.snapshot()['hardware']['start_pending'],False)
         self.assertNotIn('handled_lease',self.c.snapshot()['hardware'])
@@ -127,8 +128,10 @@ class PendingStartTests(unittest.TestCase):
         self.assertTrue(self.c.termination.snapshot())
         self.assertIs(self.c.snapshot()['hardware']['start_pending'],True)
 
-    def test_unsent_journal_failure_preserves_prior_evidence_and_allows_explicit_retry(self):
-        self.c.termination.observe('hand','SYNTHETIC-OLDER',{'active':None},0)
+    def test_unsent_journal_failure_preserves_prior_confirmations_and_allows_explicit_retry(self):
+        # Unresolved history now refuses before a start transaction. Preserve
+        # legitimate earlier ACK evidence while exercising an unsent save error.
+        self.c.termination.observe('hand','SYNTHETIC-OLDER',{'active':False,'stop_confirmed':True},0)
         rows=copy.deepcopy(self.c.termination.rows)
         confirmed=dict(self.c.termination.confirmed)
         hardware=copy.deepcopy(self.c.state['hardware'])

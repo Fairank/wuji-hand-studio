@@ -27,6 +27,16 @@ def unconfirmed(state):
     return rows
 
 
+def require_confirmed_stops(journal):
+    """A new motion cannot replace persisted, unresolved disable evidence.
+
+    Read-only recovery and explicit stop commands remain separate. Standalone
+    bridges may have no persistent journal; their live ownership guards remain.
+    """
+    if journal is not None and journal.snapshot():
+        raise ValueError('设备停用结果尚未确认，请先停止并等待原设备确认 / Device disable is unconfirmed; explicitly stop the original device before starting motion')
+
+
 class TerminationJournal:
     def __init__(self, path):
         self.path = Path(path); self.lock = threading.RLock(); self.rows = []; self.next_session=1;self.confirmed={};self.dirty=False;self.write_conflict=False

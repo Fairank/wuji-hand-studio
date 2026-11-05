@@ -42,6 +42,9 @@ class GroupParticipant:
         if not isinstance(token,str) or len(token)!=32:raise ValueError('Invalid group token')
         mode=command.get('mode')
         if mode not in ('preview','hardware'):raise ValueError('Invalid group mode')
+        if mode=='hardware':
+            from device_termination import require_confirmed_stops
+            require_confirmed_stops(getattr(self.c,'termination',None))
         if type(command.get('speed')) not in (int,float) or command['speed'] not in PLAYBACK_SPEEDS:raise ValueError('Invalid speed')
         if type(command.get('cycles')) is not int or command['cycles'] not in (1,3):raise ValueError('Choose one or three cycles')
         if type(command.get('amplitude')) not in (int,float) or command['amplitude'] not in (.25,.5,.75,1.):raise ValueError('Invalid amplitude')

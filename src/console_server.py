@@ -1206,6 +1206,8 @@ class Controller:
                     raise ValueError('先连接左手并等待实时反馈')
                 name=command['name']
                 if name in {'hardware_start','hardware_probe','hardware_trial'}:
+                    from device_termination import require_confirmed_stops
+                    require_confirmed_stops(self.termination)
                     hardware=self.state['hardware']
                     if hardware.get('active') is not False:raise ValueError('实机动作进行中或停用状态待确认')
                     if self.hardware_lease:raise ValueError('已有实机启动请求，请等待或先停止')
@@ -1257,6 +1259,7 @@ class Controller:
                     # fails, restore only this locked journal transaction and
                     # retain its dirty/error evidence for a later save retry.
                     with self.termination.lock:
+                        require_confirmed_stops(self.termination)
                         prior_rows=copy.deepcopy(self.termination.rows)
                         prior_confirmed=dict(self.termination.confirmed)
                         try:self.termination.observe('hand',self.state.get('device_id'),pending,
