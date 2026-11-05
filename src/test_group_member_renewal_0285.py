@@ -14,20 +14,41 @@ import test_group_abort_owner_0284 as status_fixture
 
 
 class Status(status_fixture.Transport):
-    def __init__(self,serial,side):super().__init__(serial);self.side=side
+    def __init__(self,serial,side):
+        super().__init__(serial);self.side=side
+        self.status_lock=threading.RLock();self.last_hardware=(False,False)
+
+    def exec_command(self,command,timeout=None):
+        stream,output,errors=super().exec_command(command,timeout);lock=self.status_lock
+        class Input:
+            def write(self,text):
+                with lock:return stream.write(text)
+            def flush(self):
+                with lock:return stream.flush()
+        return Input(),output,errors
+
+    def ready(self,*,active=False,confirmed=False):
+        with self.status_lock:return super().ready(active=active,confirmed=confirmed)
+
+    def refresh(self):
+        # Repeat the synthetic SDK's last emitted state, not the desktop's
+        # lease before its reader has consumed a newly emitted stop ACK.
+        with self.status_lock:self.ready(active=self.last_hardware[0],confirmed=self.last_hardware[1])
 
     def emit(self,event):
-        event=copy.deepcopy(event)
-        if event.get('type')=='identity':event['profile']='hand2_'+self.side
-        if event.get('type')=='state':
-            token=next((row.get('group_sync',{}).get('token') for row in reversed(self.sent)
-                        if row.get('name')=='hardware_trial'),None)
-            if token:
+        with self.status_lock:
+            event=copy.deepcopy(event)
+            if event.get('type')=='identity':event['profile']='hand2_'+self.side
+            if event.get('type')=='state':
                 hardware=event['hardware'];active=hardware['active']
-                hardware['group_sync']=dict(token=token,mode='hardware',phase='ready' if active else 'completed',
-                    active=active,stop_confirmed=hardware['stop_confirmed'],completed=not active,
-                    timing=dict(entry_s=1,body_s=1,exit_s=1,hold_s=.2),clock_s=time.monotonic(),clock_id='synthetic-renewal')
-        return super().emit(event)
+                self.last_hardware=(active,hardware['stop_confirmed'])
+                token=next((row.get('group_sync',{}).get('token') for row in reversed(self.sent)
+                            if row.get('name')=='hardware_trial'),None)
+                if token:
+                    hardware['group_sync']=dict(token=token,mode='hardware',phase='ready' if active else 'completed',
+                        active=active,stop_confirmed=hardware['stop_confirmed'],completed=not active,
+                        timing=dict(entry_s=1,body_s=1,exit_s=1,hold_s=.2),clock_s=time.monotonic(),clock_id='synthetic-renewal')
+            return super().emit(event)
 
 
 class MemberRenewalTests(unittest.TestCase):
@@ -56,9 +77,7 @@ class MemberRenewalTests(unittest.TestCase):
                 def feed():
                     while not stop.wait(.02):
                         for ident,transport in transports.items():
-                            c=controllers[ident]
-                            transport.ready(active=bool(transport.lease and c.hardware_lease),
-                                confirmed=bool(transport.disable_receipts and not c.hardware_lease))
+                            transport.refresh()
                 if mode=='hardware':feeder=threading.Thread(target=feed);feeder.start()
                 def hold_response(ident,command):
                     should_hold=command['name']==hold and (hold_all or ident==str(count-1))

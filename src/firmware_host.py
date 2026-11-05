@@ -21,7 +21,7 @@ from cli_coordination import atomic, gate, identity, release, reservation, reser
 SERIAL = re.compile(r'[A-Za-z0-9][A-Za-z0-9_-]{0,79}\Z')
 KINDS = {'firmware_check', 'firmware', 'sdk_check', 'sdk_update'}
 SAFE_ACTIONS = {'disconnect', 'hardware_stop', 'glove_stop', 'glove_disconnect',
-    'calibration_cancel', 'program_stop', 'group_stop', 'demo_stop', 'official_viz_stop',
+    'calibration_cancel', 'program_stop', 'group_stop', 'group_abort', 'demo_stop', 'official_viz_stop',
     'session_keepalive', 'hardware_keepalive', 'glove_keepalive', 'program_keepalive', 'group_beat'}
 
 

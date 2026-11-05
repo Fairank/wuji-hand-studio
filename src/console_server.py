@@ -889,7 +889,7 @@ class Controller:
             return dict(official_viz=self.official_viz.stop())
         from cli_coordination import gate,enforce
         # Stop/close must remain available while a component owns the gate.
-        if isinstance(command,dict) and command.get('name') in {'session_close','disconnect','hardware_stop','glove_stop','glove_disconnect','calibration_cancel','calibration_terminal_input','program_stop','group_stop'}:
+        if isinstance(command,dict) and command.get('name') in {'session_close','disconnect','hardware_stop','glove_stop','glove_disconnect','calibration_cancel','calibration_terminal_input','program_stop','group_stop','group_abort'}:
             return self._coordinated_action(command)
         with gate():
             from firmware_host import enforce_maintenance
@@ -983,7 +983,7 @@ class Controller:
             if self.program.snapshot()['paused']:
                 from program_runner import ProgramEntryPaused
                 raise ProgramEntryPaused('Playlist is paused before the next entry')
-        if getattr(self,'desktop_closing',False) and name not in {'disconnect','hardware_stop','glove_stop','glove_disconnect','glove_keepalive','hardware_keepalive','demo_stop','calibration_cancel','group_stop','program_stop'}:
+        if getattr(self,'desktop_closing',False) and name not in {'disconnect','hardware_stop','glove_stop','glove_disconnect','glove_keepalive','hardware_keepalive','demo_stop','calibration_cancel','group_stop','group_abort','program_stop'}:
             raise ValueError('会话正在结束，请稍候 / Session is closing; please wait')
         if name.startswith('group_'):
             return dict(group=self.group.handle(command))
