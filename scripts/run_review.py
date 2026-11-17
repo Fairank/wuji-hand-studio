@@ -157,9 +157,10 @@ def python_worker(out):
         if not Path(path).resolve().is_relative_to((out/'isolation').resolve()):
             raise RuntimeError('App state escaped review isolation: '+str(path))
     suite=unittest.defaultTestLoader.discover(str(ROOT/'src'),pattern='test_*.py')
-    faulthandler.dump_traceback_later(180,repeat=True)
-    try:result=unittest.TextTestRunner(verbosity=2).run(suite)
-    finally:faulthandler.cancel_dump_traceback_later()
+    # The parent already bounds this worker. Avoid an asynchronous watchdog
+    # reading frames while other threads are replacing or freeing them.
+    faulthandler.enable(all_threads=False)
+    result=unittest.TextTestRunner(verbosity=2).run(suite)
     report={'tests':result.testsRun,'failures':len(result.failures),'errors':len(result.errors),
             'skipped':len(result.skipped),'successful':result.wasSuccessful() and not blocked,
             'blocked_operations':blocked,'isolated_environment':{k:str(v) for k,v in roots.items()},

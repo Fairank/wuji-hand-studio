@@ -17,12 +17,20 @@ from test_sdk_lifecycle import proof_fixture, release_fixture
 
 
 class GloveColdJournalGuardTests(unittest.TestCase):
+    def setUp(self):
+        # These cases test journal identity at one fresh feedback instant.
+        # Real disk scheduling must not advance the synthetic signal's clock;
+        # dedicated feedback tests exercise the unchanged expiry guards.
+        self.clock=Mock(wraps=time);self.clock.monotonic.return_value=100.
+        clock_patch=patch('glove_bridge.time',self.clock)
+        clock_patch.start();self.addCleanup(clock_patch.stop)
+
     def bridge(self, journal=None, serial='CURRENT-HAND'):
         bridge=GloveBridge(Mock(side_effect=AssertionError('No transport open')),journal,
                            release_resolver=release_fixture)
         bridge.thread=SimpleNamespace(is_alive=lambda:True)
         bridge.stdin=io.StringIO()
-        bridge.last_update=time.monotonic()
+        bridge.last_update=self.clock.monotonic()
         bridge.state.update(connection='receiving',profile='hand2_left',glove_serial='GLOVE-A',
             user={'user_id':'person-A'},can_prepare=True,
             stream=dict(fresh=True,age_ms=0,timeout_ms=250,solver=dict(engine='sdk',applied=True)),

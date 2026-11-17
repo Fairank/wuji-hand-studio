@@ -63,9 +63,16 @@ class MemberRenewalTests(unittest.TestCase):
                 post_hook=None,read_hook=None):
         controllers={};transports={};calls=[];release=threading.Event();held=threading.Event()
         stop=threading.Event();ui_stop=threading.Event();lock=threading.Lock();held_ids=set();ui=[];reads=[]
-        coordinator=None;feeder=None;heartbeat=None
+        coordinator=None;feeder=None;heartbeat=None;feeding=[]
         with tempfile.TemporaryDirectory() as folder,patch('managed_runtime.registered',return_value=None):
             try:
+                def feed():
+                    while not stop.wait(.02):
+                        with lock:current=tuple(feeding)
+                        for transport in current:transport.refresh()
+                # Connected synthetic workers emit continuously, including
+                # while the later participants finish their own setup.
+                if mode=='hardware':feeder=threading.Thread(target=feed);feeder.start()
                 for index in range(count):
                     ident=str(index);side='left' if index%2==0 else 'right'
                     transport=Status('SYNTHETIC-RENEWAL-'+ident,side);transports[ident]=transport
@@ -74,11 +81,10 @@ class MemberRenewalTests(unittest.TestCase):
                     if mode=='hardware':
                         c.action(dict(name='connect',serial=transport.serial))
                         self.wait(lambda:c.state['connection']=='connected','Synthetic feedback connection failed')
-                def feed():
-                    while not stop.wait(.02):
-                        for ident,transport in transports.items():
-                            transport.refresh()
-                if mode=='hardware':feeder=threading.Thread(target=feed);feeder.start()
+                        with lock:feeding.append(transport)
+                if mode=='hardware':
+                    self.wait(lambda:all(not c.snapshot()['stale'] for c in controllers.values()),
+                        'Synthetic feedback readers did not become fresh before group start')
                 def hold_response(ident,command):
                     should_hold=command['name']==hold and (hold_all or ident==str(count-1))
                     if should_hold:
@@ -168,6 +174,24 @@ class MemberRenewalTests(unittest.TestCase):
 
     def test_eight_occupied_arm_workers_cannot_starve_independent_renewals(self):
         self.assert_response_hold(count=8,hold='group_arm',hold_all=True)
+
+    def test_slow_eight_member_setup_keeps_earlier_feedback_fresh_before_start(self):
+        action=Controller.action;refresh=Status.refresh;first=[True];start=GroupCoordinator.start;observed=[]
+        def delayed_action(controller,command):
+            result=action(controller,command)
+            if command.get('name')=='connect':time.sleep(.12)
+            return result
+        def delayed_first_refresh(transport):
+            if first[0]:first[0]=False;time.sleep(.4)
+            return refresh(transport)
+        def checked_start(coordinator,command):
+            states=[coordinator.read(ident) for ident in command['members']]
+            observed.extend(states)
+            self.assertTrue(all(not state['stale'] for state in states))
+            return start(coordinator,command)
+        with patch.object(Controller,'action',delayed_action),patch.object(Status,'refresh',delayed_first_refresh),patch.object(GroupCoordinator,'start',checked_start):
+            with self.members(count=8,hold=None):pass
+        self.assertEqual(len(observed),8)
 
     def test_prepare_not_yet_applied_never_receives_a_phantom_heartbeat(self):
         with self.members(hold='group_prepare',hold_before=True) as fixture:

@@ -169,13 +169,20 @@ def select():
     save_config(dict(DEFAULT,mode='wsl',agent_directory=AGENT,python=PYTHON,cli=CLI))
 
 class Files:
-    def __init__(self):self.root=Path('\\\\wsl.localhost')/NAME/'opt/hand-workbench'
+    def __init__(self):
+        self.root=Path('\\\\wsl.localhost')/NAME/'opt/hand-workbench'
+        self._resolved_root=None;self._root_lock=threading.Lock()
     def path(self,value):
         p=PurePosixPath(value)
         if not p.is_absolute() or '..' in p.parts or not p.is_relative_to(AGENT) or '\\' in str(p):raise ValueError('Path escapes the control environment')
         result=self.root.joinpath(*p.relative_to(AGENT).parts)
-        # Do not permit an in-runtime symlink to cross the owned controller tree.
-        if not result.resolve().is_relative_to(self.root.resolve()):raise ValueError('Controller path is a link outside its directory')
+        # Pin the owned root once: UNC normalization is expensive, and a root
+        # redirect must not move this Files instance's original scope. Resolve
+        # each requested target afresh so a later symlink still fails closed.
+        with self._root_lock:
+            if self._resolved_root is None:self._resolved_root=self.root.resolve()
+            resolved_root=self._resolved_root
+        if not result.resolve().is_relative_to(resolved_root):raise ValueError('Controller path is a link outside its directory')
         return result
     def open(self,path,mode):return self.path(path).open(mode)
     def posix_rename(self,a,b):self.path(a).replace(self.path(b))

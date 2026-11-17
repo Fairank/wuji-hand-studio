@@ -1,6 +1,7 @@
 """Review runner contracts; only temporary files and synthetic Python children."""
 import importlib.util
 import io
+import json
 from contextlib import redirect_stdout
 import os
 from pathlib import Path
@@ -8,6 +9,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import textwrap
 import unittest
 
 
@@ -95,6 +97,46 @@ class ReviewRunnerTests(unittest.TestCase):
             result=self.runner.run_command([sys.executable,'-c',"print('synthetic failure'); raise SystemExit(3)"],log,root,dict(os.environ))
             self.assertEqual(result['returncode'],3)
             self.assertIn('synthetic failure',log.read_text(encoding='utf8'))
+
+    def test_python_worker_uses_current_thread_fault_diagnostics_without_a_watchdog(self):
+        # Run the actual worker in a child: its audit hook and environment must
+        # remain isolated, while only the unsafe native watchdog is substituted.
+        runner=Path(__file__).with_name('run_review.py').resolve()
+        child=textwrap.dedent('''
+            import importlib.util,json,sys,unittest
+            from pathlib import Path
+            from unittest.mock import patch
+            path=Path(sys.argv[1]);out=Path(sys.argv[2]);fail=sys.argv[3]=='1'
+            spec=importlib.util.spec_from_file_location('worker_contract',path)
+            runner=importlib.util.module_from_spec(spec);spec.loader.exec_module(runner)
+            with patch.object(runner.faulthandler,'dump_traceback_later') as watchdog, \
+                 patch.object(runner.faulthandler,'cancel_dump_traceback_later'), \
+                 patch.object(runner.faulthandler,'enable') as diagnostics:
+                class Probe(unittest.TestCase):
+                    def runTest(self):
+                        watchdog.assert_not_called()
+                        diagnostics.assert_called_once_with(all_threads=False)
+                        if fail:self.fail('Synthetic failure must remain a failure')
+                suite=unittest.TestSuite([Probe()])
+                with patch.object(runner.unittest.defaultTestLoader,'discover',return_value=suite):
+                    code=runner.python_worker(out)
+                report=json.loads((out/'python.json').read_text('utf8'))
+                assert code==int(fail),(code,report)
+                assert report['tests']==1 and report['failures']==int(fail) and report['errors']==0,report
+                assert report['successful'] is (not fail) and not report['blocked_operations'],report
+                watchdog.assert_not_called()
+            raise SystemExit(code)
+        ''')
+        for fail in (False,True):
+            with self.subTest(failing_suite=fail),tempfile.TemporaryDirectory() as folder:
+                result=subprocess.run([sys.executable,'-c',child,str(runner),folder,str(int(fail))],
+                    cwd=folder,env=dict(os.environ),capture_output=True,text=True,encoding='utf8',
+                    errors='replace',timeout=20,check=False)
+                report=json.loads((Path(folder)/'python.json').read_text('utf8'))
+                self.assertEqual(report['successful'],not fail,result.stdout+result.stderr)
+                self.assertEqual(report['failures'],int(fail),result.stderr)
+                self.assertEqual(report['errors'],0,result.stderr)
+                self.assertEqual(result.returncode,int(fail),result.stdout+result.stderr)
 
     def test_unicode_failure_keeps_utf8_log_and_status_on_an_ascii_console(self):
         with tempfile.TemporaryDirectory() as folder:
