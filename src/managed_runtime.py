@@ -1,6 +1,7 @@
 """One owned WSL2 distribution. No SSH, passwords, global WSL settings or autostart motors."""
 import hashlib,json,os,secrets,shutil,subprocess,sys,threading,time
-from pathlib import Path,PurePosixPath
+from pathlib import Path,PurePosixPath,PureWindowsPath
+import re
 from user_dirs import user_data_dir
 from runtime_paths import RESOURCE
 
@@ -184,6 +185,38 @@ class Files:
             resolved_root=self._resolved_root
         if not result.resolve().is_relative_to(resolved_root):raise ValueError('Controller path is a link outside its directory')
         return result
+    def verify_existing_bundle(self,target,expected):
+        """Hash an existing exact bundle inside Linux, not once per UNC file."""
+        owned=Path('\\\\wsl.localhost')/NAME/'opt/hand-workbench'
+        if self.root!=owned:return None  # Local fixtures/other file transports retain their original path checks.
+        if (not isinstance(target,str) or not re.fullmatch(re.escape(AGENT)+r'/code/[a-f0-9]{16}',target)
+                or not isinstance(expected,dict) or not expected):raise ValueError('Invalid controller bundle verification request')
+        for name,digest in expected.items():
+            if (not isinstance(name,str) or not name or PurePosixPath(name).is_absolute()
+                    or '..' in PurePosixPath(name).parts or PurePosixPath(name).as_posix()!=name or '\\' in name or '\0' in name
+                    or not isinstance(digest,str) or not re.fullmatch(r'[a-f0-9]{64}',digest)):
+                raise ValueError('Invalid controller bundle verification member')
+        # Retain the existing pinned-root/target guard across the process
+        # boundary. A later redirect must match this original resolved scope.
+        self.path(target+'/bundle.json')
+        resolved=PureWindowsPath(str(self._resolved_root));drive=resolved.drive
+        if drive.lower().startswith('\\\\?\\unc\\'):drive='\\\\'+drive[8:]
+        if drive.casefold() not in {('\\\\wsl.localhost\\'+NAME).casefold(),('\\\\wsl$\\'+NAME).casefold()}:
+            raise ValueError('Controller root is outside the owned distribution')
+        scope='/'+('/'.join(resolved.parts[1:]))
+        from controller_bundle import VERIFY_BUNDLE_SCRIPT
+        request=dict(target=target,scope=scope,expected=expected)
+        try:
+            result=subprocess.run(args(['/usr/bin/python3','-I','-c',VERIFY_BUNDLE_SCRIPT]),input=json.dumps(request).encode('utf8'),
+                capture_output=True,timeout=30,creationflags=subprocess.CREATE_NO_WINDOW)
+        except subprocess.TimeoutExpired as error:raise RuntimeError('Controller bundle verification timed out') from error
+        if result.returncode:raise ValueError('Controller bundle verification failed: '+_decode(result.stderr)[-500:])
+        try:reply=json.loads(result.stdout)
+        except (ValueError,UnicodeError) as error:raise ValueError('Invalid controller bundle verification response') from error
+        if (not isinstance(reply,dict) or set(reply)!={'version','status','target'} or type(reply['version']) is not int
+                or reply['version']!=1 or reply['target']!=target or reply['status'] not in ('verified','missing')):
+            raise ValueError('Invalid controller bundle verification response')
+        return reply['status']=='verified'
     def open(self,path,mode):return self.path(path).open(mode)
     def posix_rename(self,a,b):self.path(a).replace(self.path(b))
     def listdir(self,path):return [p.name for p in self.path(path).iterdir()]

@@ -33,8 +33,11 @@ def _command(command):
 
 
 def _metadata(command,profile,side):
+    return _model_metadata(command('user','show'),profile,side)
+
+
+def _model_metadata(value,profile,side):
     from calibration_guided import validate_profile
-    value=command('user','show')
     if profile is None:profile=value.get('name') if isinstance(value,dict) else None
     if not isinstance(profile,str) or not PROFILE.fullmatch(profile) or profile.lower()=='default':
         raise SavedCalibrationUnavailable('请先选择已标定的命名佩戴者，或进行标定 / Select a calibrated named wearer or calibrate first')
@@ -143,3 +146,27 @@ def verify_saved_snapshot(proof,*,json_command=None,registry=None,cancel_check=N
 def prepare_saved_profile(proof,*,json_command=None,registry=None,cancel_check=None):
     verify_saved_snapshot(proof,json_command=json_command,registry=registry,cancel_check=cancel_check)
     return copy.deepcopy(proof)
+
+
+def _prepare_pinned_saved_profile(proof,*,registry=None,cancel_check=None):
+    """Reuse only the private preflight pin inside one exact switch attempt.
+
+    This prepares no live-data receipt. The controller still re-exports and
+    verifies current identity/model bytes in its final model-ready callback,
+    before dispatching glove_open. Independent public prepares stay strict.
+    """
+    from calibration_portability import CONTEXT_FIELDS,validate_continuation
+    if not isinstance(proof,dict) or proof.get('source_kind')!='saved_profile' or proof.get('expected_revision')!=_revision(proof):
+        raise ValueError('Saved calibration proof changed; select the wearer again')
+    validate_continuation({key:proof[key] for key in CONTEXT_FIELDS|{'source_kind','transfer_id','bundle_path'}},path=True)
+    _check(cancel_check)
+    expected=dict(user_id=proof['source_user_id'],display_name=proof['source_profile'])
+    require_sdk_user(read_current_sdk_user(proof['source_profile'],registry=registry),expected,proof['source_profile'])
+    _,_,name,size=_model_metadata(proof['_metadata'],proof['source_profile'],proof['side'])
+    original=_archive(Path(proof['bundle_path']),name,size)
+    if any(original[key]!=proof[key] for key in original):
+        raise ValueError('Saved calibration archive changed; select the wearer again')
+    require_sdk_user(read_current_sdk_user(proof['source_profile'],registry=registry),expected,proof['source_profile'])
+    prepared=copy.deepcopy(proof)
+    _check(cancel_check)
+    return prepared

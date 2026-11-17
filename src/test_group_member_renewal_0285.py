@@ -61,7 +61,7 @@ class MemberRenewalTests(unittest.TestCase):
     @contextmanager
     def members(self,*,count=2,mode='hardware',hold='group_arm',hold_all=False,hold_before=False,
                 post_hook=None,read_hook=None):
-        controllers={};transports={};calls=[];release=threading.Event();held=threading.Event()
+        controllers={};transports={};calls=[];dispatches=[];release=threading.Event();held=threading.Event()
         stop=threading.Event();ui_stop=threading.Event();lock=threading.Lock();held_ids=set();ui=[];reads=[]
         coordinator=None;feeder=None;heartbeat=None;feeding=[]
         with tempfile.TemporaryDirectory() as folder,patch('managed_runtime.registered',return_value=None):
@@ -94,6 +94,7 @@ class MemberRenewalTests(unittest.TestCase):
                         if not release.wait(5):raise AssertionError('Synthetic response hold watchdog')
                 def post(ident,command):
                     if hold_before:hold_response(ident,command)
+                    with lock:dispatches.append((ident,copy.deepcopy(command),time.monotonic()))
                     result=controllers[ident].action(command)
                     with lock:
                         calls.append((ident,copy.deepcopy(command),time.monotonic()))
@@ -118,8 +119,8 @@ class MemberRenewalTests(unittest.TestCase):
                         try:coordinator.beat(token);ui.append(time.monotonic())
                         except ValueError:return
                 heartbeat=threading.Thread(target=ui_heartbeat);heartbeat.start()
-                yield dict(coordinator=coordinator,controllers=controllers,transports=transports,calls=calls,
-                    release=release,held=held,stop=stop,ui_stop=ui_stop,ui=ui,token=token,lock=lock,reads=reads,spec=spec)
+                yield dict(coordinator=coordinator,controllers=controllers,transports=transports,calls=calls,dispatches=dispatches,
+                    release=release,held=held,stop=stop,ui_stop=ui_stop,heartbeat=heartbeat,ui=ui,token=token,lock=lock,reads=reads,spec=spec)
             finally:
                 release.set()
                 if coordinator:
@@ -232,11 +233,16 @@ class MemberRenewalTests(unittest.TestCase):
     def test_ui_expiry_is_not_hidden_by_a_live_member_renewal_lane(self):
         with self.members() as fixture:
             self.assertTrue(fixture['held'].wait(3));fixture['ui_stop'].set()
-            cutoff=fixture['coordinator'].heartbeat+.8
+            # A beat that already passed wait() may still update the lease.
+            # Freeze the producer before measuring its final expiry boundary.
+            fixture['heartbeat'].join(2)
+            self.assertFalse(fixture['heartbeat'].is_alive(),'Synthetic UI heartbeat did not exit')
+            with fixture['coordinator'].lock:cutoff=fixture['coordinator'].heartbeat+.8
             time.sleep(1.05);fixture['release'].set();fixture['coordinator'].thread.join(4)
             result=fixture['coordinator'].snapshot()
             self.assertEqual(result['phase'],'failed');self.assertIn('UI lease expired',result['reason'])
-            self.assertTrue(all(stamp<=cutoff+.04 for _,command,stamp in fixture['calls'] if command['name']=='group_beat'))
+            # Response processing may finish later than an authorized dispatch.
+            self.assertTrue(all(stamp<=cutoff+.04 for _,command,stamp in fixture['dispatches'] if command['name']=='group_beat'))
             self.assertEqual(result['stop_unconfirmed'],[])
 
     def test_known_member_heartbeat_failure_is_reported_after_all_member_cleanup(self):

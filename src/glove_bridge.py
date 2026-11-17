@@ -590,6 +590,8 @@ class GloveBridge:
                         self._cleanup_error='灵巧手停用尚未确认，未切换会话 / Hand disable is unconfirmed; session was not switched'
                     if self._cleanup_error:
                         self.state.update(connection='error',message=self._cleanup_error)
+                    elif self._cleanup_ack is not None and cleanup_confirmed(self._cleanup_ack):
+                        self._open_pending=False
             self.remember_termination()
 
     def run(self):

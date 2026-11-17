@@ -260,12 +260,12 @@ class Controller:
             return proof
 
     def _prepare_saved_profile(self,proof,*,cancel_check=None):
-        from saved_calibration import prepare_saved_profile
+        from saved_calibration import _prepare_pinned_saved_profile
         scope=self._saved_profile_scope(proof,internal=True);config=self.connection_switch._config()
         def check():
             if cancel_check is not None:cancel_check()
             self._saved_profile_scope(proof,attempt=scope['attempt_id'],config=config)
-        return prepare_saved_profile(proof,cancel_check=check)
+        return _prepare_pinned_saved_profile(proof,cancel_check=check)
 
     def _start_saved_profile_session(self,bundle,proof,*,expected_profile,timeout_ms=250):
         from calibration_portability import CONTEXT_FIELDS,validate_continuation

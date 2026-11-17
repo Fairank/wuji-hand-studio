@@ -102,6 +102,11 @@ def self_check():
     return 0 if data['ok'] else 1
 
 def main():
+    if '--native-viz-worker' in sys.argv:
+        from official_visualization import native_worker_main
+        try:code=native_worker_main(sys.argv[sys.argv.index('--native-viz-worker')+1:])
+        except Exception:code=1
+        os._exit(code)
     if '--jsonl-software-check' in sys.argv:
         from native_calibration import terminal_software_check
         try:code=terminal_software_check(sys.argv[sys.argv.index('--jsonl-software-check')+1],guided=True)

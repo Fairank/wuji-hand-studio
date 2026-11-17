@@ -200,8 +200,24 @@ class OwnedUpdateTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             path,release=self.wheel(folder);root,env,site,user,cli=self.environment(folder)
             run=self.runner(proof_fixture('2026.9.22'),proof_fixture(),RuntimeError('synthetic ABI failure'),proof_fixture('2026.9.22'))
-            with self.assertRaises(updates.SDKUpdateError) as caught:updates.apply(path,release,'wsl',root,run=run)
-            self.assertTrue(caught.exception.rollback_confirmed);self.assertTrue(caught.exception.switched)
+            # Keep the real filesystem operations and all rollback assertions.
+            # If Windows rejects a move or receipt write, retain that original
+            # error instead of reporting only the outer boolean assertion.
+            filesystem_errors=[];rename=Path.rename;atomic_json=updates._atomic_json
+            def observed_rename(source,target):
+                try:return rename(source,target)
+                except OSError as error:
+                    filesystem_errors.append(('rename',str(source),str(target),repr(error)));raise
+            def observed_receipt(target,value):
+                try:return atomic_json(target,value)
+                except OSError as error:
+                    filesystem_errors.append(('receipt',str(target),value.get('phase'),repr(error)));raise
+            with patch.object(Path,'rename',observed_rename),patch.object(updates,'_atomic_json',observed_receipt),self.assertRaises(updates.SDKUpdateError) as caught:
+                updates.apply(path,release,'wsl',root,run=run)
+            detail=dict(cause=repr(caught.exception.__cause__),proof_calls=run.call_count,filesystem_errors=filesystem_errors)
+            self.assertTrue(caught.exception.rollback_confirmed,detail);self.assertTrue(caught.exception.switched,detail)
+            self.assertEqual(run.call_count,4,detail)
+            self.assertEqual(run.call_args.args[0][0],str(env/'bin/python'),detail)
             self.assertEqual((site/'wuji_sdk/__init__.py').read_bytes(),b'old SDK');self.assertEqual((user/'model.urdf').read_bytes(),b'PERSONAL MODEL')
 
     def test_rollback_proof_failure_stays_unknown_for_host_interlock(self):

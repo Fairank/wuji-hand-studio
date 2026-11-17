@@ -1,6 +1,8 @@
 """Exact Viewer handover tests; all processes, jobs, profiles and devices fake."""
 from contextlib import contextmanager,ExitStack
 import copy
+import io
+import json
 import os
 from pathlib import Path
 import tempfile
@@ -25,7 +27,7 @@ TEST_TEMP.mkdir(parents=True,exist_ok=True)
 
 class HandoverTests(unittest.TestCase):
     @contextmanager
-    def environment(self,side='left'):
+    def environment(self,side='left',*,exit_ack=True):
         with tempfile.TemporaryDirectory(dir=TEST_TEMP) as folder,ExitStack() as stack:
             stack.enter_context(patch.dict(os.environ,WUJI_OFFICIAL_CLI_DATA=folder))
             who=lambda pid:'live' if pid==os.getpid() else 'foreign'
@@ -34,10 +36,23 @@ class HandoverTests(unittest.TestCase):
             recover=stack.enter_context(patch('windows_process_job.recover_viz_job',return_value=True))
             stack.enter_context(patch('managed_runtime.status',return_value={'busy':False}))
             viewer=visualization.OfficialVisualization(folder)
-            viewer.token=TOKEN;viewer.process=N(poll=Mock(return_value=None))
-            viewer.native_job=N(close=Mock(return_value=True),terminate_and_wait=Mock(return_value=True))
-            job=viewer.native_job
-            viewer.thread=N(is_alive=Mock(return_value=False),join=Mock())
+            viewer.token=TOKEN
+            cancelled=threading.Event();reader_waiting=threading.Event();exited=[False]
+            class WorkerInput(io.StringIO):
+                def flush(inner):
+                    super().flush()
+                    self.assertEqual(json.loads(inner.getvalue()),{'type':'cancel'})
+                    cancelled.set()
+            def output():
+                reader_waiting.set()
+                if not cancelled.wait(30):raise AssertionError('Synthetic Viewer did not receive cancellation')
+                if exit_ack:yield json.dumps(dict(type='exit',exitstatus=0))+'\n'
+            def wait(timeout=None):exited[0]=True;return 0
+            process=N(stdin=WorkerInput(),stdout=output(),stderr=io.StringIO(),
+                poll=lambda:0 if exited[0] else None,wait=wait)
+            job=N(process=process,close=Mock(return_value=True),terminate_and_wait=Mock(return_value=True),active_processes=Mock(return_value=0))
+            stack.enter_context(patch('native_cli.prepare',return_value={'version':'2026.10.12','binary':'SYNTHETIC-NOT-EXECUTED.exe'}))
+            stack.enter_context(patch('windows_process_job.OwnedProcess',return_value=job))
             relay=N(source='synthetic',close=Mock(return_value=True));viewer.transport=relay
             reported={'sn':SN,'model':'Wuji Glove'}
             if side is not None:reported['handedness']=side
@@ -73,8 +88,17 @@ class HandoverTests(unittest.TestCase):
                 calibration.run['status']='cancelling'
                 return {'run':copy.deepcopy(calibration.run)}
             calibration.cancel.side_effect=cancel
-            yield N(folder=Path(folder),viewer=viewer,job=job,relay=relay,marker=marker,base=base,
-                controller=controller,calibration=calibration,service=service,server=server,recover=recover)
+            # Exercise the actual host JSONL parser and finalizer. The fake
+            # child reports exit zero only after it receives the real cancel
+            # command; no fixture grants native_release in advance.
+            viewer.thread=threading.Thread(target=viewer._run_native,args=(SN,'light'),daemon=True)
+            viewer.thread.start();self.assertTrue(reader_waiting.wait(2))
+            try:
+                yield N(folder=Path(folder),viewer=viewer,job=job,relay=relay,marker=marker,base=base,
+                    controller=controller,calibration=calibration,service=service,server=server,recover=recover)
+            finally:
+                cancelled.set();viewer.thread.join(3)
+                self.assertFalse(viewer.thread.is_alive(),'Synthetic Viewer reader must exit')
 
     def command(self,**changes):
         return {'name':'calibration_handover','serial':SN,'viewer_token':TOKEN,'interface':'guided',
@@ -93,8 +117,9 @@ class HandoverTests(unittest.TestCase):
             self.assertFalse(result['calibration_connection']['busy'])
             self.assertEqual(result['calibration']['run']['serial'],SN)
             self.assertEqual(coordination.reservation(e.folder),{})
-            self.assertEqual(e.recover.call_args.args[0],e.marker['job_name'])
-            e.job.terminate_and_wait.assert_called_once();e.relay.close.assert_called_once()
+            e.recover.assert_not_called()
+            e.job.terminate_and_wait.assert_not_called();e.relay.close.assert_called_once()
+            self.assertTrue(e.viewer.native_cancel_sent);self.assertEqual(e.viewer.state['native_release'],'graceful')
 
     def test_terminal_unknown_reported_side_requires_explicit_side(self):
         with self.environment(side=None) as e:
@@ -195,7 +220,7 @@ class HandoverTests(unittest.TestCase):
             e.viewer.stop_owned=Mock(side_effect=stop)
             with self.assertRaisesRegex(ValueError,'Another session'):e.service.start(self.command())
             self.assertEqual(coordination.reservation(e.folder),foreign)
-            self.assertEqual(e.recover.call_count,1);e.calibration.start.assert_not_called()
+            self.assertEqual(e.recover.call_count,0);e.calibration.start.assert_not_called()
             self.assertTrue(e.service.state['viewer_released'])
 
     def test_cancel_during_stop_keeps_new_calibration_from_starting(self):
@@ -208,6 +233,13 @@ class HandoverTests(unittest.TestCase):
             e.viewer.stop_owned=Mock(side_effect=stop)
             with self.assertRaisesRegex(ValueError,'cancelled'):e.service.start(self.command())
             e.calibration.start.assert_not_called();self.assertEqual(coordination.reservation(e.folder),{})
+
+    def test_missing_worker_exit_ack_cannot_start_calibration_after_process_exit(self):
+        with self.environment(exit_ack=False) as e:
+            with self.assertRaisesRegex(ValueError,'graceful release is unconfirmed'):
+                e.service.start(self.command())
+            self.assertEqual(e.viewer.state['native_release'],'unconfirmed')
+            self.assertTrue(e.viewer.native_cancel_sent);e.calibration.start.assert_not_called()
 
     def test_start_failure_does_not_restart_viewer_or_claim_connection(self):
         with self.environment() as e:

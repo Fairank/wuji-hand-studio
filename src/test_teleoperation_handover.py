@@ -57,7 +57,8 @@ class TeleoperationTests(unittest.TestCase):
             self.assertEqual(result['teleoperation_connection']['runtime']['sdk_profiles'],'controller_local')
             self.assertFalse(result['teleoperation_connection']['runtime']['windows_profiles_migrated'])
             self.assertTrue(result['teleoperation_connection']['viewer_released'])
-            e.job.terminate_and_wait.assert_called_once();e.relay.close.assert_called_once()
+            e.job.terminate_and_wait.assert_not_called();e.relay.close.assert_called_once()
+            self.assertTrue(e.viewer.native_cancel_sent);self.assertEqual(e.viewer.state['native_release'],'graceful')
             e.glove.factory.assert_not_called()
 
     def test_unknown_side_or_wrong_target_blocks_before_releasing_viewer(self):
