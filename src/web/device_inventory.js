@@ -42,7 +42,7 @@
  }
  const rows=()=>{
   const current=Array.isArray(inventory?.devices)?inventory.devices.filter(d=>d&&typeof(d.sn||d.serial)==='string'):[],owner=sessionOwner(),calibration=calibrationOwner(),retained=retainedHand();
-  const observed=current.length?current:online&&!inventory?.error&&!localError?previousDisplayRows.filter(row=>recentDiscovery(row)).map(row=>({...row,pending_review:true,selectable:false,official_available:false})):[];
+  const observed=current.length?current:online&&inventory?.scanning===true&&!inventory?.error&&!localError?previousDisplayRows.filter(row=>recentDiscovery(row)).map(row=>({...row,pending_review:true,selectable:false,official_available:false})):[];
   const sessionOnly=row=>row.in_use===true&&['glove_session_identity','sdk_identity','official_viewer_session'].includes(row.identity_source||row.source);
   const visible=observed.filter(row=>(fresh(row)&&(!sessionOnly(row)||owner&&(row.sn||row.serial)===owner.serial))||owner&&(row.sn||row.serial)===owner.serial||calibration&&(row.sn||row.serial)===calibration.serial&&row.in_use===true);
   if(owner){let index=visible.findIndex(row=>(row.sn||row.serial)===owner.serial);const prior=index>=0?visible[index]:current.find(row=>(row.sn||row.serial)===owner.serial),g=consoleState?.glove||{},v=consoleState?.official_viz||{},reported=v.reported_device||v.device||{},normalize=value=>{const side=typeof value==='string'?value.toLowerCase().replace(/^handedness\./,''):'';return ['left','right'].includes(side)?side:null;};
@@ -57,8 +57,8 @@
  const sn=row=>row?.sn||row?.serial||'';
  const fresh=row=>{const seen=getTime(row?.last_seen),ttl=Number(inventory?.ttl_s),age=Date.now()-seen;return online&&row?.stale!==true&&seen>0&&age>=0&&age<((Number.isFinite(ttl)&&ttl>0?ttl:30)*1000);};
  function recentDiscovery(row,ttl=inventory?.ttl_s){const seen=getTime(row?.last_seen),age=Date.now()-seen,limit=Math.min(Number.isFinite(Number(ttl))&&Number(ttl)>0?Number(ttl):30,Number.isFinite(row?.review_ttl_s)&&row.review_ttl_s>0?row.review_ttl_s:30,30)*1000;return row?.in_use!==true&&row?.stale!==true&&seen>0&&age>=0&&age<limit;}
- function rememberDiscovery(value){const found=Array.isArray(value.devices)?value.devices:[];if(value.error){previousDisplayRows=[];return;}previousDisplayRows=(found.length?found:previousDisplayRows).filter(row=>row&&typeof(row.sn||row.serial)==='string'&&recentDiscovery(row,value.ttl_s)).map(row=>found.length?{...row,review_ttl_s:Math.min(Number.isFinite(Number(value.ttl_s))&&Number(value.ttl_s)>0?Number(value.ttl_s):30,30)}:row);}
- const usable=row=>!scanning&&inventory?.scanning!==true&&!!row&&row.pending_review!==true&&['hand','glove'].includes(row.kind)&&(row.selectable===true&&fresh(row)||row.view_only===true&&isOwned(row)||row.cleanup_only===true&&retainedHand()?.serial===(row.sn||row.serial));
+ function rememberDiscovery(value){const found=Array.isArray(value.devices)?value.devices:[];if(value.error||!found.length&&value.scanning!==true){previousDisplayRows=[];return;}previousDisplayRows=(found.length?found:previousDisplayRows).filter(row=>row&&typeof(row.sn||row.serial)==='string'&&recentDiscovery(row,value.ttl_s)).map(row=>found.length?{...row,review_ttl_s:Math.min(Number.isFinite(Number(value.ttl_s))&&Number(value.ttl_s)>0?Number(value.ttl_s):30,30)}:row);}
+ const usable=row=>(!scanning&&inventory?.scanning!==true||inventory?.discovery_interruptible===true)&&!!row&&row.pending_review!==true&&['hand','glove'].includes(row.kind)&&(row.selectable===true&&fresh(row)||row.view_only===true&&isOwned(row)||row.cleanup_only===true&&retainedHand()?.serial===(row.sn||row.serial));
  const visible=()=>!document.hidden&&!root.closest('[hidden]')&&root.getClientRects().length>0&&getComputedStyle(root).visibility!=='hidden';
  const selected=()=>rows().find(row=>sn(row)===activeSerial)||null;
  const clone=row=>row?JSON.parse(JSON.stringify(row)):null;
@@ -159,7 +159,7 @@
  function render(){
   syncDiscoveryIntent();
   const all=rows().slice().sort((a,b)=>(a.kind||'').localeCompare(b.kind||'')||(a.side||'').localeCompare(b.side||'')||sn(a).localeCompare(sn(b)));
-  const busy=scanning||inventory?.scanning===true,globalBusy=window.WujiConnectionSwitch?.busy()===true,hasSelection=!!selected(),row=selected(),canUse=usable(row)&&!using&&!busy&&!globalBusy,canConnect=canUse&&row?.view_only!==true&&row?.pending_review!==true&&fresh(row)&&row?.selectable===true;
+  const busy=scanning||inventory?.scanning===true,blockingDiscovery=busy&&inventory?.discovery_interruptible!==true,globalBusy=window.WujiConnectionSwitch?.busy()===true,hasSelection=!!selected(),row=selected(),canUse=usable(row)&&!using&&!blockingDiscovery&&!globalBusy,canConnect=canUse&&row?.view_only!==true&&row?.pending_review!==true&&fresh(row)&&row?.selectable===true;
   if(busy&&document.activeElement?.name==='inventory-device'&&!scanFocus)scanFocus=document.activeElement.value;
   setText(title,root.closest('#page-home')?t('当前设备','Current devices'):t('发现你的设备','Your devices'));setText(description,t('自动查找手套与灵巧手，选中后再进入需要的功能。','Find gloves and hands automatically. Select one, then choose how to use it.'));
   const scanState=busy?'scanning':!online?'offline':discoveryHolds.size||!discoveryWanted?'paused':inventory?.scan_allowed!==true?'waiting':'ready';
@@ -179,7 +179,7 @@
    radio.disabled=using||globalBusy||!usable(item);radio.checked=activeSerial===serial;card.dataset.selected=String(radio.checked);card.dataset.available=String(usable(item));card.dataset.kind=item.kind||'unknown';
    icon.hidden=true;icon.replaceChildren();icon.dataset.kind=item.kind||'unknown';
    const owner=ownerLabel(item);setText(name,deviceName(item));setText(meta,sideLabel(item)+(item.side_source==='serial_hint'?t(' · 身份提示，待设备核对',' · Identity hint; verify on connection'):item.side_source==='device'?t(' · 设备报告',' · Device reported'):'')+(owner&&!fresh(item)?t(' · 发现记录已过期',' · Discovery record expired'):''));setText(identity,serial);
-   setText(status,owner||(item.pending_review===true?t('待复查','Awaiting rediscovery'):busy?t('正在核对','Checking'):!fresh(item)?t('已过期','Stale'):item.kind==='unknown'?t('待识别','Unidentified'):item.selectable!==true?t('暂不可用','Unavailable'):t('已发现','Discovered')));status.dataset.state=owner||busy?'busy':!fresh(item)||item.kind==='unknown'?'muted':'ready';
+   setText(status,owner||(busy?t('正在核对','Checking'):item.pending_review===true?t('待复查','Awaiting rediscovery'):!fresh(item)?t('已过期','Stale'):item.kind==='unknown'?t('待识别','Unidentified'):item.selectable!==true?t('暂不可用','Unavailable'):t('已发现','Discovered')));status.dataset.state=owner||busy?'busy':!fresh(item)||item.kind==='unknown'?'muted':'ready';
    const calibration=calibrationOwner();calibrationLink.hidden=calibration?.serial!==serial;setText(calibrationLink,t('查看标定','View calibration'));
    if(list.children[index]!==card)list.insertBefore(card,list.children[index]||null);
   }
@@ -228,8 +228,8 @@
   if(visible()){
    if(!inventory||Date.now()-lastRead>=(inventory.scanning?1000:5000))await refresh();
    if(destroyed||!visible()){schedule();return;}
-   const elapsed=Date.now()-getTime(inventory?.scanned_at);
-   if(discoveryWanted&&online&&(!inventory?.scanned_at||elapsed>=5000))await scan(false);
+   const completed=getTime(Object.hasOwn(inventory||{},'scan_completed_at')?inventory.scan_completed_at:inventory?.scanned_at),elapsed=Date.now()-completed;
+   if(discoveryWanted&&online&&(!completed||elapsed<0||elapsed>=5000))await scan(false);
    render();
   }
   schedule();

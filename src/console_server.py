@@ -647,7 +647,11 @@ class Controller:
                 try:check();reason=None;sdk_scan=True
                 except (ValueError,OSError,RuntimeError):pass
         if workspace_errors and not reason:reason='无法确认其他工作区的状态 / Another workspace state is unavailable'
+        from connection_switch import readonly_discovery
         result.update(scanning=bool(viz.get('scanning')),scanned_at=viz.get('scanned_at'),
+                      scan_completed_at=viz.get('scan_completed_at'),
+                      discovery_interruptible=readonly_discovery(state) and not workspace_errors
+                          and (state.get('connection_switch') or {}).get('can_switch') is True,
                       error=viz.get('error') or (viz.get('sdk_error') if not result['devices'] else None),scan_allowed=not reason and bool(viz.get('supported')),
                       blocked_reason=reason,backend='sdk_session' if sdk_scan else viz.get('backend'),
                       sdk_error=viz.get('sdk_error'),workspace_errors=workspace_errors)

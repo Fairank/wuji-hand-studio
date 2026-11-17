@@ -5,7 +5,7 @@ file gate is deliberately not held while readers finish. No motor-start action
 is dispatched here, and a failed new connection is never retried implicitly.
 """
 import copy
-from contextlib import contextmanager
+from contextlib import ExitStack,contextmanager
 import hashlib
 import json
 import os
@@ -29,6 +29,16 @@ def unsettled(state):
 def task_id(kind,serial):return hashlib.sha256((kind+':'+serial).encode()).hexdigest()[:24]
 
 
+def readonly_discovery(state):
+    """A normal finite directory read is not a connected device owner."""
+    viz=state.get('official_viz') or {}
+    return (viz.get('scanning') is True and viz.get('busy') is True
+        and viz.get('phase')=='idle'
+        and viz.get('active') is False and viz.get('reserved') is False
+        and viz.get('session_id') in (None,'')
+        and viz.get('scan_cleanup_required') is False and not viz.get('error'))
+
+
 def owner(state):
     """Actual local owners only; a selection/history never owns a device."""
     glove=state.get('glove') or {};viz=state.get('official_viz') or {};found=[]
@@ -50,7 +60,7 @@ def owner(state):
             raise ValueError('手套连接尚未核对完成 / Glove ownership is not confirmed')
         found.append(dict(mode='teleoperation',kind='glove',serial=observed['glove_serial'],session=glove['session_id'],
             user_id=observed['user']['user_id'],profile=observed.get('profile')))
-    if any(viz.get(k) for k in ('active','busy','reserved','session_id','scanning')):
+    if any(viz.get(k) for k in ('active','busy','reserved','session_id','scanning')) and not readonly_discovery(state):
         reported=viz.get('reported_device') or {};selected=viz.get('device') or {};sn=reported.get('sn')
         if (viz.get('backend')!='windows_native' or viz.get('active') is not True or viz.get('phase')!='running'
                 or viz.get('busy') or not SERIAL.fullmatch(sn or '') or not isinstance(viz.get('session_id'),str)):
@@ -770,7 +780,7 @@ class ConnectionSwitch:
 
     def start(self,command,*,pair_target=None):
         if not self.workflow_lock.acquire(blocking=False):raise ValueError('Another device task is switching')
-        new_session=None;source=None;stopped=False;attempt_started=False
+        new_session=None;source=None;stopped=False;attempt_started=False;discovery_scope=ExitStack()
         try:
             request_id=command.get('request_id') if isinstance(command,dict) else None
             if not isinstance(request_id,str) or not re.fullmatch('[0-9a-f]{32}',request_id):raise ValueError('Invalid switch request identity')
@@ -792,6 +802,12 @@ class ConnectionSwitch:
                     source=copy.deepcopy(source),target=None)
             # Inventory, saved-profile reads and component checks may wait.
             # Their exact cancellable intent must be visible before they run.
+            if readonly_discovery(state):
+                discovery_scope.enter_context(self.controller.official_viz.discovery_priority(timeout=45))
+                self._check_cancel()
+                state=self.controller.snapshot()
+                if context_digest(state)!=command['expected_owner'] or owner(state)!=source:
+                    raise ValueError('Device owner changed while yielding discovery')
             target=self._target(command,state,source,pair_target)
             self._check_cancel()
             self.requests.add(request_id)
@@ -1002,4 +1018,5 @@ class ConnectionSwitch:
         finally:
             if attempt_started:
                 with self.lock:self.state['busy']=False;self._thread=None;self.viewer_token=None
-            self.workflow_lock.release()
+            try:discovery_scope.close()
+            finally:self.workflow_lock.release()
