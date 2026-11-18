@@ -11,6 +11,12 @@ class SelectionRequired(RuntimeError):
         self.devices = devices
 
 
+class HandRouteCleanupUnconfirmed(RuntimeError):
+    def __init__(self,bundle,hand=None):
+        self.bundle=bundle;self.hand=hand
+        super().__init__('灵巧手查找通路退出未确认，请断开原会话后重试 / Hand search route cleanup is unconfirmed; disconnect the owning session')
+
+
 def candidates(devices):
     found = {}
     for device in devices:
@@ -33,25 +39,37 @@ def candidates(devices):
 class Routes:
     def __init__(self): self.routes = []
     def close(self):
+        remaining=[]
         for route in self.routes:
-            route.close()
-        self.routes.clear()
+            try:
+                if route.close() is False:raise RuntimeError('Route close was not acknowledged')
+            except Exception:remaining.append(route)
+        self.routes=remaining
+        if remaining:raise HandRouteCleanupUnconfirmed(self)
+        return True
 
 
-def scan_only(manager,address='',*,include_gloves=False):
+def scan_only(manager,address='',*,include_gloves=False,cancelled=None):
     """Read discovery advertisements without connecting to or enabling a hand."""
     bundle=Routes()
+    def check():
+        if cancelled is not None and cancelled():raise RuntimeError('Hand discovery cancelled')
     try:
+        check()
         target=endpoint(address,'left') if address else ''
         if managed_wsl():
             for value in ([target] if target else ['192.168.1.110:7447','192.168.1.111:7447']):
+                check()
                 route=DeviceRoute(value,'left')
+                bundle.routes.append(route)
                 try:route.open()
-                except RuntimeError:route.close()
-                else:bundle.routes.append(route)
+                except RuntimeError:pass  # Its exact partial route still reaches finally cleanup.
+                check()
         found={};deadline=time.monotonic()+3
         while time.monotonic()<deadline:
+            check()
             advertisements=list(manager.scan())
+            check()
             if include_gloves:
                 # This directory is typed metadata only. Legacy hand-only
                 # callers retain their existing routed Unknown-SN behavior.
@@ -64,6 +82,7 @@ def scan_only(manager,address='',*,include_gloves=False):
                 for item in scan_gloves(manager,sdk,advertisements,allow_direct=False):
                     found[item['serial']]={**item,'device_type':'wuji_glove'}
             time.sleep(.1)
+        check()
         return sorted(found.values(),key=lambda r:r['serial'])
     finally:bundle.close()
 
@@ -74,22 +93,23 @@ def connect_discovered(manager, address='', serial='', use_routes=None):
     try:
         routed = managed_wsl() if use_routes is None else use_routes
         target = endpoint(address, 'left') if address else ''
+        opened_routes=0
         if routed:
             addresses = [target] if target else ['192.168.1.110:7447', '192.168.1.111:7447']
             for value in addresses:
                 route = DeviceRoute(value, 'left')  # side is irrelevant for an explicit endpoint
+                bundle.routes.append(route)
                 try: route.open()
-                except RuntimeError:
-                    route.close()
-                else: bundle.routes.append(route)
-            if target and not bundle.routes:
+                except RuntimeError:pass
+                else:opened_routes+=1
+            if target and not opened_routes:
                 raise RuntimeError('指定设备地址无协议回应 / No response from the specified address')
         deadline = time.monotonic() + 3
         while True:
             devices = candidates(manager.scan())
             if target:
                 devices = [d for d in devices if d['address'].removeprefix('udp/') == target or
-                           (routed and bundle.routes and d['address'] == 'zenoh://' + d['serial'])]
+                           (routed and opened_routes and d['address'] == 'zenoh://' + d['serial'])]
             # Another hand may advertise before the explicitly selected one.
             # Keep the original bounded discovery window for that exact serial.
             ready = any(d['serial'] == serial for d in devices) if serial else bool(devices)
@@ -110,7 +130,15 @@ def connect_discovered(manager, address='', serial='', use_routes=None):
             raise RuntimeError('设备编号与发现结果不一致 / Device serial did not verify')
         verified = profile(selected['generation'] + '_' + actual)
         return hand, bundle, verified
-    except Exception:
-        if hand is not None:hand.disconnect()
-        bundle.close()
+    except Exception as error:
+        retained=None
+        if hand is not None:
+            try:
+                if hand.disconnect() is False:raise RuntimeError('Hand disconnect was not acknowledged')
+            except Exception:retained=hand
+        try:bundle.close()
+        except HandRouteCleanupUnconfirmed as cleanup:
+            cleanup.hand=retained
+            raise cleanup from error
+        if retained is not None:raise HandRouteCleanupUnconfirmed(bundle,retained) from error
         raise

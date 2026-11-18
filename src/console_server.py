@@ -634,13 +634,19 @@ class Controller:
             if row['sn'] in owners:row['workspace_owners']=owners[row['sn']]
         reason=None
         sdk_scan=False
-        if viz.get('scanning'):reason='正在扫描设备 / Device discovery is running'
-        elif reservation(self.official_viz.folder):reason='官方 CLI 会话正在使用设备目录 / An official CLI session is active'
+        cli_scanning=bool(viz.get('scanning'))
+        cli_reserved=bool(reservation(self.official_viz.folder))
+        sdk_scanning=bool(state['glove'].get('busy') and state['glove'].get('hand_scanning') is True
+            and not cli_scanning and not cli_reserved)
+        if cli_scanning:reason='正在扫描设备 / Device discovery is running'
+        elif cli_reserved:reason='官方 CLI 会话正在使用设备目录 / An official CLI session is active'
+        elif sdk_scanning:
+            reason='正在查找灵巧手 / Hand discovery is running';sdk_scan=True
         else:
             try:self.official_viz.check_scan()
             except (ValueError,OSError,RuntimeError) as error:reason=str(error)[:700]
         # Explain the common local owner instead of an opaque global failure.
-        if reason and state['glove'].get('busy'):
+        if reason and state['glove'].get('busy') and not (cli_scanning or cli_reserved or sdk_scanning):
             reason='手套预览或遥操作正在使用设备；已有设备仍可查看，请先在原会话中断开再重新扫描 / Glove preview or teleoperation owns the device; disconnect in its session before rescanning'
             check=getattr(self,'sdk_hand_scan_check',None)
             if callable(check):
@@ -648,11 +654,14 @@ class Controller:
                 except (ValueError,OSError,RuntimeError):pass
         if workspace_errors and not reason:reason='无法确认其他工作区的状态 / Another workspace state is unavailable'
         from connection_switch import readonly_discovery
-        result.update(scanning=bool(viz.get('scanning')),scanned_at=viz.get('scanned_at'),
-                      scan_completed_at=viz.get('scan_completed_at'),
+        result.update(scanning=cli_scanning or sdk_scanning,
+                      scanned_at=state['glove'].get('hands_at') if sdk_scan else viz.get('scanned_at'),
+                      scan_completed_at=state['glove'].get('hands_at') if sdk_scan else viz.get('scan_completed_at'),
                       discovery_interruptible=readonly_discovery(state) and not workspace_errors
                           and (state.get('connection_switch') or {}).get('can_switch') is True,
-                      error=viz.get('error') or (viz.get('sdk_error') if not result['devices'] else None),scan_allowed=not reason and bool(viz.get('supported')),
+                      error=(state['glove'].get('hand_scan_error') or None) if sdk_scan else
+                          viz.get('error') or (viz.get('sdk_error') if not result['devices'] else None),
+                      scan_allowed=not reason and bool(viz.get('supported')),
                       blocked_reason=reason,backend='sdk_session' if sdk_scan else viz.get('backend'),
                       sdk_error=viz.get('sdk_error'),workspace_errors=workspace_errors)
         return result
