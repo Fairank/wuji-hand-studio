@@ -54,6 +54,12 @@ class FakeJob:
         self.process = process
         self.close = Mock(return_value=True)
         self.terminate_and_wait = Mock(return_value=True)
+        self.active_processes = Mock(return_value=0)
+
+
+def worker_lines(lines,exit_code=0):
+    for line in lines:yield json.dumps(dict(type='output',text=line))+'\n'
+    yield json.dumps(dict(type='exit',exitstatus=exit_code))+'\n'
 
 
 class DeferredThread:
@@ -137,7 +143,7 @@ class NativeVisualizationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix='.native-viz-qa-', dir=Path(__file__).resolve().parent) as directory, ExitStack() as stack:
             folder = Path(directory) / 'official-cli'
             folder.mkdir()
-            process = FakeProcess(lines, exit_code)
+            process = FakeProcess(worker_lines(lines,exit_code), exit_code)
             job = FakeJob(process)
             prepare = Mock(return_value=COMPONENT)
             factory = Mock(return_value=job)
@@ -199,14 +205,14 @@ class NativeVisualizationTests(unittest.TestCase):
                 yield json.dumps(dict(status='running', device={'sn': SERIAL}, viewer={'url': VIEWER})) + '\n'
                 observed.append(value.snapshot('light'))
 
-            job.process.stdout = lines()
+            job.process.stdout = worker_lines(lines())
             value._run_native(SERIAL, 'light')
             self.assertEqual([call.args[0] for call in sockets.call_args_list], [('127.0.0.1', 19090), ('127.0.0.1', 19876)])
             self.assertTrue(observed[0]['active'])
             self.assertEqual(observed[0]['stream_freshness'], 'not_reported')
             self.assertFalse(observed[0]['zero_on_start'])
             self.assertEqual(dict(parse_qsl(urlsplit(observed[0]['viewer_url']).query))['theme'], 'light')
-            self.assertEqual(factory.call_args.args[0], [COMPONENT['binary'], 'viz', '--sn', SERIAL, '--no-zero', '--no-open', '--jsonl'])
+            self.assertEqual(factory.call_args.args[0], [sys.executable,str(Path(visualization.__file__).with_name('desktop.py')),'--native-viz-worker',token,SERIAL])
             self.assertEqual(factory.call_args.kwargs['job_name'], 'Local\\HandWorkbench-OfficialViz-' + token)
             self.assertEqual(coordination.reservation(value.folder), {})
 
@@ -357,6 +363,7 @@ class NativeVisualizationTests(unittest.TestCase):
         with self.fixture() as (value, job, _, _, recover, _, _):
             token = self.marker(value)
             value.native_job = job
+            value.thread = module('synthetic_waiting_reader',is_alive=lambda:True,join=Mock())
             job.terminate_and_wait.side_effect = OSError('synthetic holder terminate failure')
             with self.assertRaises((OSError, ValueError)):
                 value.stop()

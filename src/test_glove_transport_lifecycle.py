@@ -4,6 +4,7 @@ import io
 import json
 import queue
 import sys
+import threading
 import time
 from types import SimpleNamespace as N
 import unittest
@@ -23,7 +24,8 @@ def receiving(active=False,confirmed=True,device='SYNTHETIC-HAND'):
 
 class GloveTransportLifecycleTests(unittest.TestCase):
     def bridge(self,stream=None):
-        journal=Mock();journal.new_session.return_value=17
+        journal=Mock();journal.new_session.return_value=17;journal.snapshot.return_value=[]
+        journal.lock=threading.RLock();journal.rows=[];journal.confirmed={};journal.dirty=False
         bridge=GloveBridge(Mock(),journal);bridge.thread=N(is_alive=lambda:True)
         bridge.stdin=stream if stream is not None else io.StringIO()
         bridge.state.update(receiving());bridge.last_update=time.monotonic()
@@ -66,8 +68,10 @@ class GloveTransportLifecycleTests(unittest.TestCase):
             yield 'WUJI_JSON:'+json.dumps(dict(type='glove_state',state=receiving()))
             if follow:bridge.verify_follow_sdk();bridge.action(dict(name='glove_follow',workspace_clear=True))
             if observed_stop:
-                yield 'WUJI_JSON:'+json.dumps(dict(type='glove_state',state=receiving(True,False)))
-                yield 'WUJI_JSON:'+json.dumps(dict(type='glove_state',state=receiving(False,True)))
+                active=receiving(True,False);active['hardware']['handled_lease']=bridge.lease
+                stopped=receiving(False,True);stopped['hardware']['handled_lease']=bridge.lease
+                yield 'WUJI_JSON:'+json.dumps(dict(type='glove_state',state=active))
+                yield 'WUJI_JSON:'+json.dumps(dict(type='glove_state',state=stopped))
         client=N(agent_command='synthetic only',exec_command=lambda *args,**kwargs:(sent,lines(),io.StringIO()),close=Mock())
         bridge.factory=Mock(return_value=client);bridge.release_resolver=release_fixture;bridge.run()
         return bridge,journal

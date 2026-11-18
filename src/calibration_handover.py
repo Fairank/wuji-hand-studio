@@ -17,7 +17,7 @@ from cli_coordination import gate, reservation
 _SERIAL=re.compile(r'[A-Za-z0-9][A-Za-z0-9_-]{0,79}\Z')
 _TOKEN=re.compile(r'[0-9a-f]{32}\Z')
 _STOPS={'disconnect','hardware_stop','glove_stop','glove_disconnect','calibration_cancel',
-        'calibration_terminal_input','session_close','program_stop','group_stop',
+        'calibration_terminal_input','session_close','program_stop','group_stop','group_abort',
         'official_viz_stop','session_keepalive','hardware_keepalive','glove_keepalive',
         'program_keepalive','group_beat'}
 

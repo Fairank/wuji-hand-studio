@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 import sys
 import tempfile
+import threading
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
@@ -278,6 +279,69 @@ class StaticOriginTests(ViewerFixture):
                 self.assertIn(code, {404, 405, 501})
         for name, (body, _) in self.originals.items():
             self.assertEqual((self.folder / name).read_bytes(), body)
+
+    def test_fragmented_post_receives_complete_rejection_after_bounded_body_read(self):
+        reading = threading.Event()
+
+        class BodyRead:
+            def __init__(self, stream):self.stream=stream
+            def __getattr__(self, name):return getattr(self.stream,name)
+            def read(self, size):
+                reading.set()
+                return self.stream.read(size)
+            def read1(self, size):
+                reading.set()
+                return self.stream.read1(size)
+
+        class Handler(self.viewer.ViewerHandler):
+            def do_POST(self):
+                self.rfile=BodyRead(self.rfile)
+                return super().do_POST()
+
+        server=self.viewer.ThreadingHTTPServer(('127.0.0.1',0),Handler)
+        thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
+        connection=http.client.HTTPConnection('127.0.0.1',server.server_address[1],timeout=3)
+        try:
+            body=b'{"name":"hardware_start"}'
+            connection.putrequest('POST','/api/action')
+            connection.putheader('Content-Length',str(len(body)))
+            connection.endheaders()
+            self.assertTrue(reading.wait(2),'Server closed before accepting the bounded request body')
+            connection.send(body)
+            response=connection.getresponse();content=response.read()
+            self.assertEqual(response.status,501)
+            self.assertEqual(len(content),int(response.getheader('Content-Length')))
+        finally:
+            connection.close();server.shutdown();server.server_close();thread.join(2)
+        self.assertFalse(thread.is_alive())
+        for name,(body,_) in self.originals.items():
+            self.assertEqual((self.folder/name).read_bytes(),body)
+
+    def test_trickling_post_cannot_extend_total_body_deadline(self):
+        clock=SimpleNamespace(now=0.)
+        connection=SimpleNamespace(timeout=None)
+        connection.gettimeout=lambda:connection.timeout
+        connection.settimeout=lambda value:setattr(connection,'timeout',value)
+        reads=[];responses=[]
+
+        def read1(size):
+            reads.append(size)
+            # Each byte arrives within the old one-second idle timeout, but
+            # the complete body must still respect a single total deadline.
+            if connection.timeout<.6:
+                clock.now+=connection.timeout
+                raise TimeoutError('next byte would exceed the deadline')
+            clock.now+=.6
+            return b'x'
+
+        target=SimpleNamespace(headers={'Content-Length':'3'},connection=connection,
+            rfile=SimpleNamespace(read1=read1),send_error=lambda code,*args:responses.append((code,clock.now)))
+        with patch.object(self.viewer,'time',SimpleNamespace(monotonic=lambda:clock.now)):
+            self.viewer.ViewerHandler.do_POST(target)
+        self.assertEqual(responses,[(501,1.)])
+        self.assertEqual(len(reads),2)
+        self.assertIsNone(connection.timeout)
+        self.assertTrue(target.close_connection)
 
     def test_url_query_does_not_change_served_html_or_resource_selection(self):
         _, port = self.start_server()

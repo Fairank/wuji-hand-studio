@@ -4,6 +4,7 @@ import tempfile
 import threading
 import time
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 import unittest
 
@@ -34,14 +35,142 @@ class SharedScanTests(unittest.TestCase):
         temp=tempfile.TemporaryDirectory();self.addCleanup(temp.cleanup)
         self.folder=Path(temp.name)/'cli'
         self.viewer=visualization.OfficialVisualization(self.folder)
+        self.viewer.observation_config=copy.deepcopy(CONFIG)
         self.viewer.state.update(devices=[copy.deepcopy(DEVICE)],scanned_at=time.time(),started_at=123)
 
-    def test_async_scan_clears_old_selection_before_worker_runs(self):
-        with patch.object(visualization.threading,'Thread',DeferredThread):
+    def test_async_scan_retains_completed_observations_without_renewing_them(self):
+        before=self.viewer.snapshot()
+        with patch('bridge_config.load_config',return_value=CONFIG),patch.object(visualization.threading,'Thread',DeferredThread):
             state=self.viewer.scan()
-        self.assertTrue(state['scanning']);self.assertEqual(state['devices'],[])
-        self.assertIsNone(state['scanned_at']);self.assertEqual(state['started_at'],123)
+        self.assertTrue(state['scanning']);self.assertEqual(state['devices'],before['devices'])
+        self.assertEqual(state['scanned_at'],before['scanned_at']);self.assertEqual(state['started_at'],123)
         self.assertEqual(coordination.reservation(self.folder)['kind'],'scan')
+
+    def seed_sdk(self):
+        row=dict(sn='WG_OLD_TYPED',device_type='wuji_glove')
+        self.viewer.state.update(sdk_devices=[row],sdk_scanned_at=time.time()-2,scan_completed_at=time.time()-1)
+        self.viewer.observation_config=copy.deepcopy(CONFIG)
+        return copy.deepcopy(self.viewer.state)
+
+    def test_native_result_publishes_without_renewing_the_pending_sdk_source(self):
+        old=self.seed_sdk();native=dict(sn='WG_NEW_NATIVE',device_type='wuji_glove')
+        sdk=dict(sn='WG_NEW_TYPED',device_type='wuji_glove');observed=[]
+        def supplement(*_):
+            interim=self.viewer.snapshot();observed.append(time.time())
+            self.assertEqual(interim['devices'],[native])
+            self.assertEqual(interim['sdk_devices'],old['sdk_devices'])
+            self.assertGreaterEqual(interim['scanned_at'],old['scanned_at'])
+            self.assertEqual(interim['sdk_scanned_at'],old['sdk_scanned_at'])
+            self.assertEqual(interim['scan_completed_at'],old['scan_completed_at'])
+            return dict(devices=[sdk],observed_at=observed[0])
+        self.viewer.supplement_scan=supplement
+        with patch('bridge_config.load_config',return_value=CONFIG),patch.object(calibration,'cli_json',return_value={'devices':[native]}):
+            token=self.viewer._begin_scan();self.assertEqual(self.viewer._collect_scan(token,True,True),[native])
+        state=self.viewer.snapshot()
+        self.assertEqual(state['devices'],[native]);self.assertEqual(state['sdk_devices'],[sdk])
+        self.assertEqual(state['sdk_scanned_at'],observed[0])
+        self.assertGreaterEqual(state['scan_completed_at'],observed[0]);self.assertFalse(state['scanning'])
+
+    def test_native_only_hand_is_selectable_during_long_sdk_preparation_without_extending_ttl(self):
+        from device_inventory import build_inventory
+        clock=SimpleNamespace(now=1000.);observed=[]
+        native=dict(sn='WH2_NATIVE_ONLY',generation='hand2',handedness='right')
+        self.viewer.state.update(devices=[],scanned_at=None,sdk_devices=[],sdk_scanned_at=None)
+        self.viewer.observation_config=None
+        def supplement(*_):
+            state=self.viewer.snapshot();directory=build_inventory(viz=state,now=clock.now)
+            observed.append(copy.deepcopy(directory))
+            self.assertEqual([row['sn'] for row in directory['devices']],[native['sn']])
+            self.assertTrue(directory['devices'][0]['selectable'])
+            self.assertEqual(state['scanned_at'],1000.);self.assertIsNone(state['scan_completed_at'])
+            clock.now=1035.
+            return dict(devices=[],observed_at=clock.now)
+        self.viewer.supplement_scan=supplement
+        with patch.object(visualization,'time',SimpleNamespace(time=lambda:clock.now)), \
+                patch('bridge_config.load_config',return_value=CONFIG),patch.object(calibration,'cli_json',return_value={'devices':[native]}):
+            token=self.viewer._begin_scan();self.assertEqual(self.viewer._collect_scan(token,True,True),[native])
+            state=self.viewer.snapshot()
+        self.assertTrue(observed);self.assertIsNone(state['sdk_error'])
+        self.assertEqual(state['scanned_at'],1000.);self.assertEqual(state['scan_completed_at'],1035.)
+        expired=build_inventory(viz=state,now=1035.)['devices'][0]
+        self.assertTrue(expired['stale']);self.assertFalse(expired['selectable'])
+
+    def test_completed_empty_directory_withdraws_both_previous_sources(self):
+        old=self.seed_sdk();self.viewer.supplement_scan=lambda *_:dict(devices=[],observed_at=time.time())
+        with patch('bridge_config.load_config',return_value=CONFIG),patch.object(calibration,'cli_json',return_value={'devices':[]}):
+            token=self.viewer._begin_scan();self.assertEqual(self.viewer._collect_scan(token,True,True),[])
+        state=self.viewer.snapshot()
+        self.assertEqual(state['devices'],[]);self.assertEqual(state['sdk_devices'],[])
+        self.assertGreater(state['scan_completed_at'],old['scan_completed_at']);self.assertFalse(state['scanning'])
+
+    def test_soft_sdk_failure_publishes_only_current_native_observations(self):
+        self.seed_sdk();native=dict(sn='WG_NEW_NATIVE',device_type='wuji_glove')
+        self.viewer.supplement_scan=Mock(side_effect=ValueError('synthetic SDK unavailable'))
+        with patch('bridge_config.load_config',return_value=CONFIG),patch.object(calibration,'cli_json',return_value={'devices':[native]}):
+            token=self.viewer._begin_scan();self.viewer._collect_scan(token,True,True)
+        state=self.viewer.snapshot()
+        self.assertEqual(state['devices'],[native]);self.assertEqual(state['sdk_devices'],[])
+        self.assertIsNone(state['sdk_scanned_at']);self.assertEqual(state['sdk_error'],'synthetic SDK unavailable')
+
+    def test_cancel_or_configuration_change_discards_previous_and_current_rows(self):
+        for change in ('cancel','config'):
+            with self.subTest(change=change):
+                self.viewer.state.update(devices=[copy.deepcopy(DEVICE)],scanned_at=time.time())
+                old=self.seed_sdk();config=[dict(CONFIG)]
+                def supplement(*_):
+                    if change=='cancel':self.viewer.scan_cancel.set()
+                    else:config[0]['cli']='different-command'
+                    return dict(devices=[dict(sn='WG_NEW_TYPED',device_type='wuji_glove')],observed_at=time.time())
+                self.viewer.supplement_scan=supplement
+                with patch('bridge_config.load_config',side_effect=lambda:copy.deepcopy(config[0])),patch.object(calibration,'cli_json',return_value={'devices':[DEVICE]}):
+                    token=self.viewer._begin_scan();self.assertIsNone(self.viewer._collect_scan(token,True,True))
+                state=self.viewer.snapshot()
+                self.assertEqual(state['devices'],[]);self.assertEqual(state['sdk_devices'],[])
+                self.assertIsNone(state['scanned_at']);self.assertIsNone(state['sdk_scanned_at'])
+                self.assertFalse(state['scanning']);self.assertGreater(state['scan_completed_at'],old['scan_completed_at'])
+
+    def test_refresh_retention_does_not_extend_the_device_expiry(self):
+        from device_inventory import build_inventory
+        before=self.seed_sdk()
+        with patch('bridge_config.load_config',return_value=CONFIG):token=self.viewer._begin_scan()
+        state=self.viewer.snapshot()
+        inventory=build_inventory(viz=state,now=max(before['scanned_at'],before['sdk_scanned_at'])+31)
+        self.assertTrue(inventory['devices']);self.assertTrue(all(row['stale'] and not row['selectable'] for row in inventory['devices']))
+        self.assertEqual(state['scanned_at'],before['scanned_at']);self.assertEqual(state['sdk_scanned_at'],before['sdk_scanned_at'])
+        self.viewer._finish_scan(token)
+
+    def test_new_controller_configuration_cannot_retain_another_directory(self):
+        self.seed_sdk()
+        with patch('bridge_config.load_config',return_value=dict(CONFIG,cli='other-command')):
+            token=self.viewer._begin_scan()
+        state=self.viewer.snapshot()
+        self.assertEqual(state['devices'],[]);self.assertEqual(state['sdk_devices'],[])
+        self.assertIsNone(state['scanned_at']);self.assertIsNone(state['sdk_scanned_at'])
+        self.assertIsNone(state['scan_completed_at']);self.viewer._finish_scan(token)
+
+    def test_explicit_discovery_priority_retains_only_same_config_completed_rows(self):
+        for changed in (False,True):
+            with self.subTest(configuration_changed=changed):
+                self.viewer.state.update(devices=[copy.deepcopy(DEVICE)],scanned_at=time.time())
+                old=self.seed_sdk();config=[copy.deepcopy(CONFIG)];entered=threading.Event()
+                def supplement(*_):
+                    entered.set()
+                    if not self.viewer.scan_cancel.wait(2):raise TimeoutError('Synthetic priority was not requested')
+                    if changed:config[0]['cli']='different-command'
+                    return dict(devices=[],observed_at=time.time())
+                self.viewer.supplement_scan=supplement
+                with patch('bridge_config.load_config',side_effect=lambda:copy.deepcopy(config[0])),patch.object(calibration,'cli_json',return_value={'devices':[]}):
+                    token=self.viewer._begin_scan()
+                    reader=threading.Thread(target=self.viewer._collect_scan,args=(token,True,True),daemon=True)
+                    reader.start();self.assertTrue(entered.wait(2))
+                    partial=self.viewer.snapshot()
+                    with self.viewer.discovery_priority(timeout=3):
+                        state=self.viewer.snapshot();self.assertFalse(state['scanning'])
+                        self.assertEqual(state['devices'],[])
+                        self.assertEqual(state['sdk_devices'],[] if changed else old['sdk_devices'])
+                        self.assertEqual(state['scanned_at'],None if changed else partial['scanned_at'])
+                        self.assertEqual(state['sdk_scanned_at'],None if changed else old['sdk_scanned_at'])
+                    reader.join(2);self.assertFalse(reader.is_alive())
 
     def test_failed_scan_clears_all_selectable_devices(self):
         with patch('bridge_config.load_config',return_value=CONFIG),patch.object(calibration,'cli_json',side_effect=ValueError('synthetic failure')), \
@@ -99,6 +228,45 @@ class SharedScanTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError,'Find devices again'):self.viewer.start(SERIAL)
                 worker.assert_not_called()
             self.assertEqual(coordination.reservation(self.folder),{})
+
+    def test_priority_confirms_its_late_factory_cleanup_before_reusing_completed_rows(self):
+        from official_device_discovery import sdk_devices
+        old=self.seed_sdk();entered=threading.Event();release=threading.Event();unconfirmed=[]
+        client=SimpleNamespace(close=Mock(return_value=True),exec_command=Mock(side_effect=AssertionError('No late SDK launch')))
+        def factory():
+            entered.set()
+            if not release.wait(7):raise TimeoutError('Fixture factory not released')
+            return client
+        self.viewer.supplement_scan=lambda config,cancelled,token:sdk_devices(factory,cancelled=cancelled)
+        with patch('bridge_config.load_config',return_value=CONFIG),patch.object(calibration,'cli_json',return_value={'devices':old['devices']}):
+            token=self.viewer._begin_scan();finished=self.viewer.scan_finished
+            worker=threading.Thread(target=self.viewer._collect_scan,args=(token,True,True),daemon=True);worker.start()
+            self.assertTrue(entered.wait(2))
+            partial=self.viewer.snapshot()
+            def release_after_unknown():
+                if finished.wait(5):
+                    unconfirmed.append(self.viewer.snapshot()['scan_cleanup_required']);release.set()
+            releaser=threading.Thread(target=release_after_unknown,daemon=True);releaser.start()
+            try:
+                with self.viewer.discovery_priority(timeout=4):
+                    state=self.viewer.snapshot()
+                    self.assertFalse(state['scanning']);self.assertFalse(state['scan_cleanup_required'])
+                    self.assertIsNone(state['error']);self.assertEqual(coordination.reservation(self.folder),{})
+                    self.assertEqual(state['devices'],old['devices']);self.assertEqual(state['sdk_devices'],old['sdk_devices'])
+                    self.assertEqual(state['scanned_at'],partial['scanned_at']);self.assertEqual(state['sdk_scanned_at'],old['sdk_scanned_at'])
+            finally:release.set();worker.join(2);releaser.join(2)
+        self.assertEqual(unconfirmed,[True]);client.exec_command.assert_not_called();client.close.assert_called()
+
+    def test_expected_scan_cleanup_never_closes_or_releases_a_replacement(self):
+        with patch('bridge_config.load_config',return_value=CONFIG):
+            old=self.viewer._begin_scan();self.viewer._finish_scan(old)
+            current=self.viewer._begin_scan()
+        job=SimpleNamespace(close=Mock(return_value=True));self.viewer.scan_job=job;self.viewer.scan_needs_close=True
+        with self.assertRaisesRegex(ValueError,'owner changed'):
+            self.viewer._stop_scan(expected_scan=old,cleanup_timeout=0)
+        job.close.assert_not_called();self.assertEqual(self.viewer.scan_token,current)
+        self.assertEqual(coordination.reservation(self.folder)['token'],current)
+        self.viewer.scan_needs_close=False;self.viewer._finish_scan(current)
         self.viewer.state.update(scanned_at=time.time(),error=None)
         with patch('bridge_config.load_config',return_value=CONFIG),patch.object(visualization.threading,'Thread') as worker:
             with self.assertRaisesRegex(ValueError,'select a discovered'):self.viewer.start('WG_OTHER')

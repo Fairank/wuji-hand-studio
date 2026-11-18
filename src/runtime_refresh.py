@@ -15,6 +15,16 @@ import tarfile
 import time
 import venv
 
+_WINDOWS=os.name=='nt'
+if _WINDOWS:
+    from filesystem_commit import CommitConflict,move_with_retry,path_identity
+
+
+def _rename(source,destination):
+    # The deployed guest receives this file alone and runs the original POSIX call.
+    if _WINDOWS:return move_with_retry(source,destination,lambda a,b:a.rename(b))
+    return source.rename(destination)
+
 SDK_VERSION='2026.10.12'
 ENV='opt/hand-workbench-venv'
 CLI='usr/local/bin/wuji'
@@ -83,8 +93,12 @@ def apply(image,digest,root=Path('/')):
             raise ValueError('已安装较新 SDK，请使用遥操作组件维护，不能回退内置基线 / A newer SDK is installed; use teleoperation component maintenance instead of a bundled downgrade')
     current.parent.mkdir(parents=True,exist_ok=True);cli.parent.mkdir(parents=True,exist_ok=True)
     env_swapped=cli_swapped=env_displaced=cli_displaced=rollback_failed=False
+    old_env=path_identity(current) if _WINDOWS else None
+    old_cli=path_identity(cli) if _WINDOWS else None
+    new_env=new_cli=None
     try:
         venv.EnvBuilder(with_pip=False,symlinks=True).create(staged)
+        if _WINDOWS:new_env=path_identity(staged)
         with tarfile.open(image) as archive:
             for name,member in selected.items():
                 destination=cli_pending if name==CLI else staged/PurePosixPath(name).relative_to(ENV)
@@ -94,6 +108,7 @@ def apply(image,digest,root=Path('/')):
                 with archive.extractfile(member) as source,destination.open('xb' if name==CLI else 'wb') as output:
                     shutil.copyfileobj(source,output)
                 destination.chmod(member.mode & 0o755)
+        if _WINDOWS:new_cli=path_identity(cli_pending)
         command=[str(staged/'bin/python'),'-c',
                  "import importlib.metadata,wuji_sdk,numpy,zenoh;assert importlib.metadata.version('wuji-sdk')=='"+SDK_VERSION+"'"]
         environment={**os.environ,'WUJI_TELEMETRY_DISABLE':'1'}
@@ -103,21 +118,30 @@ def apply(image,digest,root=Path('/')):
         assert_idle(root)
         # Record intent before each rename: an interrupt can arrive after the
         # filesystem move, before Python can record that it completed.
-        if current.exists():env_displaced=True;current.rename(previous)
-        env_swapped=True;staged.rename(current)
-        if cli.exists():cli_displaced=True;cli.rename(cli_previous)
-        cli_swapped=True;cli_pending.rename(cli)
+        if current.exists():env_displaced=True;_rename(current,previous)
+        env_swapped=True;_rename(staged,current)
+        if cli.exists():cli_displaced=True;_rename(cli,cli_previous)
+        cli_swapped=True;_rename(cli_pending,cli)
         subprocess.run([str(current/'bin/python'),'-c',command[-1]],check=True,timeout=30,env=environment,capture_output=True)
         return dict(ok=True,sdk_version=SDK_VERSION,cli_version=SDK_VERSION,
                     sdk_backup=str(previous) if previous.exists() else None,cli_backup=str(cli_previous) if cli_previous.exists() else None,parameters_preserved=True,motion_started=False)
-    except BaseException:
+    except BaseException as failure:
+        if _WINDOWS and isinstance(failure,CommitConflict):
+            rollback_failed=True
+            raise RuntimeError('Runtime restoration is unconfirmed; preserve the original backups and staging files for recovery') from failure
         errors=[]
-        for destination,pending,backup,swapped,displaced in (
-                (cli,cli_pending,cli_previous,cli_swapped,cli_displaced),
-                (current,staged,previous,env_swapped,env_displaced)):
+        for destination,pending,backup,swapped,displaced,new_identity,old_identity in (
+                (cli,cli_pending,cli_previous,cli_swapped,cli_displaced,new_cli,old_cli),
+                (current,staged,previous,env_swapped,env_displaced,new_env,old_env)):
             try:
-                if swapped and destination.exists():destination.rename(pending)
-                if displaced and backup.exists():backup.rename(destination)
+                if swapped and destination.exists():
+                    if _WINDOWS and (new_identity is None or path_identity(destination)!=new_identity):
+                        raise CommitConflict('Runtime destination changed; preserve recovery files')
+                    _rename(destination,pending)
+                if displaced and backup.exists():
+                    if _WINDOWS and (old_identity is None or path_identity(backup)!=old_identity or destination.exists()):
+                        raise CommitConflict('Runtime backup or destination changed; preserve recovery files')
+                    _rename(backup,destination)
             except BaseException as error:errors.append(error)
         if errors:
             rollback_failed=True
@@ -125,8 +149,11 @@ def apply(image,digest,root=Path('/')):
         raise
     finally:
         if not rollback_failed:
-            if staged.exists() and staged.parent==current.parent and not staged.is_symlink():shutil.rmtree(staged)
-            cli_pending.unlink(missing_ok=True)
+            if (staged.exists() and staged.parent==current.parent and not staged.is_symlink()
+                    and (not _WINDOWS or new_env is not None and path_identity(staged)==new_env)):
+                shutil.rmtree(staged)
+            if not _WINDOWS or new_cli is not None and path_identity(cli_pending)==new_cli:
+                cli_pending.unlink(missing_ok=True)
 
 
 if __name__=='__main__':print(json.dumps(apply(sys.argv[1],sys.argv[2])))

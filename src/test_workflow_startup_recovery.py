@@ -5,6 +5,7 @@ import copy
 import io
 from pathlib import Path
 import tempfile
+import threading
 import unittest
 from unittest.mock import Mock,patch
 
@@ -13,6 +14,8 @@ from group_coordinator import GroupCoordinator
 from workspace_groups import Discovery
 from test_calibration_portability import completed,MODEL
 import test_task_pairing as pairing_fixtures
+
+REAL_THREAD=threading.Thread
 
 
 class ImmediateThread:
@@ -40,6 +43,19 @@ class InlinePool:
 
 
 class GroupStartupRecoveryTests(unittest.TestCase):
+    def threads(self,service,kind=None):
+        def construct(*args,**kwargs):
+            if kwargs.get('target')==service.run:
+                if kind=='construct':raise RuntimeError('synthetic constructor unavailable')
+                return (FailedThread if kind=='start' else ImmediateThread)(*args,**kwargs)
+            return REAL_THREAD(*args,**kwargs)
+        return construct
+
+    def assert_renewals_closed(self,service):
+        for _,thread in service._member_threads:
+            self.assertIsInstance(thread,REAL_THREAD)
+            thread.join(1);self.assertFalse(thread.is_alive())
+
     def environment(self):
         states={key:dict(device_profile={'side':side},group={},hardware={'active':False})
                 for key,side in [('left','left'),('right','right')]}
@@ -47,7 +63,7 @@ class GroupStartupRecoveryTests(unittest.TestCase):
         def post(key,command):
             calls.append((key,command['name']))
             group=states[key]['group'];name=command['name']
-            if name=='group_prepare':group.update(token=command['token'],phase='preparing',active=True)
+            if name=='group_prepare':group.update(token=command['token'],mode=command['mode'],phase='preparing',active=True)
             elif name=='group_arm':group.update(phase='ready',clock_s=0.)
             elif name=='group_commit':group.update(phase='completed',active=False,elapsed_s=0.)
             return {'ok':True}
@@ -62,17 +78,19 @@ class GroupStartupRecoveryTests(unittest.TestCase):
         for kind in ('construct','start'):
             with self.subTest(kind=kind):
                 service,command,calls=self.environment()
-                with patch('group_coordinator.threading.Thread',ImmediateThread),patch('performance_program.program',return_value={'duration_s':0.}):
+                with patch('group_coordinator.threading.Thread',side_effect=self.threads(service)),patch('performance_program.program',return_value={'duration_s':0.}):
                     old=service.start(command)['group_lease']
                     self.assertEqual(service.snapshot()['phase'],'completed')
+                    self.assert_renewals_closed(service)
                 calls.clear()
-                with patch('group_coordinator.threading.Thread',**failure(kind)),self.assertRaisesRegex(RuntimeError,'unavailable'):
+                with patch('group_coordinator.threading.Thread',side_effect=self.threads(service,kind)),self.assertRaisesRegex(RuntimeError,'unavailable'):
                     service.start(command)
                 self.assertFalse(service.snapshot()['active']);self.assertEqual(service.snapshot()['phase'],'failed')
                 self.assertIsNone(service.token);self.assertIsNone(service.thread);self.assertEqual(calls,[])
                 with self.assertRaisesRegex(ValueError,'Expired'):service.beat(old)
-                with patch('group_coordinator.threading.Thread',ImmediateThread),patch('performance_program.program',return_value={'duration_s':0.}):
+                with patch('group_coordinator.threading.Thread',side_effect=self.threads(service)),patch('performance_program.program',return_value={'duration_s':0.}):
                     new=service.start(command)['group_lease']
+                    self.assert_renewals_closed(service)
                 self.assertNotEqual(old,new);self.assertEqual(service.snapshot()['phase'],'completed')
 
     def test_already_active_group_rejection_preserves_original_lease_and_thread(self):

@@ -64,7 +64,7 @@ class DiscoveryTests(unittest.TestCase):
             a,b=MagicMock(),MagicMock();a.open.side_effect=RuntimeError('offline');cls.side_effect=[a,b]
             h,r,p=d.connect_discovered(m,use_routes=True)
             self.assertEqual([c.args[0] for c in cls.call_args_list],['192.168.1.110:7447','192.168.1.111:7447'])
-            a.close.assert_called_once();r.close();b.close.assert_called_once()
+        a.close.assert_not_called();r.close();a.close.assert_called_once();b.close.assert_called_once()
     def test_explicit_failed_address_does_not_fall_back(self):
         m=manager()
         with patch.object(d,'DeviceRoute') as cls:

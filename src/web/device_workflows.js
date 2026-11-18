@@ -11,6 +11,7 @@
  window.addEventListener('console-offline',event=>{if(event.detail?.task_scope===true)return;retire();serviceToken='';observedState=null;renderContexts();});
  const serialOf=row=>row?.sn||row?.serial||'';
  const profileID=value=>typeof value==='string'&&/^hand[12]_(left|right)$/.test(value);
+ function verifiedHand(value,serial){const identity=value?.identified_device||{},owner=value?.connection_switch?.current_owner;return value?.connection==='connected'&&value.device_id===serial&&identity.source==='sdk_identity'&&identity.serial===serial&&profileID(value.device_profile?.id)&&identity.profile===value.device_profile.id&&owner?.mode==='hand'&&owner.kind==='hand'&&owner.serial===serial&&Number.isSafeInteger(owner.session)&&owner.session>0&&owner.session===value.session_generation;}
  const hasUser=target=>Object.hasOwn(target,'user_id')&&typeof target.user_id==='string';
  const requestID=()=>Array.from(crypto.getRandomValues(new Uint8Array(16)),value=>value.toString(16).padStart(2,'0')).join('');
  function connected(s,target){
@@ -151,11 +152,13 @@
  }
  async function useFeature(purpose,device=null,options={}){
   if(!['official','teleoperation','calibration','hand'].includes(purpose)||featureOwner)return;
+  const visibleContext=options.expectedContext??observedState?.connection_switch?.expected_owner;
   const ticket={epoch:serviceEpoch,purpose,serial:serialOf(device)};featureOwner=ticket;useError='';useFailure=null;renderContexts();
   const leaveView=()=>{if(options.viewOwner&&featureOwner===ticket){featureOwner=null;renderContexts();}};if(options.viewOwner)window.addEventListener('workspace-page',leaveView);
   const current=()=>featureOwner===ticket&&ticket.epoch===serviceEpoch;
   try{
    const before=await state();ticket.owner_context=before.connection_switch?.expected_owner;ticket.before_transition={request_id:before.connection_switch?.request_id||null,attempt_id:before.connection_switch?.attempt_id||null};if(!current()||serviceToken&&before.csrf!==serviceToken)return;
+   if(!options.viewOwner&&visibleContext!=null&&(!/^[a-f0-9]{64}$/.test(visibleContext)||before.connection_switch?.expected_owner!==visibleContext))throw Error(t('当前连接已变化，请重新核对。','The current connection changed. Verify it again.'));
    if(options.viewOwner||options.retryOwner){
     const expected=options.viewOwner||options.retryOwner,actual=currentOwner(before),observed=currentOwner(),target={mode:expected.mode,serial:expected.serial,user_id:expected.user_id,profile:expected.profile};
     if(options.retryOwner&&(!/^[a-f0-9]{64}$/.test(options.expectedContext||'')||before.connection_switch?.expected_owner!==options.expectedContext))throw Error(t('当前连接已变化，请重新核对。','The current connection changed. Verify it again.'));
@@ -168,9 +171,28 @@
    if(options.viewOwner)return {state:before,view:true}; // Viewing never changes an existing device purpose.
    if(purpose==='calibration')return; // The final Start atomically hands over this exact glove.
    const target={mode:purpose,serial,...purpose==='official'?{theme:document.documentElement.dataset.theme==='dark'?'dark':'light'}:{}};
+   if(purpose==='hand'&&['hand1','hand2'].includes(chosen.generation)){
+    const intent=device?.profile??window.WujiDemonstration?.profile?.()??before.device_profile?.id;
+    if(device?.profile!==undefined&&!profileID(device.profile))throw Error(t('展示型号无效，请重新选择。','Invalid demonstration model. Select it again.'));
+    // A discovery can omit side. This remains mapping intent; only the SDK
+    // connection supplies actual identity, including a different hand side.
+    const side=['left','right'].includes(chosen.side)?chosen.side:profileID(intent)?intent.split('_')[1]:profileID(before.device_profile?.id)?before.device_profile.id.split('_')[1]:null;
+    if(!side)throw Error(t('请选择展示型号和左右手，再连接设备。','Choose a demonstration model and side before connecting.'));
+    target.profile=chosen.generation+'_'+side;
+   }
    if(purpose==='teleoperation'&&device?.mode==='teleoperation')for(const key of ['user_id','profile','hand_serial','timeout_ms','address'])if(Object.hasOwn(device,key))target[key]=device[key];
-   const switched=await switchConnection(target,options.retryOwner?options.expectedContext:null);if(!current())return;if(switched.routed)return switched;
-   const latest=await window.WujiConnection?.refresh?.();if(current()&&latest)observedState=latest;if(current())directory.select?.(serial);if(current()&&purpose==='hand'&&options.navigate!==false&&latest?.device_profile?.id){window.WujiDemonstration?.selectProfile(latest.device_profile.id);const select=document.getElementById('demonstration-hand');if(select){select.value=serial;select.dispatchEvent(new Event('change'));}}
+   const handChoice={profile:window.WujiDemonstration?.profile?.(),revision:window.WujiDemonstration?.revision?.(),entry:location.hash};
+   const switched=await switchConnection(target,visibleContext??before.connection_switch?.expected_owner??null);if(!current())return;if(switched.routed)return switched;
+   const latest=await window.WujiConnection?.refresh?.();if(!current())return;
+   if(latest&&latest.csrf!==before.csrf)throw Error(t('工作台连接已变化，请重新核对。','The Workbench connection changed. Review it again.'));
+   if(purpose==='hand'&&latest){
+    const accepted=switched.state,context=observedState?.connection_switch?.expected_owner;
+    if(latest.device_id!==serial||latest.session_generation!==accepted?.session_generation||latest.connection_switch?.expected_owner!==accepted?.connection_switch?.expected_owner
+       ||context&&context!==before.connection_switch?.expected_owner&&context!==accepted?.connection_switch?.expected_owner)throw Error(t('灵巧手连接归属已变化，请重新核对。','Hand connection ownership changed. Review it again.'));
+   }
+   if(latest)observedState=latest;directory.select?.(serial);
+   const actual=latest||switched.state;
+   if(purpose==='hand'&&options.navigate!==false&&verifiedHand(actual,serial)&&location.hash===handChoice.entry&&window.WujiDemonstration?.profile?.()===handChoice.profile&&window.WujiDemonstration?.revision?.()===handChoice.revision){window.WujiDemonstration?.selectProfile(actual.device_profile.id);const select=document.getElementById('demonstration-hand');if(select){select.value=serial;select.dispatchEvent(new Event('change'));}}
    if(current()&&purpose==='official')await window.WujiOfficialViz?.selectDevice(serial);
    return {...switched,state:latest||switched.state};
   }catch(error){if(current()){useError=error.name==='SwitchCancelled'?'':error?.message||t('设备用途切换未完成，请核对当前会话。','The device switch did not complete. Review the current session.');useFailure={...(switchFailures.get(error)||{owner_context:ticket.owner_context,request_id:null,before_transition:ticket.before_transition}),retired:false};}throw error;}
@@ -202,7 +224,7 @@
  window.addEventListener('connection-switch-update',renderContexts);window.addEventListener('device-inventory-selection',renderContexts);window.addEventListener('device-inventory-update',renderContexts);window.addEventListener('wuji-language',renderContexts);renderContexts();
 
  directory.setUseHandler(async(mode,device)=>{
-  const owner=currentOwner(),serialAtClick=serialOf(device);
+  const owner=currentOwner(),serialAtClick=serialOf(device),expectedContext=observedState?.connection_switch?.expected_owner;
   if(mode==='official'&&device.kind==='glove'&&owner?.kind==='glove'&&owner.serial===serialAtClick&&['official','teleoperation'].includes(owner.mode)){await useFeature(owner.mode,device,{viewOwner:{...owner}});return;}
   // Re-read after the click. Retained cards are never sufficient authority.
   await directory.refresh();const current=directory.snapshot(),serial=device.sn||device.serial;
@@ -210,19 +232,19 @@
   if(!found?.selectable||serialOf(directory.selection())!==serial)throw Error(t('设备列表或所选设备已改变，请重新选择后继续。','The device list or selected device changed. Select it again to continue.'));
   if(mode==='official'){
    if(!found.official_available)throw Error(t('请先完成官方设备发现','Run official discovery first'));
-   await useFeature('official',found,{navigate:found.kind!=='glove'||currentOwner()?.mode==='official'&&currentOwner()?.serial===serial});return;
+   await useFeature('official',found,{navigate:found.kind!=='glove'||currentOwner()?.mode==='official'&&currentOwner()?.serial===serial,expectedContext});return;
   }
   if(mode==='hand'){
    if(found.kind!=='hand')throw Error(t('所选设备不是灵巧手','Selected device is not a hand'));
    // Exact serial identity selects the backend's original discovered route.
-   await useFeature('hand',found,{navigate:currentOwner()?.mode==='hand'&&currentOwner()?.serial===serial});return;
+   await useFeature('hand',found,{navigate:currentOwner()?.mode==='hand'&&currentOwner()?.serial===serial,expectedContext});return;
   }
   if(found.kind!=='glove')throw Error(t('请先选择手套','Select a glove first'));
   chooseGlove(found);
-  if(mode==='calibration'){await useFeature('calibration',found);return;}
+  if(mode==='calibration'){await useFeature('calibration',found,{expectedContext});return;}
   if(mode!=='preview')throw Error('Unknown device workflow');
   // This button is the explicit purpose choice. The shared coordinator ends
   // only its exact source owner and opens the SDK; following remains separate.
-  await useFeature('teleoperation',found);return;
+  await useFeature('teleoperation',found,{expectedContext});return;
  });
 })();

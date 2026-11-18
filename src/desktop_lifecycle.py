@@ -121,14 +121,14 @@ def _close_sessions(controller, timeout, clock, sleep, *, deadline=None):
     active=hardware.get('active',False)
     current_device=(glove.get('feedback') or {}).get('device_id') if glove.get('busy') else state.get('device_id')
     pending_here=bool(current_device) and any(r.get('device_id')==current_device for r in unconfirmed(state))
-    if active is not False or pending_here:
+    if active is not False or hardware.get('start_pending') or pending_here:
         try:budget();controller.action(dict(name='hardware_stop'))
         except ValueError as error:return dict(ok=False,error=str(error))
         step_deadline=clock()+budget()
         while clock()<step_deadline:
             state=controller.snapshot()
             hw=state.get('glove',{}).get('hardware',{}) if glove.get('busy') else state.get('hardware',{})
-            if hw.get('active') is False and hw.get('stop_confirmed') is True:break
+            if hw.get('active') is False and hw.get('stop_confirmed') is True and not hw.get('start_pending'):break
             sleep(min(.05,budget()))
         else:return dict(ok=False,error='尚未确认灵巧手停用，请回到工作台检查连接。 / Hand disable is not confirmed; check the connection.')
     pending=unconfirmed(state)

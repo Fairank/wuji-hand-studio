@@ -1,8 +1,9 @@
 """Actual update/discovery/close flow, synthetic HTTP and OS boundaries only."""
-from contextlib import ExitStack
+from contextlib import contextmanager,ExitStack
 import copy
 import io
 import json
+import os
 import socket
 import subprocess
 import threading
@@ -12,6 +13,7 @@ import unittest
 from unittest.mock import Mock,patch
 
 from console_server import ConsoleHTTPServer,Controller,Handler
+import cli_coordination
 from cli_coordination import reservation,root_folder
 from desktop_tools import dispatch
 from desktop_lifecycle import close_sessions
@@ -58,7 +60,7 @@ class UpdateDiscoveryTests(unittest.TestCase):
         self.service.latest=copy.deepcopy(env.latest);self.service.state.update(phase='ready',prepared=copy.deepcopy(env.prepared),available=True)
         env.source.parent.mkdir(parents=True);env.source.write_bytes(b'MZ SYNTHETIC UPDATE FIXTURE - DO NOT EXECUTE\n')
         self.service._stage_installer(env.prepared)
-        self.scans=[]
+        self.scans=[];self.scan_threads=[]
         self.stack.enter_context(patch('calibration_cli.cli_json',side_effect=self.scan_transport))
         self.addCleanup(self.finish_scans)
 
@@ -72,11 +74,55 @@ class UpdateDiscoveryTests(unittest.TestCase):
 
     def begin_scan(self):
         row=(threading.Event(),threading.Event());self.scans.append(row)
-        self.viewer.scan();self.assertTrue(row[0].wait(1))
+        def scan_thread(*args,**kwargs):
+            thread=REAL_THREAD(*args,**kwargs);self.scan_threads.append(thread);return thread
+        with patch('official_visualization.threading.Thread',side_effect=scan_thread):self.viewer.scan()
+        self.assertTrue(row[0].wait(1))
 
     def finish_scans(self):
         for entered,finish in self.scans:finish.set()
         if self.scans:self.assertTrue(self.viewer.scan_done.wait(3),'Synthetic discovery remained alive')
+        # scan_done releases the marker before the gate's file handle closes.
+        for thread in self.scan_threads:
+            thread.join(3);self.assertFalse(thread.is_alive(),'Synthetic discovery thread remained alive')
+
+    def test_scan_fixture_waits_for_worker_after_marker_release(self):
+        unwinding,release=threading.Event(),threading.Event()
+        cleanup_started,cleanup_done=threading.Event(),threading.Event()
+        workers=[];errors=[];collect=self.viewer._collect_scan;file_gate=cli_coordination._file_gate
+        def observe_collect(*args):
+            workers.append(threading.current_thread())
+            return collect(*args)
+        @contextmanager
+        def held_file_gate(folder):
+            with file_gate(folder):
+                yield
+                if threading.current_thread() in workers and self.viewer.scan_done.is_set():
+                    unwinding.set()
+                    if not release.wait(3):raise AssertionError('Synthetic gate exit watchdog')
+        def cleanup():
+            cleanup_started.set()
+            try:self.finish_scans()
+            except BaseException as error:errors.append(error)
+            finally:cleanup_done.set()
+        with patch.object(self.viewer,'_collect_scan',side_effect=observe_collect), \
+                patch('cli_coordination._file_gate',side_effect=held_file_gate):
+            self.begin_scan();self.scans[-1][1].set()
+            cleanup_thread=REAL_THREAD(target=cleanup)
+            try:
+                self.assertTrue(unwinding.wait(1));self.assertTrue(self.viewer.scan_done.is_set())
+                self.assertTrue(workers[0].is_alive())
+                if os.name=='nt':
+                    with self.assertRaises(PermissionError):(self.viewer.folder/'handover.lock').unlink()
+                cleanup_thread.start();self.assertTrue(cleanup_started.wait(1))
+                self.assertFalse(cleanup_done.wait(.05),'Fixture returned before its scan thread closed the gate')
+            finally:
+                release.set()
+                if cleanup_thread.ident is not None:cleanup_thread.join(3)
+                for worker in workers:worker.join(3)
+            self.assertTrue(cleanup_done.is_set());self.assertEqual(errors,[])
+            self.assertFalse(workers[0].is_alive())
+            (self.viewer.folder/'handover.lock').unlink()
 
     def post(self,payload,path='/api/desktop'):
         raw=json.dumps(payload).encode();handler=object.__new__(Handler)

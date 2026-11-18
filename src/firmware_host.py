@@ -21,7 +21,7 @@ from cli_coordination import atomic, gate, identity, release, reservation, reser
 SERIAL = re.compile(r'[A-Za-z0-9][A-Za-z0-9_-]{0,79}\Z')
 KINDS = {'firmware_check', 'firmware', 'sdk_check', 'sdk_update'}
 SAFE_ACTIONS = {'disconnect', 'hardware_stop', 'glove_stop', 'glove_disconnect',
-    'calibration_cancel', 'program_stop', 'group_stop', 'demo_stop', 'official_viz_stop',
+    'calibration_cancel', 'program_stop', 'group_stop', 'group_abort', 'demo_stop', 'official_viz_stop',
     'session_keepalive', 'hardware_keepalive', 'glove_keepalive', 'program_keepalive', 'group_beat'}
 
 
@@ -563,10 +563,26 @@ class FirmwareHost:
                     raise FirmwareNotStarted('Official package ownership changed before spawn')
                 self.validate_package_claim(claim['archive'])
                 marker.update(package_sha256=claim['archive']['sha256'], package_version=claim['archive']['version'])
+            spawn = self.spawn
+            if spawn is None:
+                try:
+                    from native_terminal_worker import prepare_spawn
+                    spawn = prepare_spawn()
+                except Exception as error:
+                    # This dependency check cannot create a PTY. Preserve the
+                    # exact never-started marker so release failure is recoverable.
+                    with self.lock:
+                        unstarted = (marker.get('serial') == serial and marker.get('writer_stage') == 'reserved'
+                            and 'child_pid' not in marker and 'child_start' not in marker
+                            and self.process is None and self.query_process is None
+                            and self.query_job is None and self.query_cancel is None)
+                    if unstarted:
+                        from firmware_service import FirmwareNotStarted
+                        raise FirmwareNotStarted('官方终端尚未启动 / Official terminal did not start: '+str(error)[:500]) from error
+                    raise
             marker.update(serial=serial, command='official-interactive-file-upgrade' if file_mode else 'official-interactive-upgrade', writer_stage='starting')
             atomic(self.folder / 'session.json', marker)
-        from native_terminal_worker import _spawn
-        process = (self.spawn or _spawn)(command,env=firmware_environment() if env is None else env)
+        process = spawn(command,env=firmware_environment() if env is None else env)
         run_id = uuid.uuid4().hex
         # pywinpty's destructor terminates a live PTY. Retain it before *any*
         # post-spawn I/O/identity operation can fail and unwind this stack.

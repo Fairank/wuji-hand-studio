@@ -10,6 +10,12 @@
     dialog.innerHTML=`<form id="symbol-form"><header><h2 id="symbol-title"></h2><button type="button" id="symbol-close">×</button></header><div class="symbol-kinds"><button type="button" data-kind="letters"></button><button type="button" data-kind="numbers"></button></div><label for="symbol-input" id="symbol-input-label"></label><input id="symbol-input" autocomplete="off" spellcheck="false" maxlength="16" aria-describedby="symbol-help symbol-error"><p id="symbol-error" role="status"></p><div id="symbol-options" class="symbol-options"></div><p id="symbol-help"></p><footer><button type="button" id="symbol-cancel"></button><button type="submit" id="symbol-apply" class="primary"></button></footer></form>`;
     document.body.append(dialog);
     const $=id=>document.getElementById(id), select=$('studio-action'), input=$('symbol-input');
+    const eligible=item=>!!item&&(allowPreview||item.hardware!==false);
+    function controls(){
+      select.disabled=busy||!catalog.some(eligible);
+      $('choose-letter').disabled=busy||!catalog.some(item=>eligible(item)&&(item.id==='text_sequence'||item.id.startsWith('letter_')));
+      $('choose-digit').disabled=busy||!catalog.some(item=>eligible(item)&&item.id.startsWith('digit_'));
+    }
     input.maxLength=144;
     const valid=()=>{if(kind==='letters'){if(!/^[A-Za-z0-9 \t\r\n]+$/.test(input.value))return null;const v=input.value.trim().replace(/[ \t\r\n]+/g,' ').toUpperCase();return v.length&&v.length<=48?v:null;}const v=input.value.trim();return v.length===1&&digits.includes(v)?v:null;};
     function draft(){
@@ -33,7 +39,7 @@
       $('symbol-options').replaceChildren(...nodes);draft();
     }
     function choose(id){
-      if(busy||!catalog.some(x=>x.id===id))return;
+      if(busy||!eligible(catalog.find(x=>x.id===id)))return;
       selected=id;if(catalog.find(x=>x.id===id)?.hardware!==false)lastHardware=id;render();onSelect(id);
     }
     function open(next){
@@ -45,16 +51,16 @@
       const groups=[['dance',text('手指舞','Finger dance')],['letters',text('文字与字母','Text and letters')],['basic',text('常用动作','Everyday')],['official',text('官方示例','Official examples')],['numbers',text('报数与报时','Counting and clock')]];
       if(allowPreview)groups.push(['preview',text('单指 / 关节（仅预览）','Finger / joint (preview only)')]);
       const opts=[];
-      for(const [key,label] of groups){const group=document.createElement('optgroup');group.label=label;for(const item of catalog.filter(x=>x.group===key&&!/^(letter_|digit_)/.test(x.id)))group.append(new Option(text(item.zh,item.en),item.id));if(group.children.length)opts.push(group);}
+      for(const [key,label] of groups){const group=document.createElement('optgroup');group.label=label;for(const item of catalog.filter(x=>x.group===key&&eligible(x)&&!/^(letter_|digit_)/.test(x.id)))group.append(new Option(text(item.zh,item.en),item.id));if(group.children.length)opts.push(group);}
       if(/^(letter_|digit_)/.test(selected)){
-        const item=catalog.find(x=>x.id===selected);if(item){const g=document.createElement('optgroup');g.label=text('当前选择','Current selection');g.append(new Option(text(item.zh,item.en),item.id));opts.unshift(g);}
+        const item=catalog.find(x=>x.id===selected);if(eligible(item)){const g=document.createElement('optgroup');g.label=text('当前选择','Current selection');g.append(new Option(text(item.zh,item.en),item.id));opts.unshift(g);}
       }
       select.replaceChildren(...opts);select.value=selected;
       $('studio-action-label').textContent=text('展示动作','Selected action');
       $('choose-letter').textContent=text('输入文字…','Enter text…');$('choose-digit').textContent=text('选择数字…','Choose digit…');
       const item=catalog.find(x=>x.id===selected);
       $('action-selection-note').textContent=!item?text('正在加载动作','Loading actions'):item.hardware===false?text('仅供画面预览；切回真实手时恢复上次实机动作。','Preview only; switching to Real hand restores its previous selection.'):item.group==='letters'?text('近似手指造型 · 尚未实机验收','Approximate finger shape · not hardware-validated'):item.id==='clock'?text('播放时读取本机 HH:MM，依次展示四位数字。','Captures local HH:MM at start and displays four digits.'):item.source==='official'?text('官方源码适配 · 按当前幅度和速度播放','Adapted official example · uses selected amplitude and speed'):text('项目编排动作 · 新选择在下次播放时生效','Scripted motion · changes apply on the next playback');
-      [select,$('choose-letter'),$('choose-digit')].forEach(x=>x.disabled=busy||!catalog.length);
+      controls();
       if(selected==='text_sequence')$('action-selection-note').textContent=text('依次展示：','Sequence: ')+phrase;
       if(item?.group==='dance')$('action-selection-note').textContent=text('真人教程启发 · 连续关节曲线 · 固定底座改编','Inspired by human tutorials · continuous curves · fixed-base adaptation');
       if(item?.id.startsWith('digit_'))$('action-selection-note').textContent=text(item.description_zh,item.description_en);
@@ -73,6 +79,23 @@
     $('symbol-form').addEventListener('submit',e=>{e.preventDefault();const c=valid();if(c&&!busy){if(kind==='letters'){phrase=c;choose('text_sequence');}else choose('digit_'+c);dialog.close();}});
     // HTML dialog supplies Escape dismissal, focus containment and focus return.
     render();
-    return {show(value){if(value==='closed')dialog.close();else open(value);return {ok:true,kind:value};},restore(id,value){if(catalog.some(x=>x.id===id)){selected=id;if(typeof value==="string"&&value)phrase=value;render();}},setCatalog(data){catalog=data;render();},setPreview(value){allowPreview=value;if(!value&&catalog.find(x=>x.id===selected)?.hardware===false){selected=lastHardware;onSelect(selected);}render();},render,setBusy(value){busy=value;[select,$('choose-letter'),$('choose-digit')].forEach(x=>x.disabled=busy||!catalog.length);if(dialog.open)draft();},update(state){const p=state.playback,h=state.hardware;const active=p?.active&&p.action===selected;const idx=h?.active&&h.action===selected&&h.text===phrase?h.token_index:active&&p.text===phrase?p.token_index:-1;[...$('phrase-strip').children].forEach((e,i)=>e.setAttribute('aria-current',String(i===idx)));$('performance-status').textContent=h?.active?h.trial_phase||'':active?p.label+' · '+text('预览','Preview')+' '+Math.round(100*((!p.running&&p.cycles&&p.elapsed_s>=p.duration_s*p.cycles)?1:(p.elapsed_s%p.duration_s)/p.duration_s))+'%':'';},get payload(){return selected==='text_sequence'?{text:phrase}:{};},get selected(){return selected;}};
+    function setCatalog(data){
+      catalog=data;
+      if(catalog.length){
+        const hardware=catalog.find(item=>item.id===lastHardware&&item.hardware!==false)||catalog.find(item=>item.hardware!==false);
+        lastHardware=hardware?.id||'';
+        if(!eligible(catalog.find(item=>item.id===selected))){selected=allowPreview?(hardware||catalog[0]).id:lastHardware;onSelect(selected);}
+      }
+      render();
+    }
+    function setPreview(value){
+      allowPreview=value;
+      if(catalog.length&&!eligible(catalog.find(item=>item.id===selected))){
+        selected=(catalog.find(item=>item.id===lastHardware&&item.hardware!==false)||catalog.find(item=>item.hardware!==false))?.id||'';
+        lastHardware=selected;onSelect(selected);
+      }
+      render();
+    }
+    return {show(value){if(value==='closed')dialog.close();else open(value);return {ok:true,kind:value};},restore(id,value){if(catalog.some(x=>x.id===id)){selected=id;if(typeof value==="string"&&value)phrase=value;render();}},setCatalog,setPreview,render,setBusy(value){busy=value;controls();if(dialog.open)draft();},update(state){const p=state.playback,h=state.hardware;const active=p?.active&&p.action===selected;const idx=h?.active&&h.action===selected&&h.text===phrase?h.token_index:active&&p.text===phrase?p.token_index:-1;[...$('phrase-strip').children].forEach((e,i)=>e.setAttribute('aria-current',String(i===idx)));$('performance-status').textContent=h?.active?h.trial_phase||'':active?p.label+' · '+text('预览','Preview')+' '+Math.round(100*((!p.running&&p.cycles&&p.elapsed_s>=p.duration_s*p.cycles)?1:(p.elapsed_s%p.duration_s)/p.duration_s))+'%':'';},get payload(){return selected==='text_sequence'?{text:phrase}:{};},get selected(){return selected;}};
   }};
 })();

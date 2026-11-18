@@ -24,6 +24,8 @@ class InlineThread:
 
 def controller(root):
     c=console_server.Controller.__new__(console_server.Controller)
+    c.hardware_lease=None;c.hardware_seen_active=False
+    c.hardware_lease_generation=None;c.hardware_lease_device=None
     c.lock=threading.RLock();c.reports=Path(root)/'reports';c.generation=c.hardware_generation=1
     c.state=dict(connection='connected',message='',recording={'active':False},hardware={'active':None,'stop_confirmed':False},sessions=[],motion_history=[])
     c.session_devices={1:'SYNTHETIC'};c.session_epochs={1:1};c.feedback_sessions={1:dict(worker_closed=False,reader_finished=False,transport_closed=False)}

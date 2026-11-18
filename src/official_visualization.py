@@ -33,19 +33,48 @@ def viewer_url(value,theme=None):
     return urlunsplit((parsed.scheme,parsed.netloc,parsed.path,urlencode(pairs),''))
 
 
+def native_worker_main(arguments):
+    """Run the existing Ctrl+C transport only inside this exact Viewer job."""
+    from native_calibration import _attach_pipes
+    _attach_pipes()
+    try:
+        if len(arguments)!=2:raise ValueError('Invalid internal Viewer request')
+        token,serial=arguments
+        if not re.fullmatch('[0-9a-f]{32}',token) or not re.fullmatch('[A-Za-z0-9][A-Za-z0-9_-]{0,79}',serial):
+            raise ValueError('Invalid internal Viewer identity')
+        from windows_process_job import current_in_named_job
+        name='Local\\HandWorkbench-OfficialViz-'+token
+        if not current_in_named_job(name):raise ValueError('Viewer worker is outside its private job')
+        with gate():
+            marker=reservation()
+            if (marker.get('kind')!='viz' or marker.get('backend')!='windows_native'
+                    or marker.get('token')!=token or marker.get('job_name')!=name or marker.get('serial')!=serial
+                    or marker.get('start') is None or identity(marker.get('pid'))!=marker.get('start')):
+                raise ValueError('Viewer ownership changed before launch')
+            from native_cli import prepare
+            component=prepare(strict=True)
+            if component['version']!=marker.get('cli_version'):raise ValueError('Official CLI changed before Viewer launch')
+        from native_jsonl_worker import run
+        return run([component['binary'],'viz','--sn',serial,'--no-zero','--no-open','--jsonl'])
+    except Exception as error:
+        print(json.dumps(dict(type='error',message=str(error)[:700])),flush=True)
+        return 1
+
+
 class OfficialVisualization:
     def __init__(self,folder=None,idle_check=None,scan_check=None):
         self.folder=Path(folder or root_folder());self.idle_check=idle_check or (lambda:None)
         self.scan_check=scan_check
         self.supplement_scan=None
         self.lock=threading.RLock();self.process=None;self.thread=None;self.token=None;self.config=None
-        self.native_job=None;self.native_stop=threading.Event()
+        self.native_job=None;self.native_stop=threading.Event();self.native_cancel_sent=False
         self.transport=None
         self.scan_cancel=threading.Event();self.scan_done=threading.Event();self.scan_done.set()
         self.scan_finished=threading.Event();self.scan_finished.set()
         self.scan_token=None;self.scan_job=None;self.scan_needs_close=False
+        self.observation_config=None
         self.scan_pauses=0
-        self.state=dict(supported=sys.platform=='win32' or sys.platform.startswith('linux'),busy=False,active=False,phase='idle',device=None,devices=[],scanning=False,scan_cleanup_required=False,scanned_at=None,sdk_devices=[],sdk_scanned_at=None,sdk_error=None,viewer_url=None,cli_version=None,error=None,logs=[],started_at=None,stream_freshness='not_reported',zero_on_start=False)
+        self.state=dict(supported=sys.platform=='win32' or sys.platform.startswith('linux'),busy=False,active=False,phase='idle',device=None,devices=[],scanning=False,scan_cleanup_required=False,scanned_at=None,scan_completed_at=None,sdk_devices=[],sdk_scanned_at=None,sdk_error=None,viewer_url=None,cli_version=None,error=None,logs=[],started_at=None,stream_freshness='not_reported',zero_on_start=False)
 
     def snapshot(self,theme=None):
         with self.lock:row=copy.deepcopy(self.state)
@@ -94,7 +123,7 @@ class OfficialVisualization:
             args=(token,True,True) if supplement else (token,True)
             threading.Thread(target=self._collect_scan,args=args,name='Official CLI device discovery',daemon=True).start()
         except Exception as error:
-            self._set(devices=[],scanned_at=None,error=str(error)[:700])
+            self._set(devices=[],scanned_at=None,sdk_devices=[],sdk_scanned_at=None,sdk_error=None,error=str(error)[:700])
             self._finish_scan(token)
             raise
         return self.snapshot()
@@ -107,11 +136,19 @@ class OfficialVisualization:
     @contextmanager
     def discovery_priority(self,timeout=50):
         """Yield only our finite discovery read to an explicit maintenance task."""
+        deadline=time.monotonic()+timeout
         with gate(self.folder),self.lock:
+            token=(self.scan_token if self.state.get('scanning') and not self.state.get('scan_cleanup_required')
+                   and not self.state.get('error') else None)
+            finished=self.scan_finished
             self.scan_pauses+=1
             self.scan_cancel.set()
         try:
-            if not self.scan_done.wait(timeout):
+            if token is not None:
+                if not finished.wait(max(0.,deadline-time.monotonic())):
+                    raise ValueError('设备查找尚未结束，请稍后重试 / Device discovery has not finished; retry shortly')
+                self._stop_scan(expected_scan=token,cleanup_timeout=max(0.,deadline-time.monotonic()))
+            if not self.scan_done.wait(max(0.,deadline-time.monotonic())):
                 raise ValueError('设备查找尚未结束，请稍后重试 / Device discovery has not finished; retry shortly')
             yield
         finally:
@@ -123,15 +160,22 @@ class OfficialVisualization:
                 if self.scan_pauses and not inline:raise ValueError('设备更新中，查找已暂停 / Device update in progress; discovery is paused')
                 if self.state['busy'] or self.state['active'] or self.scan_token:raise ValueError('Official CLI session is busy')
             (self.scan_check or self.idle_check)()
+            from bridge_config import load_config
+            config=load_config()
             token=reserve('scan',self.folder)
             with self.lock:
+                if self.observation_config!=config:
+                    self.state.update(devices=[],scanned_at=None,sdk_devices=[],sdk_scanned_at=None,
+                                      sdk_error=None,scan_completed_at=None)
+                    self.observation_config=None
                 self.scan_token=token;self.scan_job=None;self.scan_needs_close=False
-                self.state.update(busy=True,scanning=True,scan_cleanup_required=False,error=None,devices=[],scanned_at=None,
-                                  sdk_devices=[],sdk_scanned_at=None,sdk_error=None)
+                # Keep the last complete observations while refreshing. Their
+                # original timestamps still expire; a refresh never renews them.
+                self.state.update(busy=True,scanning=True,scan_cleanup_required=False,error=None,phase='idle')
                 self.scan_cancel.clear();self.scan_done.clear();self.scan_finished=threading.Event()
         return token
 
-    def _finish_scan(self,token):
+    def _finish_scan(self,token,*,observations=None,config=None):
         """Publish idle only after the exact discovery marker was released."""
         try:
             with gate(self.folder):
@@ -143,9 +187,12 @@ class OfficialVisualization:
                 release(token,self.folder)
                 if reservation(self.folder):raise ValueError('Device discovery ownership release is unconfirmed')
                 with self.lock:
+                    if observations is not None:
+                        self.state.update(copy.deepcopy(observations))
+                        self.observation_config=copy.deepcopy(config)
                     self.scan_finished.set()
                     self.scan_token=None;self.scan_job=None;self.scan_needs_close=False
-                    self.state.update(busy=False,scanning=False,scan_cleanup_required=False)
+                    self.state.update(busy=False,scanning=False,scan_cleanup_required=False,scan_completed_at=time.time())
                 self.scan_done.set()
             return True
         except Exception as error:
@@ -157,7 +204,8 @@ class OfficialVisualization:
             return False
 
     def _collect_scan(self,token,cancellable=False,supplement=False):
-        clean=True;devices=None;finished=False
+        clean=True;devices=None;finished=False;publication=None;config=None
+        sdk_rows=[];sdk_seen=None;sdk_error=None
         try:
             from bridge_config import load_config
             from calibration_cli import cli_json
@@ -170,8 +218,12 @@ class OfficialVisualization:
             with self.lock:
                 if self.scan_token!=token or self.scan_cancel.is_set() or config!=load_config():
                     raise DiscoveryDeferred('Device discovery scope changed')
-                self.state.update(devices=devices,scanned_at=time.time(),
+                native_seen=time.time()
+                # Each source is an independent completed observation. Publish
+                # the fresh native result before slow SDK preparation can age it.
+                self.state.update(devices=copy.deepcopy(devices),scanned_at=native_seen,
                                   backend='windows_native' if native_network(config) else 'linux_controller')
+                self.observation_config=copy.deepcopy(config)
             if supplement and callable(self.supplement_scan):
                 try:
                     result=self.supplement_scan(config,self.scan_cancel.is_set,token)
@@ -183,13 +235,19 @@ class OfficialVisualization:
                             observed=result.get('observed_at')
                             if type(observed) not in (int,float) or not 0<=time.time()-observed<=30:
                                 raise ValueError('SDK discovery observation time is unconfirmed')
-                            self.state.update(sdk_devices=rows,sdk_scanned_at=observed,sdk_error=None)
+                            sdk_rows=rows;sdk_seen=observed
                 except DiscoveryCleanupUnconfirmed:raise
                 except DiscoveryDeferred:raise
                 except Exception as error:
                     with self.lock:
-                        if self.scan_token==token:self.state.update(sdk_devices=[],sdk_scanned_at=None,sdk_error=str(error)[:700])
+                        if self.scan_token==token:sdk_error=str(error)[:700]
             devices=copy.deepcopy(devices)
+            with self.lock:
+                if self.scan_token!=token or self.scan_cancel.is_set() or config!=load_config():
+                    raise DiscoveryDeferred('Device discovery scope changed')
+                publication=dict(devices=devices,scanned_at=native_seen,sdk_devices=sdk_rows,
+                                 sdk_scanned_at=sdk_seen,sdk_error=sdk_error,
+                                 backend='windows_native' if native_network(config) else 'linux_controller')
         except Exception as error:
             from official_device_discovery import DiscoveryDeferred,DiscoveryCleanupUnconfirmed
             clean=not isinstance(error,DiscoveryCleanupUnconfirmed)
@@ -199,20 +257,32 @@ class OfficialVisualization:
                 self._set(busy=True,scanning=True,phase='error',scan_cleanup_required=True)
             with self.lock:
                 if self.scan_token==token:
-                    self.state.update(devices=[],scanned_at=None,sdk_devices=[],sdk_scanned_at=None,
-                                      error=None if isinstance(error,DiscoveryDeferred) else str(error)[:700])
+                    cancelled=(isinstance(error,DiscoveryDeferred) or isinstance(error,DiscoveryCleanupUnconfirmed)
+                               and self.scan_cancel.is_set())
+                    preserve=(cancelled and self.scan_pauses>0
+                              and config is not None and self.observation_config==config)
+                    if preserve:
+                        try:preserve=config==load_config()
+                        except Exception:preserve=False
+                    if not preserve:
+                        self.state.update(devices=[],scanned_at=None,sdk_devices=[],sdk_scanned_at=None,sdk_error=None)
+                        self.observation_config=None
+                    self.state['error']=None if isinstance(error,DiscoveryDeferred) else str(error)[:700]
             devices=None
         finally:
-            if clean:finished=self._finish_scan(token)
+            if clean:finished=self._finish_scan(token,observations=publication,config=config)
             else:
                 with self.lock:
                     if self.scan_token==token:self.scan_finished.set()
         return devices if finished else None
 
-    def _stop_scan(self):
+    def _stop_scan(self,*,expected_scan=None,cleanup_timeout=2):
         """Retry only this instance's original finite discovery read."""
-        with self.lock:
+        with gate(self.folder),self.lock:
             token=self.scan_token;finished=self.scan_finished
+            if expected_scan is not None:
+                if token is None and not reservation(self.folder):return self.snapshot()
+                if token!=expected_scan:raise ValueError('Device discovery owner changed')
             if token is None:return self.snapshot()
             self.scan_cancel.set()
         if not finished.wait(35):raise ValueError('设备查找仍在退出，请稍后重试 / Device discovery is still closing; retry shortly')
@@ -227,7 +297,7 @@ class OfficialVisualization:
                 raise ValueError('Device discovery owner changed')
             if needs_close:
                 if job is None:raise ValueError('Discovery startup exit remains unconfirmed; close and reopen the application before retrying')
-                try:closed=job.close(timeout=2)
+                try:closed=job.close(timeout=max(0.,cleanup_timeout))
                 except Exception as error:
                     self._set(error='Device discovery cleanup unconfirmed: '+str(error)[:400])
                     raise ValueError(self.snapshot()['error']) from error
@@ -278,6 +348,8 @@ class OfficialVisualization:
                     if serial.startswith('WH1') or ('hand' in kind and '2' not in kind and not serial.startswith('WH2')):raise ValueError('官方 viz 当前支持 Hand 2 和 Glove / Official viz supports Hand 2 and Glove')
                     self.token=token;self.config=config
                     self.native_stop.clear()
+                    self.native_cancel_sent=False
+                    self.state['native_release']=None
                     self.state.update(busy=True,active=False,phase='starting',viewer_url=None,error=None,logs=[],device=found,reported_device=None,started_at=time.time())
                     if native_network(config):
                         marker=reservation(self.folder)
@@ -359,12 +431,9 @@ class OfficialVisualization:
             else:self._set(phase='error',busy=False,error='CLI 会话退出尚未确认，请点击停止以核对 / CLI cleanup not confirmed; use Stop to recover')
 
     def _run_native(self,serial,theme):
-        """Observation-only native CLI, confined to a Windows kill-on-close job.
-
-        Stop terminates this Viewer process tree, not a hand or motor. The
-        original CLI startup report is not evidence of data freshness.
-        """
-        job=None;p=None;reader=None;timer_done=threading.Event();cleanup=False
+        """Original JSONL through the calibration worker's private Ctrl+C pipe."""
+        job=None;p=None;reader=None;timer_done=threading.Event();finished=threading.Event();cleanup=False
+        child_exit=None;exit_seen=False;transport_error=None;pending='';token=self.token
         try:
             from native_cli import prepare
             from windows_process_job import OwnedProcess
@@ -374,9 +443,13 @@ class OfficialVisualization:
             with self.lock:
                 if self.native_stop.is_set():return
                 marker=reservation(self.folder)
-                if marker.get('token')!=self.token:raise ValueError('Official Viewer ownership changed')
-                job=OwnedProcess([component['binary'],'viz','--sn',serial,'--no-zero','--no-open','--jsonl'],
-                    job_name=marker['job_name'],stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,
+                if marker.get('token')!=token:raise ValueError('Official Viewer ownership changed')
+                marker['cli_version']=component['version'];atomic(self.folder/'session.json',marker)
+                command=[sys.executable]
+                if not getattr(sys,'frozen',False):command.append(str(Path(__file__).with_name('desktop.py')))
+                command.extend(['--native-viz-worker',token,serial])
+                job=OwnedProcess(command,
+                    job_name=marker['job_name'],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,
                     text=True,encoding='utf-8',errors='replace',bufsize=1,
                     env=official_cli_environment())
                 p=job.process;self.native_job=job;self.process=p
@@ -385,14 +458,18 @@ class OfficialVisualization:
             reader=threading.Thread(target=stderr,daemon=True);reader.start()
             def timeout():
                 if not timer_done.wait(60):
-                    self._set(error='官方可视化启动超时 / Official Viewer startup timed out',phase='error')
-                    self.native_stop.set();job.terminate_and_wait(5)
+                    with self.lock:
+                        if self.token!=token or self.process is not p:return
+                        self._set(error='官方可视化启动超时 / Official Viewer startup timed out',phase='error')
+                        self.native_stop.set()
+                    try:self._cancel_native(p,token)
+                    except (OSError,ValueError):pass
+                    if not finished.wait(7):job.terminate_and_wait(5)
             threading.Thread(target=timeout,daemon=True).start()
-            for line in p.stdout:
-                if len(line)>32768:raise ValueError('Official Viewer startup record too large')
+            def accept(line):
                 try:event=json.loads(line)
-                except ValueError:self._log(line.rstrip());continue
-                if not isinstance(event,dict) or event.get('status')!='running':continue
+                except ValueError:self._log(line.rstrip());return
+                if not isinstance(event,dict) or event.get('status')!='running':return
                 reported=event.get('device') or {}
                 if reported.get('sn')!=serial:raise ValueError('Official Viewer returned a different device serial')
                 url=viewer_url((event.get('viewer') or {}).get('url'),theme)
@@ -400,34 +477,80 @@ class OfficialVisualization:
                     with socket.create_connection(('127.0.0.1',urlsplit(endpoint).port),timeout=5):pass
                 url=self._browser_url(url)
                 with self.lock:
-                    if not self.native_stop.is_set():
+                    if self.token==token and not self.native_stop.is_set():
                         self.state.update(active=True,busy=False,phase='running',device={**self.state['device'],**reported},reported_device=copy.deepcopy(reported),viewer_url=url)
                 timer_done.set()
+            for line in p.stdout:
+                with self.lock:
+                    if self.token!=token or self.process is not p:raise ValueError('Viewer worker ownership changed')
+                if len(line)>128*1024:raise ValueError('Viewer worker transport record too large')
+                event=json.loads(line)
+                if not isinstance(event,dict) or exit_seen:raise ValueError('Invalid or late Viewer worker event')
+                kind=event.get('type')
+                if kind in ('output','diagnostic'):
+                    text=event.get('text')
+                    if not isinstance(text,str) or len(text)>65536:raise ValueError('Invalid Viewer worker output')
+                    if kind=='diagnostic':self._log(text.rstrip());continue
+                    pending+=text
+                    while '\n' in pending:
+                        row,pending=pending.split('\n',1)
+                        if len(row)>32768:raise ValueError('Official Viewer startup record too large')
+                        accept(row)
+                    if len(pending)>32768:raise ValueError('Official Viewer startup record too large')
+                elif kind=='exit':
+                    child_exit=event.get('exitstatus');exit_seen=True
+                    if type(child_exit) is not int:raise ValueError('Invalid Viewer CLI exit status')
+                elif kind=='error':transport_error=str(event.get('message') or 'Viewer worker failed')[:700]
+                else:raise ValueError('Unsupported Viewer worker event')
+            if pending:accept(pending)
             code=p.wait(timeout=10);reader.join(timeout=2)
+            if code or child_exit!=0 or transport_error:
+                raise ValueError(transport_error or 'Official Viewer CLI exit is unconfirmed')
+            deadline=time.monotonic()+2
+            while job.active_processes() and time.monotonic()<deadline:time.sleep(.02)
+            if job.active_processes():raise ValueError('Official Viewer descendants did not exit after Ctrl+C')
             with self.lock:
+                if self.token!=token or self.process is not p:raise ValueError('Viewer worker ownership changed before release')
                 requested=self.state['phase']=='stopping'
-                self.state.update(active=False,busy=False,phase='idle' if requested else 'exited',viewer_url=None)
-                if code and not requested:self.state.update(phase='error',error='官方可视化进程退出 / Official visualization exited ('+str(code)+')')
+                self.state.update(active=False,busy=False,phase='idle' if requested else 'exited',viewer_url=None,native_release='graceful')
+                if child_exit and not requested:self.state.update(phase='error',error='官方可视化进程退出 / Official visualization exited ('+str(child_exit)+')')
         except Exception as error:
-            self._set(active=False,busy=False,phase='error',viewer_url=None,error=str(error)[:700])
+            with self.lock:
+                if self.token==token:self._set(active=False,busy=False,phase='error',viewer_url=None,error=str(error)[:700],native_release='unconfirmed')
         finally:
             timer_done.set()
+            if p is not None and p.poll() is None:
+                try:self._cancel_native(p,token);p.wait(timeout=7)
+                except (OSError,ValueError,subprocess.TimeoutExpired):pass
             try:cleanup=job is None or job.close(timeout=7)
             except Exception as error:
                 cleanup=False;self._log('Native CLI cleanup: '+str(error)[:500])
-            cleanup=self._close_transport() and cleanup
             with self.lock:
-                self.process=None
-                if cleanup:self.native_job=None
+                current=self.token==token
+            if current:cleanup=self._close_transport() and cleanup
+            with self.lock:
+                if self.process is p:self.process=None
+                if cleanup and self.native_job is job:self.native_job=None
+            finished.set()
             if cleanup and p is not None:
                 if reader is not None:reader.join(timeout=1)
-                for stream in (p.stdout,p.stderr):
+                for stream in (p.stdin,p.stdout,p.stderr):
                     if stream is not None and (stream is not p.stderr or reader is None or not reader.is_alive()):
                         try:stream.close()
                         except (OSError,AttributeError):pass
             if cleanup:
-                with gate(self.folder):release(self.token,self.folder);self.token=None
-            else:self._set(phase='error',busy=False,active=False,viewer_url=None,error='原生 CLI 退出未确认，请重试停止 / Native CLI cleanup unconfirmed; retry Stop')
+                with gate(self.folder),self.lock:
+                    release(token,self.folder)
+                    if self.token==token:self.token=None
+            elif current:self._set(phase='error',busy=False,active=False,viewer_url=None,error='原生 CLI 退出未确认，请重试停止 / Native CLI cleanup unconfirmed; retry Stop')
+
+    def _cancel_native(self,process,token):
+        """One cancel on the exact owned private worker, never another console."""
+        with self.lock:
+            if self.token!=token or self.process is not process:raise ValueError('Viewer worker ownership changed before cancel')
+            if self.native_cancel_sent or process.poll() is not None:return
+            process.stdin.write(json.dumps(dict(type='cancel'))+'\n');process.stdin.flush()
+            self.native_cancel_sent=True
 
     def connection_record(self,serial,session_id,*,require_glove=True):
         """Verify an actual local native Viewer, independently of scan TTL.
@@ -500,9 +623,17 @@ class OfficialVisualization:
             if not native and p and p.poll() is None:
                 try:p.stdin.write('stop\n');p.stdin.flush()
                 except (OSError,ValueError):pass
-        if native and job is not None:job.terminate_and_wait(timeout=7)
-        if thread and thread.is_alive():thread.join(timeout=15)
+        if native and p is not None:
+            try:self._cancel_native(p,expected_token)
+            except (OSError,ValueError,AttributeError):pass
+        if thread and thread.is_alive():thread.join(timeout=8 if native else 15)
+        if native and job is not None and (thread and thread.is_alive()):
+            self._set(native_release='unconfirmed')
+            job.terminate_and_wait(timeout=7)
+            thread.join(timeout=7)
         if thread and thread.is_alive():raise ValueError('官方可视化仍在退出 / Official visualization is still closing')
+        if native and p is not None and self.state.get('native_release')!='graceful':
+            raise ValueError('官方画面未确认正常释放，已回收的会话不能作为转接成功 / Official Viewer graceful release is unconfirmed; reclaimed sessions do not confirm handover')
         with gate(self.folder):
             stale=reservation(self.folder)
             if stale and stale.get('token')!=expected_token:

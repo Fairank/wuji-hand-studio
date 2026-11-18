@@ -69,9 +69,8 @@ def prepare_permission(hand_thread,hand_state):
     return True,''
 
 
-def scan_preview_hands(manager,glove,connection,solver_engine,source,now,
-                       hand_thread,hand_state,hand_unpairing):
-    """Refresh hand advertisements without reopening the existing glove."""
+def _check_preview_hand_scan(glove,connection,solver_engine,source,now,
+                             hand_thread,hand_state,hand_unpairing):
     if glove is None or connection!='receiving' or solver_engine!='sdk':
         raise ValueError('请先打开官方 SDK 手套预览 / Open the official SDK glove preview first')
     allowed,reason=prepare_permission(hand_thread,hand_state)
@@ -81,6 +80,16 @@ def scan_preview_hands(manager,glove,connection,solver_engine,source,now,
     if (hand_state.get('hardware') or {}).get('stop_confirmed') is False:
         raise ValueError('灵巧手停用结果未确认 / Hand disable is unconfirmed')
     source.target(now)
+
+
+def scan_preview_hands(manager,glove,connection,solver_engine,source,now,
+                       hand_thread,hand_state,hand_unpairing,*,cancelled=None):
+    """Refresh hand advertisements without reopening the existing glove."""
+    _check_preview_hand_scan(glove,connection,solver_engine,source,now,hand_thread,hand_state,hand_unpairing)
+    from zenoh_route import managed_wsl
+    if managed_wsl():
+        from device_discovery import scan_only
+        return scan_only(manager,cancelled=cancelled)
     from device_discovery import candidates
     return candidates(list(manager.scan()))
 
@@ -89,7 +98,7 @@ def paired_hand_worker(address, serial, selected, requests, events, factory, sou
     """Choose one fresh serial and verify side/model before creating a driver."""
     from device_discovery import connect_discovered, SelectionRequired
     from console_agent import worker
-    hand=route=ownership=None;delegated=False;closed=None;cleanup=True
+    hand=route=ownership=None;delegated=False;closed=None;cleanup=True;pending_cleanup=None
     class Forward:
         def put(self,event):
             nonlocal closed
@@ -118,9 +127,31 @@ def paired_hand_worker(address, serial, selected, requests, events, factory, sou
     except SelectionRequired as error:
         events.put(dict(type='selection',devices=error.devices,message=str(error)))
     except Exception as error:
+        from device_discovery import HandRouteCleanupUnconfirmed
+        if isinstance(error,HandRouteCleanupUnconfirmed) and not delegated:pending_cleanup=error;cleanup=False
         if delegated:cleanup=False
         events.put(dict(type='error',message=str(error)))
     finally:
+        if pending_cleanup is not None:
+            # A failed pre-driver close still owns its exact resources. Wait
+            # for an explicit owning-session disconnect before each retry.
+            events.put(dict(type='hand_session_closed',cleanup_confirmed=False))
+            while True:
+                command=requests.get()
+                if command.get('name')!='disconnect':continue
+                if pending_cleanup.hand is not None:
+                    try:
+                        if pending_cleanup.hand.disconnect() is False:raise RuntimeError('Hand disconnect was not acknowledged')
+                        pending_cleanup.hand=None
+                    except Exception:pass
+                try:pending_cleanup.bundle.close()
+                except Exception:pass
+                if pending_cleanup.hand is None and not pending_cleanup.bundle.routes:
+                    cleanup=True
+                    forward.put(dict(type='closed',hardware=dict(active=False,stop_confirmed=True,
+                        reason='本次未创建灵巧手动作驱动 / No hand motion driver was created')))
+                    break
+                events.put(dict(type='hand_session_closed',cleanup_confirmed=False))
         for resource in (hand,route,ownership):
             if resource is not None:
                 try:resource.disconnect() if resource is hand else resource.close()
@@ -144,6 +175,8 @@ def worker_glove(requests,events,continuation=None,sdk_requirement=None):
     model_receipt=None;model_provenance=None;opened_user_id='';selection_lease_released=True;selection_lease=None
     glove_disconnect_needs_retry=False
     hand_unpairing=False;hand_unpaired=False;hand_scan_error=''
+    hand_scan_thread=None;hand_scan_cancel=threading.Event();hand_scan_results=queue.Queue()
+    hand_scan_context=None;hand_scan_cleanup=None
     bootstrap_commands=collections.deque()
     class BootstrapCancelled(Exception):pass
     def bootstrap_not_cancelled():
@@ -221,11 +254,34 @@ def worker_glove(requests,events,continuation=None,sdk_requirement=None):
                         if glove is not None:raise ValueError('先断开手套再扫描 / Disconnect glove before scanning')
                         devices=scan();devices_at=time.time();message='扫描完成 / Scan completed'
                     elif name=='glove_hand_scan':
-                        hands=scan_preview_hands(manager,glove,state,solver_engine,source,now,
-                                                 hand_thread,hand_state,hand_unpairing)
-                        hands_at=time.time()
-                        hand_scan_error=''
-                        message='灵巧手查找完成，请选择后连接 / Hand search completed; choose a hand to connect'
+                        if hand_scan_cleanup is not None:raise ValueError('Hand search route cleanup is unconfirmed; disconnect the owning session')
+                        if hand_scan_thread is not None:raise ValueError('灵巧手查找正在进行 / Hand search is already running')
+                        _check_preview_hand_scan(glove,state,solver_engine,source,now,hand_thread,hand_state,hand_unpairing)
+                        from zenoh_route import managed_wsl
+                        if managed_wsl():
+                            hand_scan_cancel.clear();hand_scan_context=(glove,session,mapping)
+                            def search():
+                                nonlocal hand_scan_cleanup
+                                try:
+                                    rows=scan_preview_hands(manager,glove,state,solver_engine,source,time.monotonic(),
+                                        hand_thread,hand_state,hand_unpairing,cancelled=hand_scan_cancel.is_set)
+                                    hand_scan_results.put((threading.current_thread(),rows,time.time(),None))
+                                except Exception as error:
+                                    from device_discovery import HandRouteCleanupUnconfirmed
+                                    if isinstance(error,HandRouteCleanupUnconfirmed):hand_scan_cleanup=error.bundle
+                                    hand_scan_results.put((threading.current_thread(),None,None,str(error)[:400]))
+                            hand_scan_thread=threading.Thread(target=search,name='Glove hand discovery',daemon=True)
+                            try:hand_scan_thread.start()
+                            except Exception:
+                                hand_scan_thread=None;hand_scan_context=None
+                                raise
+                            hand_scan_error=''
+                            message='正在查找灵巧手 / Searching for hands'
+                        else:
+                            hands=scan_preview_hands(manager,glove,state,solver_engine,source,now,
+                                                     hand_thread,hand_state,hand_unpairing)
+                            hands_at=time.time();hand_scan_error=''
+                            message='灵巧手查找完成，请选择后连接 / Hand search completed; choose a hand to connect'
                     elif name=='glove_open':
                         if glove is not None:raise ValueError('手套已连接，修改配置请先断开')
                         if continuation is None and c['serial'] not in {d['serial'] for d in devices}:
@@ -301,6 +357,7 @@ def worker_glove(requests,events,continuation=None,sdk_requirement=None):
                         mapping=OutputMapping(c.get('retarget',defaults()));last_source_seq=None
                         state='receiving';message='已连接手套，灵巧手未启用 / Glove connected; hand not enabled'
                     elif name=='glove_solver':
+                        if hand_scan_thread is not None or hand_scan_cleanup is not None:raise ValueError('请等待灵巧手查找结束并确认退出 / Wait for hand search to finish and release')
                         if glove is None:raise ValueError('Connect glove preview first')
                         if hand_thread and hand_thread.is_alive():raise ValueError('Disconnect hand feedback before changing solver')
                         replacement=new_solver(c['solver'])
@@ -310,6 +367,7 @@ def worker_glove(requests,events,continuation=None,sdk_requirement=None):
                         source.invalidate('等待新求解器的下一帧 / Waiting for a new solver frame')
                         message='求解器已切换，等待新骨架 / Solver switched; waiting for fresh skeleton'
                     elif name=='glove_prepare':
+                        if hand_scan_thread is not None or hand_scan_cleanup is not None:raise ValueError('请等待灵巧手查找结束并确认退出 / Wait for hand search to finish and release')
                         if glove is None:raise ValueError('先连接手套 / Connect glove first')
                         if solver_engine!='sdk':
                             raise ValueError('开源映射仅用于调参预览，请切回官方 SDK 后再接入灵巧手 / Open mapping is preview only; switch to the official SDK before preparing a hand')
@@ -324,6 +382,7 @@ def worker_glove(requests,events,continuation=None,sdk_requirement=None):
                         hand_thread=threading.Thread(target=paired_hand_worker,args=(c.get('address',''),c.get('serial',''),selected,hand_requests,hand_events,factory,source),daemon=True)
                         hand_thread.start();message='正在连接灵巧手，只读反馈 / Connecting hand feedback only'
                     elif name=='glove_retarget':
+                        if hand_scan_thread is not None or hand_scan_cleanup is not None:raise ValueError('请等待灵巧手查找结束并确认退出 / Wait for hand search to finish and release')
                         if glove is None:raise ValueError('Connect glove preview first')
                         if hand_thread and hand_thread.is_alive():raise ValueError('重新连接手套预览后应用映射 / Reconnect preview before applying mapping')
                         mapping=OutputMapping(c['retarget'])
@@ -379,6 +438,19 @@ def worker_glove(requests,events,continuation=None,sdk_requirement=None):
                 except Exception as e:
                     source.invalidate(str(e));message=str(e)
             while True:
+                try:reader,rows,observed,error=hand_scan_results.get_nowait()
+                except queue.Empty:break
+                if reader is not hand_scan_thread:continue
+                context=hand_scan_context;hand_scan_thread=None;hand_scan_context=None
+                if (hand_scan_cancel.is_set() or context is None
+                        or any(before is not after for before,after in zip(context,(glove,session,mapping)))):continue
+                if error:
+                    hand_scan_error=error;message=error
+                    events.put(dict(type='glove_notice',message=error))
+                else:
+                    hands=rows;hands_at=observed;hand_scan_error=''
+                    message='灵巧手查找完成，请选择后连接 / Hand search completed; choose a hand to connect'
+            while True:
                 try:event=hand_events.get_nowait()
                 except queue.Empty:break
                 if event['type']=='state':hand_state=event
@@ -414,6 +486,8 @@ def worker_glove(requests,events,continuation=None,sdk_requirement=None):
                 if glove is None:can_prepare=False;prepare_reason='请先打开手套预览 / Open glove preview first'
                 elif solver_engine!='sdk':can_prepare=False;prepare_reason='请切回官方 SDK 映射后再接入灵巧手 / Switch to official SDK mapping before preparing a hand'
                 elif not snapshot['fresh']:can_prepare=False;prepare_reason='等待新鲜手套数据 / Wait for fresh glove data'
+                elif hand_scan_thread is not None:can_prepare=False;prepare_reason='请等待灵巧手查找结束 / Wait for hand search to finish'
+                elif hand_scan_cleanup is not None:can_prepare=False;prepare_reason='Hand search route cleanup is unconfirmed; disconnect the owning session'
                 feedback=copy.deepcopy({k:hand_state.get(k) for k in ('latest','device_id','device_version','joint_rates','metrics','connection')})
                 feedback['identified_device']=copy.deepcopy(hand_identity)
                 if feedback.get('latest'):
@@ -421,6 +495,7 @@ def worker_glove(requests,events,continuation=None,sdk_requirement=None):
                 events.put(dict(type='glove_state',state=dict(version=1,connection=state,message=message,
                     devices=devices,devices_at=devices_at,hands=hands,hands_at=hands_at,users=users,user=current,profile=selected['id'],glove_serial=glove_sn,device_version=device_version,
                     stream=snapshot,hardware=hw,feedback=feedback,hand_error=hand_error,hand_scan_error=hand_scan_error,
+                    hand_scanning=hand_scan_thread is not None,
                     can_prepare=can_prepare,prepare_blocked_reason=prepare_reason,
                     hand_cleanup_confirmed=hand_state.get('cleanup_confirmed'),
                     hand_unpairing=hand_unpairing,hand_unpaired=hand_unpaired,
@@ -445,20 +520,30 @@ def worker_glove(requests,events,continuation=None,sdk_requirement=None):
         final_cleanup=hand_state.get('cleanup_confirmed') is True
         # An unsuccessful SDK close retains its original handle and leases.
         # No timed/background retry: another explicit disconnect is required.
+        retry_scan_cleanup=hand_scan_cleanup is not None
         while True:
+            hand_scan_cancel.set()
+            if hand_scan_thread is not None:hand_scan_thread.join(timeout=2)
+            scan_finished=hand_scan_thread is None or not hand_scan_thread.is_alive()
+            if scan_finished and hand_scan_cleanup is not None and retry_scan_cleanup:
+                try:
+                    hand_scan_cleanup.close();hand_scan_cleanup=None
+                except Exception:pass
+            retry_scan_cleanup=False
+            scan_finished=scan_finished and hand_scan_cleanup is None
             if hand_thread and hand_thread.is_alive():
                 hand_requests.put(dict(name='disconnect'));hand_thread.join(timeout=4)
-            if not subscription_closed:
+            if scan_finished and not subscription_closed:
                 try:
                     if sub.close() is False:raise ValueError('Subscription close was not acknowledged')
                     subscription_closed=True
                 except Exception:pass
-            if not glove_disconnected and not glove_disconnect_needs_retry:
+            if scan_finished and not glove_disconnected and not glove_disconnect_needs_retry:
                 try:
                     if glove.disconnect() is False:raise ValueError('Glove disconnect was not acknowledged')
                     glove_disconnected=True
                 except Exception:pass
-            if session is not None:
+            if scan_finished and session is not None:
                 if callable(getattr(session,'close',None)):
                     try:
                         if session.close() is False:raise ValueError('Solver close was not acknowledged')
@@ -468,19 +553,19 @@ def worker_glove(requests,events,continuation=None,sdk_requirement=None):
                     # Pinned SDK RetargetSession has step/reset but no close.
                     solver_cleanup='sdk_no_close_api' if solver_engine=='sdk' else 'unconfirmed'
                     if solver_cleanup!='unconfirmed':session=None
-            if selection_lease is not None and not selection_lease_released:
+            if scan_finished and selection_lease is not None and not selection_lease_released:
                 try:
                     if selection_lease.close() is False:raise ValueError('Selection lease release was not acknowledged')
                     selection_lease_released=True;selection_lease=None
                 except Exception:pass
-            if restore_selection_lease is not None and not selection_lease_released:
+            if scan_finished and restore_selection_lease is not None and not selection_lease_released:
                 try:
                     if restore_selection_lease.close() is False:raise ValueError('Selection lease release was not acknowledged')
                     selection_lease_released=True;restore_selection_lease=None
                 except Exception:pass
             handles_closed=subscription_closed and glove_disconnected and solver_cleanup!='unconfirmed'
             hand_finished=hand_thread is None or not hand_thread.is_alive()
-            if handles_closed and hand_finished and selection_lease_released:
+            if scan_finished and handles_closed and hand_finished and selection_lease_released:
                 if not user_restored and manager is not None and previous_user is not None:
                     try:
                         if sys.platform.startswith('linux'):
@@ -516,13 +601,13 @@ def worker_glove(requests,events,continuation=None,sdk_requirement=None):
             if hand_thread and (hand_thread.is_alive() or not final_hardware):
                 final_hardware=dict(active=None,stop_confirmed=False,reason='停用结果未确认 / Disable not confirmed')
                 final_cleanup=False
-            retryable=not hand_finished or not all((handles_closed,user_restored,ownership_released,profile_lease_released,selection_lease_released))
+            retryable=not scan_finished or not hand_finished or not all((handles_closed,user_restored,ownership_released,profile_lease_released,selection_lease_released))
             cleanup=dict(version=1,glove_serial=glove_sn,sdk_user_id=opened_user_id,profile=selected['id'],
                 glove_was_open=glove is not None,subscription_closed=subscription_closed,
                 glove_disconnected=glove_disconnected,solver_cleanup=solver_cleanup,
                 user_restored=user_restored,ownership_released=ownership_released,
                 profile_lease_released=profile_lease_released,selection_lease_released=selection_lease_released,
-                hand_released=hand_finished and (hand_thread is None or final_cleanup
+                hand_released=scan_finished and hand_finished and (hand_thread is None or final_cleanup
                     and final_hardware.get('active') is False and final_hardware.get('stop_confirmed') is True),
                 retryable=retryable)
             events.put(dict(type='glove_closed',hardware=final_hardware,device_id=final_device,
@@ -534,6 +619,7 @@ def worker_glove(requests,events,continuation=None,sdk_requirement=None):
                 command=requests.get()
                 if command.get('name') in ('disconnect','glove_disconnect'):
                     glove_disconnect_needs_retry=False
+                    retry_scan_cleanup=True
                     break
                 if command.get('name')=='glove_stop' and hand_thread is not None and hand_thread.is_alive():
                     hand_requests.put(command);continue

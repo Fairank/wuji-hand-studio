@@ -12,6 +12,7 @@ from pathlib import Path,PurePosixPath
 import re
 import shutil
 import tempfile
+from filesystem_commit import CommitConflict, move_with_retry, path_identity
 import zipfile
 
 from cli_release_store import CLIReleaseStore,MAX_ARCHIVE,MAX_METADATA,REPOSITORY,REPO_URL,ReleaseStoreError
@@ -123,6 +124,7 @@ class ManagedNativeCLIStore(NativeCLIStore):
             if len(json.dumps(release).encode())>MAX_METADATA:raise ReleaseStoreError('Official release metadata exceeds its limit')
             asset=self._asset(value,release);digest,source=self._expected_sha(release,asset,'v'+value)
             stage=Path(tempfile.mkdtemp(prefix='.prepare-'+value+'-',dir=self.root))
+            stage_identity=path_identity(stage);preserve_stage=False
             try:
                 candidate=stage/asset['name']
                 if archive is None:
@@ -147,9 +149,14 @@ class ManagedNativeCLIStore(NativeCLIStore):
                     paths=dict(archive=asset['name'],payload='payload',binary='payload/'+binary),status='prepared',validated=True,
                     compatibility_checked=True,software_checks=evidence,device_commands_executed=False,prepared_at=datetime.now(timezone.utc).isoformat())
                 self._write_json(stage/'manifest.json',manifest);self._check_cancel()
-                os.replace(stage,final)
+                move_with_retry(stage, final, os.replace, check_cancel=self._check_cancel)
                 return self._cached(final,value,strict=True)
+            except CommitConflict:
+                preserve_stage=True
+                raise
             finally:
-                if stage.exists():
+                if not preserve_stage and stage.exists():
+                    if stage_identity is None or path_identity(stage)!=stage_identity:
+                        raise ReleaseStoreError('Staging identity changed; preserve files for recovery')
                     if stage.parent!=self.root or not stage.name.startswith('.prepare-') or _redirect(stage) or stage.resolve().parent!=self.root.resolve():raise ReleaseStoreError('Unsafe native CLI staging cleanup path')
                     shutil.rmtree(stage)

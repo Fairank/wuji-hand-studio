@@ -46,6 +46,7 @@ class _SDKDiscoveryRead:
     def __init__(self,factory,cancelled):
         self.factory=factory;self.cancelled=cancelled;self.stopped=threading.Event()
         self.finished=threading.Event();self.entered=threading.Event()
+        self.prepared=threading.Event();self.prepared_at=None;self.preparation_deadline=None
         self.lock=threading.RLock();self.close_lock=threading.Lock()
         self.client=None;self.thread=None;self.diagnostics=None
         self.transport_closed=True;self.error=None;self.result=None
@@ -64,6 +65,14 @@ class _SDKDiscoveryRead:
             client=self.factory()
             with self.lock:self.client=client;self.transport_closed=False
             if self.stopped.is_set() or self.cancelled():raise DiscoveryDeferred('SDK discovery was cancelled')
+            # Runtime preparation may verify the managed bundle before any SDK
+            # process exists. It has its own bound, never the finite read budget.
+            with self.lock:
+                admitted_at=time.monotonic()
+                if self.stopped.is_set() or self.cancelled():raise DiscoveryDeferred('SDK discovery was cancelled')
+                if self.preparation_deadline is not None and admitted_at>=self.preparation_deadline:
+                    raise ValueError('SDK discovery preparation timed out')
+                self.prepared_at=admitted_at;self.prepared.set()
             stdin,stdout,stderr=client.exec_command(client.agent_command,timeout=12)
             def drain():
                 try:
@@ -71,6 +80,7 @@ class _SDKDiscoveryRead:
                 except (OSError,ValueError,EOFError):pass
             self.diagnostics=threading.Thread(target=drain,name='SDK discovery diagnostics',daemon=True)
             self.diagnostics.start()
+            if self.stopped.is_set() or self.cancelled():raise DiscoveryDeferred('SDK discovery was cancelled')
             stdin.write('{"name":"discover","include_gloves":true}\n');stdin.flush()
             total=0
             for line in stdout:
@@ -119,16 +129,21 @@ class _SDKDiscoveryRead:
                     and (diagnostics is None or not diagnostics.is_alive()) and self.transport_closed)
 
 
-def sdk_devices(factory,*,cancelled=None,timeout=15):
+def sdk_devices(factory,*,cancelled=None,timeout=15,preparation_timeout=60):
     """Invoke original finite SDK discover; never create a connected workspace."""
     cancelled=cancelled or (lambda:False)
     if cancelled():raise DiscoveryDeferred('SDK discovery was cancelled')
     owned=_SDKDiscoveryRead(factory,cancelled)
     try:
-        owned.start();deadline=time.monotonic()+timeout
+        owned.preparation_deadline=time.monotonic()+preparation_timeout
+        owned.start()
         while not owned.finished.wait(.05):
             if cancelled():raise DiscoveryDeferred('SDK discovery was cancelled')
-            if time.monotonic()>=deadline:raise ValueError('SDK discovery timed out')
+            with owned.lock:prepared_at=owned.prepared_at
+            if prepared_at is None:
+                if time.monotonic()>=owned.preparation_deadline:
+                    raise ValueError('SDK discovery preparation timed out')
+            elif time.monotonic()>=prepared_at+timeout:raise ValueError('SDK discovery timed out')
         if cancelled():raise DiscoveryDeferred('SDK discovery was cancelled')
         if owned.error is not None:raise owned.error
         return copy.deepcopy(owned.result)

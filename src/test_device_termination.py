@@ -55,18 +55,22 @@ class TerminationTests(unittest.TestCase):
             self.assertEqual(c.state['device_id'],'NEW')
             self.assertEqual(c.state['connection'],'connecting')
 
-    def test_late_disconnect_ack_confirms_same_serial_without_reconnecting(self):
+    def test_refused_active_disconnect_and_late_exit_ack_preserve_exact_owner(self):
         from console_server import Controller
         with tempfile.TemporaryDirectory() as tmp:
             c=Controller(lambda:None,Path(tmp)/'reports')
             c.state.update(connection='error',device_id='OLD')
             c.state['hardware'].update(active=True)
             c.session_devices[0]='OLD'
-            c.action(dict(name='disconnect'))
+            with self.assertRaises(ValueError):c.action(dict(name='disconnect'))
+            # A failed reader still cannot fabricate disable. Its exact late
+            # terminal ACK can resolve uncertainty without any reconnect.
+            c.event(dict(type='error',message='synthetic reader ended'),0)
             self.assertEqual(len(c.snapshot()['unconfirmed_devices']),1)
             c.event(dict(type='closed',hardware=dict(active=False,stop_confirmed=True)),0)
             self.assertEqual(c.snapshot()['unconfirmed_devices'],[])
             self.assertIs(c.state['hardware']['active'],False)
+            self.assertEqual(c.state['connection'],'error')
 
     def test_new_glove_scan_preserves_ended_session_uncertainty(self):
         from glove_bridge import GloveBridge

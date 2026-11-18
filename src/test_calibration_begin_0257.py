@@ -42,7 +42,8 @@ class BeginTests(unittest.TestCase):
         with fixture.HandoverTests().environment() as e:
             result=e.service.begin(self.command())
             self.assertEqual(e.calibration.start.call_args.kwargs['connected']['viewer_token'],TOKEN)
-            e.job.terminate_and_wait.assert_called_once()
+            e.job.terminate_and_wait.assert_not_called()
+            self.assertTrue(e.viewer.native_cancel_sent);self.assertEqual(e.viewer.state['native_release'],'graceful')
             e.controller.calibration_devices.assert_not_called()
             self.assertEqual(result['calibration']['run']['serial'],SN)
 

@@ -45,9 +45,9 @@ class DemonstrationScope:
     def snapshot(self,profile_id=None):
         if profile_id is not None:
             key=display_profile(profile_id)['id']
-            with self.lock:return dict(self.players[key].snapshot(),display_profile=key)
+            with self.lock:return dict(self.players[key].snapshot(profile_id=key),display_profile=key)
         with self.lock:
-            return {key:dict(player.snapshot(),display_profile=key) for key,player in self.players.items()}
+            return {key:dict(player.snapshot(profile_id=key),display_profile=key) for key,player in self.players.items()}
 
     def command(self,command):
         if not isinstance(command,dict) or command.get('name') not in COMMANDS:

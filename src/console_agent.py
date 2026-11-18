@@ -169,6 +169,13 @@ class Recorder:
 def worker_auto(address, serial, requests, events):
     from device_discovery import connect_discovered, SelectionRequired
     hand = route = ownership = None
+    closed=None;failed=False
+    class Forward:
+        def put(self,event):
+            nonlocal closed
+            if event.get('type')=='closed':closed=event
+            else:events.put(event)
+    forward=Forward()
     try:
         from wuji_sdk import SdkManager
         hand, route, selected = connect_discovered(SdkManager.instance(), address, serial)
@@ -180,19 +187,25 @@ def worker_auto(address, serial, requests, events):
         if selected['generation'] == 'hand1':
             from first_generation import worker_first
             owned_hand = hand; hand = None
-            worker_first(address, requests, events, prepared_hand=owned_hand)
+            worker_first(address, requests, forward, prepared_hand=owned_hand)
         else:
             # Keep the ownership descriptor alive until the worker returns.
             owned_hand, owned_route = hand, route;hand = route = None
-            worker(address, requests, events, prepared=(owned_hand, owned_route))
+            worker(address, requests, forward, prepared=(owned_hand, owned_route))
     except SelectionRequired as error:
+        failed=True
         events.put(dict(type='selection', devices=error.devices, message=str(error)))
     except Exception as error:
+        failed=True
         events.put(dict(type='error', message=str(error)))
     finally:
-        if hand is not None:hand.disconnect()
-        if route is not None:route.close()
-        if ownership is not None:ownership.close()
+        for resource,method in ((hand,'disconnect'),(route,'close'),(ownership,'close')):
+            if resource is None:continue
+            try:
+                if getattr(resource,method)() is False:raise RuntimeError('Hand resource release was not acknowledged')
+            except Exception as error:
+                failed=True;events.put(dict(type='error',message=str(error)))
+        if not failed and closed is not None:events.put(closed)
 
 
 def worker(address, requests, events, motion_factory=HardwareShowcase, prepared=None):
@@ -201,9 +214,12 @@ def worker(address, requests, events, motion_factory=HardwareShowcase, prepared=
         from first_generation import worker_first
         return worker_first(address,requests,events)
     hand = sub = diagnostics = motion = protocol_route = ownership = None
-    recorder = Recorder()
+    handled_lease = None
+    recorder = Recorder();emit_state=None
     def finish(reason,retry=False):
         if recorder.pending_report is not None and not retry:return
+        if emit_state is not None and (recorder.active or recorder.pending_report is not None):
+            emit_state(time.monotonic())
         try:report = recorder.finish(reason, time.monotonic())
         except (OSError,ValueError,TypeError):
             events.put(dict(type='notice',message='录制摘要尚未保存；已有原始文件保留，请检查存储后点击停止采集重试 / Recording summary is not saved; existing raw files are retained. Check storage, then use Stop recording to retry.'))
@@ -230,6 +246,8 @@ def worker(address, requests, events, motion_factory=HardwareShowcase, prepared=
             hand = SdkManager.instance().connect(**kwargs)
         require_left(hand)
         device_id = str(hand.serial_number)
+        if prepared is None:
+            events.put(dict(type='identity', profile=selected['id'], device_id=device_id))
         if prepared is None and sys.platform.startswith('linux'):
             from device_ownership import DeviceOwnership
             ownership=DeviceOwnership(device_id)
@@ -258,6 +276,16 @@ def worker(address, requests, events, motion_factory=HardwareShowcase, prepared=
         joint_rates = JointRates()
         last = time.monotonic()
         last_emit = 0.
+        def emit_state(now):
+            nonlocal last_emit
+            if not motion.active:motion.check_probe_ready(recent[-1] if recent else None,diagnostic,now)
+            events.put(dict(type='state', connection='connected' if recent else 'connecting',
+                message=('正在执行实机动作，画面跟随反馈' if motion.active else '已核对设备身份，正在接收反馈') if recent else '已连接，等待反馈',
+                latest=recent[-1] if recent else None,
+                device_id=device_id, device_version=device_version, joint_rates=joint_rates.snapshot(now),
+                metrics=dict(host_hz=rate(recent, 'host_s'), device_hz=rate(recent, 'device_timestamp_us'), age_ms=(now-last)*1000 if recent else None),
+                recording=recorder.state(),hardware=dict(motion.status(),handled_lease=handled_lease)))
+            last_emit = now
         def receive():
             nonlocal last,diagnostic
             frames,state_empty=drain_available(sub)
@@ -323,6 +351,9 @@ def worker(address, requests, events, motion_factory=HardwareShowcase, prepared=
                         motion.command(command,recent[-1] if recent else None,diagnostic,now)
                     except (ValueError,RuntimeError) as error:
                         events.put(dict(type='notice',message=str(error)))
+                    finally:
+                        if name in {'hardware_start','hardware_probe','hardware_trial'}:
+                            handled_lease=command.get('lease')
                 if name == 'record' and motion.active:
                     events.put(dict(type='notice',message='请先停止实机展示，再进行只读采集'))
                     continue
@@ -345,6 +376,9 @@ def worker(address, requests, events, motion_factory=HardwareShowcase, prepared=
                 if motion.trial:motion.trial['fault']=motion.latest_observation
                 motion.stop('反馈队列未及时排空，已停止，不能用积压旧帧继续动作')
             if motion.pending_report:
+                # Publish real disable/ownership facts before report formatting,
+                # disk I/O or transport can delay the next feedback state.
+                emit_state(time.monotonic())
                 report=motion.pending_report;motion.pending_report=None
                 if report.get('kind')=='low_current_showcase_trial':report['feedback_tail']=list(recent)[-300:]
                 report.update(id=uuid.uuid4().hex,device_id=device_id,side=selected['side'],generation=selected['generation'])
@@ -357,15 +391,8 @@ def worker(address, requests, events, motion_factory=HardwareShowcase, prepared=
                 finish('completed')
             if now-last > 3:
                 raise RuntimeError('连续3秒没有收到设备反馈，请检查连接')
-            if now-last_emit >= .05:
-                if not motion.active:motion.check_probe_ready(recent[-1] if recent else None,diagnostic,now)
-                events.put(dict(type='state', connection='connected' if recent else 'connecting',
-                    message=('正在执行实机动作，画面跟随反馈' if motion.active else '已核对设备身份，正在接收反馈') if recent else '已连接，等待反馈',
-                    latest=recent[-1] if recent else None,
-                    device_id=device_id, device_version=device_version, joint_rates=joint_rates.snapshot(now),
-                    metrics=dict(host_hz=rate(recent, 'host_s'), device_hz=rate(recent, 'device_timestamp_us'), age_ms=(now-last)*1000 if recent else None),
-                    recording=recorder.state(),hardware=motion.status()))
-                last_emit = now
+            emit_now=time.monotonic()
+            if emit_now-last_emit >= .05:emit_state(emit_now)
             if motion.active:
                 # Reserve the final 150 us for the next command deadline. This
                 # improves host cadence but is not a real-time OS guarantee.
@@ -378,18 +405,17 @@ def worker(address, requests, events, motion_factory=HardwareShowcase, prepared=
     finally:
         finish('disconnected')
         if motion is not None:motion.stop('连接结束' if motion.active else motion.reason)
-        if diagnostics is not None:diagnostics.close()
-        if sub is not None:
-            sub.close()
-        try:
-            if hand is not None:
-                hand.disconnect()
-        finally:
-            if protocol_route is not None:
-                protocol_route.close()
-            if ownership is not None:
-                ownership.close()
-        events.put(dict(type='closed',hardware=motion.status() if motion is not None else {}))
+        close_errors=[]
+        for resource,method in ((diagnostics,'close'),(sub,'close'),(hand,'disconnect'),(protocol_route,'close'),(ownership,'close')):
+            if resource is None:continue
+            try:
+                if getattr(resource,method)() is False:raise RuntimeError('Hand resource release was not acknowledged')
+            except Exception as error:close_errors.append(str(error))
+        if close_errors:raise RuntimeError('Hand resource cleanup is unconfirmed: '+'; '.join(close_errors))
+        hardware=dict(motion.status(),handled_lease=handled_lease) if motion is not None else {}
+        proof=(dict(version=1,kind='readonly_feedback',serial=device_id,profile=selected['id'],enable_attempted=False,resources_released=True)
+            if motion is not None and hardware.get('active') is False and hardware.get('enable_attempted') is False else None)
+        events.put(dict(type='closed',hardware=hardware,feedback_cleanup=proof))
 
 
 def emit(event):
@@ -407,7 +433,7 @@ def main():
         nonlocal process
         if process:
             requests.put(dict(name='disconnect'))
-            process.join(timeout=6. if glove_mode else 1.)
+            process.join(timeout=6.)
             if process.is_alive():
                 process.terminate()
                 process.join(timeout=2.)

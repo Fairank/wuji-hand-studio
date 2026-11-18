@@ -15,6 +15,7 @@ import sys
 import threading
 import time
 from urllib.request import Request, urlopen
+from windows_process_job import OwnedProcess
 
 
 class DeviceFleet:
@@ -66,12 +67,18 @@ class DeviceFleet:
                        WUJI_FLEET_PARENT=self.origin, WUJI_FLEET_ID=ident,
                        WUJI_FLEET_OWNER_TOKEN=owner_token)
             command = [sys.executable, '--serve'] if getattr(sys, 'frozen', False) else [sys.executable, str(self.resource/'desktop.py'), '--serve']
+            process_owner=None
             with (folder/'console.log').open('ab') as log:
-                child = subprocess.Popen(command, env=env, stdin=subprocess.DEVNULL,
-                                         stdout=log, stderr=log,
-                                         creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+                options=dict(env=env,stdin=subprocess.DEVNULL,stdout=log,stderr=log,
+                             creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
+                if sys.platform=='win32':
+                    # The non-inherited private Job handle stays in this root.
+                    # Even a sudden root exit must not leave a second service
+                    # able to write this same saved workspace on the next boot.
+                    process_owner=OwnedProcess(command,**options);child=process_owner.process
+                else:child=subprocess.Popen(command,**options)
             record = dict(id=ident, label=label.strip(), port=port, profile=profile, process=child,
-                          owner_token=owner_token)
+                          owner_token=owner_token,process_owner=process_owner)
             self.children[ident] = record
         try:
             for _ in range(100):
@@ -88,11 +95,13 @@ class DeviceFleet:
                     staged.replace(self.records)
                 return self.public(record)
             raise ValueError('设备工作区启动超时 / Workspace startup timed out')
-        except Exception:
-            if child.poll() is None:
-                child.terminate()
-                try:child.wait(timeout=5)
-                except subprocess.TimeoutExpired:child.kill();child.wait(timeout=5)
+        except Exception as error:
+            try:self._close_child(record)
+            except (OSError,ValueError,subprocess.TimeoutExpired):
+                if process_owner is None:raise
+                # Preserve the exact owner for an explicit retry. An unknown
+                # tree exit must never be discarded as a failed addition.
+                raise ValueError('Workspace startup cleanup is unconfirmed; retry closing this session') from error
             with self.lock:self.children.pop(ident,None)
             # Keep the data/log directory for diagnosis. Never delete user data.
             raise
@@ -100,6 +109,23 @@ class DeviceFleet:
     @staticmethod
     def public(r):
         return {k: r[k] for k in ('id', 'label', 'port', 'profile')}
+
+    @staticmethod
+    def _close_child(record,*,deadline=None,clock=time.monotonic):
+        """Confirm this OS tree exited; this is never a motor-disable ACK."""
+        from desktop_tools import update_remaining
+        def wait_budget():return min(5.,update_remaining(deadline,clock)) if deadline is not None else 5
+        process=record['process'];owner=record.get('process_owner')
+        if owner is not None:
+            if owner.process is not process:raise ValueError('Workspace process owner changed; retry')
+            if owner.close(timeout=wait_budget()) is not True:
+                raise ValueError('Workspace process tree exit was not confirmed')
+        elif process.poll() is None:
+            wait_budget();process.terminate()
+            try:process.wait(timeout=wait_budget())
+            except subprocess.TimeoutExpired:
+                wait_budget();process.kill();process.wait(timeout=wait_budget())
+        if process.poll() is None:raise ValueError('Workspace process exit was not confirmed')
 
     @staticmethod
     def get(r, path, *, timeout=1):
@@ -239,13 +265,7 @@ class DeviceFleet:
                 # An unrelated already-dead child is never assumed safe.
                 r['_removal_close_process']=process
         with self.lock:current()
-        if process.poll() is None:
-            process.terminate()
-            try:process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                process.kill();process.wait(timeout=5)
-        if process.poll() is None:
-            raise ValueError('Workspace process exit was not confirmed')
+        self._close_child(r)
         with self.lock:
             current()
             rows=json.loads(self.records.read_text(encoding='utf-8')) if self.records.exists() else []
@@ -276,15 +296,7 @@ class DeviceFleet:
                         return dict(ok=False,error='设备工作区尚未确认断开 / Workspace disconnect unconfirmed: '+str(error))
             for r in records:
                 budget()
-                process=r['process']
-                if process.poll() is None:
-                    budget()
-                    process.terminate()
-                    try:process.wait(timeout=min(5.,budget()) if deadline is not None else 5)
-                    except subprocess.TimeoutExpired:
-                        budget()
-                        process.kill();process.wait(timeout=min(5.,budget()) if deadline is not None else 5)
-                if process.poll() is None:raise ValueError('Workspace process exit was not confirmed')
+                self._close_child(r,deadline=deadline,clock=clock)
             budget()
             with self.lock:
                 if len(self.children)!=len(records) or any(self.children.get(r['id']) is not r for r in records):

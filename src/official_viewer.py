@@ -9,6 +9,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import re
 import threading
+import time
 from urllib.parse import urlsplit
 
 from runtime_paths import RESOURCE, PORT
@@ -89,6 +90,27 @@ class ViewerHandler(BaseHTTPRequestHandler):
     """An independent static origin: never exposes any Workbench API."""
     def log_message(self, *_):
         pass
+
+    def do_POST(self):
+        # Drain only a small, bounded request before rejecting it. Closing with
+        # unread body bytes can reset the Windows connection before 501 arrives.
+        self.close_connection=True
+        try:length=int(self.headers.get('Content-Length','0'))
+        except (ValueError,TypeError):length=0
+        if 0<length<=4096 and not self.headers.get('Transfer-Encoding'):
+            previous=self.connection.gettimeout()
+            deadline=time.monotonic()+1
+            try:
+                while length:
+                    remaining=deadline-time.monotonic()
+                    if remaining<=0:break
+                    self.connection.settimeout(remaining)
+                    chunk=self.rfile.read1(length)
+                    if not chunk:break
+                    length-=len(chunk)
+            except OSError:pass
+            finally:self.connection.settimeout(previous)
+        self.send_error(501,"Unsupported method ('POST')")
 
     def do_GET(self):
         port = self.server.server_address[1]

@@ -202,7 +202,10 @@ class BuildIdentityTests(unittest.TestCase):
                 Path(command[3]).write_text(identity, encoding='utf-8')
             return SimpleNamespace(stdout=None, returncode=0)
         try:
-            with patch.object(sys, 'argv', [str(self.script), '--package-only', '--binary-only']), patch.object(sys, 'platform', 'win32'), patch('importlib.metadata.distributions', return_value=[]), patch.object(subprocess, 'run', side_effect=run) as child, redirect_stdout(io.StringIO()):
+            # These tests isolate cached-binary identity. Payload integrity has
+            # its own tests and requires files absent from this disposable tree.
+            with patch('prepare_official_viewer.verify'), patch('prepare_official_terminal.verify'), patch('prepare_native_cli.verify'), \
+                    patch.object(sys, 'argv', [str(self.script), '--package-only', '--binary-only']), patch.object(sys, 'platform', 'win32'), patch('importlib.metadata.distributions', return_value=[]), patch.object(subprocess, 'run', side_effect=run) as child, redirect_stdout(io.StringIO()):
                 self.child = child
                 return runpy.run_path(str(self.script), run_name='__main__')
         finally:

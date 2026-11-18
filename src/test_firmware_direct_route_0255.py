@@ -555,7 +555,10 @@ class DirectFirmwareRouteTests(unittest.TestCase):
         controller.studio=N(snapshot=lambda:{},stop=Mock())
         controller.official_viz=N(snapshot=lambda:{},stop=Mock())
         controller.official_cli=N(snapshot=lambda:{},closed=threading.Event(),cancel_and_wait=Mock(return_value=True))
-        controller.player=N(snapshot=lambda:{},command=Mock())
+        def playback_snapshot(profile_id='hand2_left'):
+            self.assertEqual(profile_id,controller.state['device_profile']['id'])
+            return {}
+        controller.player=N(snapshot=playback_snapshot,command=Mock())
         controller.parameters=N(sync_status={})
         controller.glove=N(snapshot=lambda:dict(busy=False,connection='disconnected'),busy=False)
         controller.termination=N(snapshot=lambda:[])

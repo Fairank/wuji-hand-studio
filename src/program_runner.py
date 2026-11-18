@@ -44,6 +44,8 @@ class ProgramRunner:
         if s['hardware'].get('active') is not False or s.get('glove',{}).get('busy'):
             raise ValueError('先结束当前动作 / Finish current motion first')
         if mode=='hardware':
+            from device_termination import require_confirmed_stops
+            require_confirmed_stops(getattr(self.controller,'termination',None))
             if command.get('workspace_clear') is not True:raise ValueError('Confirm the workspace is clear')
             if s['connection']!='connected' or s['stale']:raise ValueError('先连接灵巧手 / Connect the hand first')
             if s['device_profile']['generation']!='hand2':raise ValueError('一代手指舞当前仅可预览 / Hand 1 dances are preview-only')

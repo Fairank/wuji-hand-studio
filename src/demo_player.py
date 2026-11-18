@@ -4,7 +4,7 @@ import secrets
 import threading
 import time
 from datetime import datetime
-from gesture_library import CATALOG as GESTURES,CUSTOM_IDS,route
+from gesture_library import CATALOG as GESTURES,CUSTOM_IDS,route,opposition_metadata
 from performance_program import PROGRAM_IDS, program, sample
 from playback_rates import PLAYBACK_SPEEDS
 
@@ -118,13 +118,21 @@ class DemoPlayer:
                 self.scheduled_control=None;self.group_paused=False
             else:raise ValueError('Unknown preview command')
 
-    def snapshot(self):
+    def snapshot(self,profile_id='hand2_left'):
         with self.lock:
             self.advance()
             display_elapsed=self.elapsed
             if self.cycles and self.elapsed>=self.duration*self.cycles:
                 display_elapsed=max(0.,self.elapsed-1e-6)
             phase_label=CATALOG[self.action]
+            provenance={}
+            source='scripted_mujoco_pose_preview'
+            if self.action=='official_opposition':
+                metadata=opposition_metadata(profile_id)
+                phase_label=metadata['zh']
+                provenance={key:value for key,value in metadata.items() if key.startswith('source_') or key=='recording_side'}
+                source=('official_'+metadata['recording_side']+'_recording_model_preview'
+                        if metadata['source']=='official' else 'project_hand1_geometry_candidate_preview')
             token_index=-1
             if self.action in PROGRAM_IDS:
                 phase=sample(self.action,display_elapsed,self.text)
@@ -139,7 +147,7 @@ class DemoPlayer:
                 text=self.text if self.action=='text_sequence' else '',token_index=token_index,duration_s=self.duration,amplitude=self.amplitude,
                 pose_elapsed_s=display_elapsed,
                 elapsed_s=self.elapsed,cycle=min(int(self.elapsed/self.duration)+1,self.cycles) if self.cycles else int(self.elapsed/self.duration)+1,
-                source='official_left_recording_model_preview' if self.action=='official_opposition' else 'scripted_mujoco_pose_preview',hardware_motion=False)
+                source=source,hardware_motion=False,**provenance)
 
 
 class PoseLibrary:

@@ -19,9 +19,11 @@ class ContinuationOpenGuardTests(unittest.TestCase):
     def environment(self):
         fixture=continuation_fixture.ContinuationTests()
         with fixture.environment() as e:
-            c=N(calibrated_teleoperation=e.service,connection_switch=N(_config=lambda:'fixture-config'),
+            c=N(lock=threading.RLock(),calibrated_teleoperation=e.service,connection_switch=N(_config=lambda:'fixture-config'),
                 glove=N(start_calibrated=Mock(return_value=17)),_continuation_profile='hand2_right',
                 sdk_session_configs={},_continuation_model_ready=Mock(return_value={'timeout_ms':250}))
+            c.glove.snapshot=lambda:dict(session_id=17,busy=True,
+                session_cleanup=dict(session_id=17,cleanup_confirmed=False))
             e.service.start_session=lambda bundle:Controller._start_calibrated_session(c,bundle)
             with patch('bridge_config.load_config',return_value={}),patch('official_device_discovery.use_native',return_value=False):
                 e.service.execute(fixture.command(e),synchronous=True)

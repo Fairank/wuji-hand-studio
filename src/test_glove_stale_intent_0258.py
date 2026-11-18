@@ -49,7 +49,10 @@ class GloveStaleIntentTests(unittest.TestCase):
 
     def wires(self,c):return [json.loads(line) for line in c.glove.stdin.getvalue().splitlines()]
 
-    def ack(self,c,**kw):c.glove.receive({'type':'glove_state','state':self.worker_state(**kw)},session=c.glove.session)
+    def ack(self,c,**kw):
+        state=self.worker_state(**kw)
+        if c.glove.lease and not kw.get('unpaired'):state['hardware']['handled_lease']=c.glove.lease
+        c.glove.receive({'type':'glove_state','state':state},session=c.glove.session)
 
     def assert_no_cancellation(self,c):
         c.connection_switch.request_cancel.assert_not_called();c.calibration_handover.request_cancel.assert_not_called()
