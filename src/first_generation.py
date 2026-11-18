@@ -45,6 +45,7 @@ def worker_first(address,requests,events,prepared_hand=None,source=None):
     selected=controller_profile();manager=SdkManager.instance();hand=sub=publisher=lowpass=None
     latest=None;seq=0;recent=collections.deque(maxlen=500);recorder=Recorder();last=time.monotonic();last_emit=0.
     active=False;paused=False;owned=False;disable_confirmed=False;lease='';last_beat=0.;elapsed=0.;tick=0.;next_send=0.;sent=0;run_started=0.
+    enable_attempted=False;device_id=None
     handled_lease=None
     action='';reason='一代手仅开放官方张开/握拳适配，其他动作可预览';plan=None;duration=0.;applied=None;raw_target=None
     from device_profiles import native_ranges
@@ -104,6 +105,8 @@ def worker_first(address,requests,events,prepared_hand=None,source=None):
             hand=manager.connect(sn=devices[0].sn,device_name='wuji_hand')
         require_identity(hand,selected)
         device_id=str(hand.serial_number)
+        if prepared_hand is None:
+            events.put(dict(type='identity',profile=selected['id'],device_id=device_id))
         from device_versions import read_handle_version
         device_version=read_handle_version(hand,device_id)
         sub=hand.joint_states().subscribe()
@@ -135,7 +138,7 @@ def worker_first(address,requests,events,prepared_hand=None,source=None):
                             plan=dict(start=[j['position_rad'] for j in latest['joints']],action=command['action'],amplitude=command['amplitude'],speed=command['speed'],cycles=command['cycles'])
                         hand.set_all_effort_limit(CURRENT_LIMIT_A)
                         # Record ownership before enable so a partial failure still disables.
-                        owned=True;disable_confirmed=False;hand.enable();lowpass=hand.realtime_controller(LowPass(cutoff_hz=CUTOFF_HZ));lowpass.__enter__()
+                        owned=True;disable_confirmed=False;enable_attempted=True;hand.enable();lowpass=hand.realtime_controller(LowPass(cutoff_hz=CUTOFF_HZ));lowpass.__enter__()
                         if following:lowpass.set_target_position(applied)
                         else:publisher=hand.joint_command().publish()
                         lease=command['lease'];last_beat=now;tick=now;next_send=now;elapsed=0.;sent=0;active=True;paused=False;action='glove_teleoperation' if following else plan['action'];reason='一代官方LowPass示例适配'
@@ -172,6 +175,14 @@ def worker_first(address,requests,events,prepared_hand=None,source=None):
     except Exception as error:events.put(dict(type='error',message=str(error)))
     finally:
         stop('连接结束');finish_record('disconnected')
-        if sub:sub.close()
-        if hand:hand.disconnect()
-        events.put(dict(type='closed',hardware=dict(active=None if owned else False,stop_confirmed=disable_confirmed and not owned,handled_lease=handled_lease,reason=reason)))
+        close_errors=[]
+        for resource,method in ((sub,'close'),(hand,'disconnect')):
+            if resource is None:continue
+            try:
+                if getattr(resource,method)() is False:raise RuntimeError('Hand resource release was not acknowledged')
+            except Exception as error:close_errors.append(str(error))
+        if close_errors:raise RuntimeError('Hand resource cleanup is unconfirmed: '+'; '.join(close_errors))
+        proof=(dict(version=1,kind='readonly_feedback',serial=device_id,profile=selected['id'],enable_attempted=False,resources_released=True)
+            if device_id is not None and hand is not None and not owned and enable_attempted is False else None)
+        events.put(dict(type='closed',hardware=dict(active=None if owned else False,stop_confirmed=disable_confirmed and not owned,
+            enable_attempted=enable_attempted,handled_lease=handled_lease,reason=reason),feedback_cleanup=proof))

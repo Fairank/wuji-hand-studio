@@ -19,6 +19,7 @@ import traceback
 from urllib.parse import parse_qs, urlsplit
 
 from console_agent import validate_command, HARDWARE_COMMANDS
+from feedback_stream import feedback_release_confirmed
 from pose_view import PoseView, validate_mapping
 from demo_player import DemoPlayer
 from motion_history import summarize as summarize_motion
@@ -540,10 +541,7 @@ class Controller:
                     result['hand_feedback_session']=dict(source='owned_feedback_reader',serial=serial,
                         session=result['session_generation'],profile=identity.get('profile'),
                         can_disconnect=hardware.get('active') is False and not self.hardware_lease and not self.glove.busy,
-                        exit_confirmed=bool(record.get('worker_closed') and record.get('reader_finished')
-                            and record.get('transport_closed') and not record['thread'].is_alive()
-                            and (record.get('hardware') or {}).get('active') is False
-                            and (record.get('hardware') or {}).get('stop_confirmed') is True))
+                        exit_confirmed=feedback_release_confirmed(record) and not self.hardware_lease)
             try:result['retarget_binding']=self.retarget.selection(result['device_profile'])
             except (ValueError,OSError):result['retarget_binding']=None
             result['solver_runtime']=self.solver_runtime.snapshot()
@@ -724,9 +722,7 @@ class Controller:
                 # Retain unknown device/ACK evidence, not the dead thread's
                 # synchronization handles. This is not a worker-close ACK.
                 record['thread']=thread=_FINISHED_FEEDBACK_READER
-            if (not all(record.get(key) is True for key in ('worker_closed','reader_finished','transport_closed'))
-                    or thread is None or thread.is_alive()
-                    or hardware.get('active') is not False or hardware.get('stop_confirmed') is not True):continue
+            if not feedback_release_confirmed(record):continue
             self.feedback_sessions.pop(generation)
             self.session_epochs.pop(generation,None)
             self.session_devices.pop(generation,None)
@@ -1567,6 +1563,7 @@ class Controller:
             if kind=='closed' and 'hardware' in event and feedback_record is not None:
                 feedback_record['worker_closed']=True
                 feedback_record['hardware']=copy.deepcopy(event['hardware'])
+                feedback_record['feedback_cleanup']=copy.deepcopy(event.get('feedback_cleanup'))
             if 'hardware' in event:
                 self.termination.observe('hand',event.get('device_id') or self.session_devices.get(generation),event['hardware'],self.session_epochs.get(generation,0))
                 if event['hardware'].get('active') is False and event['hardware'].get('stop_confirmed') is True:
@@ -1691,9 +1688,7 @@ class Controller:
                 with self.lock:
                     record['transport_closed']=True;record.pop('client',None)
         with self.lock:
-            if (thread.is_alive() or not record.get('reader_finished') or not record.get('transport_closed')
-                    or not record.get('worker_closed') or (record.get('hardware') or {}).get('active') is not False
-                    or (record.get('hardware') or {}).get('stop_confirmed') is not True):
+            if self.hardware_lease or not feedback_release_confirmed(record):
                 raise ValueError('Hand feedback release is unconfirmed; no new device was opened')
         return dict(serial=serial,session=generation,cleanup_confirmed=True)
 

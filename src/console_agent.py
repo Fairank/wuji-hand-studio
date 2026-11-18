@@ -169,6 +169,13 @@ class Recorder:
 def worker_auto(address, serial, requests, events):
     from device_discovery import connect_discovered, SelectionRequired
     hand = route = ownership = None
+    closed=None;failed=False
+    class Forward:
+        def put(self,event):
+            nonlocal closed
+            if event.get('type')=='closed':closed=event
+            else:events.put(event)
+    forward=Forward()
     try:
         from wuji_sdk import SdkManager
         hand, route, selected = connect_discovered(SdkManager.instance(), address, serial)
@@ -180,19 +187,25 @@ def worker_auto(address, serial, requests, events):
         if selected['generation'] == 'hand1':
             from first_generation import worker_first
             owned_hand = hand; hand = None
-            worker_first(address, requests, events, prepared_hand=owned_hand)
+            worker_first(address, requests, forward, prepared_hand=owned_hand)
         else:
             # Keep the ownership descriptor alive until the worker returns.
             owned_hand, owned_route = hand, route;hand = route = None
-            worker(address, requests, events, prepared=(owned_hand, owned_route))
+            worker(address, requests, forward, prepared=(owned_hand, owned_route))
     except SelectionRequired as error:
+        failed=True
         events.put(dict(type='selection', devices=error.devices, message=str(error)))
     except Exception as error:
+        failed=True
         events.put(dict(type='error', message=str(error)))
     finally:
-        if hand is not None:hand.disconnect()
-        if route is not None:route.close()
-        if ownership is not None:ownership.close()
+        for resource,method in ((hand,'disconnect'),(route,'close'),(ownership,'close')):
+            if resource is None:continue
+            try:
+                if getattr(resource,method)() is False:raise RuntimeError('Hand resource release was not acknowledged')
+            except Exception as error:
+                failed=True;events.put(dict(type='error',message=str(error)))
+        if not failed and closed is not None:events.put(closed)
 
 
 def worker(address, requests, events, motion_factory=HardwareShowcase, prepared=None):
@@ -233,6 +246,8 @@ def worker(address, requests, events, motion_factory=HardwareShowcase, prepared=
             hand = SdkManager.instance().connect(**kwargs)
         require_left(hand)
         device_id = str(hand.serial_number)
+        if prepared is None:
+            events.put(dict(type='identity', profile=selected['id'], device_id=device_id))
         if prepared is None and sys.platform.startswith('linux'):
             from device_ownership import DeviceOwnership
             ownership=DeviceOwnership(device_id)
@@ -390,18 +405,17 @@ def worker(address, requests, events, motion_factory=HardwareShowcase, prepared=
     finally:
         finish('disconnected')
         if motion is not None:motion.stop('连接结束' if motion.active else motion.reason)
-        if diagnostics is not None:diagnostics.close()
-        if sub is not None:
-            sub.close()
-        try:
-            if hand is not None:
-                hand.disconnect()
-        finally:
-            if protocol_route is not None:
-                protocol_route.close()
-            if ownership is not None:
-                ownership.close()
-        events.put(dict(type='closed',hardware=dict(motion.status(),handled_lease=handled_lease) if motion is not None else {}))
+        close_errors=[]
+        for resource,method in ((diagnostics,'close'),(sub,'close'),(hand,'disconnect'),(protocol_route,'close'),(ownership,'close')):
+            if resource is None:continue
+            try:
+                if getattr(resource,method)() is False:raise RuntimeError('Hand resource release was not acknowledged')
+            except Exception as error:close_errors.append(str(error))
+        if close_errors:raise RuntimeError('Hand resource cleanup is unconfirmed: '+'; '.join(close_errors))
+        hardware=dict(motion.status(),handled_lease=handled_lease) if motion is not None else {}
+        proof=(dict(version=1,kind='readonly_feedback',serial=device_id,profile=selected['id'],enable_attempted=False,resources_released=True)
+            if motion is not None and hardware.get('active') is False and hardware.get('enable_attempted') is False else None)
+        events.put(dict(type='closed',hardware=hardware,feedback_cleanup=proof))
 
 
 def emit(event):
@@ -419,7 +433,7 @@ def main():
         nonlocal process
         if process:
             requests.put(dict(name='disconnect'))
-            process.join(timeout=6. if glove_mode else 1.)
+            process.join(timeout=6.)
             if process.is_alive():
                 process.terminate()
                 process.join(timeout=2.)

@@ -16,6 +16,7 @@ import time
 
 from cli_coordination import gate,reservation
 from task_sessions import context_digest
+from feedback_stream import feedback_release_confirmed
 
 SERIAL=re.compile(r'[A-Za-z0-9][A-Za-z0-9_-]{0,79}\Z')
 
@@ -210,8 +211,7 @@ class ConnectionSwitch:
         elif source.get('mode')=='hand':
             row=getattr(self.controller,'feedback_sessions',{}).get(source.get('session')) or {}
             hw=row.get('hardware') or {}
-            if (row.get('worker_closed') and row.get('reader_finished') and row.get('transport_closed')
-                    and not row['thread'].is_alive() and hw.get('active') is False and hw.get('stop_confirmed') is True):return None
+            if not getattr(self.controller,'hardware_lease',None) and feedback_release_confirmed(row):return None
             hw=state.get('hardware') or {}
             if (state.get('connection')=='connected' and state.get('device_id')==source.get('serial')
                     and state.get('session_generation')==source.get('session')

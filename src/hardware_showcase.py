@@ -82,6 +82,7 @@ class HardwareShowcase:
         self.hand,self.command_factory=hand,command_factory
         self.profile,self.reason=load_profile(device_id,profile_path)
         self.active=False;self.owned=False;self.paused=False;self.publisher=None;self.disable_confirmed=False
+        self.enable_attempted=False
         self.phase='idle';self.lease='';self.last_beat=0.;self.last_send=0.
         self.elapsed=0.;self.cycles=1;self.action='';self.error=None
         self.run_profile=self.profile;self.probe=None;self.probe_result=None
@@ -99,7 +100,7 @@ class HardwareShowcase:
 
     def status(self):
         return dict(ready=self.profile is not None,active=None if self.owned and not self.active else self.active,
-            stop_confirmed=self.disable_confirmed and not self.owned,paused=self.paused,
+            stop_confirmed=self.disable_confirmed and not self.owned,enable_attempted=self.enable_attempted,paused=self.paused,
             phase=self.phase,reason=self.reason,action=self.action,elapsed_s=self.elapsed,
             actions=list(self.profile['actions']) if self.profile else [],
             source='supervised_low_current_trial' if self.trial else 'bounded_single_joint_check' if self.probe else 'calibrated_sdk_trajectory',feedback_source='real_joint_states',
@@ -326,6 +327,7 @@ class HardwareShowcase:
 
     def enable_verified(self,q,now):
         """Seed the current measured pose before enabling the selected joints."""
+        self.enable_attempted=True
         self.phase='enabling';self.paused=False;self.single_pause_started_at=None
         self.enable_deadline=now+5.;self.approach_deadline=now+30.
         self.last_tick=now;self.last_send=now;self.target=q[:]

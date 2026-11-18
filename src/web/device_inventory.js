@@ -95,7 +95,9 @@
   if(!online||owner?.mode!=='hand'||owner.kind!=='hand'||state.connection!=='connected'||state.device_id!==owner.serial||!Number.isSafeInteger(owner.session)||owner.session<=0||state.session_generation!==owner.session||identity.source!=='sdk_identity'||identity.serial!==owner.serial||identity.profile!==profile||!/^hand[12]_(left|right)$/.test(profile||'')||typeof state.csrf!=='string'||!state.csrf||!/^[a-f0-9]{64}$/.test(state.connection_switch?.expected_owner||''))return null;
   return {serial:owner.serial,session:owner.session,profile,token:state.csrf,expected_owner:state.connection_switch.expected_owner};
  }
- function handDisconnectable(){const state=consoleState||{},current=mainHand();return !!current&&(!current.recovery||current.can_disconnect===true)&&state.hardware?.active===false&&state.hardware?.stop_confirmed!==false&&!state.hardware_control_id&&!state.recording?.active&&!state.program?.active&&!state.group?.active&&!state.glove?.busy&&!(state.unconfirmed_devices||[]).length;}
+ function handDisconnectable(){const state=consoleState||{},current=mainHand(),reader=state.hand_feedback_session;
+  const readonlyRelease=!!current&&reader?.source==='owned_feedback_reader'&&reader.serial===current.serial&&reader.session===current.session&&reader.profile===current.profile&&reader.can_disconnect===true;
+  return !!current&&(!current.recovery||current.can_disconnect===true)&&state.hardware?.active===false&&(state.hardware?.stop_confirmed!==false||readonlyRelease)&&!state.hardware_control_id&&!state.recording?.active&&!state.program?.active&&!state.group?.active&&!state.glove?.busy&&!(state.unconfirmed_devices||[]).length;}
  async function disconnectHand(){
   const current=mainHand();if(ending||using||!current||sn(selected())!==current.serial||!handDisconnectable())return false;
   const own={...current,revision:serviceRevision};ending=own;using=true;pendingMode='disconnect';consumerError='';render();
