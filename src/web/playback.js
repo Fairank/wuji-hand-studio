@@ -18,6 +18,11 @@
   const trial=document.createElement('div');trial.className='hardware-controls';
   trial.innerHTML=`<h3>低力度整套试运行</h3><p class="hint">候选姿态尚未完成实机验收。先从25%幅度开始；官方初调示例0.5 A、慢速运行，按SDK故障等级处理。电流不是已标定的接触力。</p><label for="trial-action">实机试运行动作</label><select id="trial-action"><option value="fist">张开与轻握</option><option value="opposition">拇指依次对指姿态</option><option value="sequence">整套低力度展示</option></select><label for="trial-amplitude">动作幅度</label><select id="trial-amplitude"><option value="0.25">25% · 首轮</option><option value="0.5">50%</option><option value="0.75">75%</option><option value="1">100%</option></select><label for="trial-cycles">实机试运行循环</label><select id="trial-cycles"><option value="1">1轮</option><option value="3">3轮</option></select><label class="hint"><input id="trial-clear" type="checkbox"> 底座固定，周围无人无物，开始低力度试运行</label><button id="trial-start" class="primary" disabled>开始实机低力度试运行</button><p id="trial-status" class="hint" role="status">等待设备连接</p><p id="trial-result" class="hint" role="status"></p><p class="hint">姿态到位不等于指尖实际接触。可用下方“停止实机”随时终止；不自动增幅或加力。</p>`;
   hardware.before(trial);
+  const trialActions=document.createElement('div');
+  trialActions.id='trial-result-actions';
+  trialActions.hidden=true;
+  trialActions.innerHTML='<div class="button-row"><button id="trial-recovery" type="button" class="primary"></button><button id="trial-dismiss" type="button"></button></div>';
+  get('trial-result').after(trialActions);
   const officialOption=new Option('官方二代对指 · 限速适配','official_opposition');
   get('trial-action').add(officialOption,0);get('trial-action').value='official_opposition';
   const officialNote=document.createElement('p');officialNote.className='hint';
@@ -49,7 +54,7 @@
   progress.innerHTML='<progress id="trial-progress" max="100" value="0" aria-label="实机动作进度"></progress><p id="trial-progress-text" class="hint">尚未开始</p><p id="motion-blocker" role="status"></p><div id="warning-policy" class="warning-policy"><strong>官方告警分级</strong><p class="hint">SDK判为Warning时记录并继续；其他故障等级或无法识别的设备错误请求停用。依据<a href="https://docs.wuji.tech/docs/en/wuji-hand/latest/troubleshooting/" target="_blank" rel="noopener">官方故障说明</a>与控制指南，不自动清除故障或恢复动作。</p><p id="motion-warnings" class="hint"></p><details><summary>网页控制与动作完成条件</summary><p class="hint">网页连接中断、反馈缺失或过期、无效数据时结束控制；这些是应用通信机制。速度、播放时长及回位误差用于执行和评估所选轨迹，不是官方硬件故障阈值。</p></details></div>';
   get('hardware-stop').after(progress);
   const timingLine=document.createElement('p');timingLine.id='command-timing';timingLine.className='hint';timingLine.setAttribute('role','status');progress.append(timingLine);
-  const pauseNote=document.createElement('p');pauseNote.className='hint';pauseNote.textContent='暂停会保持当前姿态；停止会请求电机停用。';get('hardware-stop').after(pauseNote);
+  const pauseNote=document.createElement('p');pauseNote.className='hint';pauseNote.hidden=true;get('hardware-stop').after(pauseNote);
   // Basic copy reviewed from the local Fable task; it does not set control policy.
   const acceptanceNote=history.previousElementSibling;
   if(acceptanceNote?.tagName==='P')acceptanceNote.textContent='指令完成不代表动作已验收，实际动作需另行确认。';
@@ -127,6 +132,7 @@
   function returnText(r){return r.return_evaluated===true||r.completed?`实际回位误差 ${degree(r.return_error_deg)}`:`未完成回位验收 · 中止时偏离起点 ${degree(r.displacement_at_stop_deg??r.return_error_deg)}`;}
   let ownedLease=null,hardwarePending=false,leaseDeadline=0,leaseSeenActive=false,hardwareGeneration=0;
   let hardwareRequest=null,leaseOwner=null,ownedControl=null;
+  let trialStartError=null;
   function hardwareOwner(value=state){
     if(typeof value?.csrf!=='string'||!value.csrf)return null;
     const glove=value.glove||{},paired=glove.feedback||{};
@@ -144,30 +150,99 @@
     const r=await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json','X-Console-Token':request.token},body:JSON.stringify(body),signal:AbortSignal.timeout(2000)});
     const result=await r.json();if(!r.ok||!result.ok)throw Error(result.error||'实机操作失败');return result;
   }
+  function clearMotionConfirmation(id){
+    const confirmation=get(id);
+    if(!confirmation.checked)return;
+    confirmation.checked=false;
+    confirmation.dispatchEvent(new Event('change',{bubbles:true}));
+  }
+
+  function trialRecoveryMode(){
+    const h=state?.hardware;
+    if(shownTrialResult()?.accepted!==false||h.active===true||h.start_pending===true)return '';
+    if(state.connection!=='connected'||!matchesDisplayHand())return 'devices';
+    const ready=state.stale===false&&!state.glove?.busy&&h.active===false&&h.stop_confirmed===true&&
+      h.trial_ready===true&&!ownedLease&&!state.recording?.active&&!currentStopPending();
+    return ready?'retry':'feedback';
+  }
+
+  let dismissedTrial=null;
+  function trialResultIdentity(result){
+    return JSON.stringify([state?.csrf,Number.isFinite(result.started_unix)?result.started_unix:result]);
+  }
+  function shownTrialResult(){
+    const result=state?.hardware?.trial_result;
+    return result?.accepted===false&&trialResultIdentity(result)===dismissedTrial?null:result;
+  }
+  function dismissTrialFailure(){
+    if(!trialRecoveryMode()||hardwarePending)return;
+    dismissedTrial=trialResultIdentity(state.hardware.trial_result);
+    renderHardware();
+  }
+  function manuallyEndedTrial(result){
+    return result?.accepted!==true&&result?.stop_confirmed===true&&result.reason==='用户停止实机展示'&&
+      ['waiting_ready','enabling','approach','playing','returning'].includes(result.stopped_phase);
+  }
+
+  function renderTrialRecovery(){
+    const mode=trialRecoveryMode(),button=get('trial-recovery'),dismiss=get('trial-dismiss');
+    get('trial-result-actions').hidden=!mode;
+    button.dataset.action=mode;
+    button.disabled=dismiss.disabled=hardwarePending;
+    button.textContent=tr('重新开始','Restart');
+    button.title=mode==='devices'?tr('先接入灵巧手','Connect the hand first'):
+      mode==='feedback'?tr('先核对实时反馈','Review live feedback first'):
+      tr('确认现场后从头开始','Confirm the workspace and start from the beginning');
+    dismiss.textContent=tr('忽略提示','Dismiss notice');
+  }
+
+  function recoverTrial(){
+    const mode=trialRecoveryMode();
+    if(!mode||hardwarePending||mode!==get('trial-recovery').dataset.action)return;
+    if(mode==='devices'){
+      if(window.WujiDeviceInventory?.show)window.WujiDeviceInventory.show('hand');
+      else location.hash='#home';
+    }else if(mode==='feedback'){
+      location.hash='#feedback';
+    }else{
+      const confirmation=get('trial-clear');
+      if(!confirmation.checked){confirmation.focus();return;}
+      const start=get('trial-start');
+      if(!start.disabled)start.click();
+    }
+  }
+
   function renderHardware(){
     const h=state?.hardware,connected=state?.connection==='connected'&&!state?.stale;
     const supported=h?.actions?.includes(get('play-action').value);
     get('hardware-start').disabled=!connected||!h?.ready||!supported||h.active||ownedLease||state?.recording?.active||hardwarePending;
     get('hardware-pause').disabled=!h?.active||!ownedLease||hardwarePending;
-    get('hardware-pause').textContent=h?.paused?'继续实机':'暂停实机';
+    get('hardware-pause').textContent=h?.paused?tr('继续实机','Resume hand'):tr('暂停（保持姿态）','Pause (hold pose)');
     get('hardware-stop').disabled=!state||(h?.active===false&&!ownedLease&&!hardwarePending&&!state?.glove?.busy&&!currentStopPending());
+    get('hardware-stop').textContent=tr('结束本轮并停用电机','End run and disable motors');
+    pauseNote.hidden=h?.active!==true;
+    pauseNote.textContent=state?.device_profile?.generation==='hand2'?
+      tr('暂停会保持姿态。展示反驱前，请先确认电机停用、灵巧手已停稳。','Pause holds the pose. Confirm the motors are disabled and the hand is still before demonstrating backdrivability.'):
+      tr('暂停会保持姿态。','Pause holds the pose.');
     get('probe-start').disabled=!connected||!h?.probe_ready||h?.active!==false||ownedLease||state?.recording?.active||hardwarePending||!get('probe-clear').checked;
     get('probe-status').textContent=!connected?'实机未连接':h?.active?`实机执行中 · ${h.reason}`:h?.probe_reason||'等待完整反馈与诊断';
     const r=h?.probe_result;
     get('probe-result').textContent=r?`${r.accepted?'已观测到往返动作':'试动未通过'} · 实际最大变化 ${r.peak_actual_delta_deg.toFixed(2)}° · 返回误差 ${r.return_error_deg.toFixed(2)}° · ${r.stop_confirmed?'停用请求已确认':'停用待确认'} · ${r.reason}`:'';
     get('trial-start').disabled=!connected||!matchesDisplayHand()||!h?.trial_ready||h?.active!==false||ownedLease||state?.recording?.active||hardwarePending||!get('trial-clear').checked;
     get('trial-status').textContent=!connected?'未连接；连接后由你选择启动':h?.active&&h?.source==='supervised_low_current_trial'?`${h.paused?'暂停':'试运行'} · 第${h.cycle}/${h.cycles}轮 · ${h.trial_phase} · ${h.elapsed_s.toFixed(1)}秒 / 计划${Math.ceil(h.planned_duration_s||0)}秒`:h?.probe_reason||'等待完整反馈与诊断';
-    const tr=h?.trial_result;
-    get('trial-result').textContent=tr?`${tr.accepted?'指令与回位检查通过':'本次试运行未通过'} · 完成${tr.finished_cycles}/${tr.requested_cycles}轮 · 实测峰值电流${tr.peak_current_A.toFixed(3)} A · ${returnText(tr)} · ${stopExplanation(tr.reason)} · 指尖接触尚待观察`:'';
+    const result=shownTrialResult();
+    get('trial-result').textContent=result?`${result.accepted?'指令与回位检查通过':manuallyEndedTrial(result)?'本轮已结束 · 电机停用已确认':'本次试运行未通过'} · 完成${result.finished_cycles}/${result.requested_cycles}轮 · 实测峰值电流${result.peak_current_A.toFixed(3)} A · ${returnText(result)} · ${stopExplanation(result.reason)} · 指尖接触尚待观察`:'';
+    renderTrialRecovery();
     const records=(state?.motion_history||[]).filter(r=>r.kind==='low_current_showcase_trial');
     const key=JSON.stringify(records);
     if(key!==historyKey){historyKey=key;get('motion-history').replaceChildren();
       const passed=records.filter(r=>r.accepted===true).length;
-      get('motion-history-summary').textContent=records.length?`最近 ${records.length} 次整套试运行：通过 ${passed} 次，未通过 ${records.length-passed} 次。单关节结果分开统计。`:'暂无整套实机记录';
+      const ended=records.filter(manuallyEndedTrial).length;
+      get('motion-history-summary').textContent=records.length?`最近 ${records.length} 次整套试运行：通过 ${passed} 次，主动结束 ${ended} 次，未通过 ${records.length-passed-ended} 次。单关节结果分开统计。`:'暂无整套实机记录';
       for(const r of records.slice(0,9)){const item=document.createElement('li');
         const name={fist:'张开与轻握',opposition:'依次对指',sequence:'整套展示',official_opposition:'官方二代对指（适配）'}[r.action]||r.action;
         const date=new Date(r.started_unix*1000).toLocaleTimeString('zh-CN',{hour12:false});
-        item.textContent=`${date} · ${name} · ${r.amplitude*100}% · ${r.accepted?'通过':'未通过'} · 完成 ${r.finished_cycles}/${r.requested_cycles} 轮 · ${returnText(r)} · ${stopExplanation(r.reason)}`;
+        item.textContent=`${date} · ${name} · ${r.amplitude*100}% · ${r.accepted?'通过':manuallyEndedTrial(r)?'主动结束':'未通过'} · 完成 ${r.finished_cycles}/${r.requested_cycles} 轮 · ${returnText(r)} · ${stopExplanation(r.reason)}`;
         if(stopExplanation(r.reason)!==r.reason){const raw=document.createElement('details');const title=document.createElement('summary');title.textContent='原始停止文本（保留）';const text=document.createElement('p');text.textContent=r.reason;raw.append(title,text);item.append(raw);}
         get('motion-history').append(item);}}
     get('hardware-status').textContent=pendingStops().length&&h?.active!==true?pendingStopNote():!connected?'实机未连接，不能同步执行':h?.active?`${h.paused?'暂停':'执行中'} · ${h.trial_phase||h.action} · ${h.elapsed_s.toFixed(1)}秒 · ${h.reason}`:!h?.ready?(h?.reason||'等待实机动作校准'):!supported?'所选动作尚未完成实机核验':h.reason||'已就绪';
@@ -184,7 +259,10 @@
     const body={name,lease:ownedLease};
     if(name==='hardware_start')Object.assign(body,{action:get('play-action').value,speed:Number(get('play-speed').value),cycles:Number(get('play-cycles').value)});
     if(name==='hardware_probe')Object.assign(body,{index:Number(get('probe-joint').value),direction:Number(get('probe-direction').value),workspace_clear:get('probe-clear').checked});
-    if(name==='hardware_trial')Object.assign(body,{expected_profile:displayProfile(),expected_serial:window.WujiDemonstration.selectedHand(),action:get('trial-action').value,amplitude:Number(get('trial-amplitude').value),speed:Number(get('trial-speed').value),cycles:Number(get('trial-cycles').value),workspace_clear:get('trial-clear').checked},window.WujiPerformancePayload?.()||{});
+    if(name==='hardware_trial'){
+      Object.assign(body,{expected_profile:displayProfile(),expected_serial:window.WujiDemonstration.selectedHand(),action:get('trial-action').value,amplitude:Number(get('trial-amplitude').value),speed:Number(get('trial-speed').value),cycles:Number(get('trial-cycles').value),workspace_clear:get('trial-clear').checked},window.WujiPerformancePayload?.()||{});
+      clearMotionConfirmation('trial-clear');
+    }
     try{
       const result=await hardwarePost(body,request);
       // The user may already have stopped this request or selected another
@@ -194,10 +272,25 @@
         if(typeof result.lease!=='string'||!/^[a-f0-9]{32}$/.test(result.lease))throw Error(tr('实机控制标识尚未核对。','The hardware control identity is unverified.'));
         const control=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(result.lease))),v=>v.toString(16).padStart(2,'0')).join('');
         if(!currentHardware(request)||state.hardware_control_id&&state.hardware_control_id!==control)return;
-        ownedLease=result.lease;leaseOwner=request.owner;ownedControl=control;leaseDeadline=performance.now()+3000;leaseSeenActive=false;get('probe-clear').checked=false;get('trial-clear').checked=false;
+        ownedLease=result.lease;leaseOwner=request.owner;ownedControl=control;leaseDeadline=performance.now()+3000;leaseSeenActive=false;
+        clearMotionConfirmation('probe-clear');clearMotionConfirmation('trial-clear');
+        if(name==='hardware_trial'){
+          const banner=get('service-error');
+          // Another operation may have replaced the banner with the same text.
+          if(trialStartError&&banner.firstChild===trialStartError){
+            banner.textContent='';banner.hidden=true;
+          }
+          trialStartError=null;
+        }
       }
       if(name==='hardware_stop')clearHardwareLease();
-    }catch(e){if(currentHardware(request)){document.getElementById('service-error').hidden=false;document.getElementById('service-error').textContent=e.message;}}
+    }catch(e){
+      if(currentHardware(request)){
+        const banner=get('service-error');
+        banner.textContent=e.message;banner.hidden=false;
+        if(name==='hardware_trial')trialStartError=banner.firstChild;
+      }
+    }
     finally{if(currentHardware(request)){hardwareRequest=null;hardwarePending=false;renderHardware();}}
   }
   get('hardware-start').addEventListener('click',()=>hardwareAction('hardware_start'));
@@ -205,6 +298,8 @@
   get('probe-clear').addEventListener('change',renderHardware);
   get('trial-start').addEventListener('click',()=>hardwareAction('hardware_trial'));
   get('trial-clear').addEventListener('change',renderHardware);
+  get('trial-recovery').addEventListener('click',recoverTrial);
+  get('trial-dismiss').addEventListener('click',dismissTrialFailure);
   get('hardware-pause').addEventListener('click',()=>hardwareAction(state?.hardware?.paused?'hardware_resume':'hardware_pause'));
   get('hardware-stop').addEventListener('click',()=>hardwareAction('hardware_stop'));
   globalStop.addEventListener('click',()=>hardwareAction('hardware_stop'));
@@ -242,12 +337,26 @@
   get('play-start').addEventListener('click',()=>send({name:'demo_start',action:get('play-action').value,speed:Number(get('play-speed').value),cycles:Number(get('play-cycles').value),...(window.WujiPerformancePayload?.()||{})}));
   get('play-pause').addEventListener('click',()=>send({name:displayPlayback().running?'demo_pause':'demo_resume'}));
   get('play-stop').addEventListener('click',()=>send({name:'demo_stop'}));
-  window.addEventListener('console-state',e=>{const next=e.detail,owner=hardwareOwner(next);if(hardwareRequest&&(hardwareRequest.owner!==owner||hardwareRequest.control&&next.hardware_control_id&&hardwareRequest.control!==next.hardware_control_id)||leaseOwner&&leaseOwner!==owner)retireHardware();state=next;if(ownedControl&&state.hardware_control_id&&state.hardware_control_id!==ownedControl)clearHardwareLease();if(state.hardware?.active)leaseSeenActive=true;else if(ownedLease&&state.hardware?.active===false&&state.hardware.stop_confirmed===true&&!state.hardware.start_pending&&(leaseSeenActive||performance.now()>leaseDeadline))clearHardwareLease();render();renderHardware();});
-  window.addEventListener('console-offline',()=>{previewUIEpoch++;retireHardware();state=null;render();renderHardware();});
+  window.addEventListener('console-state',e=>{
+    const next=e.detail,owner=hardwareOwner(next);
+    const ownerChanged=owner!==hardwareOwner();
+    if(hardwareRequest&&(hardwareRequest.owner!==owner||hardwareRequest.control&&next.hardware_control_id&&hardwareRequest.control!==next.hardware_control_id)||leaseOwner&&leaseOwner!==owner)retireHardware();
+    state=next;
+    if(ownedControl&&state.hardware_control_id&&state.hardware_control_id!==ownedControl)clearHardwareLease();
+    if(state.hardware?.active)leaseSeenActive=true;
+    else if(ownedLease&&state.hardware?.active===false&&state.hardware.stop_confirmed===true&&!state.hardware.start_pending&&(leaseSeenActive||performance.now()>leaseDeadline))clearHardwareLease();
+    if(ownerChanged){clearMotionConfirmation('probe-clear');clearMotionConfirmation('trial-clear');}
+    render();renderHardware();
+  });
+  window.addEventListener('console-offline',()=>{
+    previewUIEpoch++;retireHardware();state=null;
+    clearMotionConfirmation('probe-clear');clearMotionConfirmation('trial-clear');
+    render();renderHardware();
+  });
   window.addEventListener('hashchange',()=>{previewUIEpoch++;});
   window.addEventListener('demonstration-mode',()=>{previewUIEpoch++;});
   window.addEventListener('demonstration-profile',()=>{get('trial-clear').checked=false;render();renderHardware();});
   window.addEventListener('demonstration-target',()=>{get('trial-clear').checked=false;renderHardware();});
   window.addEventListener('demonstration-catalog',render);
-  window.addEventListener('wuji-language',render);
+  window.addEventListener('wuji-language',()=>{render();renderHardware();});
 })();

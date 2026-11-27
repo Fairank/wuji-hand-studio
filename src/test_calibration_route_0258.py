@@ -17,9 +17,11 @@ def route(address='192.0.2.15:50001',**kw):return dict(source='official_discover
 class RouteTests(unittest.TestCase):
     def test_only_exact_routable_numeric_endpoint_and_serial_are_accepted(self):
         self.assertEqual(validate_glove_route(route('udp/192.0.2.15:50001'),SN),route())
+        self.assertEqual(validate_glove_route(route('udp://192.0.2.15:50001'),SN),route())
         for address in ('localhost:50001','127.0.0.1:50001','0.0.0.0:50001','224.0.0.1:50001',
                         '169.254.1.1:1','255.255.255.255:1','192.0.2.1:0','192.0.2.1:65536',
-                        '192.0.2.1:01','192.0.2.1:1/x','tcp/192.0.2.1:1','192.0.2.1:1\n'):
+                        '192.0.2.1:01','192.0.2.1:1/x','tcp/192.0.2.1:1','192.0.2.1:1\n',
+                        'udp://udp/192.0.2.1:1','udp://192.0.2.1:1?q=1','udp://[fd00::1]:1'):
             with self.subTest(address=address),self.assertRaises(ValueError):validate_glove_route(route(address),SN)
         for bad in (dict(route(),serial='WG_OTHER'),dict(route(),source='browser'),dict(route(),extra=True)):
             with self.assertRaises(ValueError):validate_glove_route(bad,SN)
@@ -49,7 +51,7 @@ class RouteTests(unittest.TestCase):
         continuation=CalibratedTeleoperation(Mock(),Mock(),Mock(),Mock(),Mock(),Mock())
         continuation.state.update(run_id='a'*32,attempt_id='b'*32)
         controller=N(connection_switch=N(_config=Mock(return_value='config')),
-            calibration_devices=Mock(return_value=[dict(sn=SN,device_type='wuji_glove',address=route()['address'])]),
+            calibration_devices=Mock(return_value=[dict(sn=SN,device_type='wuji_glove',address='udp://'+route()['address'])]),
             glove=N(start_calibrated=Mock(return_value=42)),_continuation_model_ready=Mock(),
             _continuation_profile='hand2_right',sdk_session_configs={},calibrated_teleoperation=continuation)
         bundle={'serial':SN,'source_run_id':'a'*32}

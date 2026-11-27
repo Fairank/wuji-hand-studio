@@ -69,7 +69,7 @@ class SDKAPIContractTests(unittest.TestCase):
                 self.assertFalse(proof['api_compatible']);self.assertIn(owner+'.'+member,proof['missing_api'])
 
     def test_unknown_future_cli_guided_schema_is_not_success_and_preserves_original_output(self):
-        event=native_evidence.result();event['schema_version']=3
+        event=native_evidence.result();event['schema_version']=4
         raw=json.dumps(event)+'\n'
         actual=native_evidence.NativeCalibrationEvidenceTests().collect([
             native_evidence.ready(),native_evidence.output(raw),native_evidence.exited()])

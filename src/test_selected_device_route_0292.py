@@ -24,25 +24,26 @@ GLOVE_ENDPOINT = '192.0.2.11:50001'
 ROUTE = dict(source='official_discovery', serial=SN, address=GLOVE_ENDPOINT)
 
 
-def observed(serial, device_type, address, when=100):
-    return normalize_devices([dict(serial=serial, device_type=device_type, side='left', address='udp/'+address)],
+def observed(serial, device_type, address, when=100, prefix='udp/'):
+    return normalize_devices([dict(serial=serial, device_type=device_type, side='left', address=prefix+address)],
                              source='official_cli', observed_at=when, now=100)['devices'][0]
 
 
 class SelectedDeviceRouteTests(unittest.TestCase):
     def test_plain_hand_connection_passes_observed_addr_not_caller_addr(self):
         tests=fixture.SwitchTests()
-        with tests.environment('idle') as e:
-            e.rows[-1]=observed(HAND,'wuji_hand_2',HAND_ENDPOINT)
-            result=e.service.start(tests.command(e,'hand',HAND,address='192.0.2.44:7447'))
-            self.assertEqual(e.calls[-1],dict(name='connect',serial=HAND,auto_detect=True,address=HAND_ENDPOINT))
-            self.assertEqual(result['connection_switch_receipt']['target']['serial'],HAND)
-            self.assertFalse(e.state['hardware']['active'])
+        for prefix in ('udp/', 'udp://'):
+            with self.subTest(prefix=prefix),tests.environment('idle') as e:
+                e.rows[-1]=observed(HAND,'wuji_hand_2',HAND_ENDPOINT,prefix=prefix)
+                result=e.service.start(tests.command(e,'hand',HAND,address='192.0.2.44:7447'))
+                self.assertEqual(e.calls[-1],dict(name='connect',serial=HAND,auto_detect=True,address=HAND_ENDPOINT))
+                self.assertEqual(result['connection_switch_receipt']['target']['serial'],HAND)
+                self.assertFalse(e.state['hardware']['active'])
 
     def test_selected_wearer_and_native_locator_do_not_require_repeated_broadcast(self):
         tests=fixture.SwitchTests()
         with tests.environment('idle') as e:
-            e.rows[0]=observed(SN,'wuji_glove',GLOVE_ENDPOINT)
+            e.rows[0]=observed(SN,'wuji_glove',GLOVE_ENDPOINT,prefix='udp://')
             e.c.glove.selected_route_ready=Mock(return_value=True)
             original=e.c.action.side_effect
             def action(command):

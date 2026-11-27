@@ -32,6 +32,26 @@ class DiscoveryTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError,'Official failure'):discovery.native_devices()
             self.assertEqual(run.call_count,1)
 
+    def test_structured_discovery_error_uses_diagnostic_without_accepting_rows(self):
+        payload = dict(devices=[dict(sn='WG_SYNTHETIC')],
+                       error=dict(code=4, kind='unavailable', reason='no_route',
+                                  message='No usable IPv4 discovery interface', hint=None))
+        with patch('native_cli.prepare',return_value={'binary':'fake.exe'}), \
+                patch.object(discovery.subprocess,'run',return_value=SimpleNamespace(
+                    returncode=4,stdout=json.dumps(payload),stderr='Unrelated diagnostic')) as run:
+            with self.assertRaises(ValueError) as caught:
+                discovery.native_devices()
+        self.assertEqual(str(caught.exception), 'No usable IPv4 discovery interface')
+        self.assertEqual(run.call_count, 1)
+
+    def test_device_rows_with_error_cannot_be_published_as_fresh(self):
+        payload = dict(devices=[dict(sn='WG_SYNTHETIC')], error=dict(code=4, reason='no_response'))
+        with patch('native_cli.prepare',return_value={'binary':'fake.exe'}), \
+                patch.object(discovery.subprocess,'run',return_value=SimpleNamespace(
+                    returncode=0,stdout=json.dumps(payload),stderr='')):
+            with self.assertRaises(ValueError):
+                discovery.native_devices()
+
     def test_malformed_output_not_retried(self):
         with patch('native_cli.prepare',return_value={'binary':'fake.exe'}),patch.object(discovery.subprocess,'run',return_value=SimpleNamespace(returncode=0,stdout='{}',stderr='')) as run:
             with self.assertRaises(ValueError):discovery.native_devices()

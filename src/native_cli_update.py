@@ -71,9 +71,10 @@ class ManagedNativeCLIStore(NativeCLIStore):
                 or release.get('html_url')!=REPO_URL+'/releases/tag/'+tag
                 or release.get('draft') is not False or release.get('prerelease') is not False):
             raise ReleaseStoreError('A published stable official CLI release is required')
-        assets=release.get('assets');name='wuji_'+value+'_x86_64-pc-windows-msvc.zip'
+        assets=release.get('assets')
+        names=(f'wuji_{value}_x86_64-pc-windows-msvc.zip',f'wuji_{value}_x86_64-pc-windows-gnullvm.zip')
         if not isinstance(assets,list) or len(assets)>200:raise ReleaseStoreError('Invalid official release assets')
-        matches=[a for a in assets if isinstance(a,dict) and a.get('name')==name]
+        matches=[a for a in assets if isinstance(a,dict) and a.get('name') in names]
         if len(matches)!=1:raise ReleaseStoreError('Release must list one Windows x86_64 archive')
         asset=dict(size=None,**matches[0]) if 'size' not in matches[0] else dict(matches[0])
         self._asset_url(asset,tag)

@@ -40,6 +40,7 @@
  function explainFailure(value,fallback){
   const localized=window.WujiLocale?.notice?.(value)??value;
   if(/\[Errno 2\]|no such file or directory|cannot find the file/i.test(localized))return t('未找到组件文件。请重新检查安装。','Component files are missing. Check the installation again.');
+  if(/release must list one Windows x86_64 archive/i.test(localized))return t('此版本的 Windows CLI 安装包暂不可用。请检查工作台更新。','The Windows CLI package for this release is unavailable. Check for workbench updates.');
   if(/finish.*session|请.*结束.*会话/i.test(localized))return t('请先结束设备、标定和诊断会话，再重试。','Finish device, calibration and diagnostic sessions, then try again.');
   if(/(?:^HTTP\s+\d|failed to fetch|network|timed out|timeout)/i.test(localized))return t('服务暂不可用。请重新读取状态。','The service is unavailable. Reload the status.');
   if(/^\[Errno |(?:Type|Abort|Reference|Request|Permission)Error:/i.test(localized))return fallback;
@@ -85,18 +86,21 @@
   $('ot-system-status').textContent=systemMessage?explainFailure(systemMessage,t('Windows 组件操作未完成，请重试。','Windows component setup did not complete. Try again.')):'';
   $('ot-system-status').title=systemMessage;renderCli();
  }
+ function opensWorkbenchUpdate(update){
+  return update?.phase==='requires_workbench'||update?.update_method==='workbench'&&update.newer_cli_available===true;
+ }
  function renderCli(){
   const u=cliData?.update||{},current=cliData?.current||{},previous=cliData?.previous||{},busy=!!cliPending||!!pending||cliFresh&&(!!cliData?.busy||!!u.checking||!!u.preparing);
   const managed=u.update_method==='managed_native',unverified=managed&&current.validated===false,phase=cliPending==='official_cli_check'?'checking':cliPending==='official_cli_update'?'checking':cliPending==='official_cli_rollback'?'verifying':u.phase;
-  const bundledUpdate=cliFresh&&u.update_method==='workbench'&&u.newer_cli_available===true;
+  const bundledUpdate=cliFresh&&opensWorkbenchUpdate(u);
   const phaseLabels={checking:['正在检查更新','Checking for updates'],downloading:['正在下载更新','Downloading update'],verifying:['正在校验更新','Verifying update'],preparing:['正在准备更新','Preparing update'],waiting_idle:['设备使用中，空闲后更新','Waiting for devices to be idle'],ready:['更新已完成','Update complete']};
   let label=!cliFresh?t('版本状态暂不可用','Version status unavailable'):phaseLabels[phase]?t(...phaseLabels[phase]):u.checking?t('正在检查更新','Checking for updates'):u.preparing?t('正在准备更新','Preparing update'):u.error?t('更新未完成','Update incomplete'):u.available?t('有可用更新','Update available'):u.checked_at!=null?t('检查已完成','Check completed'):t('尚未检查更新','Updates not checked');
   if(cliFresh&&phase!=='ready'&&u.checked_at!=null&&!busy&&!u.error&&!u.available&&u.latest_version&&u.latest_version===current.version)label=t('已是最新版本','Up to date');
-  if(bundledUpdate&&!busy&&!u.error)label=t('随工作台更新','Updates with workbench');
+  if(bundledUpdate&&!busy&&!u.error)label=u.phase==='requires_workbench'?t('新版 CLI 需要更新工作台','This CLI release requires a workbench update'):t('随工作台更新','Updates with workbench');
   if(cliFresh&&unverified&&!busy)label=t('本地 CLI 待校验','Local CLI unverified');
   $('ot-cli-check').textContent=!cliFresh?t('重新读取状态','Reload status'):t('检查更新','Check updates');$('ot-cli-update').textContent=bundledUpdate?t('查看软件更新','View software update'):phase==='error'?t('重试更新','Retry update'):t('更新 CLI','Update CLI');$('ot-cli-rollback').textContent=t('回滚至 ','Roll back to ')+version(previous.version);
   $('ot-cli-check').disabled=busy;$('ot-cli-update').hidden=!bundledUpdate&&!u.available&&!u.preparing&&cliPending!=='official_cli_update';$('ot-cli-update').disabled=!cliFresh||busy||!bundledUpdate&&u.available!==true;$('ot-cli-rollback').hidden=!previous.version;$('ot-cli-rollback').disabled=!cliFresh||busy||!previous.version;
-  $('ot-cli-auto-row').hidden=!managed;$('ot-cli-auto-label').textContent=t('自动更新 CLI','Update CLI automatically');$('ot-cli-auto-note').textContent=cliPending==='official_cli_auto_update'?t('正在保存…','Saving…'):t('使用官方稳定版，设备空闲时安装。','Install official stable releases when devices are idle.');
+  $('ot-cli-auto-row').hidden=!managed;$('ot-cli-auto-label').textContent=t('自动更新 CLI','Update CLI automatically');$('ot-cli-auto-note').textContent=cliPending==='official_cli_auto_update'?t('正在保存…','Saving…'):t('设备空闲时安装工作台支持的官方稳定版。','Install supported official stable releases when devices are idle.');
   $('ot-cli-auto').setAttribute('aria-checked',String(u.auto_update===true));$('ot-cli-auto').disabled=!cliFresh||!!cliPending;
   $('ot-cli-auto').setAttribute('aria-busy',String(cliPending==='official_cli_auto_update'));
   const failure=cliTransportError||cliActionError||(phase!=='waiting_idle'?u.error:'')||(unverified?current.validation_error||'Native CLI integrity is unverified':'');
@@ -158,7 +162,7 @@
  function openEnvironment(){environment.open=true;window.WujiSettings.reveal('devices',environmentSummary);load();}
  window.WujiOfficialTools={open,openEnvironment,refresh:()=>Promise.all([load(),loadCli()])};
  $('ot-check').onclick=()=>fresh?act('control_tools_check'):load();
- $('ot-cli-check').onclick=()=>cliFresh?cliAction('official_cli_check'):loadCli();$('ot-cli-update').onclick=()=>{if(cliFresh&&cliData?.update?.update_method==='workbench'&&cliData.update.newer_cli_available===true){window.WujiWorkbenchUpdate?.showInSettings();return;}cliAction('official_cli_update');};$('ot-cli-rollback').onclick=()=>cliAction('official_cli_rollback');
+ $('ot-cli-check').onclick=()=>cliFresh?cliAction('official_cli_check'):loadCli();$('ot-cli-update').onclick=()=>{if(cliFresh&&opensWorkbenchUpdate(cliData?.update)){window.WujiWorkbenchUpdate?.open();return;}cliAction('official_cli_update');};$('ot-cli-rollback').onclick=()=>cliAction('official_cli_rollback');
  $('ot-cli-auto').onclick=()=>cliAction('official_cli_auto_update',{enabled:cliData?.update?.auto_update!==true});
  $('ot-install').onclick=()=>act('runtime_install');$('ot-select').onclick=()=>act('runtime_select');
  $('ot-system-install').onclick=async()=>{

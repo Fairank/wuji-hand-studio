@@ -71,6 +71,19 @@ class DiscoveryTests(unittest.TestCase):
             cls.return_value.open.side_effect=RuntimeError('offline')
             with self.assertRaisesRegex(RuntimeError,'specified'):d.connect_discovered(m,'192.168.1.112',use_routes=True)
             self.assertEqual(cls.call_count,1);m.scan.assert_not_called();m.connect.assert_not_called()
+    def test_new_sdk_locator_scheme_still_filters_the_explicit_endpoint_and_serial(self):
+        address = '192.0.2.119:7447'
+        m = manager()
+        m.scan.return_value = [device(LEFT, 'DeviceType.WujiHand2', 'udp://192.0.2.108:7447'),
+                               device(RIGHT, 'DeviceType.WujiHand2', 'udp://' + address)]
+        with patch.object(d.time,'monotonic',side_effect=[0,5]):
+            hand, routes, profile = d.connect_discovered(m, address, RIGHT, use_routes=False)
+        self.assertEqual(profile['id'], 'hand2_right')
+        self.assertEqual(hand.serial_number, RIGHT)
+        m.connect.assert_called_once_with(sn=RIGHT,device_name='wuji_hand_2')
+        hand.enable.assert_not_called()
+        routes.close()
+
     def test_first_generation_uses_its_own_adapter_identity(self):
         m=manager();m.scan.return_value=[device('first-test','DeviceType.WujiHand','usb://test')]
         h=m.connect.return_value;h.serial_number='first-test';h.handedness_name.return_value='Left'

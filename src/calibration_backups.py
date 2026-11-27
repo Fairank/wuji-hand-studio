@@ -1,9 +1,10 @@
 """Owned official user-export archives; no reconstructed SDK files or auto restore."""
+from collections import Counter
 import copy
 import hashlib
 import json
 import math
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 import time
 import uuid
@@ -15,6 +16,79 @@ from calibration_identity import require_sdk_user,sdk_user_identity,PROFILE
 ID=re.compile('[0-9a-f]{32}\\Z')
 HASH=re.compile('[0-9a-f]{64}\\Z')
 SERIAL=re.compile('[A-Za-z0-9][A-Za-z0-9_-]{0,79}\\Z')
+
+def supports_copy_restore(cli_version):
+    return cli_version == '2026.11.23'
+
+
+def restore_copy_name(profile, backup_id):
+    suffix = '_backup_' + backup_id[:10]
+    return profile[:32 - len(suffix)] + suffix
+
+
+def _copy_components(report):
+    rows = report.get('components') if isinstance(report, dict) else None
+    if not isinstance(rows, list) or not 1 <= len(rows) <= 4096:
+        raise ValueError('Official restore did not report the backup components')
+    components = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            raise ValueError('Invalid official restore component')
+        name, serial, state = row.get('name'), row.get('device_sn'), row.get('state')
+        if (not isinstance(name, str) or not name or serial is not None and
+                (not isinstance(serial, str) or not SERIAL.fullmatch(serial))
+                or state not in ('present', 'missing') or (name, serial) in components):
+            raise ValueError('Official restore contains an unverified component')
+        components[(name, serial)] = state
+    return components
+
+
+def _copy_artifacts(value):
+    models = {}
+    tactile = {}
+    for name, info in value['members'].items():
+        if name == 'manifest.json':
+            continue
+        path = PurePosixPath(name)
+        if path.is_absolute() or '..' in path.parts or '\\' in name:
+            raise ValueError('Official restore contains an invalid backup member')
+        content = (info['sha256'], info['bytes'])
+        if (path.name in ('left_hand.urdf', 'right_hand.urdf')
+                and path.parts[:-1] in ((), ('models',), ('user', 'hand-models'))):
+            if path.name in models:
+                raise ValueError('Official restore contains duplicate hand models')
+            models[path.name] = content
+        elif len(path.parts) >= 4 and path.parts[0] == 'devices' and path.parts[2] == 'tactile' and SERIAL.fullmatch(path.parts[1]):
+            tactile.setdefault(path.parts[1], Counter())[(path.name, *content)] += 1
+        else:
+            raise ValueError('暂无法核对该备份中的文件，原备份可继续下载 / This backup contains files that cannot yet be verified; the original remains available for download')
+    if set(models) != {side+'_hand.urdf' for side in ('left','right')
+                       if value['profile_metadata'][side+'_hand']['calibrated']}:
+        raise ValueError('The backup hand models differ from the original profile record')
+    return models, tactile
+
+
+def _verify_tactile(root, expected):
+    remaining = expected.copy()
+    names = {name for name, _, _ in remaining}
+    checked = 0
+    folders = [root]
+    while folders and remaining:
+        for file in folders.pop().iterdir():
+            checked += 1
+            if checked > 4096 or file.is_symlink() or file.is_junction():
+                raise ValueError('The copied tactile calibration directory is unverified')
+            if file.is_dir():
+                folders.append(file)
+            elif file.name in names:
+                key = (file.name, *file_digest(file, MAX_BUNDLE))
+                if remaining.get(key, 0) == 1:
+                    del remaining[key]
+                elif remaining.get(key, 0) > 1:
+                    remaining[key] -= 1
+    if remaining:
+        raise ValueError('The copied tactile files differ from the backup')
+
 
 def _timestamp(value):
     if type(value) not in (int,float):return False
@@ -141,7 +215,9 @@ class CalibrationBackups:
 
     @staticmethod
     def summary(value):
-        return {key:copy.deepcopy(value[key]) for key in ('id','run_id','profile','side','serial','created_at','bytes','sha256','verified')}
+        result = {key:copy.deepcopy(value[key]) for key in ('id','run_id','profile','side','serial','created_at','bytes','sha256','verified')}
+        result['copy_profile'] = restore_copy_name(value['profile'], value['id'])
+        return result
 
     def create(self,profile,side,serial,sdk_user,run_id,*,cli_version=None,command=None,cancel_check=None):
         from calibration_guided import validate_profile
@@ -200,3 +276,61 @@ class CalibrationBackups:
         self.verify_current_owner(backup_id,expected_sha256,command=command)
         if before!=command('user','show'):return False
         return archive_signature(readback)==value['members']
+
+    def _copy_preview(self, value, archive, command):
+        _copy_artifacts(value)
+        report = command('user','import',str(archive),'--preview')
+        if (not isinstance(report, dict) or report.get('source_user') != value['profile']
+                or type(report.get('bundle_version')) is not int or report['bundle_version'] <= 0):
+            raise ValueError('Official backup preview differs from the original wearer')
+        expected = _copy_components(report)
+        if expected.get(('hand_model.'+value['side'], None)) != 'present':
+            raise ValueError('Official backup preview lacks the selected hand model')
+        return expected
+
+    def prepare_copy(self, value, archive, target, *, command):
+        if target != restore_copy_name(value['profile'], value['id']):
+            raise ValueError('The restore destination could not be verified')
+        state = command('user','list')
+        users = state.get('users') if isinstance(state, dict) else None
+        if not isinstance(users, list) or any(not isinstance(row, dict) or not isinstance(row.get('name'), str) for row in users):
+            raise ValueError('Official profile names could not be verified')
+        if any(row['name'].lower() == target.lower() for row in users):
+            raise ValueError('恢复副本已存在，请在档案中核对 / The restore copy already exists; check the wearer profiles')
+        self._copy_preview(value, archive, command)
+
+    def verify_restored_copy(self, backup_id, expected_sha256, target, report, *, command=None):
+        from calibration_identity import read_sdk_user, sdk_user_registry
+        from native_cli import json_command
+
+        command = command or json_command
+        value, archive = self.verify_current_owner(backup_id, expected_sha256, command=command)
+        if (target != restore_copy_name(value['profile'], backup_id) or not isinstance(report, dict)
+                or report.get('name') != target or report.get('current_user') != value['profile']
+                or _copy_components(report) != self._copy_preview(value, archive, command)):
+            raise ValueError('Official restore did not confirm the requested copy and unchanged current wearer')
+        registry = sdk_user_registry()
+        identity = read_sdk_user(target, registry=registry)
+        if identity['user_id'] == value['sdk_user']['user_id']:
+            raise ValueError('Official restore did not create a separate wearer')
+        info = command('user','show',target)
+        if not isinstance(info, dict) or info.get('name') != target or info.get('is_current') is not False:
+            raise ValueError('Official restore copy is not the inactive wearer requested')
+        directory = registry.parent/identity['user_id']
+        models, tactile = _copy_artifacts(value)
+        for file, expected in models.items():
+            side = file.split('_', 1)[0]
+            model = info.get(side+'_hand')
+            if (not isinstance(model, dict) or model.get('calibrated') is not True
+                    or model.get('file_name') != file or model.get('size_bytes') != expected[1]
+                    or file_digest(directory/'models'/file) != expected):
+                raise ValueError('The copied hand model differs from the backup')
+        for serial, expected in tactile.items():
+            root = directory/'tactile'/serial
+            if any(p.is_symlink() or p.is_junction() for p in (root, *root.parents)):
+                raise ValueError('The copied tactile calibration directory is redirected')
+            _verify_tactile(root, expected)
+        if read_sdk_user(target, registry=registry) != identity:
+            raise ValueError('The copied wearer changed during verification')
+        self.verify_current_owner(backup_id, expected_sha256, command=command)
+        return True

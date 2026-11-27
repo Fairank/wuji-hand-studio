@@ -134,6 +134,80 @@ class BackupTests(unittest.TestCase):
                 run.reset_mock();self.assertEqual(native.worker_main(prefix),1);self.assertEqual(native.worker_main(prefix+['guided',fixture.USER,'keep']),1);run.assert_not_called()
             self.assertFalse(any(c.args and c.args[0]=='get' for c in e.query.call_args_list))
 
+    def test_v3_restore_requires_consent_for_a_new_copy(self):
+        with self.environment() as e:
+            saved = self.create(e)
+            component = {**fixture.COMPONENT, 'version': '2026.11.23'}
+            with patch('native_cli.prepare', return_value=component):
+                with self.assertRaisesRegex(ValueError, 'restore destination'):
+                    e.service.start_restore(saved['id'], saved['sha256'])
+            e.spawn.assert_not_called()
+            self.assertEqual(coordination.reservation(e.folder), {})
+
+    def test_v3_copy_checks_original_and_copied_model_bytes_before_success(self):
+        for changed in (False, True):
+            with self.subTest(changed=changed), self.environment() as e:
+                saved = self.create(e)
+                _, archive = e.store.load(saved['id'], saved['sha256'])
+                original_archive = archive.read_bytes()
+                target = saved['copy_profile']
+                component = {**fixture.COMPONENT, 'version': '2026.11.23'}
+                components = [{'name': 'hand_model.'+s, 'state': 'present'} for s in ('left', 'right')]
+                info = {'name': target, 'is_current': False}
+                registry = e.folder/'sdk-users'/'registry.toml'
+                model_dir = registry.parent/'new-wearer-id'/'models'
+                model_dir.mkdir(parents=True)
+                active_id = fixture.SDK_USER['user_id']
+                registry.write_text(
+                    f'current_user_id = "{active_id}"\n'
+                    f'[[users]]\nuser_id = "{active_id}"\ndisplay_name = "{fixture.USER}"\nis_default = false\n'
+                    f'[[users]]\nuser_id = "new-wearer-id"\ndisplay_name = "{target}"\nis_default = false\n',
+                    encoding='utf-8')
+                for side in ('left', 'right'):
+                    filename = side+'_hand.urdf'
+                    data = e.data[filename]
+                    if changed and side == 'right':
+                        data = b'x'*len(data)
+                    (model_dir/filename).write_bytes(data)
+                    info[side+'_hand'] = dict(calibrated=True, file_name=filename, size_bytes=len(data))
+
+                original_command = e.command
+                def command(*args):
+                    if args == ('user','list'):
+                        return dict(users=[dict(name=fixture.USER, is_current=True)])
+                    if args == ('user','import',str(archive),'--preview'):
+                        return dict(source_user=fixture.USER, bundle_version=3, components=copy.deepcopy(components))
+                    if args == ('user','show',target):
+                        return copy.deepcopy(info)
+                    return original_command(*args)
+                e.query.side_effect = command
+
+                with patch('native_cli.prepare', return_value=component), \
+                        patch('calibration_identity.sdk_user_registry', return_value=registry):
+                    e.service.start_restore(saved['id'], saved['sha256'], restore_copy=True)
+                    self.assertFalse(e.owner.run['terminal'])
+                    self.assertEqual(e.owner.run['restore_profile'], target)
+                    prefix=[e.service.token,fixture.SN,'left','900']
+                    with patch('windows_process_job.current_in_named_job',return_value=True), \
+                            patch('native_jsonl_worker.run',return_value=0) as run, redirect_stdout(io.StringIO()) as ready:
+                        self.assertEqual(native.worker_main(prefix+['restore',fixture.USER,saved['id']]),0)
+                    run.assert_called_once_with([component['binary'],'--json','user','import',str(archive),'--as',target])
+                    report=json.dumps(dict(name=target, current_user=fixture.USER, components=components))
+                    transport=ready.getvalue()+''.join(fixture.line(row) for row in [
+                        dict(type='output',text=report[:26]), dict(type='output',text=report[26:]),
+                        dict(type='exit',exitstatus=0)])
+                    e.process.stdout=io.StringIO(transport)
+                    e.service._collect()
+
+                self.assertTrue(e.owner.run['cleanup_confirmed'])
+                self.assertFalse(e.owner.run['running'])
+                self.assertEqual(e.owner.run['restore_verified'],not changed)
+                self.assertEqual(e.owner.run['status'],'restore_unconfirmed' if changed else 'restore_verified')
+                self.assertEqual(archive.read_bytes(),original_archive)
+                self.assertEqual(e.command('user','show')['name'],fixture.USER)
+                self.assertFalse(any(call.args[0]=='get' or call.args[:2]==('user','switch') for call in e.query.call_args_list))
+                self.assertEqual(coordination.reservation(e.folder),{})
+
     def test_restore_cleanup_is_required_by_actual_controller_and_desktop_exit(self):
         from console_server import Controller
         from desktop_lifecycle import calibration_cleanup_required,needs_confirmation,close_sessions

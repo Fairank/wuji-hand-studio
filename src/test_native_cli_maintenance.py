@@ -57,6 +57,22 @@ class MaintenanceTests(unittest.TestCase):
         self.enable();self.owner._work(True,automatic=True)
         self.assertEqual(self.saved()['current']['version'],NEW)
 
+    def test_unverified_newer_release_offers_workbench_update_without_changing_cli(self):
+        future='2026.11.24'
+        self.store.fetch_release.return_value={'tag_name':'v'+future}
+        self.enable()
+        for check_only,automatic in ((True,False),(False,True),(False,False)):
+            with self.subTest(check_only=check_only,automatic=automatic):
+                self.owner._work(check_only,automatic)
+                update=self.owner.snapshot()['update']
+                self.assertEqual(update['latest_version'],future)
+                self.assertEqual(update['phase'],'requires_workbench')
+                self.assertFalse(update['available'])
+                self.assertEqual(self.saved(),{})
+                self.assertEqual(reservation(self.folder),{})
+        self.store.prepare.assert_not_called()
+        self.idle.assert_not_called()
+
     def test_busy_workspace_waits_without_download_or_pointer_change(self):
         def busy():self.owner.closed.set();raise ValueError('One workspace is still in use')
         self.idle.side_effect=busy;self.owner._work(False)

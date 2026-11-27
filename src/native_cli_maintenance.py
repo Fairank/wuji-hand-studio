@@ -110,6 +110,8 @@ def run(owner,check_only,automatic):
     saved=selection(store.folder)
     current_version=(saved.get('current') or {}).get('version',PINNED_VERSION)
     available=version_order(value)>version_order(current_version)
+    if available and owner.require_workbench_for(value):
+        return
     enabled=preference(owner)
     if automatic or not check_only:owner._set(auto_update_pending=False)
     owner._set(latest_version=value,available=available,newer_cli_available=available,checked_at=time.time(),checking=False,

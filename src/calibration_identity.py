@@ -27,20 +27,22 @@ def require_sdk_user(value, expected, profile=None):
     return copy.deepcopy(actual)
 
 
-def read_current_sdk_user(profile, *, registry=None):
-    """Snapshot the SDK's exact current ID after CLI profile selection.
+def sdk_user_registry():
+    from native_environment import official_cli_environment
+    environment = official_cli_environment()
+    home = environment.get('HOME') or environment.get('USERPROFILE') or str(Path.home())
+    return Path(home)/'.wuji/sdk/users/registry.toml'
 
-    This versioned registry shape is checked strictly; it is never edited and
-    names or directories are never substituted for the SDK-issued user ID.
-    """
+
+def read_current_sdk_user(profile, *, registry=None):
+    return read_sdk_user(profile, registry=registry, require_current=True)
+
+
+def read_sdk_user(profile, *, registry=None, require_current=False):
+    """Read a named SDK identity without changing the active profile."""
     if not isinstance(profile,str) or not PROFILE.fullmatch(profile) or profile.lower()=='default':
         raise ValueError('请选择命名佩戴者 / Select a named wearer')
-    if registry is None:
-        from native_environment import official_cli_environment
-        environment=official_cli_environment()
-        home=environment.get('HOME') or environment.get('USERPROFILE') or str(Path.home())
-        registry=Path(home)/'.wuji/sdk/users/registry.toml'
-    path=Path(registry)
+    path = Path(registry) if registry is not None else sdk_user_registry()
     try:
         if not path.is_absolute() or any(p.is_symlink() or getattr(p,'is_junction',lambda:False)() for p in (path,*path.parents)):
             raise ValueError('佩戴者注册资料路径不可核对 / SDK wearer registry path is unverified')
@@ -69,7 +71,7 @@ def read_current_sdk_user(profile, *, registry=None):
                     raise ValueError('佩戴者注册身份无效 / SDK wearer registry identity is invalid')
                 if user['display_name']==profile:selected.append(sdk_user_identity(user,profile))
         if (not isinstance(value['current_user_id'],str) or value['current_user_id'] not in ids
-                or len(selected)!=1 or selected[0]['user_id']!=value['current_user_id']):
+                or len(selected)!=1 or require_current and selected[0]['user_id']!=value['current_user_id']):
             raise ValueError('当前佩戴者与所选档案不一致，请重新选择 / Current SDK wearer differs from the selected profile')
         return copy.deepcopy(selected[0])
     except (OSError,UnicodeError,tomllib.TOMLDecodeError) as error:

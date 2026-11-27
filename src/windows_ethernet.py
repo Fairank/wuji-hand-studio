@@ -22,10 +22,15 @@ class Adapter(C.Structure):
                 ('mac_length',U32),('flags',U32),('mtu',U32),('kind',U32),('status',U32)]
 
 
+class _SocketAddress(C.Structure):
+    # Widening the pointer alignment on x64 pads the native SOCKET_ADDRESS.
+    _fields_ = [('pointer', PTR), ('length', C.c_int)]
+
+
 class Unicast(C.Structure):
-    # IP_ADAPTER_UNICAST_ADDRESS_LH, including the SOCKET_ADDRESS layout.
-    _fields_ = [('length',U32),('flags',U32),('next',PTR),('socket_address',PTR),
-                ('socket_length',C.c_int),('prefix_origin',U32),('suffix_origin',U32),
+    # IP_ADAPTER_UNICAST_ADDRESS_LH uses the nested SOCKET_ADDRESS.
+    _fields_ = [('length',U32),('flags',U32),('next',PTR),('socket_address',_SocketAddress),
+                ('prefix_origin',U32),('suffix_origin',U32),
                 ('dad_state',U32),('valid_lifetime',U32),('preferred_lifetime',U32),
                 ('lease_lifetime',U32),('prefix_length',C.c_ubyte)]
 
@@ -72,8 +77,9 @@ def _parse_buffer(buffer):
         name=C.string_at(link.name,min(256,end-link.name)).split(b'\0',1)[0].decode('ascii').lower()
         addresses=[]
         for entry in _items(link.unicast,Unicast,start,end):
-            address=entry.socket_address
-            if not address or entry.socket_length<16 or not start<=address<=end-entry.socket_length:
+            sockaddr=entry.socket_address
+            address=sockaddr.pointer
+            if not address or sockaddr.length<16 or not start<=address<=end-sockaddr.length:
                 raise OSError('Invalid Windows Ethernet address')
             raw=C.string_at(address,16)
             if int.from_bytes(raw[:2],'little')!=socket.AF_INET:

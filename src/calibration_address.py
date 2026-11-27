@@ -2,10 +2,12 @@
 import ipaddress
 import re
 
+from zenoh_route import strip_udp_prefix
+
 
 def network_address(value):
     if not isinstance(value,str):raise ValueError('Missing discovered glove address')
-    host,separator,port=value.removeprefix('udp/').partition(':')
+    host,separator,port=strip_udp_prefix(value).partition(':')
     ip=ipaddress.IPv4Address(host)
     if (not separator or not port.isascii() or not port.isdecimal() or not 1<=int(port)<=65535
             or ip.is_multicast or ip.is_loopback or ip.is_unspecified or ip.is_link_local or ip.is_reserved):

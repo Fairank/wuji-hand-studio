@@ -16,11 +16,18 @@ def managed_wsl():
             or os.environ.get('WUJI_MANAGED_RUNTIME') == 'macvm')
 
 
+def strip_udp_prefix(address):
+    """Accept SDK locators and official CLI URIs without changing other transports."""
+    if address.startswith('udp://'):
+        return address.removeprefix('udp://')
+    return address.removeprefix('udp/')
+
+
 def endpoint(address, side):
     if side not in ('left', 'right'):
         raise ValueError('Unknown hand side')
     value = address.strip() or ('192.168.1.110:7447' if side == 'left' else '192.168.1.111:7447')
-    host, sep, port = value.partition(':')
+    host, sep, port = strip_udp_prefix(value).partition(':')
     ip = ipaddress.IPv4Address(host)
     if ip.is_multicast or ip.is_loopback or ip.is_unspecified or ip.is_link_local:
         raise ValueError('Expected a device Ethernet address')
@@ -60,7 +67,7 @@ class DeviceRoute:
             for device in devices:
                 serial = str(device.sn)
                 kind = str(device.device_type).lower().replace('_', '')
-                actual = str(device.address).removeprefix('udp/')
+                actual = strip_udp_prefix(str(device.address))
                 # SDK 2026.8.31 reports Unknown during Zenoh discovery. Its
                 # Hand2 serial identifies generation/side; the caller also
                 # verifies actual handedness after connecting.

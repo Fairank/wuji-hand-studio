@@ -65,6 +65,30 @@ def _serial(value):
     return value
 
 
+def _official_check_error(check):
+    """Read the documented CLI error for display only; the raw report stays intact."""
+    if not check['returncode'] or len(check['stdout']) > 16384:
+        return None
+
+    def unique_fields(pairs):
+        fields = dict(pairs)
+        if len(fields) != len(pairs):
+            raise ValueError('Duplicate official error field')
+        return fields
+
+    try:
+        envelope = json.loads(check['stdout'], object_pairs_hook=unique_fields)
+    except (ValueError, RecursionError):
+        return None
+    if not isinstance(envelope, dict) or set(envelope) != {'error'}:
+        return None
+    error = envelope['error']
+    if (not isinstance(error, dict) or set(error) != {'code', 'kind', 'reason', 'message', 'hint'}
+            or type(error['code']) is not int or error['code'] != check['returncode']):
+        return None
+    return _text(error['message'], 800)
+
+
 def official_failure_detail(output,sn):
     """Display one exact-SN failed row; never infer completion or progress.
 
@@ -362,7 +386,7 @@ class FirmwareService:
                 self._finish('check_failed',failed['error'][:800])
                 return
             if check['returncode']:
-                raise ValueError((check['stderr'] or check['stdout'] or '暂时无法检查设备更新 / Device update check is unavailable')[:800])
+                raise ValueError((_official_check_error(check) or check['stderr'] or check['stdout'] or '暂时无法检查设备更新 / Device update check is unavailable')[:800])
             report = parse_official_check_report(check['stdout'],sn,expected_type) if expected_type else None
             now, token = self._now(), secrets.token_urlsafe(24)
             public = dict(token=token, sn=sn, device=copy.deepcopy(device),
@@ -602,7 +626,7 @@ class FirmwareService:
             self._finish('completed','官方流程已结束，但兼容固件列表尚未确认，请重新检查 / The official flow ended; compatible firmware could not be checked. '+failed['error'][:500])
             return
         if report is None:
-            detail=(check['stderr'] or '设备身份与版本未通过核对 / Device identity and version were not verified')[:500]
+            detail=(_official_check_error(check) or check['stderr'] or '设备身份与版本未通过核对 / Device identity and version were not verified')[:500]
             self._finish('completed','官方流程已结束，但未能读回设备版本，请重新检查 / The official flow ended; check the device version again. '+detail)
             return
         matched=bool(before and before.get('update_available') is True

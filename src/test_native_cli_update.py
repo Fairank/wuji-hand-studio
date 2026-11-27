@@ -17,8 +17,8 @@ from test_cli_release_store import Response,html_asset_row,FakeNetwork as HTMLNe
 
 LATEST='2026.10.26'
 
-def metadata(data,value=LATEST):
-    name='wuji_'+value+'_x86_64-pc-windows-msvc.zip'
+def metadata(data,value=LATEST,toolchain='msvc'):
+    name=f'wuji_{value}_x86_64-pc-windows-{toolchain}.zip'
     return dict(tag_name='v'+value,html_url=REPO_URL+'/releases/tag/v'+value,draft=False,prerelease=False,
         assets=[dict(name=name,browser_download_url=REPO_URL+'/releases/download/v'+value+'/'+name,
             digest='sha256:'+hashlib.sha256(data).hexdigest(),size=len(data))])
@@ -66,7 +66,7 @@ class ManagedNativeTests(unittest.TestCase):
     def html_discovery(self, error, *, selected=False):
         network=HTMLNetwork();network.responses.update(self.network.responses)
         self.network=network;self.store.http_open=network
-        tag='v'+LATEST
+        tag=self.doc['tag_name']
         self.network.responses[API_URL+('/releases/tags/'+tag if selected else '/releases/latest')]=error
         self.network.responses[REPO_URL+('/releases/tag/'+tag if selected else '/releases/latest')]=lambda url:Response(b'<html>Latest</html>',self.doc['html_url'])
         asset=self.doc['assets'][0]
@@ -85,6 +85,35 @@ class ManagedNativeTests(unittest.TestCase):
                 self.assertEqual(document['assets'][0]['digest'],self.doc['assets'][0]['digest'])
                 self.assertEqual(self.store.prepare(LATEST,release=document,strict=True)['version'],LATEST)
         self.assertFalse((self.folder/'selection.json').exists())
+
+    def test_current_official_windows_archive_prepares_from_api_and_html(self):
+        value='2026.11.23'
+        self.doc=metadata(self.data,value,'gnullvm')
+        tag=self.doc['tag_name']
+        asset=self.doc['assets'][0]
+        self.network.responses[API_URL+'/releases/latest']=json.dumps(self.doc).encode()
+        self.network.responses[asset['browser_download_url']]=self.data
+        self.runner.outputs['version']='wuji '+value
+        self.assertEqual(self.store.fetch_release()['assets'][0]['name'],asset['name'])
+
+        self.html_discovery(HTTPError(API_URL,403,'Rate limit',{},None))
+        selected=self.store.fetch_release()
+        self.assertEqual(selected['stability_source'],'github_latest_release_redirect')
+        self.assertEqual(selected['tag_name'],tag)
+        prepared=self.store.prepare(value,release=selected,strict=True)
+        self.assertEqual(prepared['paths']['archive'],asset['name'])
+        self.assertEqual(prepared['archive_sha256'],asset['digest'].removeprefix('sha256:'))
+        self.assertEqual(pointer(prepared),pointer(version_info(value,folder=self.folder,strict=True)))
+        self.assertFalse((self.folder/'selection.json').exists())
+
+    def test_ambiguous_or_non_windows_assets_are_rejected(self):
+        for assets in ([self.doc['assets'][0]]*2,
+                       metadata(self.data,LATEST,'unverified')['assets']):
+            with self.subTest(assets=len(assets)):
+                document={**self.doc,'assets':assets}
+                self.network.responses[API_URL+'/releases/latest']=json.dumps(document).encode()
+                with self.assertRaises(ReleaseStoreError):self.store.fetch_release()
+        self.assertEqual(self.runner.calls,[])
 
     def test_bare_tag_html_cannot_claim_stable_even_with_a_latest_label(self):
         self.html_discovery(HTTPError(API_URL,403,'Rate limit',{},None),selected=True)

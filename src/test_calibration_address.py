@@ -50,7 +50,7 @@ class NoThread:
 
 class AddressTests(unittest.TestCase):
     def test_address_canonicalizes_only_ipv4_and_numeric_port(self):
-        for value, expected in [('udp/' + ADDRESS, ADDRESS), (ADDRESS, ADDRESS),
+        for value, expected in [('udp/' + ADDRESS, ADDRESS), ('udp://' + ADDRESS, ADDRESS), (ADDRESS, ADDRESS),
                                 ('10.0.0.7:00080', '10.0.0.7:80'),
                                 ('172.16.5.4:1', '172.16.5.4:1'),
                                 ('192.168.1.121:65535', '192.168.1.121:65535')]:
@@ -63,7 +63,7 @@ class AddressTests(unittest.TestCase):
                   '169.254.2.3:9400', '192.168.1.121:0', '192.168.1.121:65536',
                   '192.168.1.121:-1', '192.168.1.121:+2', '192.168.1.121:９４００',
                   '192.168.1.121:9400 ', '192.168.1.121:9400:1',
-                  '192.168.1.121:9400\n', 'udp://192.168.1.121:9400',
+                  '192.168.1.121:9400\n', 'udp://udp/' + ADDRESS, 'udp/udp://' + ADDRESS, 'tcp://' + ADDRESS,
                   '[::1]:9400', 'user@192.168.1.121:9400', '1.2.3.999:9400']
         for value in values:
             with self.subTest(value=value), self.assertRaises(ValueError):
@@ -81,11 +81,11 @@ class GloveIdentityTests(unittest.TestCase):
                                SdkManager=SimpleNamespace(instance=Mock(return_value=manager)))
 
     def test_verified_glove_disconnects_before_return(self):
-        for side in ['left', 'Handedness.LEFT']:
+        for prefix, side in [('udp/', 'left'), ('udp://', 'Handedness.LEFT')]:
             glove = SyntheticGlove(side=side)
             manager = SimpleNamespace(connect=Mock(return_value=glove))
-            with self.subTest(side=side):
-                self.assertIsNone(calibration_address.verify_glove('udp/' + ADDRESS, SERIAL, 'left',
+            with self.subTest(side=side, prefix=prefix):
+                self.assertIsNone(calibration_address.verify_glove(prefix + ADDRESS, SERIAL, 'left',
                                                                   manager=manager, sdk=self.sdk(manager)))
                 manager.connect.assert_called_once_with(address=ADDRESS,
                                                         device_name='workbench_calibration_identity')

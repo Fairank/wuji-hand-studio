@@ -144,7 +144,7 @@ class OfficialEventTests(unittest.TestCase):
 
     def test_non_protocol_diagnostics_do_not_invent_progress(self):
         noise=['bad JSON', 'null','[]',line({**record(),'schema_version':True}),
-               line({**record(),'schema_version':3}),line({**record(),'operation':'other'}),
+               line({**record(),'schema_version':4}),line({**record(),'operation':'other'}),
                line({**record(),'calibration':'other'}),line({**record(),'event':'unknown'})]
         decoder=self.decoder()
         self.assertEqual(decoder.feed('\n'.join(noise),final=True),[])
@@ -216,6 +216,39 @@ class GuidedCollectionTests(unittest.TestCase):
         self.assertEqual(state['status'],'error')
         self.assertIn('before verified',state['error'])
         self.assertIsNone(state['result'])
+
+    def test_v3_final_pose_and_verified_result_complete_after_exit(self):
+        progress = record(schema_version=3, feedback=dict(step_index=5, step_total=6,
+                          step_name='flat_open', state='done', progress=1))
+        result = record('result', schema_version=3)
+        state, marker = self.collect([ready(), output(progress, result), dict(type='exit', exitstatus=0)])
+        self.assertEqual(state['status'], 'completed')
+        self.assertEqual(state['result'], result)
+        self.assertEqual(state['captured_poses'], [5])
+        self.assertEqual(state['phase'], 'solving')
+        self.assertTrue(state['cleanup_confirmed'])
+        self.assertEqual(marker, {})
+
+    def test_v3_official_cancellation_checks_child_exit_and_releases_owner(self):
+        cancelled = record('cancelled', schema_version=3, status='cancelled')
+        for code, expected in [(130, 'cancelled'), (-2, 'cancelled'), (0xC000013A, 'cancelled'),
+                               (-1073741510, 'cancelled'), (0, 'error'), (1, 'error')]:
+            with self.subTest(code=code):
+                state, marker = self.collect([ready(), output(cancelled), dict(type='exit', exitstatus=code)])
+                self.assertEqual(state['status'], expected)
+                self.assertEqual(state['event'], cancelled)
+                self.assertTrue(state['cleanup_confirmed'])
+                self.assertEqual(marker, {})
+
+    def test_v3_error_preserves_reason_and_exposes_the_official_message(self):
+        error = dict(code=4, kind='unavailable', reason='not_reached', failure='timeout',
+                     message='The final pose timed out', hint='')
+        result = record('error', schema_version=3, status='failed', error=error)
+        state, marker = self.collect([ready(), output(result), dict(type='exit', exitstatus=4)])
+        self.assertEqual(state['status'], 'error')
+        self.assertEqual(state['event'], result)
+        self.assertEqual(state['error'], error['message'])
+        self.assertEqual(marker, {})
 
     def test_wrong_ready_serial_or_side_never_completes(self):
         for bad in [dict(type='ready',serial='WG_OTHER',side='left'),dict(type='ready',serial=SN,side='right'),

@@ -94,6 +94,24 @@ class PortabilityTests(unittest.TestCase):
             bad=copy.deepcopy(good);bad['run']['result']['result']['sn']='OTHER'
             with self.assertRaises(ValueError):calibration_proof(bad)
 
+    def test_v3_result_keeps_exact_component_wearer_and_artifact_proof(self):
+        with tempfile.TemporaryDirectory() as folder:
+            model = Path(folder)/'right_hand.urdf'
+            model.write_bytes(MODEL)
+            state = completed(model)
+            run = state['run']
+            run.update(cli_version='2026.11.23', cli_binary_sha256='b'*64, cli_archive_sha256='c'*64)
+            run['result']['schema_version'] = 3
+            with patch('native_cli_update.version_info', return_value=dict(
+                    binary_sha256='b'*64, archive_sha256='c'*64)):
+                proof = calibration_proof(state)
+                self.assertEqual(proof['source_user_id'], 'owner-1')
+                self.assertEqual(proof['source_cli_version'], '2026.11.23')
+                self.assertEqual(proof['model_sha256'], hashlib.sha256(MODEL).hexdigest())
+                run['result']['result']['sdk_user']['user_id'] = 'another-wearer'
+                with self.assertRaisesRegex(ValueError, 'wearer identity'):
+                    calibration_proof(state)
+
     def test_model_missing_or_redirected_never_produces_proof(self):
         with tempfile.TemporaryDirectory() as folder:
             model=Path(folder)/'missing.urdf'

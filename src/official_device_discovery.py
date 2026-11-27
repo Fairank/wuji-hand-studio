@@ -202,6 +202,24 @@ def _cancellable_read(command,cancelled):
                 raise DiscoveryCleanupUnconfirmed('Discovery process exit is unconfirmed',owned=owned)
 
 
+def device_list_response(code, out, err):
+    """Failed scans may carry a device list, but only successful reports are current."""
+    try:
+        value = json.loads(out)
+    except (ValueError, TypeError):
+        value = None
+    error = value.get('error') if isinstance(value, dict) else None
+    if code:
+        if isinstance(error, dict) and type(error.get('code')) is int and error['code'] == code:
+            message = error.get('message')
+            if isinstance(message, str) and message.strip():
+                raise ValueError(message.strip()[:700])
+        raise ValueError((err or out or 'Official discovery failed')[:700])
+    if not isinstance(value, dict) or error is not None or not isinstance(value.get('devices'), list):
+        raise ValueError('Invalid official device list')
+    return value
+
+
 def native_devices(*,cancelled=None):
     from native_cli import prepare
     from native_environment import official_cli_environment
@@ -216,8 +234,6 @@ def native_devices(*,cancelled=None):
                 creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0),
                 env=official_cli_environment())
         else:result=_cancellable_read(command,cancelled)
-        if result.returncode:raise ValueError((result.stderr or result.stdout or 'Official discovery failed')[:700])
-        value=json.loads(result.stdout)
-        if not isinstance(value,dict) or not isinstance(value.get('devices'),list):raise ValueError('Invalid official device list')
+        value=device_list_response(result.returncode,result.stdout,result.stderr)
         if value['devices'] or attempt:return value
         time.sleep(.25)

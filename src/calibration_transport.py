@@ -2,6 +2,8 @@
 import ipaddress
 import re
 
+from zenoh_route import strip_udp_prefix
+
 
 def validate_glove_route(value,serial):
     if (not isinstance(value,dict) or set(value)!={'source','serial','address'}
@@ -9,7 +11,7 @@ def validate_glove_route(value,serial):
             or not isinstance(serial,str) or not re.fullmatch('[A-Za-z0-9_.-]{1,100}',serial)
             or not isinstance(value.get('address'),str)):
         raise ValueError('所选手套的网络身份不可核对 / Selected glove route identity is unverified')
-    address=value['address'].removeprefix('udp/')
+    address=strip_udp_prefix(value['address'])
     match=re.fullmatch(r'([0-9.]+):([1-9][0-9]{0,4})',address)
     if not match:raise ValueError('官方手套地址格式不可核对 / Official glove address is unverified')
     host=ipaddress.IPv4Address(match[1]);port=int(match[2])

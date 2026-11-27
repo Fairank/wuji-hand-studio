@@ -47,6 +47,7 @@ def worker_main(arguments):
         token,serial,expected_side,timeout=arguments[:4]
         restoring=len(arguments)==7 and arguments[4]=='restore'
         guided=len(arguments)==7 and not restoring
+        restore_profile = None
         user=arguments[5] if len(arguments)==7 else None
         replace=guided and arguments[6]=='replace'
         if guided and (arguments[4]!='guided' or arguments[6] not in ('replace','keep')):
@@ -69,7 +70,9 @@ def worker_main(arguments):
                 backup_id=arguments[6]
                 if marker.get('interface')!='restore' or marker.get('user')!=user or marker.get('backup_id')!=backup_id:
                     raise ValueError('Profile restore ownership changed')
-                backup,archive=CalibrationBackups().verify_current_owner(backup_id,marker.get('backup_sha256'))
+                backups = CalibrationBackups()
+                backup,archive=backups.verify_current_owner(backup_id,marker.get('backup_sha256'))
+                restore_profile = marker.get('restore_profile')
                 if backup['profile']!=user or backup['serial']!=serial or backup['side']!=expected_side:
                     raise ValueError('Profile restore backup identity differs')
             elif guided:
@@ -92,11 +95,23 @@ def worker_main(arguments):
                 if returned is not None and returned!=serial:raise ValueError('Official CLI returned a different device identity')
             component=prepare(strict=True)
             if component['version']!=marker.get('cli_version'):raise ValueError('Official CLI changed before capture')
-        if guided:from native_jsonl_worker import run
-        else:from native_terminal_worker import run
-        print(json.dumps(dict(type='ready',source='official_user_import_tty' if restoring else 'official_jsonl_native' if guided else 'official_tty',serial=serial,side=side)),flush=True)
+            if restoring:
+                from calibration_backups import supports_copy_restore
+                if supports_copy_restore(component['version']) != bool(restore_profile):
+                    raise ValueError('Official CLI changed the restore destination')
+                if restore_profile:
+                    backups.prepare_copy(backup, archive, restore_profile, command=json_command)
+        if guided or restore_profile:
+            from native_jsonl_worker import run
+        else:
+            from native_terminal_worker import run
+        source = ('official_user_import_copy' if restore_profile else 'official_user_import_tty' if restoring
+                  else 'official_jsonl_native' if guided else 'official_tty')
+        print(json.dumps(dict(type='ready',source=source,serial=serial,side=side)),flush=True)
         # Human mode owns its original user/overwrite prompts, pose art and result.
         # A single exact SN selector is used; side is independently verified above.
+        if restore_profile:
+            return run([component['binary'], '--json', 'user', 'import', str(archive), '--as', restore_profile])
         if restoring:return run([component['binary'],'user','import',str(archive)])
         return run([component['binary'],*(['--jsonl'] if guided else []),'calib','hand-model','--sn',serial,'--timeout-s',timeout])
     except Exception as error:
@@ -157,13 +172,15 @@ class NativeCalibration:
                 self._start_failure(error,run_id,serial,side,user,sdk_user,backup,False,False)
             raise
 
-    def start_restore(self,backup_id,expected_sha256,timeout=900):
+    def start_restore(self,backup_id,expected_sha256,timeout=900,*,restore_copy=False):
         from calibration_backups import CalibrationBackups
+        if type(restore_copy) is not bool:
+            raise ValueError('Invalid calibration restore destination')
         value,_=CalibrationBackups().verify_current_owner(backup_id,expected_sha256)
         return self._start(value['serial'],value['side'],timeout,user=value['profile'],sdk_user=value['sdk_user'],
-            backup=CalibrationBackups.summary(value),restoring=True)
+            backup=CalibrationBackups.summary(value),restoring=True,restore_copy=restore_copy)
 
-    def _start(self,serial,expected_side,timeout,user=None,replace=False,sdk_user=None,cancel_check=None,run_id=None,backup=None,restoring=False):
+    def _start(self,serial,expected_side,timeout,user=None,replace=False,sdk_user=None,cancel_check=None,run_id=None,backup=None,restoring=False,restore_copy=False):
         run_id=run_id or uuid.uuid4().hex
         if (not isinstance(serial,str) or not re.fullmatch('[A-Za-z0-9][A-Za-z0-9_-]{0,79}',serial)
                 or expected_side not in (None,'left','right') or type(timeout) is not int or not 60<=timeout<=1800):
@@ -175,6 +192,13 @@ class NativeCalibration:
             self.recover()
             owner.metadata_check()
             component=prepare(strict=True)
+            restore_profile = None
+            if restoring:
+                from calibration_backups import supports_copy_restore
+                if restore_copy != supports_copy_restore(component['version']):
+                    raise ValueError('恢复目标已变化，请刷新并重新确认 / The restore destination changed; refresh and confirm the new destination')
+                if restore_copy:
+                    restore_profile = backup['copy_profile']
             if cancel_check is not None:cancel_check()
             self.token=reserve('calibration',self.folder)
             self.run_id=run_id
@@ -186,6 +210,8 @@ class NativeCalibration:
                     job_name='Local\\HandWorkbench-OfficialCalibration-'+self.token,serial=serial,side=expected_side,run_id=run_id,launch_stage='reserved')
                 if restoring:
                     marker.update(interface='restore',user=user,sdk_user=sdk_user,backup_id=backup['id'],backup_sha256=backup['sha256'])
+                    if restore_profile:
+                        marker['restore_profile'] = restore_profile
                 elif user is not None:
                     from calibration_identity import sdk_user_identity
                     sdk_user=sdk_user_identity(sdk_user,user)
@@ -208,14 +234,15 @@ class NativeCalibration:
                     stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,encoding='utf-8',errors='strict',bufsize=1,
                     env=environment,**options)
             except BaseException as error:
-                self._start_failure(error,run_id,serial,expected_side,user,sdk_user,backup,spawn_attempted,restoring)
+                self._start_failure(error,run_id,serial,expected_side,user,sdk_user,backup,spawn_attempted,restoring,restore_profile)
                 raise
             with owner.lock:
                 owner.process=self.job.process
                 owner.run=dict(running=True,status='cancelling' if self.cancel_requested else 'starting',id=run_id,user=user,serial=serial,side=None,
                     expected_side=expected_side,
                     started=time.time(),event=None,result=None,error=None,exit_code=None,step=None,progress=None,
-                    source='official_user_import_tty' if restoring else 'official_jsonl_native' if user else 'official_tty',terminal=restoring or user is None,
+                    source='official_user_import_copy' if restore_profile else 'official_user_import_tty' if restoring else 'official_jsonl_native' if user else 'official_tty',
+                    terminal=(restoring and not restore_profile) or user is None, restore_profile=restore_profile,
                     interface='restore' if restoring else 'guided' if user else 'terminal',sdk_user=copy.deepcopy(sdk_user),backup=copy.deepcopy(backup),
                     phase='preflight',event_count=0,captured_poses=[],pose_index=None,cli_version=component['version'],
                     cli_binary_sha256=component.get('binary_sha256'),cli_archive_sha256=component.get('archive_sha256'))
@@ -224,14 +251,14 @@ class NativeCalibration:
                 owner.thread=threading.Thread(target=self._collect,name='Official calibration terminal',daemon=True)
                 owner.thread.start()
             except BaseException as error:
-                self._start_failure(error,run_id,serial,expected_side,user,sdk_user,backup,True,restoring)
+                self._start_failure(error,run_id,serial,expected_side,user,sdk_user,backup,True,restoring,restore_profile)
                 raise
             if self.cancel_requested:
                 try:self._send(dict(type='cancel'))
                 except (OSError,ValueError):pass
         return owner.snapshot(refresh=False)
 
-    def _start_failure(self,error,run_id,serial,side,user,sdk_user,backup,spawn_attempted,restoring):
+    def _start_failure(self,error,run_id,serial,side,user,sdk_user,backup,spawn_attempted,restoring,restore_profile=None):
         """Never abandon a possibly running private Job or a retained lease."""
         owner=self.owner;self.run_id=run_id;self.failed_start_run=run_id;self.spawn_attempted=spawn_attempted
         clean=not spawn_attempted;released=self.token is None;cleanup_error=None
@@ -254,8 +281,9 @@ class NativeCalibration:
             prior=owner.run if owner.run.get('id')==run_id else {}
             cancelled=clean and released and self.cancel_requested
             owner.run=dict(prior,id=run_id,user=user,serial=serial,side=None,expected_side=side,
-                source='official_user_import_tty' if restoring else 'official_jsonl_native' if user else 'official_tty',
-                terminal=restoring or user is None,interface='restore' if restoring else 'guided' if user else 'terminal',
+                source='official_user_import_copy' if restore_profile else 'official_user_import_tty' if restoring else 'official_jsonl_native' if user else 'official_tty',
+                terminal=(restoring and not restore_profile) or user is None,restore_profile=restore_profile,
+                interface='restore' if restoring else 'guided' if user else 'terminal',
                 sdk_user=copy.deepcopy(sdk_user),backup=copy.deepcopy(backup),status='cancelled' if cancelled else 'error',running=not clean,
                 error=None if cancelled else str(error)[:700],startup_error=str(error)[:700],cancel_reason=str(error)[:700] if cancelled else None,
                 cleanup_confirmed=clean and released,cleanup_error=cleanup_error,
@@ -428,9 +456,12 @@ class NativeCalibration:
         owner=self.owner;process=owner.process;child_exit=None;transport_error=None
         token=self.token;job=self.job;run_id=owner.run.get('id');serial=owner.run.get('serial')
         guided=owner.run.get('source')=='official_jsonl_native';ready=False;exit_seen=False
-        restoring=owner.run.get('source')=='official_user_import_tty' and owner.run.get('interface')=='restore'
+        restoring = owner.run.get('interface') == 'restore'
+        restore_profile = owner.run.get('restore_profile') if owner.run.get('source') == 'official_user_import_copy' else None
+        restore_output = ''
+        restore_report = None
         pending_transport=None
-        from calibration_guided import OfficialEvents
+        from calibration_guided import OfficialEvents, event_error, event_kind, interrupted
         decoder=OfficialEvents(owner.run['serial'],owner.run.get('expected_side'),owner.run.get('user'),owner.run.get('sdk_user')) if guided else None
         def append_output(text):
             # Keep the original bounded output even when its structured result
@@ -442,12 +473,12 @@ class NativeCalibration:
             for event in decoder.feed(text,final):
                 if not ready:raise ValueError('Official guided data arrived before verified device readiness')
                 owner.run['event']=event;owner.run['event_count']+=1
-                kind=event['event']
+                kind=event_kind(event)
                 if kind=='progress':
                     record_progress(owner.run,event)
                     if not self.cancel_requested:owner.run['status']='solving' if owner.run.get('phase')=='solving' else 'collecting'
                 elif kind=='result':owner.run['result']=event
-                elif kind=='error':owner.run['error']=str(event.get('error') or 'Official calibration failed')[:800]
+                elif kind=='error':owner.run['error']=event_error(event)
         def drain():
             try:
                 for _ in process.stderr:pass
@@ -467,7 +498,8 @@ class NativeCalibration:
                         if ready:raise ValueError('Duplicate terminal readiness event')
                         side=event.get('side')
                         if (side not in ('left','right') or event.get('serial')!=owner.run['serial']
-                                or owner.run.get('expected_side') not in (None,side)):
+                                or owner.run.get('expected_side') not in (None,side)
+                                or restore_profile and event.get('source') != 'official_user_import_copy'):
                             raise ValueError('Official terminal ready identity could not be verified')
                         owner.run['side']=side
                         ready=True
@@ -478,7 +510,14 @@ class NativeCalibration:
                         append_output(text)
                         pending_transport=None
                         if guided and kind=='output':accept(text)
-                        elif not guided and not self.cancel_requested:owner.run.update(status='terminal',phase='official_tty')
+                        elif restore_profile and kind == 'output':
+                            if not ready or len(restore_output) + len(text) > 256*1024:
+                                raise ValueError('Invalid official restore copy output')
+                            restore_output += text
+                            if not self.cancel_requested:
+                                owner.run.update(status='restoring',phase='official_restore')
+                        elif not guided and not restore_profile and not self.cancel_requested:
+                            owner.run.update(status='terminal',phase='official_tty')
                     elif kind=='exit':
                         exit_seen=True
                         child_exit=event.get('exitstatus')
@@ -490,6 +529,10 @@ class NativeCalibration:
             worker_code=process.wait(timeout=10)
             if worker_code or child_exit is None:
                 transport_error=transport_error or 'Official terminal exit could not be verified'
+            if restore_profile and not transport_error and (child_exit == 0 or restore_output.strip()):
+                restore_report = json.loads(restore_output)
+                if child_exit and isinstance(restore_report, dict) and 'error' in restore_report:
+                    transport_error = event_error(restore_report)
         except Exception as error:
             transport_error=str(error)[:700]
             with owner.lock:
@@ -504,9 +547,22 @@ class NativeCalibration:
                 except (RuntimeError,OSError):pass
             model_values={}
             with owner.lock:
-                status='error' if transport_error or not clean or self.forced_stop else 'cancelled' if child_exit==9 else 'stopped' if self.cancel_requested else 'session_ended' if child_exit==0 else 'error'
-                if guided and status=='session_ended':
-                    status='completed' if ready and decoder.terminal=='result' and decoder.result is not None else 'error'
+                if transport_error or not clean or self.forced_stop:
+                    status = 'error'
+                elif guided and decoder.schema_version == 3 and decoder.terminal == 'cancelled':
+                    status = 'cancelled' if interrupted(child_exit) else 'error'
+                elif guided and decoder.terminal == 'error':
+                    status = 'error'
+                elif child_exit == 9 or not guided and interrupted(child_exit):
+                    status = 'cancelled'
+                elif self.cancel_requested:
+                    status = 'stopped'
+                elif child_exit != 0:
+                    status = 'error'
+                elif guided:
+                    status = 'completed' if ready and decoder.terminal == 'result' else 'error'
+                else:
+                    status = 'session_ended'
                 if guided and status=='completed':
                     try:
                         from calibration_portability import file_digest
@@ -520,7 +576,11 @@ class NativeCalibration:
                 try:
                     from calibration_backups import CalibrationBackups
                     backup=owner.run.get('backup') or {}
-                    verified=CalibrationBackups().verify_restored(backup.get('id'),backup.get('sha256'))
+                    backups = CalibrationBackups()
+                    if restore_profile:
+                        verified = backups.verify_restored_copy(backup['id'], backup['sha256'], restore_profile, restore_report)
+                    else:
+                        verified = backups.verify_restored(backup.get('id'),backup.get('sha256'))
                     model_values.update(restore_verified=verified,restore_error=None if verified else '官方流程已结束，SDK档案内容尚未与备份完整匹配 / Official import ended; SDK contents do not yet exactly match the backup')
                 except Exception as error:
                     model_values.update(restore_verified=False,restore_error=str(error)[:600])

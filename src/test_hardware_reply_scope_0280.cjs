@@ -8,17 +8,22 @@ const observations=source.slice(source.indexOf("  window.addEventListener('conso
 const A='a'.repeat(32),B='b'.repeat(32),hash=value=>crypto.createHash('sha256').update(value).digest('hex');
 const flush=async()=>{for(let n=0;n<15;n++)await new Promise(resolve=>setImmediate(resolve));};
 function fixture(){
- const listeners={},requests=[],nodes=new Map(),timers=[],get=id=>{if(!nodes.has(id))nodes.set(id,{value:id.includes('speed')?'1':id.includes('amplitude')?'.25':id.includes('cycles')?'1':id==='probe-joint'?'6':id==='probe-direction'?'1':'fist',checked:true,textContent:'',hidden:true});return nodes.get(id);};
+ const listeners={},requests=[],nodes=new Map(),timers=[],get=id=>{if(!nodes.has(id))nodes.set(id,{value:id.includes('speed')?'1':id.includes('amplitude')?'.25':id.includes('cycles')?'1':id==='probe-joint'?'6':id==='probe-direction'?'1':'fist',checked:true,textContent:'',hidden:true,events:[],dispatchEvent(event){this.events.push(event.type);}});return nodes.get(id);};
  const state={csrf:'hardware-service-A',connection:'connected',stale:false,device_id:'WH_SYNTHETIC_A',session_generation:1,
   identified_device:{source:'sdk_identity',serial:'WH_SYNTHETIC_A',profile:'hand2_right'},device_profile:{id:'hand2_right'},
   hardware_control_id:null,hardware:{active:false,stop_confirmed:true},glove:{busy:false}};
+ const banner=get('service-error');
+ Object.defineProperty(banner,'textContent',{
+  get(){return this.firstChild?.textContent||'';},
+  set(value){this.firstChild=value?{textContent:value}:null;}
+ });
  const window={WujiDemonstration:{selectedHand:()=>ctx.state.device_id},addEventListener:(type,fn)=>(listeners[type]??=[]).push(fn)};
  const ctx={state:structuredClone(state),window,document:{getElementById:get},get,globalStop:{},displayProfile:()=>ctx.state?.device_profile?.id,
   matchesDisplayHand:()=>true,tr:(zh,en)=>en,performance,crypto:crypto.webcrypto,TextEncoder,render(){},previewUIEpoch:0,
-  setTimeout:fn=>timers.push(fn),AbortSignal,
+  setTimeout:fn=>timers.push(fn),AbortSignal,Event,
   fetch:async(url,options)=>{assert.equal(url,'/api/action');const command=JSON.parse(options.body);let resolve,reject;const promise=new Promise((a,b)=>{resolve=a;reject=b;});requests.push({command,headers:options.headers,resolve:value=>resolve({ok:value.ok!==false,json:async()=>value}),reject});if(command.name==='hardware_stop'&&!Object.hasOwn(command,'lease'))resolve({ok:true,json:async()=>({ok:true})});return promise;}};
  vm.createContext(ctx);vm.runInContext(actions+'\nrenderHardware=()=>{};'+beat+observations,ctx);
- return {requests,nodes,get,timers,ctx,action:name=>ctx.hardwareAction(name),beat:()=>ctx.beat(),
+ return {requests,nodes,get,timers,ctx,action(name){if(name==='hardware_trial')get('trial-clear').checked=true;return ctx.hardwareAction(name);},beat:()=>ctx.beat(),
   status:()=>vm.runInContext('({lease:ownedLease,pending:hardwarePending,generation:hardwareGeneration})',ctx),
   publish(changes={}){const next={...structuredClone(ctx.state),...changes};for(const fn of listeners['console-state']||[])fn({detail:next});},
   offline(){for(const fn of listeners['console-offline']||[])fn({});},
@@ -80,4 +85,40 @@ test('same-session replacement control retires the old pause error and its pendi
  f.get('service-error').textContent='Current B';f.active(B);assert.equal(f.status().pending,false);
  f.requests[1].reject(Error('Old pause failure'));await pause;
  assert.equal(f.get('service-error').textContent,'Current B');assert.equal(f.requests.length,2);assert.equal(f.status().lease,null);
+});
+
+
+test('the same serial in another hand session requires a new workspace confirmation',()=>{
+ const f=fixture(),trial=f.get('trial-clear'),probe=f.get('probe-clear');
+ assert.equal(trial.checked,true);f.publish();
+ assert.equal(trial.checked,true);
+ f.publish({session_generation:2});
+ assert.equal(trial.checked,false);assert.equal(probe.checked,false);
+ assert.deepEqual(trial.events,['change']);
+ trial.checked=true;probe.checked=true;f.offline();
+ assert.equal(trial.checked,false);assert.equal(probe.checked,false);
+});
+
+test('a transport failure cannot reuse the confirmation sent with the trial',async()=>{
+ const f=fixture(),trial=f.get('trial-clear'),attempt=f.action('hardware_trial');await flush();
+ assert.equal(f.requests[0].command.workspace_clear,true);
+ assert.equal(trial.checked,false);
+ assert.deepEqual(trial.events,['change']);
+ f.requests[0].reject(Error('response unavailable'));await attempt;
+ assert.equal(trial.checked,false);
+});
+
+test('a confirmed retry clears only the previous trial error it owns',async()=>{
+ for(const replaced of [false,true]){
+  const f=fixture(),banner=f.get('service-error');
+  const first=f.action('hardware_trial');await flush();
+  f.requests[0].reject(Error('Previous start refused'));await first;
+  assert.equal(banner.hidden,false);
+  assert.equal(banner.textContent,'Previous start refused');
+  if(replaced)banner.textContent='Previous start refused';
+  const second=f.action('hardware_trial');await flush();
+  f.active(B);f.accept(1,B);await second;
+  assert.equal(banner.hidden,!replaced);
+  assert.equal(banner.textContent,replaced?'Previous start refused':'');
+ }
 });

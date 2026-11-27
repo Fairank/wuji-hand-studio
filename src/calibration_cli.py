@@ -58,9 +58,6 @@ def cli_json(config, *args, cancelled=None):
             return native_devices() if cancelled is None else native_devices(cancelled=cancelled)
         from native_cli import json_command
         return json_command(*args)
-    if args==('devices',):
-        from official_device_discovery import use_native,native_devices
-        if use_native(config):return native_devices()
     from official_cli import cli_path
     command = [cli_path(config), '--json', *args]
     if len(args)>1 and args[0]=='user' and args[1] in ('create','switch'):
@@ -70,6 +67,9 @@ def cli_json(config, *args, cancelled=None):
         code, out, err = remote_run(config, command)
     else:
         code, out, err = local_run(controller_args(config, command))
+    if args == ('devices',):
+        from official_device_discovery import device_list_response
+        return device_list_response(code, out, err)
     if code:
         raise ValueError((err or out or 'Official CLI failed').strip()[:400])
     try:
@@ -142,6 +142,9 @@ def record_progress(run,event):
     captured=list(run.get('captured_poses',[]))
     if fields['phase']=='done' and fields['pose_index'] is not None and fields['pose_index'] not in captured:
         captured.append(fields['pose_index'])
+    if (event.get('schema_version') == 3 and fields['phase'] == 'done'
+            and fields['pose_index'] == 5 and fields['step_total'] == 6):
+        fields['phase'] = 'solving'
     run.update(fields,captured_poses=sorted(captured))
 
 
@@ -188,6 +191,7 @@ class CalibrationCLI:
                         # neither discover nor connect to a device.
                         self.profile_read_check()
                         from native_cli import prepare
+                        from calibration_backups import supports_copy_restore
                         component=prepare()
                         users=cli_json(config,'user','list').get('users',[])
                         current=cli_json(config,'user','show')
@@ -217,7 +221,9 @@ class CalibrationCLI:
                                current=current,devices=[d for d in devices if is_glove_device(d)],error=None,
                                metadata_checked_at=time.time())
                     if native:
-                        cache.update(runtime=dict(backend='windows_native',label='Windows CLI · Windows SDK',version=component['version']),guide='official_jsonl',human_tty=False,guided_native=True)
+                        cache.update(runtime=dict(backend='windows_native',label='Windows CLI · Windows SDK',
+                            version=component['version'],restore_copy=supports_copy_restore(component['version'])),
+                            guide='official_jsonl',human_tty=False,guided_native=True)
                     else:cache.update(runtime=dict(backend=config['mode'],label=config['mode']+' CLI / SDK'),guide='official_jsonl',human_tty=False)
                     with self.lock:
                         if metadata_epoch!=self.metadata_epoch or run_identity!=(self.run.get('id'),self.run.get('user'),self.run.get('running')):
@@ -309,7 +315,7 @@ class CalibrationCLI:
         if not exists:raise ValueError('未找到佩戴者 / Unknown SDK user')
         return validate_profile(cli_json(config,'user','show',profile),profile,side,replace)
 
-    def restore_backup(self,backup_id,expected_sha256):
+    def restore_backup(self,backup_id,expected_sha256,*,restore_copy=False):
         if not isinstance(expected_sha256,str) or not re.fullmatch('[0-9a-f]{64}',expected_sha256):
             raise ValueError('Invalid calibration backup digest')
         from cli_coordination import gate
@@ -322,7 +328,7 @@ class CalibrationCLI:
             from native_calibration import NativeCalibration
             native=NativeCalibration(self)
             with self.lock:self.native=native
-            return native.start_restore(backup_id,expected_sha256)
+            return native.start_restore(backup_id,expected_sha256,restore_copy=restore_copy)
 
     def start(self, side, serial, replace=False, timeout_s=900, *, interface='guided', connected=None, profile=None, create_profile=False, cancel_check=None):
         config=load_config()
@@ -427,8 +433,10 @@ class CalibrationCLI:
             return self.snapshot(refresh=False)
 
     def _collect(self, process):
+        from calibration_guided import event_error, event_kind, event_schema, interrupted, validate_named_result
         stderr_parts = []
         terminal=None;trace=None;trace_size=0
+        schema = None
         def drain():
             for line in process.stderr:
                 if sum(map(len, stderr_parts)) < 4000:
@@ -446,13 +454,21 @@ class CalibrationCLI:
                     event = json.loads(line)
                 except ValueError:
                     continue
-                if not isinstance(event, dict) or event.get('schema_version') != 2 or event.get('calibration') != 'hand_model':
-                    continue
-                kind = event.get('event') or event.get('type') or 'progress'
-                if kind not in ('progress','result','error','cancelled'):continue
                 if trace and trace_size<8*1024*1024:
                     trace.write(line);trace.flush();trace_size+=len(line.encode('utf-8'))
+                kind = event_kind(event, legacy_stream=True)
+                if kind is None: continue
+                incoming_schema = event_schema(event)
+                if incoming_schema is not None:
+                    if schema not in (None, incoming_schema):
+                        raise ValueError('Official calibration event schema changed during capture')
+                    schema = incoming_schema
                 with self.lock:
+                    if schema == 3:
+                        if terminal is not None:
+                            raise ValueError('Official calibration emitted data after its terminal event')
+                        if kind == 'result':
+                            validate_named_result(event, self.run['serial'], self.run['side'], self.run['user'])
                     self.run['event'] = event
                     self.run['event_count']+=1
                     if kind=='progress':
@@ -461,7 +477,7 @@ class CalibrationCLI:
                     else:
                         terminal=kind
                         if kind=='result':self.run['result']=event
-                        elif kind=='error':self.run['error']=str(event.get('error') or 'Official calibration failed')[:800]
+                        elif kind=='error':self.run['error']=event_error(event)
             code = process.wait()
             reader.join(timeout=1)
             with self.lock:
@@ -472,7 +488,11 @@ class CalibrationCLI:
                 elif terminal=='error':
                     self.run['status'] = 'error'
                     self.run['error'] = self.run['error'] or ''.join(stderr_parts)[-400:] or 'Official calibration failed'
-                elif code == 9 or terminal=='cancelled':
+                elif schema == 3 and terminal == 'cancelled':
+                    self.run['status'] = 'cancelled' if interrupted(code) else 'error'
+                    if self.run['status'] == 'error':
+                        self.run['error'] = 'Official cancellation exit could not be verified'
+                elif schema != 3 and (code == 9 or terminal=='cancelled'):
                     self.run['status'] = 'cancelled'
                 elif code == 0:
                     self.run.update(status='unconfirmed',error='CLI exited without an official result / 官方流程结束但未返回成功结果')

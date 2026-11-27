@@ -27,6 +27,23 @@ class CalibrationRunnerTests(unittest.TestCase):
             self.assertEqual(calibration_runner.run(command),9)
         self.assertEqual(calls,['acquire','acquire','signal','wait','release','release'])
 
+    def test_v3_sigint_survives_the_linux_wrapper_exit_status(self):
+        from contextlib import nullcontext
+        from unittest.mock import Mock
+
+        current = SimpleNamespace(returncode=0,stdout='{"name":"Demo","left_hand":{"calibrated":false}}')
+        command=['calibrate','Demo','keep','wuji','--jsonl','calib','hand-model','--sn','WG','--handedness','left','--timeout-s','900']
+        process=Mock()
+        process.poll.return_value=-2
+        process.wait.return_value=-2
+        with patch('sdk_session.ProfileLease',return_value=nullcontext()), \
+                patch('device_ownership.DeviceOwnership',return_value=nullcontext()), \
+                patch.object(calibration_runner.subprocess,'run',return_value=current), \
+                patch.object(calibration_runner.subprocess,'Popen',return_value=process), \
+                patch.object(calibration_runner.sys,'stdin',io.StringIO('')), \
+                patch.object(calibration_runner.signal,'signal'):
+            self.assertEqual(calibration_runner.run(command),130)
+
     def test_user_changed_between_host_preflight_and_locked_capture(self):
         from contextlib import nullcontext
         current=SimpleNamespace(returncode=0,stdout='{"name":"Another","left_hand":{"calibrated":false}}')

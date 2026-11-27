@@ -11,3 +11,16 @@ test('new archive in the same service retires only the old local pending state',
 test('old success or rejection cannot clear a new target restore pending ticket',async()=>{for(const reject of [false,true]){const e=fixture();e.render();const old=e.click().catch(()=>{});e.controller('controller-B');e.state.data={run:{id:'e'.repeat(32),running:false,backup:backup('b','Bob')}};e.render();const current=e.click();assert.equal(e.requests.length,2);reject?e.requests[0].reject(Error('Old response')):e.requests[0].resolve();await old;assert.equal(e.$('oc-backup-restore').disabled,true);assert.equal(e.$('oc-backup-restore').textContent,'Opening…');e.requests[1].resolve();await current;assert.equal(e.$('oc-backup-restore').disabled,false);}});
 test('freshness withdrawal keeps the entry disabled until fresh and idle without resubmission',async()=>{const e=fixture();e.render();const old=e.click();e.state.context={fresh:false,busy:true};e.render();assert(e.$('oc-backup-restore').disabled);e.state.context={fresh:true,busy:true};e.render();assert(e.$('oc-backup-restore').disabled);e.requests[0].resolve();await old;assert(e.$('oc-backup-restore').disabled);e.state.context.busy=false;e.render();assert.equal(e.$('oc-backup-restore').disabled,false);assert.equal(e.requests.length,1);});
 test('malformed replacement metadata withdraws the link and cannot issue another request',async()=>{const e=fixture();e.render();const old=e.click();e.state.data.run.backup={...backup(),sha256:'invalid'};e.render();assert.equal(e.$('oc-backup').hidden,true);assert.equal(e.$('oc-backup-save').href,undefined);await e.click();assert.equal(e.requests.length,1);e.requests[0].resolve();await old;});
+
+test('a new CLI restore shows the exact copy name and sends explicit copy intent',async()=>{
+ const e=fixture(),name='Alice_backup_aaaaaaaaaa';
+ e.state.data.runtime={restore_copy:true};e.state.data.run.backup.copy_profile=name;
+ e.render();
+ assert.match(e.$('oc-backup-note').textContent,new RegExp(name));
+ assert.equal(e.$('oc-backup-restore').textContent,'Restore as a new profile');
+ const save=e.click();
+ assert.equal(e.requests[0].payload.copy,true);
+ e.requests[0].resolve();await save;
+ e.state.data.run.restore_profile=name;e.state.data.run.restore_verified=true;e.render();
+ assert.equal(e.$('oc-backup-restore').disabled,true);
+});

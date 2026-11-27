@@ -32,7 +32,7 @@ def _observed_hand_endpoint(hand,side):
                 or row.get('side') not in (None,side)):
             continue
         for value in row.get('addresses',()):
-            try:address=endpoint(value.removeprefix('udp/'),side) if value else ''
+            try:address=endpoint(value,side) if value else ''
             except ValueError:continue  # Zenoh serial URIs and USB locators are not Ethernet endpoints.
             if address and not address.startswith('255.255.255.255:'):locations.add(address)
     return next(iter(locations)) if len(locations)==1 else ''

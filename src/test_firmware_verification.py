@@ -73,6 +73,17 @@ class FirmwareVerificationTests(unittest.TestCase):
                 self.assertNotEqual(state['result']['verdict'],'target_version_verified')
                 self.assertFalse(state['locked']);self.assertEqual(state['verification_report']['stdout'],value['stdout'])
 
+    def test_readback_displays_confirmed_20261123_stdout_error_message(self):
+        message = 'Selected device is still rebooting'
+        raw = json.dumps(dict(error=dict(code=4, kind='unavailable', reason='no_response',
+                                         message=message, hint=None)), indent=2)
+        state = self.run_upgrade(dict(exited=True, returncode=4, stdout=raw, stderr=''))
+        self.assertEqual(state['phase'], 'completed')
+        self.assertTrue(state['error'].endswith(message))
+        self.assertEqual(state['verification_report']['stdout'], raw)
+        self.assertNotEqual(state['result']['verdict'], 'target_version_verified')
+        self.assertIsNone(state['current_version'])
+
     def test_readback_retains_reservation_until_query_exits(self):
         token=self.prepare();entered,resume=threading.Event(),threading.Event()
         original=self.host.execute

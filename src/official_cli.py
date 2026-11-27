@@ -15,6 +15,10 @@ import time
 from cli_coordination import root_folder,gate,reserve,release,atomic,reservation
 from cli_release_store import CLIReleaseStore
 
+# A CLI release can change device, calibration or update output without
+# changing any of the command-line help used by the installation probe.
+LATEST_COMPATIBLE_CLI='2026.11.23'
+
 
 def selected(folder=None):
     try:
@@ -91,6 +95,13 @@ class OfficialCLI:
 
     def _set(self,**values):
         with self.lock:self.state.update(**values)
+
+    def require_workbench_for(self,version):
+        if version_order(version)<=version_order(LATEST_COMPATIBLE_CLI):
+            return False
+        self._set(phase='requires_workbench',latest_version=version,available=False,newer_cli_available=True,
+            checked_at=time.time(),checking=False,preparing=False,auto_update_pending=False,progress=None,error=None)
+        return True
 
     def startup(self):
         if os.environ.get('WUJI_FLEET_ID') or os.environ.get('WUJI_CLI_AUTO_CHECK')=='0':return
@@ -171,6 +182,8 @@ class OfficialCLI:
             saved=selected(self.folder);current=saved.get('current') or {}
             available=(not current.get('version') or version_order(version)>version_order(current['version'])
                 or current.get('source')=='bundled' and version_order(version)==version_order(current['version']))
+            if available and self.require_workbench_for(version):
+                return
             self._set(latest_version=version,available=available,checked_at=time.time(),checking=False)
             if check_only or not available or automatic and saved.get('hold_version')==version:self._set(phase='checked');return
             from bridge_config import load_config

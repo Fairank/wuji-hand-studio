@@ -16,7 +16,7 @@ class FakeProcess:
         self.stderr = io.StringIO('')
         self.returncode = None
 
-    def wait(self):
+    def wait(self, timeout=None):
         self.returncode = 0
         return 0
 
@@ -90,6 +90,32 @@ class CalibrationTest(unittest.TestCase):
             self.assertEqual(created[0][0][-10:], ['wuji', '--jsonl', 'calib', 'hand-model', '--sn', 'WG123', '--handedness', 'left', '--timeout-s', '900'])
             self.assertEqual(created[0][0][-13:-10], ['calibrate','Demo','keep'])
             self.assertEqual(created[0][1]['stdin'], calibration_cli.subprocess.PIPE)
+
+    def test_v3_managed_result_must_name_the_selected_wearer_and_side(self):
+        for wearer, side, expected in [('Demo', 'left', 'completed'), ('Other', 'left', 'error'),
+                                       ('Demo', 'right', 'error')]:
+            with self.subTest(wearer=wearer, side=side):
+                process = FakeProcess([])
+                events = [
+                    dict(schema_version=3, operation='calibrate', calibration='hand_model', event='progress',
+                         feedback=dict(step_name='pinch_index', step_index=0, step_total=6, progress=.5)),
+                    dict(schema_version=3, operation='calibrate', calibration='hand_model', event='result',
+                         status='ok', device=dict(sn='WG123'), user=dict(display_name=wearer),
+                         result=dict(sdk_user=wearer, handedness=side, calibrated_urdf='/synthetic/model.urdf')),
+                ]
+                process.stdout = io.StringIO(''.join(json.dumps(event)+'\n' for event in events))
+                with patch.object(calibration_cli, 'load_config', return_value=self.config), \
+                        patch.object(calibration_cli, 'cli_json', side_effect=self.cli), \
+                        patch.object(calibration_cli.subprocess, 'Popen', return_value=process):
+                    service = calibration_cli.CalibrationCLI()
+                    service.start('left', 'WG123')
+                    service.thread.join(2)
+                self.assertEqual(service.run['status'], expected)
+                if expected == 'completed':
+                    self.assertEqual(service.run['result'], events[-1])
+                    self.assertEqual(service.run['progress'], .5)
+                else:
+                    self.assertIsNone(service.run['result'])
 
     def test_zero_exit_without_result_is_not_success(self):
         p=FakeProcess([]);p.stdout=io.StringIO('')

@@ -9,7 +9,7 @@ def calibration_cleanup_required(state):
     calibration=state.get('calibration') or {}
     run=calibration.get('run') or calibration
     return (calibration.get('cleanup_required') is True
-            or (run.get('source') in ('official_tty','official_jsonl_native','official_user_import_tty')
+            or (run.get('source') in ('official_tty','official_jsonl_native','official_user_import_tty','official_user_import_copy')
                 and run.get('id') is not None and run.get('running') is False
                 and run.get('cleanup_confirmed') is not True))
 

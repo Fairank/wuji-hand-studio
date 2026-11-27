@@ -9,10 +9,12 @@ import math
 import re
 import time
 
+from zenoh_route import strip_udp_prefix
+
 
 _SERIAL = re.compile(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,99}\Z')
 _HAND2_HINT = re.compile(r'WH2([JK])[A-Z][0-9]{11}\Z')
-_IPV4_ENDPOINT = re.compile(r'(?:udp/)?([0-9.]+)(?::([1-9][0-9]{0,4}))?\Z')
+_IPV4_ENDPOINT = re.compile(r'([0-9.]+)(?::([1-9][0-9]{0,4}))?\Z')
 _NETWORK_DISCOVERY = {'official_cli', 'controller_discovery', 'glove_discovery', 'glove_hand_discovery'}
 _KNOWN_TYPES = {
     'wujihand2': ('hand', 'hand2'), 'hand2': ('hand', 'hand2'),
@@ -100,7 +102,12 @@ def _one(row, source, observed_at, now, ttl):
     addresses = sorted({_text(row.get(key)) for key in ('address', 'ip') if _text(row.get(key))})
     transport = _text(row.get('transport'), 80).lower().removeprefix('transport.')
     if not transport and address:
-        transport = 'zenoh' if address.startswith('zenoh://') else 'usb' if address.startswith('usb') else 'udp' if address.startswith('udp/') else None
+        if address.startswith('zenoh://'):
+            transport = 'zenoh'
+        elif address.startswith('usb'):
+            transport = 'usb'
+        elif strip_udp_prefix(address) != address:
+            transport = 'udp'
     observed_at = float(observed_at) if _number(observed_at) else None
     stale = observed_at is None or observed_at > now or now - observed_at >= ttl
     verified = (source in {'sdk_identity', 'glove_session_identity'} and row.get('identity_verified') is True
@@ -116,7 +123,8 @@ def _one(row, source, observed_at, now, ttl):
                  stale=stale, in_use=False, official_available=source.startswith('official_') and not stale,
                  selectable=kind != 'unknown' and not stale, address=address or None,
                  addresses=addresses, transport=transport or None, conflict=False,
-                 _explicit=explicit, _official_fresh=source.startswith('official_') and not stale)
+                 _explicit=explicit, _official_fresh=source.startswith('official_') and not stale,
+                 _reported_address_conflict=source == 'official_cli' and row.get('status') == 'conflict')
     return value, None
 
 
@@ -126,7 +134,7 @@ def _reported_ipv4(row):
         return set()
     addresses = set()
     for value in row['addresses']:
-        match = _IPV4_ENDPOINT.fullmatch(value)
+        match = _IPV4_ENDPOINT.fullmatch(strip_udp_prefix(value))
         if match is None or match[2] and int(match[2]) > 65535:
             continue
         try:
@@ -142,10 +150,13 @@ def _reported_ipv4(row):
 def _mark_address_conflicts(rows):
     """One actual discovery reply is the boundary for a shared-IP finding."""
     claims = {}
+    collisions = set()
     for row in rows:
         for address in _reported_ipv4(row):
             claims.setdefault(address, set()).add(row['serial'])
-    collisions = {address for address, serials in claims.items() if len(serials) > 1}
+            if row['_reported_address_conflict']:
+                collisions.add(address)
+    collisions.update(address for address, serials in claims.items() if len(serials) > 1)
     if collisions:
         for row in rows:
             shared = _reported_ipv4(row) & collisions

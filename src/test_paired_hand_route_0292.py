@@ -30,7 +30,7 @@ def directory_row(address, *, seen=100, prior=None):
 class PairedHandRouteTests(unittest.TestCase):
     def test_fresh_official_custom_locator_reaches_exact_zenoh_sdk_connection(self):
         with fixture.TargetMappingSwitchTests().environment(False) as e:
-            e.rows[-1] = directory_row('udp/' + CUSTOM)
+            e.rows[-1] = directory_row('udp://' + CUSTOM)
             route = Mock()
             hand = Mock(serial_number=HAND)
             hand.handedness.return_value.get.return_value = 'left'

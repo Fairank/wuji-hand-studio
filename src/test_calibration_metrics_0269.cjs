@@ -11,3 +11,13 @@ test('a stable but unsatisfied live pose shows current numeric guidance instead 
 test('an SDK error has a recovery action and keeps its original message in detailed diagnostics',()=>{const e=environment('en'),d=failed();d.run.event=null;d.run.error={message:'Synthetic capture failed'};e.host.querySelector('details').open=true;e.ui.render(d,{fresh:true});assert.match(e.$('hub-calib-status').textContent,/Review the detailed log/);assert.doesNotMatch(e.$('hub-calib-status').textContent,/Synthetic capture failed/);assert.match(e.$('oc-details').textContent,/Synthetic capture failed/);assert.equal(e.host.dataset.view,'error');assert.equal(e.host.querySelector('.oc-result').hidden,true);});
 test('unknown nonfinite metrics cannot manufacture a measurement and fresh retry clears old guidance',()=>{const e=environment('en'),d=failed();d.run.checks.metrics[0].value=NaN;e.ui.render(d,{fresh:true});assert.doesNotMatch(e.$('hub-calib-status').textContent,/NaN|107\.5/);const next={...d,run:{id:'b'.repeat(32),source:'official_jsonl_native',running:true,status:'starting',step:null,error:null}};e.ui.render(next,{fresh:true});assert.equal(e.host.dataset.view,'preparing');assert.doesNotMatch(e.$('hub-calib-status').textContent,/120|107\.5/);assert.equal(e.$('oc-diagnostics').hidden,true);});
 test('offline retains unverified status and does not present old metrics as a new measurement',()=>{const e=environment(),d=failed();e.ui.render(d,{fresh:false});assert.equal(e.host.dataset.view,'unverified');assert.doesNotMatch(e.$('hub-calib-status').textContent,/107\.5\s*mm/);});
+
+test('a verified schema3 result reaches the existing saved-model view',()=>{
+ const e=environment(),d=failed(),result={schema_version:3,operation:'calibrate',calibration:'hand_model',event:'result',status:'ok',result:{sdk_user:'Demo',handedness:'left',calibrated_urdf:'C:/synthetic/left_hand.urdf'}};
+ Object.assign(d.run,{status:'completed',exit_code:0,user:'Demo',side:'left',event:result,result,error:null});
+ e.ui.render(d,{fresh:true});
+ assert.equal(e.host.querySelector('.oc-result').hidden,false);
+ assert.match(e.$('oc-result-user').textContent,/Demo/);
+ e.ui.render({...d,run:{...d.run,event:null,result:{...result,status:'failed'}}},{fresh:true});
+ assert.equal(e.host.querySelector('.oc-result').hidden,true);
+});

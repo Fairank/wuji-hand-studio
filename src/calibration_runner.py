@@ -67,7 +67,10 @@ def run(argv):
         signal.signal(signal.SIGTERM, cancel)
         signal.signal(signal.SIGINT, cancel)
         threading.Thread(target=input_loop, daemon=True).start()
-        return process.wait()
+        code = process.wait()
+        # An unhandled SIGINT returns -2 from subprocess. Forward the shell
+        # status rather than letting sys.exit(-2) wrap it to 254.
+        return 130 if code == -signal.SIGINT else code
 
 
 if __name__ == '__main__':

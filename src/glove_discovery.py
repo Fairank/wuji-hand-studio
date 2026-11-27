@@ -5,6 +5,8 @@ closes a typed glove handle; it never opens a hand driver or starts following.
 """
 import re
 
+from zenoh_route import strip_udp_prefix
+
 FACTORY_ENDPOINTS=('192.168.1.100:50001','192.168.1.101:50001')
 
 
@@ -19,7 +21,7 @@ def scan_gloves(manager,sdk,discovered,allow_direct=False):
     found={str(d.sn):dict(serial=str(d.sn),address=str(d.address),source='sdk_scan')
            for d in discovered if d.device_type==sdk.DeviceType.WujiGlove}
     if allow_direct:
-        known={d['address'].removeprefix('udp/') for d in found.values()}
+        known={strip_udp_prefix(d['address']) for d in found.values()}
         for index,address in enumerate(FACTORY_ENDPOINTS):
             if address in known:continue
             glove=None

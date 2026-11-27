@@ -3,7 +3,7 @@ import re
 import time
 from concurrent.futures import ThreadPoolExecutor
 from device_profiles import profile
-from zenoh_route import DeviceRoute, endpoint, managed_wsl
+from zenoh_route import DeviceRoute, endpoint, managed_wsl, strip_udp_prefix
 
 HAND2_SERIAL = re.compile(r'WH2([JK])[A-Z][0-9]{11}')
 
@@ -136,7 +136,7 @@ def connect_discovered(manager, address='', serial='', use_routes=None):
             while True:
                 devices = candidates(manager.scan())
                 if target:
-                    devices = [d for d in devices if d['address'].removeprefix('udp/') == target or
+                    devices = [d for d in devices if strip_udp_prefix(d['address']) == target or
                                (routed and opened_routes and d['address'] == 'zenoh://' + d['serial'])]
                 # Another hand may advertise before the explicitly selected one.
                 # Keep the original bounded discovery window for that exact serial.

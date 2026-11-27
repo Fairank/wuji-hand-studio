@@ -384,6 +384,35 @@ class AddressConflictTests(unittest.TestCase):
                 self.assertEqual(row['address_conflicts'], [self.address])
                 self.assertFalse(row['selectable'] or row['identity_verified'])
 
+    def test_new_cli_addresses_share_the_same_conflict_detection(self):
+        batch = [self.hand(address='udp://' + self.address + ':7447'),
+                 self.hand(LEFT, 'udp/' + self.address + ':7448')]
+        directory = self.read(*batch)
+        self.assertEqual(len(directory['devices']), 2)
+        self.assertTrue(all(row.get('address_conflicts') == [self.address] and not row['selectable']
+                            for row in directory['devices']))
+
+    def test_official_conflict_between_unlisted_devices_blocks_the_visible_locator(self):
+        visible = dict(self.hand(address='udp://' + self.address + ':7447'),
+                       transport='zenoh', status='conflict')
+        directory = self.read(visible)
+        combined = merge_inventories([directory], now=NOW + 1)
+        for snapshot in (directory, combined):
+            row, = snapshot['devices']
+            self.assertEqual(row.get('address_conflicts'), [self.address])
+            self.assertFalse(row['selectable'])
+        failed = self.read(visible, error='discovery failed')
+        self.assertFalse(failed['devices'][0]['conflict'])
+
+    def test_unprobed_or_busy_zenoh_report_does_not_claim_sdk_identity(self):
+        rows = [dict(self.hand(address='udp://' + self.address + ':7447'),
+                     transport='udp', status=None),
+                dict(self.hand(LEFT, 'zenoh://' + LEFT), transport='zenoh', status='busy')]
+        directory = self.read(*rows)
+        self.assertEqual(len(directory['devices']), 2)
+        self.assertTrue(all(row['selectable'] and not row['identity_verified']
+                            and not row['in_use'] for row in directory['devices']))
+
     def test_independent_readers_and_separate_source_batches_do_not_infer_shared_network(self):
         local = self.read(self.hand())
         remote = self.read(self.hand(LEFT))

@@ -336,7 +336,7 @@ class Controller:
         # No discovery, user refresh or SDK access in this read-only view.
         with self.calibration.lock:
             run=copy.deepcopy(self.calibration.run)
-        return dict(run=run,cleanup_required=(run.get('source') in ('official_tty','official_jsonl_native','official_user_import_tty')
+        return dict(run=run,cleanup_required=(run.get('source') in ('official_tty','official_jsonl_native','official_user_import_tty','official_user_import_copy')
             and run.get('running') is False and run.get('id') is not None and run.get('cleanup_confirmed') is not True))
 
     def _continuation_idle(self):
@@ -607,7 +607,7 @@ class Controller:
             result['group']=self.group.snapshot()
             with self.calibration.lock:
                 result['calibration']={k:self.calibration.run.get(k) for k in ('running','status','side','user','id','serial','source','phase','cleanup_confirmed','interface')}
-                result['calibration']['cleanup_required']=(self.calibration.run.get('source') in ('official_tty','official_jsonl_native','official_user_import_tty')
+                result['calibration']['cleanup_required']=(self.calibration.run.get('source') in ('official_tty','official_jsonl_native','official_user_import_tty','official_user_import_copy')
                     and self.calibration.run.get('running') is False and self.calibration.run.get('id') is not None
                     and self.calibration.run.get('cleanup_confirmed') is not True)
             result['calibration_connection']=self.calibration_handover.snapshot()
@@ -1068,8 +1068,11 @@ class Controller:
             if name=='calibration_profile_switch':
                 return dict(calibration=self.calibration.profile('switch',command.get('profile')))
             if name=='calibration_backup_restore':
-                if set(command)!={'name','backup_id','expected_sha256'}:raise ValueError('Invalid calibration backup restore request')
-                return dict(calibration=self.calibration.restore_backup(command['backup_id'],command['expected_sha256']))
+                fields = {'name','backup_id','expected_sha256'}
+                if (set(command) not in (fields, fields | {'copy'}) or type(command.get('copy', False)) is not bool):
+                    raise ValueError('Invalid calibration backup restore request')
+                return dict(calibration=self.calibration.restore_backup(
+                    command['backup_id'], command['expected_sha256'], restore_copy=command.get('copy', False)))
             return dict(calibration=self.calibration.start(command.get('side'),command.get('serial'),command.get('replace',False)))
         if name=='retarget_context':
             return dict(mapping=self.retarget.context(self.state['device_profile']))

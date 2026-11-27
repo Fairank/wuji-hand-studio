@@ -3,7 +3,10 @@
  'use strict';
  const names={pinch_index:['拇指与食指指尖接触','Thumb–index fingertip contact'],pinch_middle:['拇指与中指指尖接触','Thumb–middle fingertip contact'],pinch_ring:['拇指与无名指指尖接触','Thumb–ring fingertip contact'],pinch_pinky:['拇指与小指指尖接触','Thumb–little fingertip contact'],four_finger_bend_90:['四指弯曲约 90°','Four fingers bent about 90°'],flat_open:['四指伸平','Four fingers flat']};
  const text=(value,max=400)=>typeof value==='string'?value.slice(0,max):'';
- const officialResult=value=>!!value&&typeof value==='object'&&value.schema_version===2&&value.calibration==='hand_model'&&(value.event==='result'||value.type==='result');
+ const officialEvent=(value,kind)=>!!value&&value.calibration==='hand_model'&&(
+  value.schema_version===2&&(value.event===kind||value.type===kind)||
+  value.schema_version===3&&value.operation==='calibrate'&&value.event===kind&&value.status===(kind==='result'?'ok':'failed'));
+ const officialResult=value=>officialEvent(value,'result');
  function completed(run){return run.source!=='official_user_import_tty'&&run.interface!=='restore'&&run.running===false&&run.status==='completed'&&run.exit_code===0&&(officialResult(run.result)||officialResult(run.event));}
  function step(run,language){
   const name=text(run.step_name,240).trim();
@@ -42,34 +45,39 @@
    const run=data.run||{},b=run.backup;
    return b&&b.verified===true&&/^[a-f0-9]{32}$/.test(b.id||'')&&/^[a-f0-9]{32}$/.test(b.run_id||'')&&/^[a-f0-9]{64}$/.test(b.sha256||'')&&Number.isSafeInteger(b.bytes)&&b.bytes>0&&typeof b.profile==='string'&&/^[A-Za-z0-9_][A-Za-z0-9_-]{0,31}$/.test(b.profile)&&['left','right'].includes(b.side)&&typeof b.serial==='string'&&!!b.serial?b:null;
   }
-  function backupOwner(){const b=backupRecord();return b?JSON.stringify([scope(),data.run?.id,b.id,b.sha256]):null;}
+  function backupOwner(){const b=backupRecord();return b?JSON.stringify([scope(),data.run?.id,b.id,b.sha256,data.runtime?.restore_copy===true,b.copy_profile]):null;}
   function backupControls(){
    const identity=backupOwner();if(restoreTicket&&(context.fresh!==true||restoreTicket.owner!==identity))restoreTicket=null;
    const pending=!!restoreTicket,b=backupRecord(),run=data.run||{},en=language()==='en',t=(zh,eng)=>en?eng:zh;$('oc-backup').hidden=!b;
    if(!b){$('oc-backup-save').removeAttribute('href');$('oc-backup-restore').disabled=true;return;}
    write('oc-backup-label',t('覆盖前档案备份 · ','Profile backup before replacement · ')+b.profile);
    const save=$('oc-backup-save');save.href='/api/calibration-backup?backup_id='+encodeURIComponent(b.id);save.download='wuji-calibration-backup-'+b.profile+'.zip';write('oc-backup-save',t('保存备份','Save backup'));
-   write('oc-backup-restore',pending?t('正在打开…','Opening…'):t('恢复整份档案…','Restore full profile…'));
-   $('oc-backup-restore').disabled=pending||context.fresh!==true||context.busy===true||run.running===true||data.cleanup_required===true||typeof onRestore!=='function';
-   write('oc-backup-note',t('官方导入会先显示预览（默认 No），由你确认是否恢复整份档案。','Official import opens a preview (No by default). You decide whether to restore the full profile.'));
+   const copying=data.runtime?.restore_copy===true,copyProfile=/^[A-Za-z0-9_][A-Za-z0-9_-]{0,31}$/.test(b.copy_profile||'')?b.copy_profile:'';
+   const copied=copying&&copyProfile&&run.restore_profile===copyProfile&&run.restore_verified===true;
+   const restoreLabel=copying?t('恢复为新档案','Restore as a new profile'):t('恢复整份档案…','Restore full profile…');
+   write('oc-backup-restore',pending?t('正在打开…','Opening…'):restoreLabel);
+   $('oc-backup-restore').disabled=pending||context.fresh!==true||context.busy===true||run.running===true||data.cleanup_required===true||typeof onRestore!=='function'||copying&&(!copyProfile||!!copied);
+   write('oc-backup-note',copying?(copyProfile?t('恢复到新档案 ','Restore to a new profile ')+copyProfile+t('，当前档案继续使用。','. The current profile stays selected.'):t('刷新档案后可确认恢复位置。','Refresh the profile to verify the restore destination.')):t('官方导入会先显示预览（默认 No），由你确认是否恢复整份档案。','Official import opens a preview (No by default). You decide whether to restore the full profile.'));
   }
   $('oc-backup-restore').onclick=async()=>{
    const b=backupRecord();if(!b||$('oc-backup-restore').disabled)return;
-   const ticket={owner:backupOwner()};restoreTicket=ticket;backupControls();try{await onRestore({backup_id:b.id,expected_sha256:b.sha256});}finally{if(restoreTicket===ticket)restoreTicket=null;backupControls();}
+   const ticket={owner:backupOwner()};restoreTicket=ticket;backupControls();try{await onRestore({backup_id:b.id,expected_sha256:b.sha256,...(data.runtime?.restore_copy===true?{copy:true}:{})});}finally{if(restoreTicket===ticket)restoreTicket=null;backupControls();}
   };
   function raw(){
    if(!details.open)return;
    const run=data.run||{};let output;
-   try{output=JSON.stringify({status_verified:context.fresh===true,status:run.status,running:run.running,step:run.step,step_total:run.step_total,step_name:run.step_name,progress:run.progress,phase:run.phase,checks:run.checks,timing:run.timing,user:run.user,side:run.side,serial:run.serial,exit_code:run.exit_code,event:run.event,result:run.result,error:run.error,request_error:context.error,request_details:context.details,cleanup_error:data.cleanup_error,backup:run.backup,restore_verified:run.restore_verified},null,2);}
+   try{output=JSON.stringify({status_verified:context.fresh===true,status:run.status,running:run.running,step:run.step,step_total:run.step_total,step_name:run.step_name,progress:run.progress,phase:run.phase,checks:run.checks,timing:run.timing,user:run.user,side:run.side,serial:run.serial,exit_code:run.exit_code,event:run.event,result:run.result,error:run.error,request_error:context.error,request_details:context.details,cleanup_error:data.cleanup_error,backup:run.backup,restore_verified:run.restore_verified,restore_profile:run.restore_profile,restore_error:run.restore_error},null,2);}
    catch{output=language()==='en'?'Event details unavailable':'事件详情不可用';}
    write('oc-details',output.length>16000?output.slice(0,16000)+'\n…':output);
   }
   details.addEventListener('toggle',raw);
   function render(next,options={}){
    data=next||{};context=options;const run=data.run||{},en=language()==='en',t=(zh,eng)=>en?eng:zh,fresh=context.fresh===true;
-   const restoring=run.source==='official_user_import_tty'&&run.interface==='restore',restoreVerified=restoring&&run.running===false&&run.cleanup_confirmed===true&&run.exit_code===0&&run.status==='restore_verified'&&run.restore_verified===true;
-   const native=restoring||run.source==='official_tty'||data.human_tty===true&&!data.guided_native,guided=data.guided_native===true&&!native;host.dataset.source=native?'official_tty':'official_jsonl';host.dataset.humanTty=String(native);host.dataset.guided=String(guided);host.dataset.previous=String(context.previous===true);terminal?.render(restoring?{...run,source:'official_tty'}:run,{fresh});
-   const eventError=run.event?.schema_version===2&&run.event?.calibration==='hand_model'&&(run.event.event==='error'||run.event.type==='error')?run.event.error:null;
+   const restoreTty=run.interface==='restore'&&run.source==='official_user_import_tty';
+   const restoreCopy=run.interface==='restore'&&run.source==='official_user_import_copy';
+   const restoring=restoreTty||restoreCopy,restoreVerified=restoring&&run.running===false&&run.cleanup_confirmed===true&&run.exit_code===0&&run.status==='restore_verified'&&run.restore_verified===true;
+   const native=!restoreCopy&&(restoreTty||run.source==='official_tty'||data.human_tty===true&&!data.guided_native),guided=data.guided_native===true&&!native&&!restoreCopy;host.dataset.source=native?'official_tty':'official_jsonl';host.dataset.humanTty=String(native);host.dataset.guided=String(guided);host.dataset.previous=String(context.previous===true);terminal?.render(restoreTty?{...run,source:'official_tty'}:run,{fresh});
+   const eventError=officialEvent(run.event,'error')?run.event.error:null;
    const cleanup=data.cleanup_required===true,done=!cleanup&&!native&&completed(run),error=errorText(context.error)||errorText(eventError)||errorText(run.error),status=typeof run.status==='string'?run.status:'idle';host.dataset.cleanupRequired=String(cleanup);
    const localizedError=noticeText(error),friendlyError=localizedError&&localizedError!==error?localizedError:'';
    let label=t('尚未开始','Not started'),message=noticeText(context.notice),tone='idle';
@@ -87,7 +95,14 @@
     label=labels[status]?t(...labels[status]):t('运行中','Running');message=status==='starting'?(data.human_tty===true?t('正在核对所选手套并打开官方流程，尚未开始采集。','Verifying the selected glove and opening the official journey. Capture has not started.'):t('正在核对所选手套、用户和左右手，尚未开始采集。','Verifying the selected glove, user and hand side. Capture has not started.')):status==='solving'?t('官方正在求解手型，请等待结果。','The official solver is fitting the hand model. Wait for its result.'):status==='cancelling'?t('正在结束本次采集，请等待官方进程退出。','Ending this capture. Wait for the official process to exit.'):t('跟随下方官方当前动作，采集条件由 CLI 判断。','Follow the official step below. Capture conditions are evaluated by the CLI.');tone='running';
    }else if(status!=='idle'&&status!==''){label=t('状态未知','Status unknown');message=t('当前状态未识别，请查看详细记录。','The current status is unrecognized. Review the detailed log.');tone='unknown';}
    else if(data.available!==true){label=t('CLI 未就绪','CLI unavailable');message=t('刷新状态后重试。','Refresh status and retry.');tone='unknown';}
-   if(restoring&&fresh&&!cleanup&&!error){label=restoreVerified?t('档案已恢复','Profile restored'):run.running?t('正在恢复档案','Restoring profile'):t('恢复结果待核对','Restore unverified');message=restoreVerified?t('官方导入已完成，档案内容已重新核对。','Official import completed and the profile contents were verified.'):run.running?t('在下方官方界面核对整份档案；默认选择 No，由你确认是否导入。','Review the full profile in the official interface below. No is selected by default; you decide whether to import.'):t('尚未核对恢复结果，请查看官方记录并刷新。','The restore result is unverified. Review the official record and refresh.');}
+   if(restoreTty&&fresh&&!cleanup&&!error){label=restoreVerified?t('档案已恢复','Profile restored'):run.running?t('正在恢复档案','Restoring profile'):t('恢复结果待核对','Restore unverified');message=restoreVerified?t('官方导入已完成，档案内容已重新核对。','Official import completed and the profile contents were verified.'):run.running?t('在下方官方界面核对整份档案；默认选择 No，由你确认是否导入。','Review the full profile in the official interface below. No is selected by default; you decide whether to import.'):t('尚未核对恢复结果，请查看官方记录并刷新。','The restore result is unverified. Review the official record and refresh.');}
+   if(restoreCopy&&fresh&&!cleanup){
+    const name=text(run.restore_profile,32);
+    if(error||status==='error'){label=t('恢复未完成','Restore incomplete');message=friendlyError||t('请查看详细记录，可继续下载原备份。','Review the detailed log. The original backup remains available.');}
+    else if(restoreVerified){label=t('档案副本已核对','Profile copy verified');message=t('可在档案中选择 ','Choose ')+name+t('，当前档案继续使用。',' from the profile list. The current profile stays selected.');tone='idle';}
+    else if(run.running){label=t('正在恢复档案副本','Restoring a profile copy');message=name;}
+    else if(status!=='cancelled'){label=t('恢复结果待核对','Restore unverified');message=t('请在档案列表中核对 ','Check the profile list for ')+name;tone='unknown';}
+   }
    if(native&&!restoring&&fresh&&run.running&&status==='terminal')message=t('按原版界面完成用户确认与动作采集；动作图示和结果均由官方 CLI 显示。','Follow the original interface for profile confirmation and capture. Pose guidance and results are displayed by the official CLI.');
    if(guided&&fresh&&!error&&tone==='running'&&run.running===true&&run.status!=='starting'&&run.status!=='solving'&&run.status!=='cancelling'){
     const hints={waiting_movement:['先放松张开手掌，再做这个动作。','Relax and open your palm, then make this pose.'],waiting_stable:['保持这个动作，手掌尽量平稳。','Hold this pose and keep your hand steady.'],collecting:['保持不动，正在采集。','Keep holding still. Capturing this pose.'],done:['这个动作已采集，等待下一步。','Pose captured. Wait for the next step.']};if(hints[run.phase])message=t(...hints[run.phase]);

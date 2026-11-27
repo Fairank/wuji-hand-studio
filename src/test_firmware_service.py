@@ -389,6 +389,19 @@ class FirmwareServiceTests(unittest.TestCase):
         self.assertEqual(state['check_report']['stdout'],'official query detail')
         self.assertIsNone(state['result']);self.assertIsNone(state['notification'])
 
+    def test_check_displays_confirmed_20261123_stdout_error_message(self):
+        message = 'Selected device is offline'
+        raw = json.dumps(dict(error=dict(code=4, kind='unavailable', reason='device_not_found',
+                                         message=message, hint=None)), indent=2)
+        self.host.results = [dict(exited=True, returncode=4, stdout=raw, stderr='')]
+        self.service.start_check(SN)
+        state = self.join()
+        self.assertEqual(state['phase'], 'check_failed')
+        self.assertEqual(state['error'], message)
+        self.assertEqual(state['check_report']['stdout'], raw)
+        self.assertFalse(state['can_upgrade'])
+        self.assertIsNone(state['preview'])
+
     def test_user_priority_cancels_only_background_read_and_confirms_release(self):
         entered,release=threading.Event(),threading.Event()
         def execute(argv,**options):

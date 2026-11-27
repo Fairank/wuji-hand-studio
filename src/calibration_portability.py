@@ -100,23 +100,14 @@ def calibration_proof(snapshot, *, workspace='main'):
                 or run.get('cli_archive_sha256')!=component['archive_sha256']):
             raise ValueError('Calibration component identity could not be verified')
     profile=run.get('user');serial=run.get('serial');side=run.get('side')
-    event=run.get('result');result=event.get('result') if isinstance(event,dict) else None
+    event=run.get('result')
     if (not isinstance(profile,str) or not PROFILE.fullmatch(profile) or profile.lower()=='default'
             or not isinstance(serial,str) or not IDENT.fullmatch(serial)
-            or side not in ('left','right') or run.get('expected_side') not in (None,side)
-            or not isinstance(result,dict) or event.get('event')!='result'
-            or type(event.get('schema_version')) is not int or event['schema_version']!=2
-            or event.get('calibration')!='hand_model' or event.get('operation')!='calibrate'
-            or event.get('status')!='ok'
-            or result.get('handedness')!=side or not isinstance(result.get('calibrated_urdf'),str)):
+            or side not in ('left','right') or run.get('expected_side') not in (None,side)):
         raise ValueError('本次标定的设备、佩戴者或手型结果不一致 / Calibration device, wearer or model result differs')
     from calibration_guided import validate_result
     identity=validate_result(event,serial,side,profile,run.get('sdk_user'))
-    for row in (event,result,event.get('device') or {},result.get('device') or {}):
-        if not isinstance(row,dict):raise ValueError('Invalid calibration device context')
-        if any(row.get(k) is not None and row[k]!=serial for k in ('sn','serial')):
-            raise ValueError('Calibration result belongs to another glove')
-    path=Path(result['calibrated_urdf'])
+    path=Path(event['result']['calibrated_urdf'])
     digest,size=file_digest(path)
     if (not isinstance(run.get('model_sha256'),str) or not HASH.fullmatch(run['model_sha256'])
             or type(run.get('model_bytes')) is not int
