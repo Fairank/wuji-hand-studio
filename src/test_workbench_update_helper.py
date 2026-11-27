@@ -59,6 +59,11 @@ function Start-Process {
     $kind=if ($FilePath -eq $global:fixture.installer) { 'installer' } else { 'application' }
     RecordEvent @{kind=$kind;path=$FilePath;arguments=@($ArgumentList);style=$WindowStyle;wait=[bool]$Wait}
     if ($kind -eq 'installer') {
+        $logArg=$ArgumentList | Where-Object { $_.StartsWith('/LOG="') } | Select-Object -First 1
+        if ($logArg -and $global:fixture.case -ne 'preparation-no-log') {
+            [IO.File]::WriteAllText($logArg.Substring(6,$logArg.Length-7),'synthetic setup log')
+        }
+        if ($global:fixture.case -in @('preparation-failed','preparation-no-log')) { return @{ExitCode=7} }
         if ($global:fixture.case -eq 'installer-failed') { return @{ExitCode=2} }
         if ($global:fixture.case -ne 'identity-missing') {
             $edition=@{name='workbench';product_id='hand-workbench';version='0.2.45'}
@@ -84,7 +89,7 @@ exit $LASTEXITCODE
 @unittest.skipUnless(sys.platform == 'win32', 'Windows PowerShell helper')
 class UpdateHelperTests(unittest.TestCase):
     def run_case(self, case):
-        with tempfile.TemporaryDirectory(prefix='update-helper-') as folder:
+        with tempfile.TemporaryDirectory(prefix='update helper-') as folder:
             root=Path(folder);data=root/'data';updates=data/'updates';updates.mkdir(parents=True)
             exe=root/'installed'/'HandWorkbench.exe';exe.parent.mkdir();exe.write_bytes(b'MZ not an application')
             edition=exe.parent/'_internal'/'edition.json';edition.parent.mkdir()
@@ -92,6 +97,8 @@ class UpdateHelperTests(unittest.TestCase):
             payload=b'MZ SYNTHETIC INSTALLER, NEVER EXECUTED';installer.write_bytes(payload)
             digest=hashlib.sha256(payload).hexdigest();token='a'*32
             result=updates/('apply-'+token+'.result.json');plan=updates/('apply-'+token+'.json')
+            setup_log=updates/('apply-'+token+'.setup.log')
+            if case=='existing-setup-log':setup_log.write_text('preserve old failure',encoding='utf-8')
             plan.write_text(json.dumps(dict(schema=1,app_id='44DF38B2-39A0-491F-B154-E587231C83CE',
                 repository='Fairank/wuji-hand-studio',token=token,sha256='0'*64 if case=='bad-hash' else digest,
                 version='0.2.45',old_version='0.2.44',data_dir=str(data),result_file=str(result),
@@ -112,6 +119,7 @@ class UpdateHelperTests(unittest.TestCase):
             trace=[json.loads(line) for line in events.read_text('utf-8-sig').splitlines()]
             self.assertEqual(installer.read_bytes(),payload)
             self.assertEqual(report['token'],token)
+            if case=='existing-setup-log':self.assertEqual(setup_log.read_text(encoding='utf-8'),'preserve old failure')
             return completed.returncode,report,trace
 
     def test_visible_installer_and_verified_restart_complete_in_order(self):
@@ -122,6 +130,10 @@ class UpdateHelperTests(unittest.TestCase):
         installer=trace[-2]
         self.assertIn('/SILENT',installer['arguments']);self.assertNotIn('/VERYSILENT',installer['arguments'])
         self.assertIn('/NOCLOSEAPPLICATIONS',installer['arguments']);self.assertIn('/NORESTARTAPPLICATIONS',installer['arguments'])
+        setup_log=Path(installer['path']).with_name('apply-'+report['token']+'.setup.log')
+        self.assertIn(f'/LOG="{setup_log}"',installer['arguments'])
+        self.assertEqual(report['setup_log'],setup_log.name)
+        self.assertEqual(report['installer_exit_code'],0)
         self.assertEqual(installer['style'],'Normal');self.assertTrue(installer['wait'])
         self.assertEqual(trace[-1]['style'],'Normal');self.assertFalse(trace[-1]['wait'])
 
@@ -149,6 +161,29 @@ class UpdateHelperTests(unittest.TestCase):
                 self.assertNotIn('application',[r['kind'] for r in trace])
                 self.assertEqual(trace[-1]['kind'],'error-dialog')
                 self.assertIn(report['error'],trace[-1]['text'])
+
+    def test_preparation_failure_records_code_and_only_reports_a_log_if_present(self):
+        for case in ('preparation-failed','preparation-no-log'):
+            with self.subTest(case=case):
+                code,report,trace=self.run_case(case)
+                self.assertEqual(code,1)
+                self.assertEqual(report['phase'],'error')
+                self.assertEqual(report['installer_exit_code'],7)
+                self.assertFalse(report['version_verified'] or report['launch_started'])
+                self.assertNotIn('application',[item['kind'] for item in trace])
+                self.assertIn('preparation',report['error'])
+                if case=='preparation-failed':
+                    self.assertEqual(report['setup_log'],'apply-'+report['token']+'.setup.log')
+                    self.assertIn(report['setup_log'],trace[-1]['text'])
+                else:self.assertNotIn('setup_log',report)
+
+    def test_existing_attempt_log_is_preserved_without_closing_or_installing(self):
+        code,report,trace=self.run_case('existing-setup-log')
+        self.assertEqual(code,1)
+        self.assertEqual(report['phase'],'error')
+        self.assertIn('log path',report['error'])
+        self.assertNotIn('close_idle',[item.get('operation') for item in trace])
+        self.assertNotIn('installer',[item['kind'] for item in trace])
 
     def test_restart_failure_does_not_report_installed(self):
         for case in ('restart-failed','restart-no-pid'):

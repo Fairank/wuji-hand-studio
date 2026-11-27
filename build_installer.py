@@ -17,7 +17,7 @@ def main():
     parser.add_argument('--iscc',type=Path,required=True)
     parser.add_argument('--webview-bootstrap',type=Path,required=True)
     parser.add_argument('--zh-language',type=Path,required=True)
-    parser.add_argument('--online',action='store_true',help='Build a small update entry plus a complete offline installer')
+    parser.add_argument('--online',action='store_true',help='Also build a separate optional online installer')
     args=parser.parse_args()
     config=json.loads((ROOT/'src/edition.json').read_text(encoding='utf-8'))
     runtime=json.loads((ROOT/'src/runtime_manifest.json').read_text(encoding='utf-8'))
@@ -30,8 +30,7 @@ def main():
         if key.upper()=='PSMODULEPATH':env.pop(key)
     check="$s=Get-AuthenticodeSignature -LiteralPath $env:WUJI_BUILD_BOOTSTRAP; if ($s.Status -ne 'Valid' -or $s.SignerCertificate.Subject -notmatch 'O=Microsoft Corporation') { throw 'Microsoft signature validation failed' }"
     subprocess.run([shutil.which('pwsh') or 'powershell.exe','-NoProfile','-NonInteractive','-Command',check],env=env,check=True)
-    suffix='offline-setup' if args.online else 'setup'
-    output=f"{name}-{config['version']}-windows-x64-{suffix}"
+    output=f"{name}-{config['version']}-windows-x64-setup"
     defines=dict(ProjectRoot=ROOT,PayloadDir=ROOT/'dist'/name,AppExe=name+'.exe',AppName='Hand Workbench',
                  AppGuid=guid,AppVersion=config['version'],OutputDir=ROOT/'dist',OutputName=output,
                  IconFile=ROOT/'src/WujiStudio.ico',LicenseFile=ROOT/'LICENSE',RuntimeFile=runtime['file'],
@@ -43,7 +42,7 @@ def main():
     result=dict(installer=str(path),sha256=digest,edition=config['name'])
     if args.online:
         from build_online_installer import build
-        result=build(ROOT,config['version'],args.iscc,args.zh_language)
+        result.update(build(ROOT,config['version'],args.iscc,args.zh_language))
     print(json.dumps(result))
 
 

@@ -1,5 +1,6 @@
 """Exact reservation-release receipts do not fabricate a hardware disable ACK."""
 import copy
+from threading import Event
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
@@ -10,18 +11,30 @@ TOKEN='a'*32
 
 
 class ReadonlyCleanupTests(unittest.TestCase):
-    def run_cancel(self,receipts,hardware=None,errors=()):
+    def run_cancel(self,receipts,hardware=None,errors=(),probe_before_cancel=False):
         calls=[];clock=[100.];reads=[]
+        preparation_probe=Event()
+        cleanup_started=Event()
         hardware=hardware or {}
         coordinator=None
         def post(member,command):
             calls.append((member,copy.deepcopy(command)))
-            if command['name']=='group_prepare':coordinator.cancel.set();return {}
+            if command['name']=='group_prepare':
+                if probe_before_cancel:
+                    self.assertTrue(preparation_probe.wait(5),'Expected a reservation read before cancellation')
+                coordinator.cancel.set()
+                return {}
             self.assertEqual(command['name'],'group_abort')
+            cleanup_started.set()
             if member in errors:raise OSError('Synthetic abort reply missing')
             return copy.deepcopy(receipts.get(member,{}))
         def read(member):
-            reads.append(member)
+            # Renewal can probe a reservation while prepare is still in flight.
+            # Count confirmation reads after abort begins.
+            if cleanup_started.is_set():
+                reads.append(member)
+            else:
+                preparation_probe.set()
             return dict(hardware=copy.deepcopy(hardware.get(member,dict(active=False,stop_confirmed=False))))
         def sleep(seconds):clock[0]+=seconds
         coordinator=GroupCoordinator(read,post)
@@ -51,7 +64,7 @@ class ReadonlyCleanupTests(unittest.TestCase):
         for readonly,stopped in (('L','R'),('R','L')):
             with self.subTest(readonly=readonly):
                 result,reads=self.run_cancel({readonly:self.receipt()},
-                    {stopped:dict(active=False,stop_confirmed=True)})
+                    {stopped:dict(active=False,stop_confirmed=True)},probe_before_cancel=True)
                 self.assertEqual(result['stop_unconfirmed'],[])
                 self.assertEqual(reads,[stopped])
 

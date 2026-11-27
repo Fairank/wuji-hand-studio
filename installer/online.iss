@@ -1,4 +1,4 @@
-; Small update entry for older workbenches whose downloader has a short budget.
+; Optional online installer. In-app updates use the full setup directly.
 ; Uses Inno Setup's original download page and the unchanged offline installer.
 #if !defined(AppVersion) || !defined(PayloadName) || !defined(PayloadUrl) || !defined(PayloadSha256) || !defined(PayloadBytes)
   #error Missing immutable offline installer identity
@@ -26,6 +26,7 @@ DisableProgramGroupPage=yes
 DisableStartupPrompt=yes
 CloseApplications=no
 RestartApplications=no
+SetupLogging=yes
 WizardStyle=modern
 SetupIconFile={#IconFile}
 OutputDir={#OutputDir}

@@ -50,6 +50,7 @@ UninstallDisplayIcon={app}\{#AppExe}
 AppMutex={#MutexName}
 CloseApplications=no
 RestartApplications=no
+SetupLogging=yes
 Compression=lzma2
 SolidCompression=yes
 OutputDir={#OutputDir}

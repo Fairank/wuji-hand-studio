@@ -22,7 +22,7 @@
  function valid(value){return value&&typeof value==='object'&&!Array.isArray(value)&&value.source===source&&typeof value.current_version==='string'&&value.current_version.length>0&&value.current_version.length<81&&phases.has(value.phase)&&typeof value.busy==='boolean'&&typeof value.available==='boolean'&&typeof value.supported==='boolean'&&typeof value.can_apply==='boolean'&&(value.latest_version==null||typeof value.latest_version==='string'&&value.latest_version.length<81)&&(value.prepared==null||typeof value.prepared==='object'&&!Array.isArray(value.prepared)&&version(value.prepared.version))&&(value.error==null||typeof value.error==='string');}
  function accept(value){if(!valid(value))throw Error('Incomplete software update state');data=value;fresh=true;transportError='';actionError='';applyUnconfirmed=false;}
  function userError(error,state={}){
-  const value=String(error||'').toLowerCase();
+  const value=String(error||'').split(/\r?\n/,1)[0].toLowerCase();
   if(/workbench service is offline|工作台服务已离线/.test(value))return t('工作台服务已离线，请重新读取更新状态。','Workbench service is offline. Reload update status.');
   if(state.cancelled===true||/cancelled|canceled|取消/.test(value))return t('本次更新已取消。需要时可重新开始。','This update was cancelled. You can start again when ready.');
   if(/rate.?limit|too many requests|(?:http(?: error)?|status)\s*[:=]?\s*(?:403|429)\b|限流/.test(value))return t('更新服务暂时限制请求，请稍后重试。','The update service is limiting requests. Please try again later.');
@@ -32,7 +32,8 @@
   if((state.error_stage==='check'||/metadata/.test(value))&&/timed out|timeout|\bstall(?:ed|ing)?\b/.test(value))return t('检查版本时等待响应超时，请重新检查。','The version check timed out while waiting for a response. Check again.');
   if(/preparation timed out|download.*(?:timed out|timeout|deadline|time limit)|(?:deadline|time limit).*download/.test(value))return t('下载用时超过限制，已停止。可重新下载安装包。','The download exceeded its time limit and stopped. Download the installer again.');
   if(/\bstall(?:ed|ing)?\b|no (?:download )?progress|无进展/.test(value))return t('下载长时间没有收到新数据，已停止。请重试。','The download stopped because no new data arrived. Please retry.');
-  if(state.error_stage==='install'||/updat(?:e|er) helper|installer (?:failed|exit)|安装助手/.test(value))return t('安装未完成，当前版本仍可使用。请重新检查后重试安装。','Installation did not finish. Your current version remains usable. Check again and retry installation.');
+  if(/installer stopped during preparation|installer exited with code 7\b/.test(value))return t('安装准备未完成。请查看详细记录后重试。','Installation stopped during preparation. Check the details and try again.');
+  if(state.error_stage==='install'||/updat(?:e|er) helper|installer (?:failed|exit)|安装助手/.test(value))return t('安装未完成。请查看详细记录后重试。','Installation did not finish. Check the details and try again.');
   if(state.error_stage==='download'&&/timeout|timed out/.test(value))return t('下载等待数据超时，已停止。可重新下载安装包。','The download stopped while waiting for data. Download the installer again.');
   if(/permission|filesystem|directory|access denied|disk|enospc|no space left|storage is full|read.only|file or folder is missing|file path is too long|磁盘|权限|存储空间|只读/.test(value))return t('暂时无法保存安装包，请检查本机存储后重试。','The installer could not be saved. Check local storage and retry.');
   if(/network|dns|http|urlopen|connect|timeout|timed out|fetch|abort|网络/.test(value))return t('暂时无法连接更新服务，请稍后重试。','The update service is unavailable. Try again shortly.');

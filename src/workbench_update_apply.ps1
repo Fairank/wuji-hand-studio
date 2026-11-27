@@ -6,14 +6,32 @@ $resultValidated=$false
 $versionVerified=$false
 $launchStarted=$false
 $applicationExited=$false
+$installerExitCode=$null
+$setupLog=$null
 function PlainPath([string]$path) {
     $item=Get-Item -LiteralPath $path -Force
     if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Update paths must not be redirects' }
     return $item
 }
+function AssertSetupLogVacant {
+    if (Get-Item -LiteralPath $setupLog -Force -ErrorAction SilentlyContinue) {
+        throw 'Installer log path already exists for this attempt'
+    }
+}
+function SetupLogName {
+    $entry=Get-Item -LiteralPath $setupLog -Force -ErrorAction SilentlyContinue
+    if ($entry -is [IO.FileInfo] -and ($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0) {
+        return $entry.Name
+    }
+}
 function Result([string]$phase,[string]$errorText='') {
     if ($null -eq $plan -or -not $resultValidated) { return }
     $record=@{token=$plan.token;phase=$phase;version=$plan.version;sha256=$plan.sha256;error=$errorText;version_verified=$versionVerified;launch_started=$launchStarted;at=[DateTime]::UtcNow.ToString('o')}
+    if ($null -ne $installerExitCode) {
+        $record.installer_exit_code=$installerExitCode
+        $logName=SetupLogName
+        if ($logName) { $record.setup_log=$logName }
+    }
     [IO.File]::WriteAllText($plan.result_file,($record|ConvertTo-Json -Compress),(New-Object Text.UTF8Encoding($false)))
 }
 try {
@@ -29,6 +47,8 @@ try {
     [void](PlainPath $root);[void](PlainPath $updates)
     if (Test-Path -LiteralPath $expectedResult) { [void](PlainPath $expectedResult) }
     $resultValidated=$true
+    $setupLog=Join-Path $updates ('apply-'+$plan.token+'.setup.log')
+    AssertSetupLogVacant
     $installer=Join-Path $updates ('HandWorkbench-'+$plan.version+'-windows-x64-setup.exe')
     if ($plan.installer -ne $installer) { throw 'Unexpected staged installer path' }
     $payload=PlainPath $installer
@@ -70,12 +90,20 @@ try {
     $applicationExited=$true
     [void](PlainPath $installer)
     if ((Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant() -cne $plan.sha256) { throw 'Installer changed after preflight' }
+    [void](PlainPath $root);[void](PlainPath $updates)
+    AssertSetupLogVacant
     # Inno's existing progress window stays visible after the workbench closes.
     # /SILENT skips setup questions but does not hide installation progress.
-    $arguments=@('/SILENT','/SUPPRESSMSGBOXES','/NORESTART','/CURRENTUSER','/NOCLOSEAPPLICATIONS','/NORESTARTAPPLICATIONS',('/DIR="'+[IO.Path]::GetDirectoryName($exe)+'"'))
+    $arguments=@('/SILENT','/SUPPRESSMSGBOXES','/NORESTART','/CURRENTUSER','/NOCLOSEAPPLICATIONS','/NORESTARTAPPLICATIONS',('/DIR="'+[IO.Path]::GetDirectoryName($exe)+'"'),('/LOG="'+$setupLog+'"'))
     Result 'installing'
     $installed=Start-Process -FilePath $installer -ArgumentList $arguments -WindowStyle Normal -PassThru -Wait
-    if ($installed.ExitCode -ne 0) { throw ('Installer exited with code '+$installed.ExitCode) }
+    $installerExitCode=$installed.ExitCode
+    if ($installerExitCode -ne 0) {
+        $reason='Installer exited with code '+$installerExitCode
+        if ($installerExitCode -eq 7) { $reason='Installer stopped during preparation (code 7)' }
+        if (SetupLogName) { $reason+=[Environment]::NewLine+'Setup log: '+$setupLog }
+        throw $reason
+    }
     $editionPath=Join-Path ([IO.Path]::GetDirectoryName($exe)) '_internal\edition.json'
     $editionFile=PlainPath $editionPath
     if ($editionFile.Length -ge 65536) { throw 'Installed application identity exceeds its limit' }
