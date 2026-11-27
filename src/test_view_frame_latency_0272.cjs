@@ -7,12 +7,13 @@ async function fixture(kind='main',options={}){
  const source=fs.readFileSync(path.join(web,kind==='main'?'visual.js':'viewer.js'),'utf8');
  let now=0,id=0,visible=true,fetchFailures=options.failures||0;const timers=new Map(),reads=[],draws=[],decoders=[],failures=[],nodes=new Map();
  const state={csrf:'synthetic-view-service',connection:'disconnected',view_source:'glove',teleoperation_view_mode:'target',device_profile:{id:'hand2_right'},glove:{busy:true,connection:'receiving',session_id:7,glove_serial:'WG_SYNTHETIC_VIEW',profile:'hand2_right',user:{user_id:'synthetic-wearer'},stream:{fresh:true,seq:1},feedback:{}}};
+ const viewButtons=Array.from({length:3},()=>({disabled:false}));
  function node(){return{hidden:false,style:{display:'',removeProperty(){}},classList:{toggle(){},remove(){}},removeAttribute(){},replaceChildren(){},append(){},textContent:''};}
  function get(key){if(!nodes.has(key)){const n=node();if(key==='pose-image'||key==='image')Object.defineProperty(n,'src',{set(value){draws.push({at:now,value});},get(){return'';}});nodes.set(key,n);}return nodes.get(key);}
  const timeout=(fn,ms)=>{timers.set(++id,{at:now+Math.max(0,ms),fn});return id;};
- const ctx={AbortController,AbortSignal,performance:{now:()=>now},state,sourceScope:'source-A',viewRevision:0,serviceOffline:false,viewPolling:false,viewRequest:null,viewTimer:0,decodedImage:null,hasImage:false,lastImageScope:null,lastImageMode:null,viewStatus:{kind:'loading'},camera:null,pointer:null,busy:false,dirty:false,
+ const ctx={AbortController,AbortSignal,performance:{now:()=>now},state,sourceScope:'source-A',viewRevision:0,serviceOffline:false,viewPolling:false,viewRequest:null,viewTimer:0,decodedImage:null,hasImage:false,lastImageScope:null,lastImageMode:null,viewStatus:{kind:'loading'},camera:null,pointer:null,busy:false,dirty:false,cameraRequest:null,cameraTimer:0,cameraEnabled:false,
   setTimeout:timeout,clearTimeout:key=>timers.delete(key),visible:()=>visible,syncView(){},text:(zh,en)=>en,english:()=>true,sourceKind:mode=>mode==='glove_constrained_unavailable'?'glove_constrained':mode,
-  demonstrationProfile:()=>null,demonstrationMode:()=>'',virtualTeleoperation:()=>true,$:get,byId:get,cells:[],fmt:v=>String(v),document:{createElement:node},renderStatus(){},
+  demonstrationProfile:()=>null,demonstrationMode:()=>'',virtualTeleoperation:()=>true,$:get,byId:get,cells:[],fmt:v=>String(v),document:{createElement:node,querySelectorAll:()=>viewButtons},renderStatus(){},
   discardImage(){ctx.hasImage=false;},clearVisual(message,kind='error',meta=null){failures.push({at:now,message});ctx.viewStatus={kind,message,meta};},
   Image:class{
    set src(value){this.value=value;}
@@ -40,7 +41,7 @@ async function fixture(kind='main',options={}){
  vm.createContext(ctx);vm.runInContext(code,ctx);
  async function flush(){for(let n=0;n<40;n++)await Promise.resolve();}
  async function advance(to){await flush();let count=0;while(true){const tasks=[...timers].filter(([,v])=>v.at<=to).sort((a,b)=>a[1].at-b[1].at||a[0]-b[0]);if(!tasks.length)break;assert(++count<5000,'bounded frame loop');const [key,task]=tasks[0];timers.delete(key);now=task.at;task.fn();await flush();}now=to;await flush();}
- return{start:()=>{ctx.start();},advance,reads,draws,failures,decoders,get,state,ctx,
+ return{start:()=>{ctx.start();},advance,reads,draws,failures,decoders,get,state,ctx,viewButtons,
   changeSource(){ctx.sourceScope='source-B';ctx.viewRevision++;ctx.viewRequest?.abort();},
   hide(){visible=false;ctx.viewRevision++;ctx.viewRequest?.abort();},
   resolveFirst:async()=>{decoders[0].resolve();await flush();}};

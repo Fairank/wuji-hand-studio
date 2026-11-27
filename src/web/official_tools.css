@@ -1,19 +1,14 @@
 .official-tools{min-width:0;scroll-margin-top:18px}
-.official-tools .ot-environment{margin-top:20px;padding-top:16px;border-top:1px solid var(--wb-line)}
-.official-tools .ot-environment>summary{display:flex;align-items:center;justify-content:space-between;gap:12px;cursor:pointer;font-size:13px;line-height:1.6;color:var(--wb-ink);list-style:none}
-.official-tools .ot-environment>summary::-webkit-details-marker{display:none}
-.official-tools .ot-environment>summary>span:first-child{display:flex;align-items:center;gap:8px}
-.official-tools .ot-environment>summary>span:first-child:before{content:'';width:5px;height:5px;border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;transform:rotate(-45deg);transition:transform 180ms ease}
-.official-tools .ot-environment[open]>summary>span:first-child:before{transform:rotate(45deg)}
-.official-tools .ot-environment[open]>summary{margin-bottom:18px}
-.official-tools .ot-environment .ot-badge{font-size:11px;padding:3px 7px;border:0;background:transparent}
+.ot-environment>summary{display:flex;align-items:center;justify-content:space-between;gap:12px;cursor:pointer;font-size:14px;font-weight:600;line-height:1.6;color:var(--wb-ink);list-style:none}
+.ot-environment>summary::-webkit-details-marker{display:none}
+.ot-environment>summary>span:first-child{display:flex;align-items:center;gap:8px}
+.ot-environment>summary>span:first-child:before{content:'';width:5px;height:5px;border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;transform:rotate(-45deg);transition:transform 180ms ease}
+.ot-environment[open]>summary>span:first-child:before{transform:rotate(45deg)}
+.ot-environment[open]>summary{margin-bottom:14px}
+.ot-environment .ot-badge{font-size:11px;font-weight:400;padding:3px 7px;border:0;background:transparent}
 .official-tools #ot-status:empty{display:none}
 .official-tools .ot-component[hidden]{display:none}
-.ot-cli-release{margin-top:18px;padding-top:16px;border-top:1px solid var(--wb-line);min-width:0}.ot-cli-release-row{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}#ot-cli-release-state{font-size:12px;line-height:1.6;overflow-wrap:anywhere}.ot-cli-release-actions{display:flex;gap:8px;flex-wrap:wrap}.official-tools .ot-cli-release-actions button{font-size:12px;min-height:34px;padding:7px 11px}.ot-cli-release details{margin-top:12px}.ot-cli-release summary{font-size:12px;cursor:pointer;color:var(--wb-sub)}#ot-cli-release-details{font-size:11px;line-height:1.7;white-space:pre-line;overflow-wrap:anywhere}#ot-cli-release-error{font-size:12px;color:var(--ui-danger,#ba302a);overflow-wrap:anywhere}#ot-cli-release-error:empty{display:none}
-html .official-tools .ot-cli-release-actions button{border:1px solid var(--ui-line);border-radius:10px;background:var(--ui-fill);color:var(--ui-ink);font-weight:500;line-height:1.35;box-shadow:0 1px 1px #00000004}html .official-tools .ot-cli-release-actions button:disabled{opacity:.43;cursor:default;box-shadow:none}
-.official-tools .ot-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:18px;margin-bottom:14px}
-.official-tools .ot-heading h3{margin:0 0 5px}
-.official-tools .ot-heading p{margin:0;font-size:12px}
+.ot-cli-release{min-width:0}.ot-cli-release details{margin-top:12px}.ot-cli-release summary{font-size:12px;cursor:pointer;color:var(--wb-sub)}#ot-cli-release-details{font-size:11px;line-height:1.7;white-space:pre-line;overflow-wrap:anywhere}#ot-cli-release-error{font-size:12px;color:var(--ui-danger,#ba302a);overflow-wrap:anywhere}#ot-cli-release-error:empty{display:none}
 .official-tools .ot-badge{border:1px solid var(--wb-line);border-radius:999px;padding:6px 10px;font-size:12px;line-height:1.4;white-space:nowrap;color:var(--wb-sub);background:var(--wb-group,#f5f5f7)}
 .official-tools[data-status=ready] .ot-badge{color:#26734d;background:rgba(39,128,82,.08);border-color:rgba(39,128,82,.18)}
 .official-tools[data-status=failed] .ot-badge{color:#a43d32;background:rgba(164,61,50,.06);border-color:rgba(164,61,50,.18)}
@@ -41,7 +36,6 @@ html .official-tools .ot-cli-release-actions button{border:1px solid var(--ui-li
 html[data-theme=dark] .official-tools[data-status=ready] .ot-badge{color:#9cdbb8}
 html[data-theme=dark] .official-tools[data-status=failed] .ot-badge,html[data-theme=dark] .official-tools #ot-error{color:#ffb0a6}
 @media(max-width:700px){
- .official-tools .ot-heading{gap:10px}
  .official-tools .ot-badge{max-width:150px;white-space:normal;text-align:center}
  .official-tools .ot-table-head,.official-tools .ot-component{grid-template-columns:72px minmax(0,1fr) minmax(0,1fr);gap:10px;padding:10px 12px;font-size:12px;overflow-wrap:anywhere}
  .official-tools .ot-table-head{font-size:11px}
@@ -49,8 +43,6 @@ html[data-theme=dark] .official-tools[data-status=failed] .ot-badge,html[data-th
  .official-tools .ot-actions{align-items:stretch}
  .official-tools .ot-actions button{flex:1 1 190px}
 }
-/* The CLI and SDK are the main actions; environment repair follows them. */
-.official-tools>.ot-cli-release{margin-top:0;padding-top:0;border-top:0}
 html[data-reduce-motion=true] .ot-environment>summary>span:first-child:before{transition:none}
 @media(prefers-reduced-motion:reduce){.ot-environment>summary>span:first-child:before{transition:none}}
 .official-tools [hidden]{display:none!important}
@@ -61,6 +53,6 @@ html body .official-tools button.ot-cli-switch[aria-checked=true]{background:#00
 .ot-cli-switch>span{display:block;width:20px;height:20px;border-radius:50%;background:#fff;box-shadow:0 1px 3px #0003;transform:translateX(0);transition:transform 180ms ease}
 .ot-cli-switch[aria-checked=true]>span{transform:translateX(18px)}html body .official-tools button.ot-cli-switch:disabled{opacity:.5;cursor:wait}html body .official-tools button.ot-cli-switch:focus-visible{outline:2px solid var(--wb-accent,#007aff);outline-offset:3px}
 #ot-cli-progress-wrap{margin-top:18px}.ot-cli-progress-heading{display:flex;align-items:baseline;justify-content:space-between;gap:12px;font-size:12px;margin-bottom:9px;font-variant-numeric:tabular-nums}#ot-cli-progress-detail{color:var(--wb-sub);white-space:nowrap}#ot-cli-progress{appearance:none;-webkit-appearance:none;display:block;width:100%;height:7px;border:0;border-radius:999px;overflow:hidden;accent-color:#007aff;background:var(--wb-group)}#ot-cli-progress::-webkit-progress-bar{background:var(--wb-group);border-radius:999px}#ot-cli-progress::-webkit-progress-value{background:#007aff;border-radius:999px;transition:width 180ms ease}#ot-cli-progress:indeterminate{background:linear-gradient(90deg,transparent,#007aff66,transparent) var(--wb-group);background-size:200% 100%;animation:ot-cli-pending 1.6s linear infinite}#ot-cli-progress:indeterminate::-webkit-progress-bar{background:transparent}@keyframes ot-cli-pending{to{background-position:-200% 0}}
-@media(max-width:600px){.ot-cli-release-actions{width:100%}.ot-cli-release-actions button{flex:1 1 auto}.ot-cli-auto-row{gap:12px}.ot-cli-progress-heading{flex-wrap:wrap;gap:4px 12px}}
+@media(max-width:600px){.ot-cli-auto-row{gap:12px}.ot-cli-progress-heading{flex-wrap:wrap;gap:4px 12px}}
 @media(prefers-reduced-motion:reduce){.ot-cli-switch>span,#ot-cli-progress::-webkit-progress-value{transition:none}#ot-cli-progress:indeterminate{animation:none}}html[data-reduce-motion=true] .ot-cli-switch>span{transition:none}html[data-reduce-motion=true] #ot-cli-progress{animation:none}
 @media(forced-colors:active){html body .official-tools button.ot-cli-switch{border:1px solid ButtonText;background:Canvas}.ot-cli-switch>span{background:ButtonText}html body .official-tools button.ot-cli-switch[aria-checked=true]{border:1px solid Highlight;background:Highlight}.ot-cli-switch[aria-checked=true]>span{background:HighlightText}}

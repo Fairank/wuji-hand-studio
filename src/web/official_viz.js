@@ -20,6 +20,7 @@
   sourceInfo.append($('ov-message'),connectDevice);displayActions.after(sourceInfo);
   displayActions.prepend(root.querySelector('.ov-session'));root.querySelector('.ov-session').append($('ov-state'));
   const t=(zh,en)=>window.WujiLocale?.lang==='en'?en:zh;
+  const noticeText=value=>window.WujiLocale?.notice?.(value)??value??'';
   let state=null,fresh=false,loading=null,pending='',sequence=0,readEpoch=0,transportError='',actionError='',viewerError='',frame=null,frameUrl='',frameLoaded=false,focus=false,destroyed=false,lastVisible=null,optionKey='',savedScroll=0;
   let viewMode='device',task='view',calibrationLayer=null,calibrationMeta={},offline=null,offlineError='',offlineLoading=null,frameReady=false,consoleState=null,wantedSerial='',calibrationRunning=false,calibrationBusy=false,calibrationVerified=true,previewErrorOwner=null;
   const previewOnly=s=>s?.connection==='disconnected'&&s?.hardware?.active===false&&s?.glove?.busy===true&&!s.glove.feedback?.device_id&&s.glove.hardware?.active!==true&&s.glove.hardware?.active!==null&&!(s.unconfirmed_devices||[]).length;
@@ -48,7 +49,7 @@
    frame.src=url;viewStage.append(frame);$('ov-empty').hidden=true;renderFrameStatus();
   }
   function renderFrameStatus(){root.dataset.rendererReady=String(frameReady);setText('ov-frame-status',(viewMode==='offline'?frameReady:frameLoaded)?(viewMode==='offline'?t('查看器已打开 · 未接入设备数据，不用于标定','Viewer open · No device data; not a calibration session'):t('页面已载入；CLI 未报告数据新鲜度','Page loaded; data freshness is not reported by the CLI')):t('正在载入原版画面…','Loading the original Viewer…'));$('ov-frame-status').hidden=task==='calibration'||!frame||root.dataset.liveOwned==='true'&&frameLoaded&&!viewerError;}
-  function renderLogs(){if(logs.open){const detail=[$('ov-version').textContent,viewMode==='device'&&frameLoaded?t('页面已载入；CLI 未报告数据新鲜度。','Page loaded; data freshness is not reported by the CLI.'):null,...(Array.isArray(state?.logs)?state.logs:[])];setText('ov-logs',detail.filter(line=>typeof line==='string'&&line).slice(-82).map(line=>line.slice(0,2000)).join('\n')||t('暂无日志','No log messages'));}}
+  function renderLogs(){if(logs.open){const detail=[$('ov-version').textContent,viewMode==='device'&&frameLoaded?t('页面已载入；CLI 未报告数据新鲜度。','Page loaded; data freshness is not reported by the CLI.'):null,...(Array.isArray(state?.logs)?state.logs.slice(-74):[]),state?.blocked_reason,state?.error,transportError,actionError,viewerError,offlineError];setText('ov-logs',detail.filter(line=>typeof line==='string'&&line).map(line=>line.slice(0,2000)).join('\n')||t('暂无日志','No log messages'));}}
   function devicesForTask(){
    const s=state||{},devices=(Array.isArray(s.devices)?s.devices:[]).filter(d=>d&&typeof(d.sn||d.serial)==='string'&&(d.sn||d.serial)).map(d=>({...d,sn:d.sn||d.serial}));
    const side=value=>{const v=typeof value==='string'?value.toLowerCase().replace(/^handedness\./,''):'';return ['left','right'].includes(v)?v:'';};
@@ -66,7 +67,7 @@
   }
   function render(){
    if(destroyed)return;const s=state||{},busy=!!pending||!!s.busy,active=s.active===true,phase=s.phase,scanCleanup=s.scan_cleanup_required===true&&!active;
-   setText('ov-title',t('官方 CLI','Official CLI'));setText('ov-description',t('选好设备，在同一工作区查看或标定。','Choose a device to view or calibrate in this workspace.'));
+   setText('ov-title',t('官方 CLI','Official CLI'));setText('ov-description','');
    const calibrating=task==='calibration';root.dataset.task=task;root.dataset.guided=String(calibrationMeta.guided===true);stage.dataset.task=task;viewStage.hidden=calibrating;if(calibrationLayer)calibrationLayer.hidden=!calibrating;
    setText('ov-task-view',t('查看','View'));setText('ov-task-calibration',t('标定','Calibrate'));root.querySelector('.ov-task-choice').setAttribute('aria-label',t('官方任务','Official task'));$('ov-task-view').setAttribute('aria-pressed',String(!calibrating));$('ov-task-calibration').setAttribute('aria-pressed',String(calibrating));
    $('ov-start').hidden=calibrating;calibrate.hidden=!calibrating;modes.hidden=calibrating;logs.hidden=calibrating;$('ov-start-note').hidden=calibrating;$('ov-reload').hidden=calibrating;$('ov-frame-status').hidden=calibrating;
@@ -93,20 +94,21 @@
    if(scanCleanup)setText('ov-stop',pending==='official_viz_stop'?t('正在结束查找…','Ending discovery…'):t('结束设备查找','Finish device discovery'));
    $('ov-stop').disabled=pending==='official_viz_stop'||!scanCleanup&&!active&&!s.reserved&&!['starting','running','stopping'].includes(phase);
    $('ov-focus').disabled=!frame;$('ov-reload').disabled=blank?!!offlineLoading:!fresh||!active||phase!=='running';$('ov-stop').hidden=!scanCleanup&&!active&&!s.reserved&&!['starting','running','stopping'].includes(phase);
-   $('ov-start-note').hidden=blank||calibrating||liveOwned;$('ov-message').hidden=false;connectDevice.hidden=!blank||calibrating;connectDevice.textContent=t('选择设备','Choose device');
-   setText('ov-start-note',calibrationMeta.guided?t('接入后查看三维与传感数据；手型标定请切到“标定”。不使能电机；手套画面会设置数据流频率。','Connect to view 3D and sensor data. For hand-model calibration, choose Calibrate. Motors are not enabled; glove viewing configures stream rates.'):t('查看模式显示三维与传感数据；手型标定请切到“标定”，按官方终端的菜单与图示操作，无需编写代码。跳过触觉清零、不使能电机；手套画面会设置数据流频率。','View mode shows 3D and sensor data. For hand-model calibration, choose Calibrate and follow the official terminal menus and illustrations; no coding is needed. Skips tactile zeroing and does not enable motors; glove visualization configures stream rates.'));
+   $('ov-start-note').hidden=true;$('ov-message').hidden=false;connectDevice.hidden=!blank||calibrating;connectDevice.textContent=t('选择设备','Choose device');
    const d=s.device||{},identity=d.sn?[text(d.model,100),text(d.sn,160),d.handedness==='left'?t('左手','Left'):d.handedness==='right'?t('右手','Right'):''].filter(Boolean).join(' · '):'';
    setText('ov-identity',identity?(liveOwned?'':active?t('启动报告：','Startup report: '):t('上次启动：','Previous startup: '))+identity:'');setText('ov-version','CLI '+(text(s.cli_version,80)||t('版本未核对','version unverified'))+(s.backend==='windows_native'?t(' · Windows 原生',' · Native Windows'):''));
-   setText('ov-message',calibrationRunning?t('标定会话正在使用设备；取消或完成后才能打开实时画面。','Calibration owns the device. Finish or cancel it before opening a live view.'):!calibrationVerified&&!active?t('标定会话状态尚未核对，请刷新官方状态后再打开实时画面。','Calibration session state is unverified. Refresh official status before opening a live view.'):!fresh?t('当前状态未核对，重新读取后再操作。','Current state is unverified. Reload it before starting.'):text(s.blocked_reason)||(active?t('显示 CLI 进程状态；画面保留不代表反馈在线。','Shows CLI process state; a retained image does not establish live feedback.'):t('选择设备后接入画面，或准备手套标定。','Choose a device to connect its view, or prepare glove calibration.')));
+   setText('ov-message',calibrationRunning?t('完成或取消标定后，可以打开设备画面。','Finish or cancel calibration to open the live view.'):!calibrationVerified&&!active?t('请刷新官方状态，核对标定会话。','Refresh the official status to verify the calibration session.'):!fresh?'':noticeText(text(s.blocked_reason))||(active&&!liveOwned?t('请核对当前会话和设备反馈。','Verify the current session and device feedback.'):''));
    if(blank){
-    setText('ov-description',t('官方查看器可以离线打开；实际设备画面和标定仍由上方任务按钮明确启动。','The official Viewer can open offline. Use the task buttons above to explicitly start a device view or calibration.'));
-    setText('ov-start-note',t('原版 Rerun Viewer · 无需启动设备或 Linux 控制端。','Original Rerun Viewer · No device or Linux controller required.'));
-    setText('ov-message',active||s.reserved?t('当前查看器没有接入数据；已有设备会话仍在运行，请切回“实时设备”查看或单独停止。','This viewer has no device data. The existing device session is still running; return to Live device to view it or stop it separately.'):t('无设备时可先检查查看器能否打开。查看手套或灵巧手，请点击“接入设备”，再查找并选择实际设备。','Use this to check that the viewer opens without hardware. For glove or hand data, choose Use a live device, then find and select your device.'));
+    setText('ov-message',active||s.reserved?t('设备会话仍在运行，切回实时设备可查看或停止。','The device session is still running. Return to Live device to view or stop it.'):'');
    }
-   setText('ov-error',transportError||actionError||text(s.error)||viewerError);setText('ov-empty-title',!fresh?t('状态未核对','Status unverified'):s.supported===false?t('当前环境不支持','Not supported in this environment'):active?t('等待画面','Waiting for the Viewer'):t('选择设备后，点击“查看”打开官方画面','Choose a device, then View to open its official display'));
-   setText('ov-empty-message',!fresh?t('重新读取状态后可恢复画面。','The view can resume after status is verified.'):active?t('CLI 可能仍在运行，停止会话请使用上方按钮。','The CLI may still be running. Use the button above to stop its session.'):t('查找并选择设备，原版界面将在此处显示。','Find and select a device. The original interface will appear here.'));
-   if(blank){setText('ov-error',offlineError||viewerError);setText('ov-empty-title',t('正在打开原版 Viewer','Opening original Viewer'));setText('ov-empty-message',offlineError||t('本地资源正在准备，无需连接设备。','Preparing local resources. No device connection needed.'));}
-   if(calibrating){setText('ov-description',t('选好手套和佩戴者，开始标定。','Choose the glove and wearer, then start calibration.'));setText('ov-state',text(calibrationMeta.status));setText('ov-message',text(calibrationMeta.reason,2000));setText('ov-version',text(calibrationMeta.runtime,200));root.querySelector('.ov-session').hidden=!calibrationRunning&&!calibrationBusy;setText('ov-identity','');}
+   const fault=blank?offlineError||viewerError:transportError||actionError||text(s.error)||viewerError;
+   const localized=noticeText(fault);
+   const actionHint=blank?t('重载查看器，或在详细日志中核对原因。','Reload the Viewer or check the detailed log.'):!fresh?t('请刷新状态后再查看。','Refresh the status to continue.'):viewerError?t('请重新载入画面。','Reload the view.'):t('请查看详细日志后重试。','Review the detailed log and try again.');
+   setText('ov-error',fault?(localized!==fault?localized:actionHint):'');
+   setText('ov-empty-title',!fresh?t('设备状态待核对','Device status unverified'):s.supported===false?t('当前环境无法打开设备画面','Live view unavailable in this environment'):active?t('等待设备画面','Waiting for live view'):t('设备画面','Live view'));
+   setText('ov-empty-message',fault?'':active?t('可在上方停止画面会话。','Use the controls above to stop the Viewer session.'):fresh&&s.supported!==false?t('在设备页选择设备，再打开画面。','Select a device on Devices, then open its view.'):'');
+   if(blank){setText('ov-empty-title',offlineError?t('查看器暂不可用','Viewer unavailable'):t('正在打开查看器','Opening the Viewer'));setText('ov-empty-message','');}
+   if(calibrating){setText('ov-state',text(calibrationMeta.status));setText('ov-message',noticeText(calibrationMeta.reason));setText('ov-version',text(calibrationMeta.runtime,200));root.querySelector('.ov-session').hidden=!calibrationRunning&&!calibrationBusy;setText('ov-identity','');}
    if(liveOwned)setText('ov-message','');sourceInfo.hidden=!$('ov-message').textContent&&connectDevice.hidden;
    setText('ov-logs-label',t('详细日志','Detailed log'));renderLogs();syncFrame();renderFrameStatus();$('ov-focus').disabled=calibrating?calibrationMeta.terminal!==true:!frame;
   }

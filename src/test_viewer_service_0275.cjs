@@ -18,3 +18,24 @@ test('service change during decoding rejects the old image and the next explicit
 test('parallel state-B and old frame-A responses cannot be accepted as one source',async()=>{const f=await fixture({serviceToken:'service-A'});f.state.csrf='service-B';f.start();await f.advance(10);assert.equal(f.decoders.length,0);assert.equal(f.draws.length,0);assert.equal(f.get('stale').hidden,false);});
 for(const token of [undefined,null,'',false,7])test('missing or invalid frame service identity is unavailable: '+String(token),async()=>{const f=await fixture({serviceToken:token});f.start();await f.advance(10);assert.equal(f.decoders.length,0);assert.equal(f.draws.length,0);assert.equal(f.get('stale').hidden,false);});
 test('post-decode identity service change cannot make an old image ready',async()=>{const f=await fixture({fetchMs:(url,n)=>url==='/api/state'&&n%2===1?40:0});f.start();await f.advance(10);await f.resolveFirst();f.state.csrf='service-B';await f.advance(60);assert.equal(f.draws.length,0);assert.equal(f.get('stale').hidden,false);});
+for(const failedRead of ['state','view','readback'])test('a '+failedRead+' outage clears the displayed frame and locks camera until identity returns',async()=>{
+ const f=await fixture({neverDecode:false,decodeMs:5});
+ let offline=false,stateReads=0;
+ const fetch=f.ctx.fetch;
+ f.ctx.fetch=(url,init)=>{
+  if(offline&&(failedRead==='view'&&url==='/api/view'||url==='/api/state'&&(failedRead==='state'||failedRead==='readback'&&++stateReads===2)))return {ok:false,status:503};
+  return fetch(url,init);
+ };
+ f.start();await f.advance(20);
+ assert.equal(f.get('image').hidden,false);
+ assert.ok(f.viewButtons.every(button=>!button.disabled));
+ offline=true;await f.advance(120);
+ assert.equal(f.get('image').hidden,true);
+ assert.equal(f.get('stale').hidden,false);
+ assert.ok(f.viewButtons.every(button=>button.disabled));
+ assert.equal(f.ctx.state,null);
+ f.state.csrf='service-B';offline=false;await f.advance(220);
+ assert.equal(f.get('image').hidden,false);
+ assert.ok(f.viewButtons.every(button=>!button.disabled));
+ assert.equal(f.ctx.state.csrf,'service-B');
+});

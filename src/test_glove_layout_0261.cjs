@@ -22,3 +22,18 @@ test('resize across the media boundary restores the original wide order without 
 test('confirmed pause hides the local stop and restores source-first layout',()=>{const e=fixture({width:390});e.sync();e.stop.hidden=true;e.sync();assert.deepEqual(e.order(),['source','display','operations']);assert.equal(e.layout.dataset.actionFirst,'false');});
 test('older-browser fallback restores a focused control after each actual move',()=>{const e=fixture({width:1366,native:false,focusPause:true});e.resize(390);assert.equal(e.document.activeElement,e.pause);e.resize(1366);assert.equal(e.document.activeElement,e.pause);assert.deepEqual(e.moves,['insertBefore','insertBefore']);assert.equal(e.focusCalls.length,2);assert(e.focusCalls.every(c=>c.options.preventScroll===true));});
 test('fallback does not steal focus from an unmoved source or mode control',()=>{const e=fixture({width:390,native:false});e.sync();assert.equal(e.document.activeElement,e.other);assert.equal(e.focusCalls.length,0);});
+test('confirmed following hides only its own stop ledger placeholder',()=>{
+ const functionSource=source.slice(source.indexOf(' function visibleStopWarnings('),source.indexOf(' function render(){'));
+ const context={validSession:value=>Number.isSafeInteger(value)&&value>0};
+ vm.runInNewContext(functionSource+'\nthis.warnings=visibleStopWarnings;',context);
+ const active={busy:true,connection:'receiving',session_id:3,follow_unconfirmed:false,hardware:{active:true},feedback:{device_id:'HAND'}};
+ const own={source:'glove',device_id:'HAND',session:3},older={...own,session:2},otherDevice={...own,device_id:'OTHER'},otherSource={...own,source:'desktop'};
+ const rows=Object.freeze([own,older,otherDevice,otherSource]);
+ assert.deepEqual(Array.from(context.warnings(rows,active)),[older,otherDevice,otherSource]);
+ assert.equal(context.warnings(rows,{...active,hardware:{active:null}}),rows);
+ assert.equal(context.warnings(rows,{...active,connection:'error'}),rows);
+ assert.equal(context.warnings(rows,{...active,follow_unconfirmed:true}),rows);
+ assert.equal(context.warnings(rows,{...active,follow_unconfirmed:undefined}),rows);
+ assert.equal(context.warnings(rows,{...active,session_id:null}),rows);
+ assert.equal(context.warnings(rows,{...active,feedback:{}}),rows);
+});

@@ -2,6 +2,7 @@
 (()=>{
  'use strict';
  const $=id=>document.getElementById(id),t=(zh,en)=>window.WujiLocale?.lang==='en'?en:zh;
+ const notice=value=>window.WujiLocale?.notice?.(value)??String(value||'');
  let native=null,info=null,state=null;
  const button=document.createElement('button');button.className='app-menu-button';button.id='desktop-menu-button';button.type='button';button.textContent='⋯';button.setAttribute('aria-haspopup','dialog');
  const tools=document.createElement('div');tools.className='desktop-tools';tools.append(button);document.querySelector('.top-actions').append(tools);
@@ -78,14 +79,15 @@
  }
  button.onclick=()=>{labels();if(!menu.open)menu.showModal();};$('desktop-menu-close').onclick=()=>menu.close();
  menu.addEventListener('click',e=>{if(e.target===menu){const r=menu.getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom)menu.close();}});
- async function call(name){try{await native[name]();menu.close();}catch(e){$('desktop-menu-status').textContent=e.message;}}
+ menu.addEventListener('close',()=>{$('desktop-menu-status').textContent='';});
+ async function call(name){try{await native[name]();menu.close();}catch(e){$('desktop-menu-status').textContent=notice(e.message);}}
  $('desktop-viewer').onclick=()=>call('open_viewer');$('desktop-folder').onclick=()=>call('open_data_folder');$('desktop-quit').onclick=()=>call('request_close');
- $('desktop-model').onclick=async()=>{try{const r=await native.import_model_dialog();if(r.ok){$('desktop-menu-status').textContent=t('模型已导入，仅用于离线仿真识别','Model imported for offline simulation only');window.dispatchEvent(new Event('workbench-model-changed'));}else if(!r.cancelled)throw Error(r.error);}catch(e){$('desktop-menu-status').textContent=e.message;}};
+ $('desktop-model').onclick=async()=>{try{const r=await native.import_model_dialog();if(r.ok){$('desktop-menu-status').textContent=t('模型已导入，可用于离线仿真','Model imported for offline simulation');window.dispatchEvent(new Event('workbench-model-changed'));}else if(!r.cancelled)throw Error(r.error);}catch(e){$('desktop-menu-status').textContent=notice(e.message);}};
  $('desktop-close-cancel').onclick=()=>closeDialog.close();
  $('desktop-close-confirm').onclick=async()=>{
   $('desktop-close-confirm').disabled=true;$('desktop-close-status').textContent=t('正在停止并保存…','Stopping and saving…');
-  try{const result=await native.stop_and_close();if(!result.ok)$('desktop-close-status').textContent=result.error;}
-  catch(e){$('desktop-close-status').textContent=e.message;}
+  try{const result=await native.stop_and_close();if(!result.ok)$('desktop-close-status').textContent=notice(result.error);}
+  catch(e){$('desktop-close-status').textContent=notice(e.message);}
   finally{$('desktop-close-confirm').disabled=false;}
  };
  const errors=[];

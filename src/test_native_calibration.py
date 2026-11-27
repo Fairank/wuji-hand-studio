@@ -438,6 +438,73 @@ class WorkerPreflightTests(unittest.TestCase):
 
 
 class NativeMetadataTests(unittest.TestCase):
+    def test_new_wearer_keeps_native_guidance_while_profile_metadata_is_unavailable(self):
+        config = {'mode': 'wsl', 'cli': 'wuji'}
+        people = {'Default': {**PROFILE, 'name': 'Default', 'is_default': True}}
+        current = ['Default']
+
+        def query(*args):
+            if args == ('user', 'list'):
+                return {'users': list(people.values())}
+            if args[:2] == ('user', 'show'):
+                return copy.deepcopy(people[args[2] if len(args) == 3 else current[0]])
+            if args == ('user', 'create', 'Demo', '--switch'):
+                people['Demo'] = PROFILE
+                current[0] = 'Demo'
+                return copy.deepcopy(PROFILE)
+            self.fail('Unexpected native command: ' + repr(args))
+
+        process = FakeProcess([{'type': 'exit', 'exitstatus': 9}])
+        job = SimpleNamespace(process=process, close=Mock(return_value=True))
+        service = calibration_cli.CalibrationCLI(device_provider=lambda fresh=False: [])
+        owner_start = 'synthetic-owner'
+        with temporary_folder() as folder, patch.dict(os.environ, WUJI_OFFICIAL_CLI_DATA=folder), \
+                patch.object(calibration_cli, 'load_config', return_value=config), \
+                patch('official_device_discovery.use_native', return_value=True), \
+                patch.object(native_cli, 'prepare', return_value=COMPONENT), \
+                patch.object(native_cli, 'json_command', side_effect=query) as queries, \
+                patch('cli_coordination.identity', return_value=owner_start), \
+                patch('native_calibration.identity', return_value=owner_start), \
+                patch('calibration_identity.read_current_sdk_user', return_value={'user_id': 'demo-1', 'display_name': 'Demo'}), \
+                patch('windows_process_job.OwnedProcess', return_value=job), \
+                patch.object(native.threading, 'Thread', DeferredThread):
+            self.assertTrue(service.snapshot(refresh=True)['metadata_current'])
+            result = service.start('left', SN, connected={
+                'source': 'explicit_calibration', 'owner_pid': os.getpid(), 'owner_start': owner_start,
+                'serial': SN, 'side': 'left', 'checked_at': native.time.time()},
+                profile='Demo', create_profile=True)
+            self.assertTrue(result['run']['running'])
+            self.assertEqual(result['run']['source'], 'official_jsonl_native')
+            self.assertIsNone(result['run']['side'])
+            self.assertTrue(result['guided_native'])
+            self.assertFalse(result['metadata_current'])
+            self.assertIsNone(result['current'])
+            self.assertEqual(result['users'], [])
+
+            query_count = queries.call_count
+            service.run['status'] = 'cancelling'
+            cancelling = service.snapshot(refresh=True)
+            self.assertTrue(cancelling['guided_native'])
+            self.assertFalse(cancelling['metadata_current'])
+            self.assertEqual(queries.call_count, query_count)
+            service.native._collect()
+            finished = service.snapshot(refresh=True)
+            self.assertEqual(finished['run']['status'], 'cancelled')
+            self.assertTrue(finished['run']['cleanup_confirmed'])
+            self.assertTrue(finished['metadata_current'])
+            self.assertEqual(finished['current'], PROFILE)
+
+    def test_running_remote_guided_calibration_does_not_gain_native_capability(self):
+        service = calibration_cli.CalibrationCLI(device_provider=lambda fresh=False: [])
+        service.run.update(running=True, source='official_jsonl', interface='guided', side=None)
+        with temporary_folder() as folder, patch.dict(os.environ, WUJI_OFFICIAL_CLI_DATA=folder), \
+                patch.object(native_cli, 'prepare') as native_prepare:
+            snapshot = service.snapshot(refresh=True)
+            self.assertFalse(snapshot.get('guided_native', False))
+            self.assertFalse(snapshot['metadata_current'])
+            self.assertIsNone(snapshot['run']['side'])
+            native_prepare.assert_not_called()
+
     def test_guided_metadata_only_reads_local_users_without_device_or_profile_mutation(self):
         config = {'mode': 'wsl', 'cli': 'wuji'}
         def query(*args):

@@ -33,6 +33,7 @@ args=[sys.executable,'-m','PyInstaller','--noconfirm','--clean','--onedir','--na
     '--add-data','src/studio_agent.py'+os.pathsep+'.',
     '--add-data','src/studio_manifest.json'+os.pathsep+'.',
     '--add-data','src/network_setup_windows.ps1'+os.pathsep+'.',
+    '--add-data','src/network_auto_address.ps1'+os.pathsep+'.',
     '--add-data','THIRD_PARTY_NOTICES.md'+os.pathsep+'.']
 # Some Python distributions load an auxiliary OpenSSL distrust policy from
 # SSLContext.__new__. Preserve that selected interpreter's exact policy bytes

@@ -57,7 +57,18 @@ class TargetMappingSwitchTests(unittest.TestCase):
             self.assertEqual([c['name'] for c in e.calls],['retarget_binding_save','glove_prepare'])
             self.assertFalse(result['connection_switch']['source_released'])
 
-    def test_unknown_or_wrong_side_hand_retains_original_session_and_binding(self):
+    def test_unknown_hand_side_allows_exact_readonly_preparation(self):
+        for mapping_changed in (False,True):
+            with self.subTest(mapping_changed=mapping_changed),self.environment(mapping_changed) as e:
+                e.rows[-1]['side']=None
+                result=e.service.start(e.command())
+                self.assertEqual(result['connection_switch_receipt']['target']['hand_serial'],HAND)
+                self.assertEqual(e.gs['feedback']['identified_device']['profile'],'hand2_left')
+                self.assertFalse(e.gs['hardware']['active'])
+                self.assertEqual([c['name'] for c in e.calls].count('glove_prepare'),1)
+                self.assertNotIn('glove_follow',[c['name'] for c in e.calls])
+
+    def test_wrong_side_stale_or_foreign_hand_retains_original_session_and_binding(self):
         for change in ({'side':'right'},{'stale':True},{'workspace_owners':['other']}):
             with self.subTest(change=change),self.environment() as e:
                 e.rows[-1].update(change);before=e.c.retarget.path.read_bytes()

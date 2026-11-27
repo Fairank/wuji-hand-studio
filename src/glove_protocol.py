@@ -39,11 +39,27 @@ def cleanup_confirmed(value):
         'ownership_released','profile_lease_released','selection_lease_released','hand_released'))
 
 
+def no_hand_driver_cleanup(value,*,serial,profile):
+    """Exact prepare resources ended before a motion driver was constructed.
+
+    The serial is request identity, never a verified physical hand or stop ACK.
+    """
+    return bool(isinstance(value,dict)
+        and set(value)=={'version','kind','requested_serial','profile','enable_attempted','resources_released'}
+        and type(value.get('version')) is int and value['version']==1
+        and value.get('kind')=='hand_driver_not_created'
+        and isinstance(serial,str) and re.fullmatch(r'[A-Za-z0-9_.-]{1,100}',serial)
+        and value.get('requested_serial')==serial
+        and isinstance(profile,str) and re.fullmatch(r'hand[12]_(left|right)',profile)
+        and value.get('profile')==profile
+        and value.get('enable_attempted') is False and value.get('resources_released') is True)
+
+
 def validate(c):
     if not isinstance(c,dict) or c.get('name') not in COMMANDS:
         raise ValueError('Unknown glove operation')
     allowed={'name'}
-    if c['name']=='glove_session':allowed|={'continuation','sdk_requirement'}
+    if c['name']=='glove_session':allowed|={'continuation','sdk_requirement','glove_route'}
     if c['name']=='glove_open':allowed|={'serial','user_id','timeout_ms','retarget','solver'}
     if c['name']=='glove_solver':allowed|={'solver'}
     if c['name']=='glove_prepare':allowed|={'address','serial'}
@@ -54,6 +70,11 @@ def validate(c):
     if 'continuation' in c:
         from calibration_portability import validate_continuation
         validate_continuation(c['continuation'],path=True)
+    if 'glove_route' in c:
+        from calibration_transport import validate_glove_route
+        route=c['glove_route']
+        if not isinstance(route,dict) or 'continuation' in c:raise ValueError('Invalid selected glove route')
+        validate_glove_route(route,route.get('serial'))
     if 'sdk_requirement' in c:
         from sdk_release import validate_requirement
         validate_requirement(c['sdk_requirement'])

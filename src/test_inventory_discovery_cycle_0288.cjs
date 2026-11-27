@@ -68,3 +68,60 @@ test('an explicit use during an interruptible read dispatches once and selection
  assert.equal(calls.length,0);const pending=c.use('preview');assert.equal(calls.length,1);assert.equal(await c.use('preview'),false);
  finish();assert.equal(await pending,true);assert.deepEqual(calls,[{mode:'preview',sn:SN}]);assert.equal(events.length,1);
 });
+
+test('both IP conflict cards remain visible while only the exact existing session is viewable',()=>{
+ const f=projection(),other='WG_OTHER_IP_CONFLICT';
+ const first={...advertisement(),selectable:false,conflict:true,address_conflicts:['192.0.2.11']};
+ const second={...first,sn:other,selectable:true}; // An older/contradicting DTO cannot re-enable the card.
+ f.read({devices:[first,second],ttl_s:30,scanning:false});
+ assert.deepEqual(f.rows().map(row=>row.sn),[SN,other]);
+ assert.ok(f.rows().every(row=>!f.c.usable(row)));
+ const owner={mode:'teleoperation',kind:'glove',serial:SN,session:4,user_id:'sdk-owner',profile:'hand2_right'};
+ f.c.window.WujiDeviceUse.current=()=>owner;
+ f.c.consoleState.glove={busy:true,connection:'receiving',session_id:4,glove_serial:SN,user:{user_id:'sdk-owner'},profile:'hand2_right'};
+ f.c.consoleState.device_profile={id:'hand2_right'};
+ const owned=f.rows().find(row=>row.sn===SN);
+ assert.equal(owned.view_only,true);assert.equal(owned.selectable,false);assert.ok(f.c.usable(owned));
+ assert.equal(f.c.usable(f.rows().find(row=>row.sn===other)),false);
+});
+
+function networkEvents(extra={}){
+ const scheduled=[],listeners={},events=[],state=(csrf,network_revision)=>({csrf,official_viz:{network_revision}});
+ const c={window:{addEventListener:(name,fn)=>listeners[name]=fn,dispatchEvent:event=>events.push(event.detail)},
+  consoleState:state('same',4),AbortSignal,CustomEvent:class{constructor(_,options){this.detail=options.detail;}},
+  inventory:{devices:[advertisement()]},previousDisplayRows:[advertisement()],online:true,lastRead:10000,
+  serviceRevision:0,networkReadRevision:0,ending:null,loading:null,destroyed:false,discoveryWanted:false,
+  mainHand:()=>null,render(){},visible:()=>true,schedule:delay=>scheduled.push(delay),...extra};
+ const begin=source.indexOf(" window.addEventListener('console-state',"),end=source.indexOf("window.addEventListener('device-use-update',",begin);
+ vm.runInNewContext(fn('refresh')+'\n'+source.slice(begin,end)+'\nthis.refresh=refresh;',c);
+ return {c,scheduled,events,state,update:detail=>listeners['console-state']({detail})};
+}
+
+test('a network revision clears aged card history and schedules only a device-list read',()=>{
+ const {c,scheduled,state,update}=networkEvents();
+ update(state('same',4));assert.deepEqual(scheduled,[]);assert.equal(c.previousDisplayRows.length,1);
+ update(state('same',5));assert.deepEqual(scheduled,[0]);assert.equal(c.previousDisplayRows.length,0);assert.equal(c.lastRead,0);
+ assert.equal(c.discoveryWanted,false);assert.equal(c.serviceRevision,0);assert.equal(c.inventory.devices.length,1);
+ update(state('same',5));update(state('new',1));assert.deepEqual(scheduled,[0]);assert.equal(c.serviceRevision,1);
+});
+
+test('a network switch discards an in-flight old list and immediately reads once more',async()=>{
+ const calls=[];
+ const {c,events,state,update}=networkEvents({rememberDiscovery:value=>{c.previousDisplayRows=value.devices;},
+  localError:'',lastErrorKey:'',backoffUntil:0,
+  fetch:(url,options)=>new Promise(resolve=>calls.push({url,options,resolve}))});
+ const old=c.refresh();
+ update(state('same',5));
+ const joined=c.refresh();
+ assert.equal(calls.length,1);
+ const reply=sn=>({ok:true,json:async()=>({devices:[{...advertisement(),sn}],scan_allowed:true})});
+ calls[0].resolve(reply('STALE_NIC'));
+ await Promise.all([old,joined]);
+ assert.equal(calls.length,2);
+ assert.deepEqual(events,[]);assert.equal(c.previousDisplayRows.length,0);
+ assert.equal(calls[1].url,'/api/device-inventory');assert.equal(calls[1].options.method,undefined);
+ calls[1].resolve(reply('NEW_NIC'));await c.loading;
+ assert.equal(c.inventory.devices[0].sn,'NEW_NIC');
+ assert.deepEqual(events.map(event=>event.devices[0].sn),['NEW_NIC']);
+ assert.equal(c.discoveryWanted,false);assert.equal(c.serviceRevision,0);
+});

@@ -424,6 +424,9 @@ class Controller:
                     or glove.get('connection')!='receiving' or not (glove.get('stream') or {}).get('fresh')
                     or (glove.get('feedback') or {}).get('device_id')):
                 raise ValueError('Pairing source, user or target profile changed')
+            from connection_switch import _observed_hand_endpoint,_reject_address_conflict
+            directory=self.device_inventory()
+            _reject_address_conflict(directory['devices'],payload['hand_serial'])
             from retarget_workspace import MappingSwitchRequired
             try:self.action(dict(name='retarget_binding_save',binding=dict(binding,hand_serial=payload['hand_serial'])))
             except MappingSwitchRequired:
@@ -431,7 +434,18 @@ class Controller:
                 return self.connection_switch.start(dict(name='connection_switch',request_id=secrets.token_hex(16),
                     expected_owner=context_digest(state),target=dict(mode='teleoperation',serial=binding['glove_serial'],
                         user_id=binding['sdk_user'],profile=profile['id'],hand_serial=payload['hand_serial'])),pair_target=payload)
-            return self.action(dict(name='glove_prepare',serial=payload['hand_serial']))
+            prepare=dict(name='glove_prepare',serial=payload['hand_serial'])
+            from bridge_config import load_config
+            if profile['generation']=='hand2' and load_config().get('mode') in ('wsl','macvm'):
+                # A task-released hand can disappear from the directory. The
+                # SDK still verifies the exact serial when no locator remains.
+                row=next((r for r in directory['devices'] if r['sn']==prepare['serial']
+                    and r.get('kind')=='hand' and r.get('generation')=='hand2' and r.get('side')==profile['side']
+                    and r.get('stale') is False and not r.get('conflict') and not r.get('workspace_owners')),None)
+                if row and not directory.get('workspace_errors'):
+                    address=_observed_hand_endpoint(row,profile['side'])
+                    if address:prepare['address']=address
+            return self.action(prepare)
         if action=='unpair':
             session=glove.get('session_id')
             old=self.retarget.context(state['device_profile'])['binding']
@@ -661,7 +675,7 @@ class Controller:
                           viz.get('error') or (viz.get('sdk_error') if not result['devices'] else None),
                       scan_allowed=not reason and bool(viz.get('supported')),
                       blocked_reason=reason,backend='sdk_session' if sdk_scan else viz.get('backend'),
-                      sdk_error=viz.get('sdk_error'),workspace_errors=workspace_errors)
+                      sdk_error=viz.get('sdk_error'),network_notice=viz.get('network_notice'),workspace_errors=workspace_errors)
         return result
 
     def calibration_devices(self,fresh=False):
@@ -888,12 +902,17 @@ class Controller:
             if name=='official_cli_update':return dict(official_cli=self.official_cli.start())
             if name=='official_cli_rollback':return dict(official_cli=self.official_cli.rollback())
             if name in {'official_viz_scan','device_inventory_scan'}:
+                retry_network=command.get('retry_network',False)
+                if type(retry_network) is not bool:raise ValueError('Invalid device network retry')
                 if name=='device_inventory_scan' and self.glove.snapshot().get('busy'):
                     check=getattr(self,'sdk_hand_scan_check',None)
                     if not callable(check):raise ValueError('SDK session discovery is unavailable')
                     check();self.glove.action(dict(name='glove_hand_scan'))
                     return dict(glove=self.glove.snapshot())
-                return dict(official_viz=self.official_viz.scan(supplement=True) if name=='device_inventory_scan' else self.official_viz.scan())
+                if name=='device_inventory_scan':
+                    options={'retry_network':True} if retry_network else {}
+                    return dict(official_viz=self.official_viz.scan(supplement=True,**options))
+                return dict(official_viz=self.official_viz.scan())
             if name=='official_viz_start':return dict(official_viz=self.official_viz.start(command.get('serial'),command.get('theme','light')))
             return dict(official_viz=self.official_viz.stop())
         from cli_coordination import gate,enforce
@@ -965,6 +984,8 @@ class Controller:
     def _action(self, command):
         if not isinstance(command,dict):raise ValueError('Invalid request')
         name=command.get('name','')
+        if '_glove_route' in command and (name!='glove_scan' or not getattr(getattr(self,'connection_switch',None),'internal',False)):
+            raise ValueError('Selected glove route requires the private connection switch')
         if 'display_profile' in command:return self._demonstration_action(command)
         if name in ('glove_follow','glove_open') and {'expected_session','expected_revision'}&set(command):
             self._validate_glove_intent(command)
@@ -1165,7 +1186,10 @@ class Controller:
             switch=getattr(self,'connection_switch',None)
             config=switch._config() if switch is not None and name in ('glove_scan','glove_connect') else None
             if name in ('glove_scan','glove_connect'):Controller._retire_sdk_session_config(self)
-            result=self.glove.action(command)
+            if '_glove_route' in command:
+                command=dict(command);route=command.pop('_glove_route')
+                result=self.glove.action(command,selected_route=route)
+            else:result=self.glove.action(command)
             if config is not None:self.sdk_session_configs[self.glove.session]=config
             if name in {'glove_scan','glove_open','glove_follow','glove_prepare'}:
                 self.player.command(dict(name='demo_stop'));self.state['view_source']='glove'
@@ -1952,6 +1976,12 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(200,state)
         if url.path == '/api/state':
             return self.reply(200, self.server.controller.snapshot())
+        if url.path == '/api/teleoperation-terminal':
+            from teleoperation_terminal import KEY_HEADER
+            desktop=getattr(self.server,'desktop',None)
+            read=getattr(desktop,'teleoperation_terminal_snapshot',None)
+            data=read(self.headers.get(KEY_HEADER,'')) if read is not None and not url.query else None
+            return self.reply(200,data) if data is not None else self.reply(403,dict(error='No terminal session'))
         if url.path == '/api/parameters':
             return self.reply(200,self.server.controller.parameter_snapshot())
         if url.path == '/api/catalog':
@@ -2052,7 +2082,7 @@ class Handler(BaseHTTPRequestHandler):
         for name in ('task_workspace.js','calibration_continuation.js','viewport_resize.js'):assets['/'+name]=(name,'text/javascript; charset=utf-8')
         for name in ('task_frame_host.js','task_window.js'):assets['/'+name]=(name,'text/javascript; charset=utf-8')
         assets['/task_window.css']=('task_window.css','text/css; charset=utf-8')
-        for name in ('task_workspace.css','calibration_continuation.css','viewport_resize.css'):assets['/'+name]=(name,'text/css; charset=utf-8')
+        for name in ('task_workspace.css','calibration_continuation.css','viewport_resize.css','workbench_visual.css'):assets['/'+name]=(name,'text/css; charset=utf-8')
         assets['/favicon.ico']=('favicon.ico','image/x-icon')
         assets['/app-icon.png']=('app-icon.png','image/png')
         assets['/wuji-logo.png']=('wuji-logo.png','image/png')
@@ -2584,6 +2614,35 @@ class ConsoleHTTPServer(ThreadingHTTPServer):
                 require_idle(state,doctor)
             check_workspaces(check)
         self.controller.sdk_hand_scan_check=sdk_hand_scan_check
+        def before_discovery(config,cancelled,token,revision,retry_network):
+            from bridge_config import load_config
+            from official_device_discovery import use_native,DiscoveryDeferred,DiscoveryCleanupUnconfirmed
+            from studio_component import lease_state,require_idle
+            from device_network import recover_dock_routes
+            if not use_native(config):return None
+            from windows_ethernet import TOPOLOGY
+            links=TOPOLOGY.links()
+            if not links or not any(link[2]==1 for link in links):return None
+            # The transaction can add its own address. Full topology still
+            # invalidates the inventory scan once the transaction exits.
+            def repair_cancelled():
+                return self.controller.official_viz.scan_cancel.is_set() or TOPOLOGY.links()!=links
+            def check():
+                if repair_cancelled() or config!=load_config():raise DiscoveryDeferred('Device network recovery scope changed')
+                if lease_state().get('reserved'):raise ValueError('Official Studio owns the device network')
+                def idle(state,doctor):
+                    require_idle(state,doctor)
+                    if any((state.get('official_studio') or {}).get(key) for key in ('active','busy','reserved')):
+                        raise ValueError('Official Studio owns the device network')
+                check_workspaces(idle,allow_local_scan=token)
+            try:
+                return recover_dock_routes(self.controller.official_viz.folder,token,revision,repair_cancelled,check,
+                                           retry=retry_network,link_scope=links)
+            except (DiscoveryDeferred,DiscoveryCleanupUnconfirmed):
+                raise
+            except (OSError, ValueError, RuntimeError):
+                return '暂时无法核对专用网卡路由 / Could not verify the dedicated device routes'
+        self.controller.official_viz.before_discovery=before_discovery
         def supplement_scan(config,cancelled,token):
             from bridge_config import load_config
             from official_device_discovery import sdk_devices,use_native,DiscoveryDeferred

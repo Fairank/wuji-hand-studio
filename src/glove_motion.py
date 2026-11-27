@@ -6,7 +6,7 @@ No browser pose injection, recording replay, automatic resume or gain preset.
 import math
 from hardware_showcase import HardwareShowcase,vector
 from official_policy import LOWER_RAD,UPPER_RAD,CURRENT_LIMIT_A,KP,KD,settings
-from motion_parameters import COMMAND_SPEED_RAD_S,PATH_SPEED_RAD_S
+from motion_parameters import COMMAND_SPEED_RAD_S,PATH_SPEED_RAD_S,MIN_TRANSITION_S
 
 class GloveMotion(HardwareShowcase):
     def __init__(self,*args,source,**kwargs):
@@ -47,6 +47,7 @@ class GloveMotion(HardwareShowcase):
                 if not self.check_probe_ready(row,diag,now):raise ValueError(self.probe_reason)
                 q=self.raw_position(row,now)
             self.target_from_glove(now)
+            self.follow_origin=q[:]
             self.enable_verified(q,now)
             self.last_beat=now;self.reason='手套跟随 · 当前控制端参数'
         except Exception as e:
@@ -61,13 +62,19 @@ class GloveMotion(HardwareShowcase):
                 raise ValueError('实际姿态超出官方文档行程')
             desired=self.target_from_glove(now);self.raw_target=desired
             if self.phase=='enabling':
-                if all(j['state']==2 for j in diag['joints']):self.phase='following';self.last_tick=now
+                if all(j['state']==2 for j in diag['joints']):
+                    self.phase='following';self.last_tick=now;self.follow_started_at=now
                 elif now>self.enable_deadline:raise ValueError('关节启用超时')
                 else:return
             self.diagnostic(diag,now,require_enabled=True)
             if not self.cadence.due(now):return
             dt=min(.03,max(0.,now-self.last_tick));self.last_tick=now;self.elapsed+=dt
             step=self.run_profile['max_velocity_rad_s']*dt
+            # Follow the official SDK example's gradual transition from the
+            # measured starting pose, while continuing to rate-limit publishes.
+            alpha=min(1.,(now-self.follow_started_at)/max(1.,MIN_TRANSITION_S))
+            if alpha<1.:
+                desired=[a+alpha*(b-a) for a,b in zip(self.follow_origin,desired)]
             self.target=[x+max(-step,min(step,y-x)) for x,y in zip(self.target,desired)]
             self.publish(self.target)
         except Exception as e:self.stop(str(e))

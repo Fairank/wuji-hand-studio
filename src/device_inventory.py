@@ -4,6 +4,7 @@ No SDK/CLI imports, process creation, filesystem access or device operations.
 Advertisements and serial hints never become verified connection identities.
 All timestamps use wall-clock seconds; missing/future observations are stale.
 """
+import ipaddress
 import math
 import re
 import time
@@ -11,6 +12,8 @@ import time
 
 _SERIAL = re.compile(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,99}\Z')
 _HAND2_HINT = re.compile(r'WH2([JK])[A-Z][0-9]{11}\Z')
+_IPV4_ENDPOINT = re.compile(r'(?:udp/)?([0-9.]+)(?::([1-9][0-9]{0,4}))?\Z')
+_NETWORK_DISCOVERY = {'official_cli', 'controller_discovery', 'glove_discovery', 'glove_hand_discovery'}
 _KNOWN_TYPES = {
     'wujihand2': ('hand', 'hand2'), 'hand2': ('hand', 'hand2'),
     'wujihand': ('hand', 'hand1'), 'wujihand1': ('hand', 'hand1'), 'hand1': ('hand', 'hand1'),
@@ -117,6 +120,39 @@ def _one(row, source, observed_at, now, ttl):
     return value, None
 
 
+def _reported_ipv4(row):
+    if (row['stale'] or row['source'] not in _NETWORK_DISCOVERY or row['kind_source'] != 'device'
+            or row['transport'] == 'usb' or not (row['kind'] == 'glove' or row['generation'] == 'hand2')):
+        return set()
+    addresses = set()
+    for value in row['addresses']:
+        match = _IPV4_ENDPOINT.fullmatch(value)
+        if match is None or match[2] and int(match[2]) > 65535:
+            continue
+        try:
+            address = ipaddress.IPv4Address(match[1])
+        except ipaddress.AddressValueError:
+            continue
+        if not (address.is_loopback or address.is_unspecified or address.is_multicast
+                or address.is_link_local or address.is_reserved):
+            addresses.add(str(address))
+    return addresses
+
+
+def _mark_address_conflicts(rows):
+    """One actual discovery reply is the boundary for a shared-IP finding."""
+    claims = {}
+    for row in rows:
+        for address in _reported_ipv4(row):
+            claims.setdefault(address, set()).add(row['serial'])
+    collisions = {address for address, serials in claims.items() if len(serials) > 1}
+    if collisions:
+        for row in rows:
+            shared = _reported_ipv4(row) & collisions
+            if shared:
+                row['address_conflicts'] = sorted(shared)
+
+
 def _merge(rows):
     devices, conflicts = [], []
     grouped = {}
@@ -161,14 +197,24 @@ def _merge(rows):
         chosen['official_available'] = any(row['_official_fresh'] for row in observations)
         chosen['_official_fresh'] = chosen['official_available']
         chosen['model'] = _model(chosen['kind'], chosen['generation'])
-        chosen['selectable'] = chosen['kind'] != 'unknown' and not chosen['stale']
+        # In a workspace union, prefer a known locator from the local
+        # controller. A sibling's isolated network cannot invalidate it.
+        local = [row for row in observations if row.get('_local_scope') and _reported_ipv4(row)]
+        address_conflicts = sorted({address for row in (local or observations)
+                                    for address in row.get('address_conflicts', [])})
+        if address_conflicts:
+            chosen['address_conflicts'] = address_conflicts
+        else:
+            chosen.pop('address_conflicts', None)
+        chosen['conflict'] = bool(address_conflicts)
+        chosen['selectable'] = chosen['kind'] != 'unknown' and not chosen['stale'] and not chosen['conflict']
         distinct = {}
         for row in observations:
             for observation in row.get('_observations', [row]):
                 key = tuple(observation.get(field) for field in (
                     'serial', 'source', 'kind', 'kind_source', 'generation', 'generation_source', 'side', 'side_source',
                     'identity_verified', 'observed_at', 'stale', 'in_use', 'official_available', 'address', 'transport'))
-                key += (tuple(observation['addresses']),)
+                key += (tuple(observation['addresses']), tuple(observation.get('address_conflicts', [])))
                 distinct.setdefault(key, observation)
         chosen['_observations'] = list(distinct.values())
         devices.append(chosen)
@@ -186,7 +232,8 @@ def normalize_devices(rows, *, source, observed_at, now=None, ttl=30):
     """Normalize one bounded observation list without running discovery.
 
     Returns ``{devices, conflicts, rejected}``. Conflicting identities are
-    excluded; duplicate transports for the same identity are merged.
+    excluded; duplicate transports for the same identity are merged. A fresh
+    official CLI IP conflict retains its identities but blocks new access.
     """
     now, ttl = _clock(now, ttl)
     source = _text(source, 80)
@@ -201,6 +248,8 @@ def normalize_devices(rows, *, source, observed_at, now=None, ttl=30):
             rejected.append(dict(index=index, source=source, reason=reason))
         else:
             accepted.append(value)
+    if source == 'official_cli':
+        _mark_address_conflicts(accepted)
     devices, conflicts = _merge(accepted)
     return dict(devices=[_public(row) for row in devices], conflicts=conflicts, rejected=rejected)
 
@@ -223,6 +272,7 @@ def build_inventory(viz=None, controller=None, glove=None, *, now=None, ttl=30):
         if not isinstance(rows, list) or len(rows) > 512:
             rejected.append(dict(source=source, reason='Invalid observation list'))
             return
+        batch = []
         for index, raw in enumerate(rows):
             row, reason = _one(raw, source, seen, now, ttl)
             if reason:
@@ -231,7 +281,10 @@ def build_inventory(viz=None, controller=None, glove=None, *, now=None, ttl=30):
             if error:
                 row.update(stale=True, selectable=False, official_available=False, _official_fresh=False)
             row['in_use'] = owned
-            observations.append(row)
+            batch.append(row)
+        if source in _NETWORK_DISCOVERY:
+            _mark_address_conflicts(batch)
+        observations.extend(batch)
 
     add(viz.get('devices', []), 'official_cli', viz.get('scanned_at'), error=bool(viz.get('error')))
     add(viz.get('sdk_devices', []), 'controller_discovery', viz.get('sdk_scanned_at'),error=bool(viz.get('sdk_error')))
@@ -308,7 +361,9 @@ def merge_inventories(inventories, *, now=None, ttl=30):
     Only those original timestamps can establish freshness; updated_at and
     combined ``sources`` never do. An explicit conflict in any input directory
     excludes that serial from the merged directory, even if another workspace
-    has a nonconflicting observation. Inputs are not mutated.
+    has a nonconflicting observation. The first directory is the local
+    controller. Address conflicts only come from original discovery batches,
+    since sibling workspaces can have independent networks. Inputs are not mutated.
     """
     now, ttl = _clock(now, ttl)
     if not isinstance(inventories, (list, tuple)) or len(inventories) > 64:
@@ -368,6 +423,19 @@ def merge_inventories(inventories, *, now=None, ttl=30):
                 if isinstance(addresses, list):
                     item['addresses'] = sorted(set(item['addresses']) | {
                         _text(address) for address in addresses[:512] if _text(address)})
+                item['_local_scope'] = inventory_index == 0
+                marked = leaf.get('address_conflicts')
+                directory_conflicts = row.get('address_conflicts')
+                expires = leaf.get('expires_at')
+                if (isinstance(marked, list) and isinstance(directory_conflicts, list)
+                        and _number(expires) and now < expires):
+                    # A previous union may have suppressed a sibling's
+                    # conflict in favor of a clean local locator. Keep that
+                    # provenance when a canonical directory is merged again.
+                    allowed = {value for value in directory_conflicts[:512] if isinstance(value, str)}
+                    existing = {value for value in marked[:512] if isinstance(value, str)} & allowed & _reported_ipv4(item)
+                    if existing:
+                        item['address_conflicts'] = sorted(existing)
                 accepted.append(item)
         input_conflicts, input_rejected = inventory.get('conflicts', []), inventory.get('rejected', [])
         if not isinstance(input_conflicts, list) or not isinstance(input_rejected, list):

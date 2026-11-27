@@ -167,7 +167,7 @@ class Recorder:
 
 
 def worker_auto(address, serial, requests, events):
-    from device_discovery import connect_discovered, SelectionRequired
+    from device_discovery import connect_discovered, HandUnavailableBeforeConnect, SelectionRequired
     hand = route = ownership = None
     closed=None;failed=False
     class Forward:
@@ -195,6 +195,13 @@ def worker_auto(address, serial, requests, events):
     except SelectionRequired as error:
         failed=True
         events.put(dict(type='selection', devices=error.devices, message=str(error)))
+    except HandUnavailableBeforeConnect as error:
+        events.put(dict(type='error',message=str(error)))
+        # Discovery propagates this typed outcome only after its routes close.
+        if serial:
+            closed=dict(type='closed',hardware=dict(active=False,stop_confirmed=False,enable_attempted=False),
+                feedback_cleanup=dict(version=1,kind='feedback_not_opened',serial=serial,
+                    enable_attempted=False,resources_released=True))
     except Exception as error:
         failed=True
         events.put(dict(type='error', message=str(error)))
@@ -445,7 +452,7 @@ def main():
             prepare_transfer_directory();continuation_version=1
         except (ValueError,OSError):pass  # Ordinary SDK sessions remain available.
     from sdk_runtime import probe_runtime
-    emit(dict(type='ready',teleop_version=1,calibration_continuation_version=continuation_version,
+    emit(dict(type='ready',teleop_version=1,calibration_continuation_version=continuation_version,glove_route_version=1,
               sdk_proof=probe_runtime()))
     try:
         while True:
@@ -476,7 +483,7 @@ def main():
                         sdk_requirement=validate_requirement(command.get('sdk_requirement'))
                         verify_proof(probe_runtime(),sdk_requirement)
                         from glove_agent import worker_glove
-                        process=ctx.Process(target=worker_glove,args=(requests,events,command.get('continuation'),sdk_requirement))
+                        process=ctx.Process(target=worker_glove,args=(requests,events,command.get('continuation'),sdk_requirement,command.get('glove_route')))
                         process.start();received_feedback=True;started=time.monotonic();glove_mode=True
                     elif name == 'connect':
                         if process:
@@ -503,6 +510,11 @@ def main():
                         raise ValueError('Connect the left hand first')
                 except (ValueError, TypeError) as error:
                     emit(dict(type='notice', message=str(error)))
+            # Join an exited worker before draining its last feedback/close
+            # receipt. A worker that exits during this drain is reaped on the
+            # next iteration, where its terminal records are now available.
+            exited=process is not None and not process.is_alive()
+            if exited:process.join()
             while True:
                 try:
                     event = events.get_nowait()
@@ -511,9 +523,7 @@ def main():
                 if event['type'] == 'state' and event.get('latest'):
                     received_feedback = True
                 emit(event)
-            if process and not process.is_alive():
-                process.join()
-                break
+            if exited:break
             if process and not received_feedback and time.monotonic()-started > 15:
                 halt()
                 emit(dict(type='error', message='15秒内未收到灵巧手反馈；请检查电源、网线和设备地址'))

@@ -5,9 +5,11 @@ import io
 import json
 import queue
 import sys
+import tempfile
 import threading
 import time
 import unittest
+from pathlib import Path
 from types import SimpleNamespace as N
 from unittest.mock import Mock,patch
 import numpy  # Resolve extension imports before temporary synthetic modules.
@@ -199,7 +201,7 @@ class BridgeCleanupTests(unittest.TestCase):
         self.assertFalse(bridge.snapshot()['session_cleanup']['acknowledged'],'Unsent open authorized an arbitrary candidate')
 
     @contextmanager
-    def transport(self,ack=None,*,missing_ack=False,hold_exit=False,close_error=False,final_hardware=None,ready_only=False,no_terminal=False):
+    def transport(self,ack=None,*,missing_ack=False,hold_exit=False,close_error=False,final_hardware=None,ready_only=False,no_terminal=False,with_hand=False):
         started=threading.Event();disconnect=threading.Event();ack_sent=threading.Event();finish=threading.Event()
         if not hold_exit:finish.set()
         class Input(io.StringIO):
@@ -213,10 +215,16 @@ class BridgeCleanupTests(unittest.TestCase):
             yield 'WUJI_JSON:'+json.dumps(dict(type='sdk_ready',sdk_proof=proof_fixture()))
             state=receiving()
             if ready_only:state.update(connection='ready',glove_serial='',user={'user_id':'prior'})
+            if with_hand:
+                state['feedback']=dict(connection='connected',device_id='WH-SYNTHETIC',metrics=dict(age_ms=0))
+                state['hardware']=dict(active=False,stop_confirmed=True)
             yield 'WUJI_JSON:'+json.dumps(dict(type='glove_state',state=state))
             started.set()
             if not disconnect.wait(2):raise AssertionError('Synthetic test did not request disconnect')
             event=dict(type='glove_closed',hardware=final_hardware or {})
+            if with_hand and final_hardware is None:
+                event.update(hardware=dict(active=False,stop_confirmed=True),device_id='WH-SYNTHETIC',
+                             hand_cleanup_confirmed=True)
             if not missing_ack:
                 event['session_cleanup']=cleanup(glove_serial='',sdk_user_id='',glove_was_open=False,solver_cleanup='not_open') if ready_only else cleanup() if ack is None else ack
             if not no_terminal:yield 'WUJI_JSON:'+json.dumps(event)
@@ -240,6 +248,42 @@ class BridgeCleanupTests(unittest.TestCase):
             self.assertFalse(e.bridge.busy);self.assertTrue(e.bridge.snapshot()['session_cleanup']['cleanup_confirmed'])
             self.assertEqual([json.loads(line)['name'] for line in e.sent.getvalue().splitlines()],['glove_session','glove_disconnect'])
             e.client.close.assert_called_once();self.assertEqual(self.request(e.bridge),result)
+
+    def test_solver_switch_waits_for_reader_then_uses_confirmed_disconnection(self):
+        from console_server import Controller
+        with tempfile.TemporaryDirectory() as folder, self.transport(hold_exit=True,with_hand=True) as e:
+            controller=Controller(factory=lambda:None,reports=Path(folder)/'reports')
+            controller.glove=e.bridge
+            binding=controller.retarget.context(controller.state['device_profile'])['binding']
+            context=controller.tuning.context(binding)
+            command=dict(name='retarget_engine_select',binding=binding,engine='official_open',
+                         values=context['values'],revision=context['revision'])
+            with self.assertRaisesRegex(ValueError,'Disconnect hand feedback'):
+                controller.action(command)
+            with self.assertRaises(ValueError):
+                self.request(e.bridge,timeout=.02)
+            self.assertTrue(e.ack_sent.wait(1))
+            self.assertEqual(e.bridge.snapshot()['feedback']['device_id'],'WH-SYNTHETIC')
+            with self.assertRaisesRegex(ValueError,'Disconnect hand feedback'):
+                controller.action(command)
+            e.finish.set()
+            self.assertTrue(self.request(e.bridge)['cleanup_confirmed'])
+            result=controller.action(command)
+            self.assertTrue(result['submitted'])
+            self.assertFalse(result['runtime_applied'])
+            self.assertEqual(controller.tuning.engine(binding),'official_open')
+            self.assertEqual(e.bridge.snapshot()['feedback'],{'stale':True})
+            self.assertEqual(e.bridge.state['feedback']['device_id'],'WH-SYNTHETIC')
+            self.assertEqual([json.loads(line)['name'] for line in e.sent.getvalue().splitlines()],
+                             ['glove_session','glove_disconnect'])
+
+    def test_unconfirmed_transport_close_preserves_last_hand_identity(self):
+        with self.transport(close_error=True,with_hand=True) as e:
+            with self.assertRaises(ValueError):
+                self.request(e.bridge)
+            state=e.bridge.snapshot()
+            self.assertFalse(state['session_cleanup']['cleanup_confirmed'])
+            self.assertEqual(state['feedback']['device_id'],'WH-SYNTHETIC')
 
     def test_old_protocol_without_glove_ack_is_not_success_even_after_eof(self):
         with self.transport(missing_ack=True) as e:

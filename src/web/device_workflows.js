@@ -150,6 +150,11 @@
   else if(purpose==='hand'){location.hash='#library';window.WujiWorkspace.showPage();}
   else{window.WujiConnectionHub.show(purpose==='calibration'?'calibration':'official');if(purpose==='official')window.WujiOfficialViz?.showDeviceMode();}
  }
+ function selectConnectedHand(value,serial){
+  window.WujiDemonstration?.selectProfile(value.device_profile.id);
+  const select=document.getElementById('demonstration-hand');
+  if(select){select.value=serial;select.dispatchEvent(new Event('change'));}
+ }
  async function useFeature(purpose,device=null,options={}){
   if(!['official','teleoperation','calibration','hand'].includes(purpose)||featureOwner)return;
   const visibleContext=options.expectedContext??observedState?.connection_switch?.expected_owner;
@@ -162,11 +167,16 @@
    if(options.viewOwner||options.retryOwner){
     const expected=options.viewOwner||options.retryOwner,actual=currentOwner(before),observed=currentOwner(),target={mode:expected.mode,serial:expected.serial,user_id:expected.user_id,profile:expected.profile};
     if(options.retryOwner&&(!/^[a-f0-9]{64}$/.test(options.expectedContext||'')||before.connection_switch?.expected_owner!==options.expectedContext))throw Error(t('当前连接已变化，请重新核对。','The current connection changed. Verify it again.'));
-    if(before.connection_switch?.busy===true||!actual||!observed||['mode','kind','serial','session','user_id','profile'].some(key=>actual[key]!==expected[key]||observed[key]!==expected[key])||!connected(before,target)||actual.mode==='teleoperation'&&before.glove?.session_id!==actual.session||actual.mode==='official'&&(!/^[a-f0-9]{32}$/.test(actual.session||'')||before.official_viz?.session_id!==actual.session))throw Error(t('当前连接已变化，请重新核对。','The current connection changed. Verify it again.'));
+    const handViewChanged=options.viewOwner&&expected.mode==='hand'&&(
+     !verifiedHand(before,expected.serial)||!verifiedHand(observedState,expected.serial)||
+     before.device_profile.id!==options.handViewProfile||observedState.device_profile.id!==options.handViewProfile||
+     serialOf(directory.selection())!==expected.serial);
+    if(handViewChanged||before.connection_switch?.busy===true||!actual||!observed||['mode','kind','serial','session','user_id','profile'].some(key=>actual[key]!==expected[key]||observed[key]!==expected[key])||!connected(before,target)||actual.mode==='teleoperation'&&before.glove?.session_id!==actual.session||actual.mode==='official'&&(!/^[a-f0-9]{32}$/.test(actual.session||'')||before.official_viz?.session_id!==actual.session))throw Error(t('当前连接已变化，请重新核对。','The current connection changed. Verify it again.'));
    }
    const chosen=device||selectedDevice(purpose,before),serial=serialOf(chosen);
    if(!serial||['teleoperation','calibration'].includes(purpose)&&chosen?.kind!=='glove'||purpose==='hand'&&chosen?.kind!=='hand'){chooseDevice(purpose==='official'?'all':'glove');return;}
    ticket.serial=serial;if(chosen.kind==='glove'&&!options.viewOwner)chooseGlove({...chosen,sn:serial,serial});
+   if(options.viewOwner&&purpose==='hand')selectConnectedHand(before,serial);
    if(options.navigate!==false)navigate(purpose,serial);renderContexts();
    if(options.viewOwner)return {state:before,view:true}; // Viewing never changes an existing device purpose.
    if(purpose==='calibration')return; // The final Start atomically hands over this exact glove.
@@ -192,7 +202,7 @@
    }
    if(latest)observedState=latest;directory.select?.(serial);
    const actual=latest||switched.state;
-   if(purpose==='hand'&&options.navigate!==false&&verifiedHand(actual,serial)&&location.hash===handChoice.entry&&window.WujiDemonstration?.profile?.()===handChoice.profile&&window.WujiDemonstration?.revision?.()===handChoice.revision){window.WujiDemonstration?.selectProfile(actual.device_profile.id);const select=document.getElementById('demonstration-hand');if(select){select.value=serial;select.dispatchEvent(new Event('change'));}}
+   if(purpose==='hand'&&options.navigate!==false&&verifiedHand(actual,serial)&&location.hash===handChoice.entry&&window.WujiDemonstration?.profile?.()===handChoice.profile&&window.WujiDemonstration?.revision?.()===handChoice.revision)selectConnectedHand(actual,serial);
    if(current()&&purpose==='official')await window.WujiOfficialViz?.selectDevice(serial);
    return {...switched,state:latest||switched.state};
   }catch(error){if(current()){useError=error.name==='SwitchCancelled'?'':error?.message||t('设备用途切换未完成，请核对当前会话。','The device switch did not complete. Review the current session.');useFailure={...(switchFailures.get(error)||{owner_context:ticket.owner_context,request_id:null,before_transition:ticket.before_transition}),retired:false};}throw error;}
@@ -226,6 +236,9 @@
  directory.setUseHandler(async(mode,device)=>{
   const owner=currentOwner(),serialAtClick=serialOf(device),expectedContext=observedState?.connection_switch?.expected_owner;
   if(mode==='official'&&device.kind==='glove'&&owner?.kind==='glove'&&owner.serial===serialAtClick&&['official','teleoperation'].includes(owner.mode)){await useFeature(owner.mode,device,{viewOwner:{...owner}});return;}
+  if(mode==='hand'&&device.kind==='hand'&&owner?.mode==='hand'&&owner.kind==='hand'&&owner.serial===serialAtClick){
+   await useFeature('hand',device,{viewOwner:{...owner},handViewProfile:observedState?.device_profile?.id});return;
+  }
   // Re-read after the click. Retained cards are never sufficient authority.
   await directory.refresh();const current=directory.snapshot(),serial=device.sn||device.serial;
   const found=current?.devices?.find(row=>(row.sn||row.serial)===serial);
@@ -237,7 +250,7 @@
   if(mode==='hand'){
    if(found.kind!=='hand')throw Error(t('所选设备不是灵巧手','Selected device is not a hand'));
    // Exact serial identity selects the backend's original discovered route.
-   await useFeature('hand',found,{navigate:currentOwner()?.mode==='hand'&&currentOwner()?.serial===serial,expectedContext});return;
+   await useFeature('hand',found,{navigate:false,expectedContext});return;
   }
   if(found.kind!=='glove')throw Error(t('请先选择手套','Select a glove first'));
   chooseGlove(found);

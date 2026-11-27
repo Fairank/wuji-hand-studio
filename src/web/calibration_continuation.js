@@ -3,6 +3,7 @@
  'use strict';
  let state=null,pending=false,pendingName='',requestEpoch=0,requestedRun=null,requestedMode='virtual',entryHash='',error='',host=null,button=null,realButton=null,cancel=null,note=null;
  const t=(zh,en)=>window.WujiLocale?.lang==='en'?en:zh;
+ const noticeText=value=>window.WujiLocale?.notice?.(value)??value??'';
  const validId=value=>typeof value==='string'&&/^[a-f0-9]{32}$/.test(value);
  const sameRequest=(epoch,context,attempt=false)=>epoch===requestEpoch&&state?.csrf===context.csrf
   &&state?.calibrated_teleoperation?.run_id===context.run_id
@@ -63,11 +64,11 @@
   const loaded=loadedSession();
   button.hidden=c?.busy===true&&!loaded;button.disabled=pending||!state||!(c?.can_continue===true||c?.connected===true||loaded);
   realButton.hidden=button.hidden;realButton.disabled=button.disabled;
-  button.textContent=t('虚拟遥操作','Virtual teleoperation');realButton.textContent=t('遥操作','Teleoperation');
+  button.textContent=t('打开虚拟预览','Open virtual preview');realButton.textContent=t('前往实机跟随','Open real following');
   cancel.hidden=c?.busy!==true||loaded;cancel.disabled=pendingName==='cancel'||!state?.csrf||!validId(c?.run_id)||!validId(c?.attempt_id);cancel.textContent=t('取消接续','Cancel continuation');
   const phases={validating:['正在接续本次标定…','Continuing this calibration…'],exporting:['正在沿用已保存的手型…','Loading the saved hand model…'],connecting:['正在打开手套预览…','Opening glove preview…'],cancelling:['正在结束接续…','Ending continuation…']};
   const fault=error||c?.error;
-  note.textContent=fault?(window.WujiLocale?.lang==='en'?fault.split(' / ').at(-1):fault.split(' / ')[0]):(pending?(pendingName==='cancel'?t('正在结束接续…','Ending continuation…'):t('正在加载已保存的标定…','Loading saved calibration…')):c?.busy?(phases[c.phase]?.[window.WujiLocale?.lang==='en'?1:0]||t('正在接续…','Continuing…')):'');note.hidden=!note.textContent;
+  note.textContent=fault?noticeText(fault):(pending?(pendingName==='cancel'?t('正在结束接续…','Ending continuation…'):t('正在加载已保存的手型…','Loading the saved hand model…')):c?.busy?(phases[c.phase]?.[window.WujiLocale?.lang==='en'?1:0]||t('正在准备遥操作…','Preparing teleoperation…')):'');note.hidden=!note.textContent;note.dataset.tone=fault?'warning':'info';
   if((c?.connected===true||loaded)&&requestedRun===c.run_id){requestedRun=null;if(location.hash===entryHash)navigate(requestedMode);}
  }
  window.addEventListener('console-state',event=>{const next=event.detail;if(state&&(state.csrf!==next?.csrf||state.calibrated_teleoperation?.run_id!==next?.calibrated_teleoperation?.run_id||pendingName==='cancel'&&state.calibrated_teleoperation?.attempt_id!==next?.calibrated_teleoperation?.attempt_id)){requestEpoch++;pending=false;pendingName='';requestedRun=null;error='';}state=next;render();});

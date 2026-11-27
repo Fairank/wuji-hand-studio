@@ -7,32 +7,42 @@ screen.before(toolbar);
 const lens=document.createElement('div');lens.className='camera-lens';
 lens.append(toolbar.querySelector('.camera-presets'));screen.append(lens);
 const stageStop=document.createElement('button');stageStop.textContent='停止实机并停用电机';stageStop.className='stage-stop';stageStop.hidden=true;toolbar.append(stageStop);
+const buttons=[...toolbar.querySelectorAll('button'),...lens.querySelectorAll('button')];
+for(const button of buttons)button.disabled=true;
 stageStop.addEventListener('click',async()=>{try{await post({name:'hardware_stop'});notice.textContent='已请求停止，等待实机状态';}catch(e){notice.textContent=e.message;}});
 screen.tabIndex=0;screen.setAttribute('role','group');screen.setAttribute('aria-label','三维视角，拖动旋转，滚轮缩放，方向键旋转，加减键缩放，R复位');
 document.getElementById('pose-image').draggable=false;
-let state=null,camera=null,revision=-1,dirty=false,busy=false,timer=0,lastGesture=0;
+let state=null,camera=null,revision=-1,dirty=false,cameraRequest=null,timer=0,lastGesture=0;
 const pointers=new Map();
 const notice=document.getElementById('camera-notice');
 const clone=c=>({...c,lookat:[...c.lookat]});
 const defaults=()=>({azimuth:90,elevation:-5,distance:.38,lookat:[0,0,.115]});
-async function post(body){
+async function post(body,signal=AbortSignal.timeout(2000)){
   if(!state?.csrf)throw Error('本机服务未连接');
-  const r=await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json','X-Console-Token':state.csrf},body:JSON.stringify(body),signal:AbortSignal.timeout(2000)});
+  const r=await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json','X-Console-Token':state.csrf},body:JSON.stringify(body),signal});
   const value=await r.json();if(!r.ok||!value.ok)throw Error(value.error||'操作失败');return value;
+}
+function resetCamera(){
+  camera=null;revision=-1;dirty=false;clearTimeout(timer);pointers.clear();
+  cameraRequest?.abort();cameraRequest=null;
 }
 function schedule(){dirty=true;clearTimeout(timer);timer=setTimeout(flush,50);}
 async function flush(){
-  if(busy||!dirty||!camera||!state)return;
-  busy=true;dirty=false;const sent=clone(camera);
-  try{const r=await post({name:'view_camera',camera:sent});revision=Math.max(revision,r.camera_revision);notice.textContent='';}
-  catch(e){notice.textContent=e.message;}
-  finally{busy=false;if(dirty)timer=setTimeout(flush,50);}
+  if(cameraRequest||!dirty||!camera||!state)return;
+  const request=new AbortController();cameraRequest=request;dirty=false;
+  try{
+    const r=await post({name:'view_camera',camera:clone(camera)},AbortSignal.any([request.signal,AbortSignal.timeout(2000)]));
+    if(cameraRequest===request){revision=Math.max(revision,r.camera_revision);notice.textContent='';}
+  }
+  catch(e){if(cameraRequest===request)notice.textContent=e.message;}
+  finally{if(cameraRequest===request){cameraRequest=null;if(dirty)timer=setTimeout(flush,50);}}
 }
 function gesture(kind,dx,dy){
   if(!camera||!state)return;
   camera=cameraGesture(camera,kind,dx,dy);lastGesture=performance.now();schedule();
 }
 function preset(view){
+  if(!state?.csrf)return;
   camera=defaults();if(view==='back')camera.azimuth=270;if(view==='side')camera.azimuth=0;
   lastGesture=performance.now();schedule();
 }
@@ -62,21 +72,28 @@ screen.addEventListener('wheel',e=>{
   if(!state)return;e.preventDefault();const pixels=e.deltaY*(e.deltaMode===1?16:e.deltaMode===2?screen.clientHeight:1);gesture('zoom',0,Math.max(-1,Math.min(1,pixels*.002)));
 },{passive:false});
 screen.addEventListener('keydown',e=>{
+  if(!state)return;
   const keys={ArrowLeft:[-.05,0],ArrowRight:[.05,0],ArrowUp:[0,-.05],ArrowDown:[0,.05]};
   if(keys[e.key]){e.preventDefault();gesture('orbit',...keys[e.key]);}
   else if(['+','=','-'].includes(e.key)){e.preventDefault();gesture('zoom',0,e.key==='-'?.12:-.12);}
   else if(e.key.toLowerCase()==='r'){e.preventDefault();preset('reset');}
 });
+function offline(){
+  state=null;resetCamera();notice.textContent='';
+  for(const button of buttons)button.disabled=true;
+}
 window.addEventListener('console-state',e=>{
+  if(!e.detail?.csrf){offline();return;}
+  if(state?.csrf!==e.detail.csrf)resetCamera();
   state=e.detail;
-  if(!camera||(!busy&&!dirty&&performance.now()-lastGesture>350&&state.camera_revision>=revision)){
+  if(!camera||(!cameraRequest&&!dirty&&performance.now()-lastGesture>350&&state.camera_revision>=revision)){
     camera=clone(state.camera);revision=state.camera_revision;
   }
-  for(const b of toolbar.querySelectorAll('button'))b.disabled=false;
+  for(const button of buttons)button.disabled=false;
   stageStop.hidden=!state.glove?.busy&&(state.hardware?.active===false||state.hardware?.active===undefined);
   for(const b of toolbar.querySelectorAll('[data-source]')){
     b.setAttribute('aria-pressed',String(b.dataset.source===state.view_source));
     b.disabled=!!state.hardware?.active&&b.dataset.source==='preview';
   }
 });
-window.addEventListener('console-offline',()=>{state=null;dirty=false;clearTimeout(timer);pointers.clear();for(const b of toolbar.querySelectorAll('button'))b.disabled=true;});
+window.addEventListener('console-offline',offline);

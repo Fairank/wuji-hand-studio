@@ -7,9 +7,22 @@
  const support=document.createElement('details');support.className='doctor-support';
  support.innerHTML='<summary id="support-heading"></summary><p id="support-help" class="hint"></p><label for="support-description" id="support-description-label"></label><textarea id="support-description" rows="3" maxlength="2000"></textarea><div class="button-row"><label for="support-days" id="support-days-label"></label><select id="support-days"><option value="1">1</option><option value="7">7</option><option value="30">30</option></select><button id="support-generate"></button></div><p id="support-status" role="status"></p><div class="button-row"><a id="support-brief" class="doctor-export" download hidden></a><a id="support-official" class="doctor-export" download hidden></a><a id="support-all" class="doctor-export" download hidden></a></div>';
  page.querySelector('.doctor-body').insertBefore(support,$('doctor-rows'));
+ function failureDetails(anchor,id){
+  const details=document.createElement('details');details.hidden=true;
+  details.innerHTML='<summary></summary><pre></pre>';
+  details.querySelector('pre').id=id;anchor.after(details);
+  return (value,label)=>{
+   details.hidden=!value;if(!value)details.open=false;
+   details.querySelector('summary').textContent=label;details.querySelector('pre').textContent=value;
+  };
+ }
+ const showDiagnosticDetails=failureDetails($('doctor-status'),'doctor-failure-detail');
+ const showSupportDetails=failureDetails($('support-status'),'support-failure-detail');
  const link=document.createElement('a');link.href='#doctor';link.dataset.page='doctor';link.innerHTML='<svg viewBox="0 0 26 24" aria-hidden="true"><path d="M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0 M6 12h4l2-5 3 10 2-5h5"/></svg><span data-i18n="doctor"></span>';
  document.querySelector('.directory').insertBefore(link,document.querySelector('.nav-advanced'));
- let state=null,result=null,sending=false,fresh=false,readRevision=0,serviceEpoch=0,controllerToken=null;const t=(zh,en)=>window.WujiLocale.lang==='en'?en:zh;
+ let state=null,result=null,sending=false,fresh=false,readRevision=0,serviceEpoch=0,controllerToken=null;
+ const actionErrors={diagnose:'',support:''};
+ const t=(zh,en)=>window.WujiLocale.lang==='en'?en:zh;
  function translate(){page.querySelector('h2').textContent=t('官方诊断','Diagnostics');link.querySelector('span').textContent=t('官方诊断','Diagnostics');$('doctor-scope').textContent=t('使用当前控制端的 SDK 环境运行官方 CLI。退出码 0 不代表全部检查通过；跳过和未发现设备均不计为设备通过。','Runs the official CLI with this controller’s SDK environment. Exit code 0 does not mean all checks passed; skipped or undiscovered devices are not validated.');$('doctor-serial-label').textContent=t('设备序列号（可空，留空自动发现）','Device serial (optional; empty discovers devices)');$('doctor-version').textContent=t('CLI 与 SDK','CLI & SDK');$('doctor-run').textContent=t('运行官方诊断','Run official diagnostics');$('doctor-download').textContent=t('导出可读报告','Export text');$('doctor-json').textContent=t('官方原始 JSON','Official JSON');$('doctor-bundle').textContent=t('完整运行记录','Full run record');$('doctor-raw-label').textContent=t('官方原始输出','Official raw output');$('doctor-docs').textContent=t('查看官方诊断说明','Official diagnostic documentation');render();}
  function bindReportExports(report){
   const token=result?.report_id,verified=!!report&&typeof token==='string'&&/^[a-f0-9]{64}$/.test(token);
@@ -22,23 +35,70 @@
   $('doctor-address-label').textContent=t('设备 IPv4:端口（可选，与序列号二选一）','Device IPv4:port (optional; choose address or serial)');$('doctor-address').disabled=busy;
   $('support-heading').textContent=t('故障简报与官方支持包','Fault brief and official support bundle');$('support-help').textContent=t('调用官方 wuji logs export，包含已有日志、诊断及范围内的标定录制。文件保存在本机，不会自动发送。','Runs official wuji logs export, including existing logs, diagnostics and calibration recordings in range. Saved locally; never uploaded automatically.');$('support-description-label').textContent=t('故障现象（作为用户描述记录）','Symptom (recorded as operator observation)');$('support-days-label').textContent=t('最近天数','Recent days');$('support-generate').textContent=t('生成支持包','Create support bundle');$('support-brief').textContent=t('故障简报','Fault brief');$('support-official').textContent=t('官方支持包','Official support ZIP');$('support-all').textContent=t('全部附件','All evidence');
   $('support-generate').disabled=busy||connected||!fresh;$('support-days').disabled=busy;$('support-description').disabled=busy;
-  const exported=result?.support;
-  $('support-status').textContent=busy&&result?.operation==='support'?t('正在收集官方日志和诊断…','Collecting official logs and diagnostics…'):exported?t('导出已结束 · 官方退出码 ','Export finished · official exit code ')+exported.exit_code+(!exported.official_archive_available?t(' · 官方 ZIP 未生成或未能收取，简报已保留',' · Official ZIP was not created or collected; the fault brief is retained'):exported.exit_code===0?'':t(' · 存在失败项，请查看原文',' · Some collection failed; review the original output'))+(exported.collection_error?' · '+exported.collection_error:''):'';
+  const exported=result?.support,isSupport=result?.operation==='support';
+  const supportBusy=sending?.kind==='support'||isSupport&&result.running;
+  const diagnosticBusy=sending?.kind==='diagnose'||!isSupport&&result?.running;
+  const supportFailure=actionErrors.support||(isSupport?result.error:'')||'';
+  const backendDiagnosticError=(!isSupport&&result?.error)||'';
+  const diagnosticFailure=actionErrors.diagnose||backendDiagnosticError;
+  const detailsLabel=t('查看错误详情','View error details');
+  const previousSupport=exported?t(' 可下载上次保存的支持包。',' The previous bundle is available to download.'):'';
+  const supportResult=!exported?'':!exported.official_archive_available
+   ?t('故障简报已保存。官方支持包未生成，请查看详情。','The fault brief is saved. See details for the missing official support bundle.')
+   :exported.exit_code!==0||exported.collection_error
+   ?t('支持包已保存。部分资料未收集，请查看详情。','The support bundle is saved. See details for items that were not collected.')
+   :t('支持包已可下载。','The support bundle is ready to download.');
+  $('support-status').textContent=supportBusy?t('正在收集官方日志和诊断…','Collecting official logs and diagnostics…')
+   :supportFailure?t('支持包生成未完成。请重试。','Support bundle generation did not complete. Try again.')+previousSupport
+   :!fresh&&exported?t('本次状态待核对。','Current status is unverified.')+previousSupport:supportResult;
+  const collectionDetail=exported&&(!exported.official_archive_available||exported.exit_code!==0||exported.collection_error)
+   ?[t('官方退出码 ','Official exit code ')+exported.exit_code,exported.collection_error].filter(Boolean).join('\n'):'';
+  showSupportDetails(supportBusy?'':supportFailure||collectionDetail,detailsLabel);
   for(const [id,kind,filename] of [['support-brief','brief','fault-brief.txt'],['support-official','official','official-wuji-support.zip'],['support-all','all','workbench-support.zip']]){const a=$(id);a.download=filename;a.hidden=!exported||(kind==='official'&&!exported.official_archive_available);if(exported)a.href='/api/support?id='+encodeURIComponent(exported.id)+'&kind='+kind;}
-  $('doctor-status').textContent=!fresh?t('诊断状态尚未核对，恢复连接后重新读取。','Diagnostic status is unverified. Reload it after reconnection.'):busy?t('正在检查，请稍候…','Checking…'):result?.error|| (result?.report?t('诊断已结束 · 官方退出码 ','Finished · official exit code ')+result.report.exit_code:connected?t('请先断开设备连接，再运行独立诊断。','Disconnect the SDK session before diagnostics.'):t('尚未运行。控制端和CLI路径在“连接与校准”设置。','Not run. Set the controller and CLI path in Connection.'));
+  const diagnosticSavedError=!actionErrors.diagnose&&backendDiagnosticError&&result?.status==='completed'&&result?.report;
+  $('doctor-status').textContent=!fresh?t('诊断状态尚未核对，恢复连接后重新读取。','Diagnostic status is unverified. Reload it after reconnection.')
+   :diagnosticBusy?t('正在检查，请稍候…','Checking…')
+   :diagnosticSavedError?t('诊断已完成。报告未保存，可查看本次原始输出。','Diagnostics finished. The report was not saved. The original output is available.')
+   :diagnosticFailure?t('诊断未完成。请重试。','Diagnostics did not complete. Try again.')
+   :result?.report?t('诊断已结束 · 官方退出码 ','Finished · official exit code ')+result.report.exit_code
+   :connected?t('请先断开设备连接，再运行独立诊断。','Disconnect the SDK session before diagnostics.')
+   :t('尚未运行。控制端和 CLI 路径在“连接与校准”设置。','Not run. Set the controller and CLI path in Connection.');
+  showDiagnosticDetails(diagnosticBusy?'':diagnosticFailure,detailsLabel);
   const report=result?.report,container=$('doctor-rows');container.replaceChildren();
   bindReportExports(report);
   const date=report?.finished?new Date(report.finished*1000):null;
   const labels={pass:t('通过','Pass'),warn:t('警告','Warning'),fail:t('失败','Fail'),skip:t('跳过','Skipped'),unknown:t('未知','Unknown')};
   const totals={};for(const row of report?.rows||[]){if(row.status in labels)totals[row.status]=(totals[row.status]||0)+1;}
-  $('doctor-context').textContent=report?[!fresh?t('上次报告（状态未核对）','Previous report (status unverified)'):result.restored?t('上次保存的报告','Saved previous report'):t('本次报告','Current report'),date&&!Number.isNaN(date.getTime())?date.toLocaleString():null,report.controller, ...Object.keys(labels).filter(k=>totals[k]).map(k=>labels[k]+' '+totals[k])].filter(Boolean).join(' · '):'';
+  $('doctor-context').textContent=report?[!fresh?t('上次报告（状态未核对）','Previous report (status unverified)'):result.restored||diagnosticFailure&&!diagnosticSavedError?t('上次保存的报告','Saved previous report'):t('本次报告','Current report'),date&&!Number.isNaN(date.getTime())?date.toLocaleString():null,report.controller, ...Object.keys(labels).filter(k=>totals[k]).map(k=>labels[k]+' '+totals[k])].filter(Boolean).join(' · '):'';
   for(const row of report?.rows||[]){const line=document.createElement('div');line.className='doctor-row';line.style.paddingLeft=Math.min(row.depth,12)*14+'px';const badge=document.createElement('span');badge.className='doctor-badge';badge.dataset.status=row.status;badge.textContent=({pass:t('通过','Pass'),warn:t('提示','Warning'),fail:t('失败','Fail'),skip:t('跳过','Skipped'),group:t('分组','Group'),unknown:t('未知','Unknown')})[row.status]||row.status;const content=document.createElement('div'),label=document.createElement('strong'),detail=document.createElement('p');label.textContent=row.label+(row.sn?' · '+row.sn:'');detail.textContent=[row.summary,row.tip].filter(Boolean).join(' · ');content.append(label,detail);line.append(badge,content);container.append(line);}
   $('doctor-raw').textContent=report?[report.stdout,report.stderr,report.parse_error].filter(Boolean).join('\n'):'—';
  }
- function retireService(){serviceEpoch++;readRevision++;sending=false;fresh=false;}
+ function retireService(){serviceEpoch++;readRevision++;sending=false;fresh=false;actionErrors.diagnose=actionErrors.support='';}
  async function poll(force=false){if(sending&&!force)return;const own=++readRevision,epoch=serviceEpoch;try{const r=await fetch('/api/doctor',{cache:'no-store',signal:AbortSignal.timeout(6000)});if(!r.ok)throw Error('Diagnostic status unavailable');const next=await r.json();if(own!==readRevision||epoch!==serviceEpoch)return;result=next;fresh=true;}catch{if(own!==readRevision||epoch!==serviceEpoch)return;fresh=false;}render();}
- async function run(name){if(sending||!fresh||!state?.csrf)return;const ticket={epoch:serviceEpoch,token:state.csrf},current=()=>sending===ticket&&ticket.epoch===serviceEpoch&&state?.csrf===ticket.token;readRevision++;sending=ticket;render();try{const response=await fetch('/api/state',{cache:'no-store',signal:AbortSignal.timeout(6000)});if(!response.ok)throw Error(t('工作台服务未就绪','Workbench service unavailable'));const s=await response.json();if(!current())return;if(typeof s.csrf!=='string'||!s.csrf)throw Error(t('工作台服务未就绪','Workbench service unavailable'));if(s.csrf!==ticket.token)throw Error(t('工作台服务已改变，请重新读取后重试。','Workbench service changed. Reload the status before retrying.'));const values=name==='doctor_support'?{name,days:Number($('support-days').value),description:$('support-description').value}:name==='doctor_run'?{name,serial:$('doctor-serial').value.trim(),address:$('doctor-address').value.trim()}:{name};const r=await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json','X-Console-Token':s.csrf},body:JSON.stringify(values),signal:AbortSignal.timeout(15000)});const body=await r.json();if(!current())return;if(!r.ok||body.ok===false)throw Error(body.error||t('诊断操作未完成','Diagnostic action did not complete'));await poll(true);}catch(e){if(current())result={...result,error:e.message};}finally{if(sending===ticket){sending=false;render();}}}
- $('doctor-version').addEventListener('click',()=>window.WujiOfficialTools?.open());$('doctor-run').addEventListener('click',()=>run('doctor_run'));
+ async function run(name){
+  if(sending||!fresh||!state?.csrf)return;
+  const kind=name==='doctor_support'?'support':'diagnose';
+  const ticket={epoch:serviceEpoch,token:state.csrf,kind};
+  const current=()=>sending===ticket&&ticket.epoch===serviceEpoch&&state?.csrf===ticket.token;
+  readRevision++;sending=ticket;actionErrors[kind]='';render();
+  try{
+   const response=await fetch('/api/state',{cache:'no-store',signal:AbortSignal.timeout(6000)});
+   if(!response.ok)throw Error(t('工作台服务未就绪','Workbench service unavailable'));
+   const s=await response.json();
+   if(!current())return;
+   if(typeof s.csrf!=='string'||!s.csrf)throw Error(t('工作台服务未就绪','Workbench service unavailable'));
+   if(s.csrf!==ticket.token)throw Error(t('工作台服务已改变，请重新读取后重试。','Workbench service changed. Reload the status before retrying.'));
+   const values=kind==='support'?{name,days:Number($('support-days').value),description:$('support-description').value}
+    :{name,serial:$('doctor-serial').value.trim(),address:$('doctor-address').value.trim()};
+   const r=await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json','X-Console-Token':s.csrf},body:JSON.stringify(values),signal:AbortSignal.timeout(15000)});
+   const body=await r.json();
+   if(!current())return;
+   if(!r.ok||body.ok===false)throw Error(body.error||'HTTP '+r.status);
+   await poll(true);
+  }catch(error){if(current())actionErrors[kind]=error.message||error.name;}
+  finally{if(sending===ticket){sending=false;render();}}
+ }
+ $('doctor-version').addEventListener('click',()=>window.WujiOfficialTools?.openEnvironment());$('doctor-run').addEventListener('click',()=>run('doctor_run'));
  $('support-generate').addEventListener('click',()=>run('doctor_support'));
  window.addEventListener('console-state',e=>{const next=e.detail,token=typeof next?.csrf==='string'&&next.csrf?next.csrf:null;if(token!==controllerToken){retireService();controllerToken=token;}state=next;if(!page.hidden)render();});window.addEventListener('console-offline',()=>{retireService();state=null;render();});window.addEventListener('wuji-language',translate);window.addEventListener('workspace-page',()=>{if(location.hash==='#doctor')poll();});setInterval(()=>{if(!page.hidden)poll();},1500);translate();ws.showPage();
 })();

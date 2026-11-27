@@ -364,5 +364,78 @@ class MergeInventoriesTests(unittest.TestCase):
         self.assertEqual(len(result['rejected']), 2)
 
 
+class AddressConflictTests(unittest.TestCase):
+    address = '192.0.2.111'
+
+    def hand(self, serial=RIGHT, address=None):
+        return dict(sn=serial, device_type='wuji_hand_2', address=address or self.address)
+
+    def read(self, *rows, seen=NOW, **fields):
+        return build_inventory(viz=dict(devices=list(rows), scanned_at=seen, **fields), now=NOW)
+
+    def test_one_official_discovery_rejects_two_distinct_serials_sharing_an_ipv4(self):
+        both = [self.hand(address='udp/' + self.address + ':7447'),
+                self.hand(LEFT, self.address + ':7448')]
+        for result in (self.read(*both), normalize_devices(both, source='official_cli', observed_at=NOW, now=NOW)):
+            self.assertEqual({row['sn'] for row in result['devices']}, {LEFT, RIGHT})
+            self.assertEqual(result['conflicts'], [], 'Cards are not excluded as contradictory device identities')
+            for row in result['devices']:
+                self.assertTrue(row['conflict'])
+                self.assertEqual(row['address_conflicts'], [self.address])
+                self.assertFalse(row['selectable'] or row['identity_verified'])
+
+    def test_independent_readers_and_separate_source_batches_do_not_infer_shared_network(self):
+        local = self.read(self.hand())
+        remote = self.read(self.hand(LEFT))
+        shared = merge_inventories([local, remote], now=NOW)
+        mixed = build_inventory(viz=dict(devices=[self.hand()], scanned_at=NOW,
+                                         sdk_devices=[self.hand(LEFT)], sdk_scanned_at=NOW), now=NOW)
+        for result in (shared, mixed, merge_inventories([shared, remote], now=NOW + 1)):
+            self.assertEqual(len(result['devices']), 2)
+            self.assertTrue(all(row['selectable'] and not row['conflict'] for row in result['devices']))
+
+    def test_an_sdk_batch_preserves_ambiguous_cards_without_treating_metadata_as_identity_error(self):
+        from official_device_discovery import _sdk_rows
+        raw = [self.hand(), self.hand(LEFT)]
+        rows = _sdk_rows(raw)
+        inventory = build_inventory(viz=dict(sdk_devices=rows, sdk_scanned_at=NOW), now=NOW)
+        self.assertEqual(len(inventory['devices']), 2)
+        self.assertTrue(all(row['conflict'] and not row['selectable'] for row in inventory['devices']))
+
+    def test_local_collision_is_preserved_but_expired_reports_do_not_block_connect(self):
+        pair = self.read(self.hand(), self.hand(LEFT))
+        remote = self.read(self.hand(address='192.0.2.112'))
+        merged = merge_inventories([pair, remote], now=NOW + 1)
+        self.assertTrue(all(row['address_conflicts'] == [self.address] for row in merged['devices']))
+        verified_local = merge_inventories([remote, pair], now=NOW + 1)
+        reachable = next(row for row in verified_local['devices'] if row['sn'] == RIGHT)
+        self.assertTrue(reachable['selectable'], 'A separate workspace claim cannot disable a clean local route')
+        repeated = merge_inventories([verified_local, pair], now=NOW + 2)
+        self.assertTrue(next(row for row in repeated['devices'] if row['sn'] == RIGHT)['selectable'])
+        later = build_inventory(viz=dict(devices=[self.hand()], scanned_at=NOW + 30), now=NOW + 30)
+        expired = merge_inventories([pair, later], now=NOW + 30)
+        self.assertFalse(any(row.get('address_conflicts') or row['conflict'] for row in expired['devices']))
+        self.assertTrue(next(row for row in expired['devices'] if row['sn'] == RIGHT)['selectable'])
+
+    def test_stale_failed_usb_zenoh_or_hint_only_rows_do_not_supply_a_conflict(self):
+        cases = [self.read(self.hand(), self.hand(LEFT), seen=NOW - 30),
+                 self.read(self.hand(), self.hand(LEFT), error='fixture failed'),
+                 self.read(self.hand(), self.hand(LEFT, 'zenoh://' + LEFT)),
+                 self.read(self.hand(), dict(self.hand(LEFT), address='usb://example', ip=self.address)),
+                 self.read(self.hand(), dict(sn=LEFT, address=self.address)),
+                 self.read(self.hand(address='224.0.0.1'), self.hand(LEFT, '224.0.0.1')),
+                 self.read(self.hand(address=self.address + ':70000'), self.hand(LEFT)),
+                 self.read(self.hand(), self.hand(address='udp/' + self.address))]
+        for result in cases:
+            self.assertFalse(any(row.get('address_conflicts') or row['conflict'] for row in result['devices']))
+
+    def test_active_exact_hand_keeps_verified_ownership_under_an_address_conflict(self):
+        inventory = build_inventory(viz=dict(devices=[self.hand(), self.hand(LEFT)], scanned_at=NOW),
+                                    controller=InventoryTests().controller(stale=False), now=NOW)
+        active = next(row for row in inventory['devices'] if row['sn'] == RIGHT)
+        self.assertTrue(active['in_use'] and active['identity_verified'] and active['conflict'])
+        self.assertFalse(active['selectable'], 'Retain a verified session, but do not advertise a new connection')
+
+
 if __name__ == '__main__':
     unittest.main()

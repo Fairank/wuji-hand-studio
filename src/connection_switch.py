@@ -21,6 +21,46 @@ from feedback_stream import feedback_release_confirmed
 SERIAL=re.compile(r'[A-Za-z0-9][A-Za-z0-9_-]{0,79}\Z')
 
 
+def _observed_hand_endpoint(hand,side):
+    """Only fresh, exact discovery records can supply a concrete route."""
+    from zenoh_route import endpoint
+    locations=set()
+    for row in hand.get('observations',()):
+        if (row.get('stale') is not False or row.get('sn')!=hand.get('sn')
+                or row.get('source') not in ('official_cli','controller_discovery','glove_hand_discovery')
+                or row.get('kind')!='hand' or row.get('generation')!='hand2'
+                or row.get('side') not in (None,side)):
+            continue
+        for value in row.get('addresses',()):
+            try:address=endpoint(value.removeprefix('udp/'),side) if value else ''
+            except ValueError:continue  # Zenoh serial URIs and USB locators are not Ethernet endpoints.
+            if address and not address.startswith('255.255.255.255:'):locations.add(address)
+    return next(iter(locations)) if len(locations)==1 else ''
+
+
+def _observed_glove_route(glove,side):
+    """Keep the current native CLI's exact glove locator on the explicit open."""
+    from calibration_transport import validate_glove_route
+    serial=glove['sn'];locations=set()
+    for row in glove.get('observations',()):
+        if (row.get('source')!='official_cli' or row.get('stale') is not False
+                or row.get('sn')!=serial or row.get('kind')!='glove'
+                or row.get('kind_source')!='device' or row.get('side') not in (None,side)):
+            continue
+        for address in row.get('addresses',()):
+            try:route=validate_glove_route(dict(source='official_discovery',serial=serial,address=address),serial)
+            except ValueError:continue
+            locations.add(route['address'])
+    if len(locations)==1:
+        return dict(source='official_discovery',serial=serial,address=next(iter(locations)))
+    return None
+
+
+def _reject_address_conflict(devices,serial):
+    if any(row.get('sn')==serial and row.get('address_conflicts') for row in devices):
+        raise ValueError('多台设备使用同一 IP，请先分开地址 / Device address conflict; assign distinct addresses')
+
+
 def unsettled(state):
     switch=state.get('connection_switch') or {}
     return bool(switch.get('busy') or (switch.get('user_catalog') or {}).get('busy')
@@ -192,7 +232,8 @@ class ConnectionSwitch:
                     and cleanup.get('error') is None and glove.get('busy') is False
                     and glove.get('follow_pending',False) is False and glove.get('follow_unconfirmed',False) is False
                     and hardware.get('active',False) is False
-                    and ('stop_confirmed' not in hardware or hardware['stop_confirmed'] is True)):
+                    and ('stop_confirmed' not in hardware or hardware['stop_confirmed'] is True
+                         or cleanup.get('readonly_hand_released') is True)):
                 with self.lock:
                     if self._cleanup_owner==responsibility and self.state.get('attempt_id')==attempt:
                         self._cleanup_owner=None;self.state['cleanup_error']=None
@@ -514,6 +555,8 @@ class ConnectionSwitch:
             raise ValueError('Invalid glove timeout')
         inventory=self.controller.device_inventory()
         if inventory.get('workspace_errors'):raise ValueError('Another workspace state is unavailable')
+        _reject_address_conflict(inventory['devices'],sn)
+        if 'hand_serial' in target:_reject_address_conflict(inventory['devices'],target['hand_serial'])
         row=next((r for r in inventory['devices'] if r['sn']==sn and not r.get('conflict')
                   and (not r.get('stale') or source and source['serial']==sn)),None)
         if row is None:raise ValueError('请先查找并选择目标设备 / Find and select the target device first')
@@ -602,6 +645,9 @@ class ConnectionSwitch:
                 if not ('_saved_profile' in target or actual or resumed or catalog):raise ValueError('请刷新并选择实际SDK佩戴者 / Refresh and select an actual SDK wearer')
                 from glove_protocol import validate
                 validate(dict(name='glove_open',serial=sn,user_id=target['user_id'],timeout_ms=target.get('timeout_ms',250)))
+                if '_saved_profile' not in target and self._saved_supported():
+                    route=_observed_glove_route(row,selected['side'])
+                    if route is not None:target['_glove_route']=route
             if 'hand_serial' in target:
                 if '_continuation' in target or '_saved_profile' in target:raise ValueError('Continue calibration before selecting a hand')
                 from glove_protocol import validate
@@ -614,14 +660,19 @@ class ConnectionSwitch:
                 hand=next((r for r in inventory['devices'] if r['sn']==target['hand_serial']
                     and r.get('kind')=='hand' and (not r.get('stale') or exact_current) and not r.get('conflict')
                     and not r.get('workspace_owners') and r.get('generation')==selected['generation']
-                    and r.get('side')==selected['side']),None)
+                    and r.get('side') in (None,selected['side'])),None)
                 # The private pairing adapter has just verified and released
                 # this exact hand in its original workspace. It may disappear
                 # from that workspace's directory after release; the SDK still
                 # verifies its actual identity before feedback is accepted.
-                if (pair_target==dict(hand_serial=target['hand_serial'],profile=selected['id'],sdk_user=target['user_id'])):
+                if (hand is None and pair_target==dict(hand_serial=target['hand_serial'],profile=selected['id'],sdk_user=target['user_id'])):
                     hand=pair_target
                 if hand is None:raise ValueError('请查找并选择空闲的同型号同侧灵巧手 / Find an available hand with the same model and side')
+                if selected['generation']=='hand2' and not target.get('address'):
+                    address=_observed_hand_endpoint(hand,selected['side'])
+                    if address:
+                        from bridge_config import load_config
+                        if load_config().get('mode') in ('wsl','macvm'):target['address']=address
                 target['_binding']=dict(generation=selected['generation'],side=selected['side'],
                     glove_serial=sn,sdk_user=target['user_id'],hand_serial=target['hand_serial'])
                 target['_mapping']=self.controller.retarget.library.snapshot(target['_binding'])
@@ -641,6 +692,11 @@ class ConnectionSwitch:
             # The original connector verifies serial again. Caller-supplied
             # addresses never override the directory's exact target identity.
             target.pop('address',None)
+            if selected['generation']=='hand2':
+                address=_observed_hand_endpoint(row,selected['side'])
+                if address:
+                    from bridge_config import load_config
+                    if load_config().get('mode') in ('wsl','macvm'):target['_hand_endpoint']=address
         else:
             from bridge_config import load_config
             if load_config().get('mode') not in ('wsl','local'):
@@ -780,7 +836,7 @@ class ConnectionSwitch:
 
     def start(self,command,*,pair_target=None):
         if not self.workflow_lock.acquire(blocking=False):raise ValueError('Another device task is switching')
-        new_session=None;source=None;stopped=False;attempt_started=False;discovery_scope=ExitStack()
+        new_session=None;hand_session=None;source=None;stopped=False;attempt_started=False;discovery_scope=ExitStack()
         try:
             request_id=command.get('request_id') if isinstance(command,dict) else None
             if not isinstance(request_id,str) or not re.fullmatch('[0-9a-f]{32}',request_id):raise ValueError('Invalid switch request identity')
@@ -898,7 +954,10 @@ class ConnectionSwitch:
                     self._check_cancel()
                     self.controller.action(dict(name='official_viz_start',serial=target['serial'],theme=target.get('theme','light')))
                 elif target['mode']=='hand':
-                    self.controller.action(dict(name='connect',serial=target['serial'],auto_detect=True))
+                    opening=dict(name='connect',serial=target['serial'],auto_detect=True)
+                    if '_hand_endpoint' in target:opening['address']=target['_hand_endpoint']
+                    self.controller.action(opening)
+                    hand_session=getattr(self.controller,'generation',None)
                 elif '_saved_profile' in target:
                     proof=target['_saved_profile']
                     bundle=self.controller._prepare_saved_profile(proof,cancel_check=self._check_cancel)
@@ -913,7 +972,9 @@ class ConnectionSwitch:
                     if continued.get('phase') in ('error','cancelled'):
                         raise ValueError(continued.get('error') or 'Calibration continuation did not start')
                 else:
-                    self.controller.action(dict(name='glove_scan'))
+                    opening=dict(name='glove_scan')
+                    if '_glove_route' in target:opening['_glove_route']=target['_glove_route']
+                    self.controller.action(opening)
                     new_session=self.controller.glove.snapshot()['session_id']
             if target['mode']=='teleoperation' and not {'_continuation','_saved_profile'}&set(target) and not attach:
                 def ready():
@@ -922,7 +983,8 @@ class ConnectionSwitch:
                     if g.get('connection')=='error' or not g.get('busy'):raise ValueError(g.get('message') or 'SDK connection failed')
                     return g if g.get('connection')=='ready' else None
                 g=self._wait(ready,12,'SDK directory did not become ready')
-                if (not any((r.get('sn') or r.get('serial'))==target['serial'] for r in g.get('devices',[]))
+                routed=('_glove_route' in target and self.controller.glove.selected_route_ready(new_session,target['_glove_route']))
+                if (not (routed or any((r.get('sn') or r.get('serial'))==target['serial'] for r in g.get('devices',[])))
                         or not any(u.get('user_id')==target['user_id'] for u in g.get('users',[]))):
                     raise ValueError('The exact glove or SDK wearer is no longer available')
                 self._check_cancel()
@@ -935,6 +997,8 @@ class ConnectionSwitch:
                     raise ValueError((current.get('official_viz') or {}).get('error') or 'Viewer connection failed')
                 if target['mode']=='teleoperation' and (current.get('glove') or {}).get('connection')=='error':
                     raise ValueError((current.get('glove') or {}).get('message') or 'SDK connection failed')
+                if target['mode']=='hand' and current.get('connection')=='error':
+                    raise ValueError(current.get('message') or 'Hand connection failed')
                 actual=owner(current)
                 if actual and actual['mode']==target['mode'] and actual['serial']==target['serial']:
                     if target['mode']=='teleoperation' and (actual['profile']!=target['profile']
@@ -945,7 +1009,6 @@ class ConnectionSwitch:
                                 or solver.get('applied') is not True):return None
                     return current
                 if target['mode']=='official' and (current.get('official_viz') or {}).get('phase')=='error':raise ValueError('Viewer connection failed')
-                if target['mode']=='hand' and current.get('connection')=='error':raise ValueError(current.get('message') or 'Hand connection failed')
                 return None
             # While starting, owner() intentionally rejects incomplete claims;
             # those are pending, not successful receipts.
@@ -958,9 +1021,12 @@ class ConnectionSwitch:
             after=self._wait(poll_connected,max(0,self.deadline-self.clock()) if '_saved_profile' in target else 12,'New device connection was not confirmed')
             if 'hand_serial' in target:
                 self._check_cancel();self._check_mapping(target)
+                prior_hand_error=(after.get('glove') or {}).get('hand_error') or ''
+                prior_error_cleared=not prior_hand_error
                 self.controller.action(dict(name='glove_prepare',serial=target['hand_serial'],address=target.get('address','')))
                 expected_session=(after.get('glove') or {}).get('session_id')
                 def prepared():
+                    nonlocal prior_error_cleared
                     current=self.controller.snapshot();g=current.get('glove') or {};feedback=g.get('feedback') or {}
                     identity=feedback.get('identified_device') or {};hardware=g.get('hardware') or {}
                     if (g.get('session_id')!=expected_session or g.get('glove_serial')!=target['serial']
@@ -968,6 +1034,13 @@ class ConnectionSwitch:
                         raise ValueError('Glove identity changed while connecting the hand')
                     if g.get('connection')=='error' or hardware.get('phase')=='error':raise ValueError(g.get('message') or hardware.get('reason') or 'Hand connection failed')
                     if feedback.get('device_id') not in (None,target['hand_serial']):raise ValueError('Unexpected hand feedback identity')
+                    hand_error=g.get('hand_error')
+                    if not hand_error:prior_error_cleared=True
+                    # A notice or an unchanged earlier prepare error is not
+                    # acknowledgement that this explicit retry has failed.
+                    if (isinstance(hand_error,str) and hand_error and (prior_error_cleared or hand_error!=prior_hand_error)
+                            and (feedback.get('connection')=='error' or g.get('hand_cleanup_confirmed') is True and not feedback.get('device_id'))):
+                        raise ValueError(hand_error)
                     if (feedback.get('connection')=='connected' and feedback.get('device_id')==target['hand_serial']
                             and feedback.get('stale') is False and identity.get('source')=='sdk_identity'
                             and identity.get('serial')==target['hand_serial'] and identity.get('profile')==target['profile']
@@ -998,6 +1071,14 @@ class ConnectionSwitch:
             self._set(phase='failed',error=str(error)[:900],receipt=None,source_released=stopped)
             # No implicit retry or unrelated stop. An unfinished new session
             # remains visible and explicitly owned if cleanup cannot be proven.
+            if hand_session is not None:
+                controller=self.controller;serial=target['serial']
+                record=getattr(controller,'feedback_sessions',{}).get(hand_session)
+                if record is not None and record.get('serial')==serial:
+                    record['thread'].join(max(0,min(1,self.deadline-self.clock())))
+                    if feedback_release_confirmed(record):
+                        try:controller.stop_feedback_confirmed(hand_session,serial,timeout=0,allow_unidentified=True)
+                        except ValueError:pass  # A replacement owner or unconfirmed stop must remain protected.
             if new_session is not None:
                 try:
                     glove=self.controller.glove.snapshot()

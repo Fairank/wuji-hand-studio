@@ -73,8 +73,8 @@ class ReviewRunnerTests(unittest.TestCase):
             p.write_text('x=2\n',encoding='utf8')
             self.assertNotEqual(before,self.runner.source_hashes(root))
 
-    def test_source_fingerprint_includes_ui_markup_styles_identity_and_svg(self):
-        for extension in ('.html','.css','.json','.svg'):
+    def test_source_fingerprint_includes_ui_assets_and_windows_network_setup(self):
+        for extension in ('.html','.css','.json','.svg','.ps1'):
             with self.subTest(extension=extension),tempfile.TemporaryDirectory() as folder:
                 root=Path(folder);(root/'src').mkdir();path=root/('src/fixture'+extension)
                 path.write_text('original',encoding='utf8');before=self.runner.source_hashes(root)

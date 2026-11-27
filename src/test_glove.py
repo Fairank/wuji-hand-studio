@@ -94,6 +94,15 @@ class GloveTests(unittest.TestCase):
         self.assertEqual(s.target(1.),[.1]*20)
         self.assertTrue(s.snapshot(1.)['fresh'])
 
+    def test_mapping_duration_belongs_to_latest_accepted_fresh_frame(self):
+        source=GloveSource(250)
+        self.assertTrue(source.update([.1]*20,8,100,1.,mapping_ms=2.5))
+        self.assertFalse(source.update([.2]*20,8,110,1.1,mapping_ms=87.))
+        self.assertEqual(source.snapshot(1.2)['mapping_ms'],2.5)
+        self.assertIsNone(source.snapshot(1.26)['mapping_ms'])
+        self.assertTrue(source.update([.3]*20,9,120,1.3))
+        self.assertIsNone(source.snapshot(1.3)['mapping_ms'])
+
     def test_nonfinite_output_invalidates_instead_of_being_sent(self):
         s=GloveSource()
         with self.assertRaises(ValueError):s.update([float('nan')]*20,1,1,0)
@@ -137,6 +146,21 @@ class GloveTests(unittest.TestCase):
         last=[c[1] for c in hand.calls if c[0]=='send'][-1]
         self.assertLessEqual(max(last),.01+d.run_profile['max_velocity_rad_s']*.02)
         self.assertTrue(d.active);d.stop('test')
+
+    def test_high_speed_setting_still_eases_from_the_measured_pose_on_enable(self):
+        hand,source,driver=self.make_driver()
+        with patch('glove_motion.PATH_SPEED_RAD_S',10.075),patch('glove_motion.COMMAND_SPEED_RAD_S',13.08):
+            self.start(driver)
+            for step in range(1,102):
+                now=1.+step/100
+                source.update([.3]*20,step+1,step+1,now)
+                driver.command(dict(name='hardware_keepalive',lease='a'*32),None,None,now)
+                driver.tick(feedback(now,.01),diagnostics(now),now)
+                if step in (11,101):
+                    target=[entry[1] for entry in hand.calls if entry[0]=='send'][-1]
+                    self.assertAlmostEqual(target[0],.039 if step==11 else .3,places=6)
+            self.assertTrue(driver.active)
+            driver.stop('test complete')
 
     def test_glove_loss_disables_no_send_and_no_automatic_resume(self):
         hand,s,d=self.make_driver();self.start(d)

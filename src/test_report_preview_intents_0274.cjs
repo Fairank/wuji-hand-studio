@@ -13,15 +13,30 @@ test('all three ordinary export URLs bind the displayed report identity',()=>{co
 test('an unverified or absent report cannot leave a latest-report export link available',()=>{for(const token of [null,'bad','A'.repeat(64)]){const n=exportsFixture({operation:'diagnose'},token);for(const name of ['doctor-download','doctor-json','doctor-bundle']){assert.equal(n[name].hidden,true);assert.equal(n[name].href,undefined);}}});
 function fixture(){
  const source=fs.readFileSync(path.join(web,'studio.js'),'utf8'),begin=source.indexOf('  let touchPending='),fallback=source.indexOf("  $('touch-flow').addEventListener('click',"),end=source.indexOf("  const pose=$('pose-console')",fallback),listeners={},button={disabled:false,addEventListener(name,fn){this[name]=fn}},location={hash:'#interaction'},calls=[],pending=[],errors=[];
- const env={location,$:id=>{assert.equal(id,'touch-flow');return button},window:{addEventListener(name,fn){(listeners[name]??=[]).push(fn)}},text:(zh,en)=>en,notice:e=>errors.push(e.message),post:body=>{calls.push(body);return new Promise((resolve,reject)=>pending.push({resolve,reject}))}};
- vm.createContext(env);vm.runInContext(`let state={csrf:'A'},intentRevision=0;${source.slice(begin>=0?begin:fallback,end)};globalThis.stateTo=value=>state=value;globalThis.bumpIntent=()=>intentRevision++;`,env);
+ const status={hidden:true,textContent:''},summary={textContent:''},raw={textContent:''};
+ const details={hidden:true,open:false,querySelector:selector=>({summary,pre:raw})[selector]};
+ const nodes={'touch-flow':button,'touch-flow-result':status,'touch-flow-details':details};
+ let language='en';
+ const env={location,$:id=>{assert.ok(nodes[id],id);return nodes[id];},window:{addEventListener(name,fn){(listeners[name]??=[]).push(fn)}},text:(zh,en)=>language==='en'?en:zh,notice:e=>errors.push(e.message),post:body=>{calls.push(body);return new Promise((resolve,reject)=>pending.push({resolve,reject}))}};
+ vm.createContext(env);vm.runInContext(`let state={csrf:'A'},intentRevision=0;${source.slice(begin>=0?begin:fallback,end)};globalThis.stateTo=value=>state=value;globalThis.bumpIntent=()=>intentRevision++;globalThis.renderFeedback=renderTouchFailure;`,env);
  const publish=token=>{for(const fn of listeners['console-state']||[])fn({detail:{csrf:token}});env.stateTo({csrf:token})};
  const navigate=hash=>{location.hash=hash;for(const fn of listeners.hashchange||[])fn()};
  const offline=()=>{for(const fn of listeners['console-offline']||[])fn();env.stateTo(null)};
- publish('A');return {env,button,calls,pending,errors,location,publish,navigate,offline,start:()=>button.click()};
+ const switchLanguage=value=>{language=value;env.renderFeedback();};
+ publish('A');return {env,button,calls,pending,errors,status,summary,raw,details,location,publish,navigate,offline,switchLanguage,start:()=>button.click()};
 }
-test('touch preview suppresses duplicate pending clicks and preserves normal completion',async()=>{const f=fixture(),first=f.start(),second=f.start();assert.equal(f.calls.length,1);assert.equal(f.button.disabled,true);f.pending[0].resolve({ok:true});await Promise.all([first,second]);assert.equal(f.location.hash,'feedback');assert.equal(f.button.disabled,false);});
-test('navigation away and back retires automatic navigation from an old preview',async()=>{const f=fixture(),first=f.start();f.navigate('#home');f.navigate('#interaction');f.pending[0].resolve({ok:true});await first;assert.equal(f.location.hash,'#interaction');assert.deepEqual(f.errors,[]);});
-for(const success of [true,false])test('old-service '+(success?'success':'failure')+' cannot clear a new request or change its page/error',async()=>{const f=fixture(),old=f.start();f.offline();f.publish('B');const next=f.start();assert.equal(f.calls.length,2);if(success)f.pending[0].resolve({ok:true});else f.pending[0].reject(Error('OLD A failure'));await old;assert.equal(f.button.disabled,true);assert.deepEqual(f.errors,[]);assert.equal(f.location.hash,'#interaction');f.pending[1].resolve({ok:true});await next;assert.equal(f.button.disabled,false);assert.equal(f.location.hash,'feedback');});
-test('same-service explicit failure is retryable and does not navigate',async()=>{const f=fixture(),first=f.start();f.pending[0].reject(Error('Current failure'));await first;assert.equal(f.location.hash,'#interaction');assert.deepEqual(f.errors,['Current failure']);assert.equal(f.button.disabled,false);const retry=f.start();f.pending[1].resolve({ok:true});await retry;assert.equal(f.calls.length,2);assert.equal(f.location.hash,'feedback');});
-test('a changed demonstration intent cannot be overwritten by touch preview completion',async()=>{const f=fixture(),first=f.start();f.env.bumpIntent();f.pending[0].resolve({ok:true});await first;assert.equal(f.location.hash,'#interaction');assert.deepEqual(f.errors,[]);});
+function noLocalFailure(f){assert.equal(f.status.hidden,true);assert.equal(f.details.hidden,true);assert.equal(f.raw.textContent,'');assert.deepEqual(f.errors,[]);}
+test('touch preview suppresses duplicate pending clicks and preserves normal completion',async()=>{const f=fixture(),first=f.start(),second=f.start();assert.equal(f.calls.length,1);assert.equal(f.button.disabled,true);f.pending[0].resolve({ok:true});await Promise.all([first,second]);assert.equal(f.location.hash,'feedback');assert.equal(f.button.disabled,false);noLocalFailure(f);});
+for(const success of [true,false])test('navigation away and back retires the previous preview '+(success?'success':'failure'),async()=>{const f=fixture(),first=f.start();f.navigate('#home');f.navigate('#interaction');if(success)f.pending[0].resolve({ok:true});else f.pending[0].reject(Error('Outdated preview failure'));await first;assert.equal(f.location.hash,'#interaction');noLocalFailure(f);});
+for(const success of [true,false])test('old-service '+(success?'success':'failure')+' cannot clear a new request or change its page/error',async()=>{const f=fixture(),old=f.start();f.offline();f.publish('B');const next=f.start();assert.equal(f.calls.length,2);if(success)f.pending[0].resolve({ok:true});else f.pending[0].reject(Error('OLD A failure'));await old;assert.equal(f.button.disabled,true);noLocalFailure(f);assert.equal(f.location.hash,'#interaction');f.pending[1].resolve({ok:true});await next;assert.equal(f.button.disabled,false);assert.equal(f.location.hash,'feedback');});
+test('same-service failure stays local with translated feedback, original details and explicit retry',async()=>{
+ const f=fixture(),first=f.start();f.pending[0].reject(Error('HTTP 503 · Current failure'));await first;
+ assert.equal(f.location.hash,'#interaction');assert.equal(f.button.disabled,false);assert.deepEqual(f.errors,[]);
+ assert.equal(f.status.hidden,false);assert.equal(f.status.textContent,'Preview did not complete. Try again.');
+ assert.equal(f.details.hidden,false);assert.equal(f.details.open,false);assert.equal(f.summary.textContent,'View error details');
+ assert.equal(f.raw.textContent,'HTTP 503 · Current failure');
+ f.switchLanguage('zh');assert.equal(f.status.textContent,'预览未完成。请重试。');assert.equal(f.raw.textContent,'HTTP 503 · Current failure');
+ const retry=f.start();noLocalFailure(f);f.pending[1].resolve({ok:true});await retry;
+ assert.equal(f.calls.length,2);assert.equal(f.location.hash,'feedback');
+});
+test('a changed demonstration intent cannot be overwritten by touch preview completion',async()=>{const f=fixture(),first=f.start();f.env.bumpIntent();f.pending[0].resolve({ok:true});await first;assert.equal(f.location.hash,'#interaction');noLocalFailure(f);});

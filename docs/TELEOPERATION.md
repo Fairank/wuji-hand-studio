@@ -29,4 +29,6 @@ Windows使用已配置的内置Linux控制端或显式Linux控制电脑。当前
 
 型号、地址、失联时限、参数与数据率在详情中查看。实际停止、终止记录、精确设备归属、数据新鲜度及控制租约仍由原控制链核验。软件与合成界面验证不等于实机精度或物理停止已验收。
 
+Windows 上手和手套接到两张同网段的网卡时，可在「设备 → 检查连接」中逐个选择设备及其实际网卡，再点击配置。配置只保存所选设备地址的专用路由。已经可用的专用路由会自动识别，日常在设备页选中并接入即可。进入实机跟随时使用当前控制端参数，从实测姿态逐步过渡到手套目标。
+
 官方依据：[SDK实时遥操作示例](https://github.com/wuji-technology/wuji-sdk/blob/main/examples/python/retargeting/1.teleop_real.py)、[SDK说明](https://github.com/wuji-technology/wuji-sdk/blob/main/README.md)。本版结果另见[验证记录](VALIDATION_0.2.44.md)。

@@ -17,7 +17,7 @@ function fixture({native=true,mode='ssh'}={}){
  const listeners={},connection=new Element('section'),body=new Element('body'),address=new Element('input'),inventoryRoot=new Element('section'),reads=[],writes=[],fetches=[],sheets=[],state={csrf:'network-service-A',device_profile:{id:'hand2_right',generation:'hand2',side:'right'}};body.dataset.page='home';address.value='';
  const document={body,hidden:false,documentElement:{lang:'zh-CN'},addEventListener:(n,f)=>(listeners['document:'+n]??=[]).push(f),createElement:tag=>new Element(tag),getElementById:id=>id==='device-address'?address:id==='device-inventory'?inventoryRoot:null};
  const window={document,WujiWorkspace:{views:{connection}},WujiConnection:{state:()=>state},addEventListener:(n,f)=>(listeners[n]??=[]).push(f),dispatchEvent:e=>{for(const f of listeners[e.type]||[])f(e);},HandWorkbenchSheet:{create:()=>{const element=new Element('dialog'),sheet={element,body:new Element('div'),open(){element.open=true;},close(){element.open=false;element.dispatchEvent({type:'close'});},setLabels(){}};sheets.push(sheet);return sheet;}}};
- if(native)window.pywebview={api:{network_status:address=>{const d=deferred();reads.push({address,...d});return d.promise;},configure_device_network:async(...args)=>{writes.push(args);return status();}}};
+ if(native)window.pywebview={api:{network_status:(address,target)=>{const d=deferred();reads.push({address,target,...d});return d.promise;},configure_device_network:async(...args)=>{writes.push(args);return status();}}};
  const ctx={window,document,console,Promise,Date,JSON,Number,Error,setTimeout:(fn,ms)=>ms===1000?(queueMicrotask(fn),-1):setTimeout(fn,ms),clearTimeout,CustomEvent:class{constructor(type,options={}){this.type=type;this.detail=options.detail;}},getComputedStyle:()=>({visibility:'visible'}),fetch:async url=>{fetches.push(url);return {ok:true,json:async()=>({bridge:{mode}})};},Option:class extends Element{constructor(label,value){super('option');this.textContent=label;this.value=value;}}};
  vm.runInNewContext(source,ctx);const emit=(type,detail)=>window.dispatchEvent({type,detail});return {window,document,connection,address,inventoryRoot,reads,writes,fetches,sheets,state,emit,card:connection.children[0],api:window.WujiNetwork};
 }
@@ -28,8 +28,56 @@ test('automatic completed empty discovery deduplicates; pending/nonempty/hidden 
 test('offline then fresh service read is not overwritten or unlocked by the old native reply',async()=>{const f=fixture();await flush();const old=f.api.inspect();await flush();f.emit('console-offline');f.state.csrf='network-service-B';f.emit('console-state',structuredClone(f.state));const current=f.api.inspect();await flush();assert.equal(f.reads.length,2);f.reads[0].resolve(status('subnet_ready'));await old;assert.equal(f.card.children.at(-1).children[0].disabled,true);assert(!f.card.children[1].textContent.includes('已就绪'));f.reads[1].resolve(status('cable_unplugged'));await current;assert.match(f.card.children[1].textContent,/未检测到连接/);assert.equal(f.card.children.at(-1).children[0].disabled,false);});
 test('closing and reopening retires a pending read and its error cannot replace the retry',async()=>{const f=fixture();await flush();const a=f.api.inspect();await flush();f.sheets[0].close();const b=f.api.inspect();await flush();f.reads[0].reject(Error('old closed error'));await a.catch(()=>{});assert.equal(f.card.children.at(-1).children[0].disabled,true);f.reads[1].resolve(status('subnet_ready'));await b;assert.match(f.card.children[1].textContent,/已就绪/);assert(!f.card.children[1].textContent.includes('old closed'));assert.equal(f.writes.length,0);});
 test('profile change retires old read; USB explanation is retained without invented adapter evidence',async()=>{const f=fixture();await flush();const a=f.api.inspect();await flush();f.state.device_profile={id:'hand1_left',generation:'hand1',side:'left'};f.emit('console-state',structuredClone(f.state));const b=f.api.inspect();await flush();f.reads[1].resolve({code:'usb_device',can_configure:false});await b;f.reads[0].resolve(status('subnet_ready'));await a;assert.match(f.card.children[1].textContent,/USB/);assert(!f.card.children[2].textContent.includes('USB Ethernet'));assert.equal(f.writes.length,0);});
-test('read failure can be explicitly retried and missing native bridge has no read or write fallback',async()=>{const f=fixture();await flush();const a=f.api.inspect();await flush();f.reads[0].reject(Error('synthetic read failure'));await a.catch(()=>{});assert.match(f.card.children[1].textContent,/synthetic read failure/);assert.equal(f.card.children.at(-1).children[0].disabled,false);const b=f.api.inspect();await flush();f.reads[1].resolve(status());await b;assert(!f.card.children[1].textContent.includes('synthetic'));const absent=fixture({native:false});await flush();assert.equal(absent.api.available(),false);assert.equal(await absent.api.inspect(),null);assert.equal(absent.sheets.length,0);assert.equal(absent.fetches.length,0);});
+test('read failure has an explicit retry and retains its original diagnostic; missing bridge has no fallback',async()=>{const f=fixture();await flush();const a=f.api.inspect();await flush();f.reads[0].reject(Error('synthetic read failure'));await a.catch(()=>{});const diagnostics=f.card.children.find(item=>item.tagName==='details'),raw=diagnostics.children.find(item=>item.tagName==='pre');assert.match(f.card.children[1].textContent,/请重新检查/);assert.equal(f.card.children[1].dataset.tone,'warning');assert.equal(diagnostics.hidden,false);assert.equal(raw.textContent,'synthetic read failure');assert.equal(f.card.children.at(-1).children[0].disabled,false);const b=f.api.inspect();await flush();f.reads[1].resolve(status());await b;assert.equal(raw.hidden,true);assert(!f.card.children[1].textContent.includes('synthetic'));const absent=fixture({native:false});await flush();assert.equal(absent.api.available(),false);assert.equal(await absent.api.inspect(),null);assert.equal(absent.sheets.length,0);assert.equal(absent.fetches.length,0);});
+test('pending system approval and denial stay actionable and localized; a read never configures',async()=>{
+ const f=fixture(),read=f.api.inspect();
+ await flush();
+ f.reads[0].resolve({...status(),setup:{state:'pending'}});
+ await read;
+ assert.equal(f.card.children[1].textContent,'正在配置设备网口。');
+ assert.match(f.card.children[2].textContent,/授权/);
+ const rejected=f.api.inspect();
+ await flush();
+ f.reads[1].resolve({...status(),setup:{state:'failed',error:'Synthetic Windows approval was declined'}});
+ await rejected;
+ f.document.documentElement.lang='en';
+ f.emit('wuji-language');
+ assert.match(f.card.children[1].textContent,/Adapter setup did not finish/);
+ const diagnostics=f.card.children.find(item=>item.tagName==='details');
+ assert.match(diagnostics.children.find(item=>item.tagName==='pre').textContent,/Synthetic Windows/);
+ assert.equal(diagnostics.children.find(item=>item.tagName==='ul').children.length,1);
+ assert.equal(f.writes.length,0);
+});
 test('only an explicit enabled adapter configuration click invokes the existing native write and rereads its result',async()=>{const f=fixture(),read=f.api.inspect();await flush();f.reads[0].resolve(status());await read;const select=f.card.children.find(x=>x.tagName==='select'),repair=f.card.children.at(-1).children[1];select.value='synthetic-adapter';select.onchange();assert.equal(repair.disabled,false);const configured=repair.onclick();await flush();assert.equal(f.writes.length,1);assert.deepEqual(f.writes[0],['synthetic-adapter','']);assert.equal(f.reads.length,2);const duplicate=f.api.inspect();await flush();assert.equal(f.reads.length,2,'Reopening the same check cannot replace a configuration in progress');await repair.onclick();assert.equal(f.writes.length,1);f.reads[1].resolve({...status('subnet_ready'),can_configure:false});await flush();assert.equal(f.reads.length,3);f.reads[2].resolve({...status('subnet_ready'),can_configure:false});await configured;await duplicate;assert.match(f.card.children[1].textContent,/已就绪/);assert.equal(repair.hidden,true);assert.equal(f.writes.length,1);});
 test('the first published replacement service retires a read even before an initial console event',async()=>{const f=fixture(),a=f.api.inspect();await flush();f.state.csrf='network-service-B';f.emit('console-state',structuredClone(f.state));assert.equal(f.card.children.at(-1).children[0].disabled,false);const b=f.api.inspect();await flush();f.reads[0].resolve(status('subnet_ready'));await a;assert.equal(f.card.children.at(-1).children[0].disabled,true);f.reads[1].resolve(status('cable_unplugged'));await b;assert.match(f.card.children[1].textContent,/未检测到连接/);});
 test('an address edit without a state publication rejects the old read but leaves explicit check retryable',async()=>{const f=fixture(),a=f.api.inspect();await flush();f.address.value='192.168.2.20:7447';f.reads[0].resolve(status('subnet_ready'));await a;assert.equal(f.card.children.at(-1).children[0].disabled,false);assert(!f.card.children[1].textContent.includes('已就绪'));const b=f.api.inspect();await flush();assert.equal(f.reads[1].address,'192.168.2.20:7447');f.reads[1].resolve(status('cable_unplugged'));await b;});
 test('a completed first discovery failure without a previous timestamp can check once, but an unstarted scan cannot',async()=>{const f=fixture();await f.api.observe({...finished,scanned_at:null});assert.equal(f.reads.length,0);const failed={...finished,scanned_at:null,error:'Synthetic discovery failed'},a=f.api.observe(failed);await flush();assert.equal(f.reads.length,1);f.reads[0].resolve(status('no_ethernet'));await a;await f.api.observe({...failed});assert.equal(f.reads.length,1);assert.equal(f.writes.length,0);});
+test('Windows connection check can configure the other adapter for the selected glove only',async()=>{
+ const f=fixture({mode:'wsl'}),first=f.api.inspect();
+ await flush();
+ const targets=['hand','glove_left','glove_right'];
+ f.reads[0].resolve({...status('subnet_ready'),can_configure:false,network_targets:targets});
+ await first;
+ const target=f.card.children.find(x=>x.id==='device-network-target');
+ assert.equal(target?.hidden,false);
+ f.address.value='192.168.1.111';
+ target.value='glove_right';target.onchange();
+ await flush();
+ assert.deepEqual([f.reads[1].address,f.reads[1].target],['','glove_right']);
+ f.reads[1].resolve({...status('route_required'),network_targets:targets,
+  target:'192.168.1.101:50001',candidates:[{id:'glove-ethernet',name:'Glove Ethernet'}]});
+ await flush();
+ const choice=f.card.children.find(x=>x.tagName==='select'&&x!==target);
+ const repair=f.card.children.at(-1).children[1];
+ choice.value='glove-ethernet';choice.onchange();
+ assert.equal(f.writes.length,0);
+ const configured=repair.onclick();
+ await flush();
+ assert.deepEqual(f.writes,[['glove-ethernet','','glove_right']]);
+ f.reads[2].resolve({...status('subnet_ready'),can_configure:false,network_targets:targets});
+ await flush();
+ f.reads[3].resolve({...status('subnet_ready'),can_configure:false,network_targets:targets});
+ await configured;
+ assert.match(f.card.children[1].textContent,/已就绪/);
+ assert.equal(repair.hidden,true);
+});

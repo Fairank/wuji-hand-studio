@@ -2,12 +2,13 @@
 (()=>{
  'use strict';
  const $=id=>document.getElementById(id),ws=window.WujiWorkspace;
- const host=$('settings-devices');if(!host||!ws)return;
+ const host=$('settings-updates'),deviceHost=$('settings-devices');if(!host||!deviceHost||!ws)return;
  const t=(zh,en)=>window.WujiLocale?.lang==='en'?en:zh;
- const card=document.createElement('section');card.id='official-tools';card.className='wb-card official-tools';
+ const card=document.createElement('section');card.id='official-tools';card.className='wb-card official-tools update-card';
  card.setAttribute('aria-labelledby','ot-title');
- card.innerHTML=`<header class="ot-heading"><div><h3 id="ot-title" tabindex="-1"></h3><p id="ot-subtitle"></p></div><span id="ot-state" class="ot-badge"></span></header>
- <p id="ot-description"></p><div class="ot-table" role="table" aria-labelledby="ot-title"><div class="ot-table-head" role="row"><span id="ot-component-label" role="columnheader"></span><span id="ot-checked-label" role="columnheader"></span><span id="ot-target-label" role="columnheader"></span></div>
+ card.innerHTML=`<header class="update-heading"><div><h3 id="ot-title" tabindex="-1"></h3><p id="ot-subtitle"></p></div><span id="ot-cli-release-state" class="update-state" role="status"></span></header>
+ <div class="update-versions"><div><span id="ot-cli-current-label"></span><strong id="ot-cli-current"></strong></div><div><span id="ot-cli-latest-label"></span><strong id="ot-cli-latest"></strong></div></div>
+ <p id="ot-description"></p><div class="ot-table" role="table" aria-labelledby="ot-environment-title"><div class="ot-table-head" role="row"><span id="ot-component-label" role="columnheader"></span><span id="ot-checked-label" role="columnheader"></span><span id="ot-target-label" role="columnheader"></span></div>
  <div class="ot-component" role="row"><strong role="rowheader">CLI</strong><span id="ot-cli" role="cell"></span><span id="ot-cli-target" role="cell"></span></div>
  <div class="ot-component" role="row"><strong role="rowheader">SDK</strong><span id="ot-sdk" role="cell"></span><span id="ot-sdk-target" role="cell"></span></div></div>
  <div class="ot-runtime"><div><strong id="ot-runtime-label"></strong><span id="ot-runtime-state"></span></div><p id="ot-runtime-note"></p></div>
@@ -15,14 +16,19 @@
  <div class="ot-actions"><button id="ot-check" type="button" class="primary"></button><button id="ot-install" type="button"></button><button id="ot-select" type="button"></button></div>
  <details id="ot-system"><summary id="ot-system-title"></summary><p id="ot-system-note"></p><button id="ot-system-install" type="button"></button><p id="ot-system-status" role="status"></p></details>`;
  const releases=document.createElement('div');releases.className='ot-cli-release';
- releases.innerHTML='<div class="ot-cli-release-row"><span id="ot-cli-release-state" role="status"></span><div class="ot-cli-release-actions"><button id="ot-cli-check" type="button"></button><button id="ot-cli-update" type="button"></button><button id="ot-cli-rollback" type="button"></button></div></div><div id="ot-cli-auto-row" class="ot-cli-auto-row" hidden><div><label id="ot-cli-auto-label" for="ot-cli-auto"></label><p id="ot-cli-auto-note"></p></div><button id="ot-cli-auto" class="ot-cli-switch" type="button" role="switch" aria-checked="false" aria-labelledby="ot-cli-auto-label" aria-describedby="ot-cli-auto-note"><span></span></button></div><div id="ot-cli-progress-wrap" hidden><div class="ot-cli-progress-heading"><span id="ot-cli-progress-label"></span><span id="ot-cli-progress-detail"></span></div><progress id="ot-cli-progress" max="100" aria-labelledby="ot-cli-progress-label"></progress></div><p id="ot-cli-release-error" role="alert"></p><details><summary id="ot-cli-release-details-label"></summary><p id="ot-cli-release-details"></p></details>';
- card.querySelector('#ot-system').before(releases);host.prepend(card);
- // Daily version controls stay first. Environment repair keeps the same
- // controls and listeners in a disclosure rather than another dashboard.
- const environment=document.createElement('details');environment.id='ot-environment';environment.className='ot-environment';
- const environmentSummary=document.createElement('summary'),environmentTitle=document.createElement('span');environmentTitle.id='ot-environment-title';environmentSummary.append(environmentTitle,$('ot-state'));environment.append(environmentSummary);
- for(const selector of ['#ot-description','.ot-table','.ot-runtime','#ot-checked-at','#ot-status','#ot-error','.ot-actions'])environment.append(card.querySelector(selector));
- card.append(environment);
+ releases.innerHTML=`<div class="update-actions"><button id="ot-cli-check" type="button"></button><button id="ot-cli-update" class="primary" type="button"></button><button id="ot-cli-rollback" type="button"></button></div>
+ <div id="ot-cli-progress-wrap" hidden><div class="ot-cli-progress-heading"><span id="ot-cli-progress-label"></span><span id="ot-cli-progress-detail"></span></div><progress id="ot-cli-progress" max="100" aria-labelledby="ot-cli-progress-label"></progress></div>
+ <p id="ot-cli-release-error" role="alert"></p>
+ <div id="ot-cli-auto-row" class="ot-cli-auto-row" hidden><div><label id="ot-cli-auto-label" for="ot-cli-auto"></label><p id="ot-cli-auto-note"></p></div><button id="ot-cli-auto" class="ot-cli-switch" type="button" role="switch" aria-checked="false" aria-labelledby="ot-cli-auto-label" aria-describedby="ot-cli-auto-note"><span></span></button></div>
+ <details><summary id="ot-cli-release-details-label"></summary><p id="ot-cli-release-details"></p></details>`;
+ card.append(releases);host.append(card);
+ const environment=document.createElement('details');environment.id='ot-environment';environment.className='wb-card official-tools ot-environment';
+ const environmentSummary=document.createElement('summary'),environmentTitle=document.createElement('span'),environmentState=document.createElement('span');environmentTitle.id='ot-environment-title';environmentState.id='ot-state';environmentState.className='ot-badge';environmentSummary.append(environmentTitle,environmentState);environment.append(environmentSummary);
+ for(const selector of ['#ot-description','.ot-table','.ot-runtime','#ot-checked-at','#ot-status','#ot-error','.ot-actions','#ot-system'])environment.append(card.querySelector(selector));
+ const environmentDetails=document.createElement('details');environmentDetails.className='ot-diagnostics';environmentDetails.hidden=true;
+ environmentDetails.innerHTML='<summary></summary><pre></pre>';
+ environment.querySelector('#ot-error').after(environmentDetails);
+ deviceHost.append(environment);
  let data=null,fresh=false,pending='',pollPromise=null,transportError='',actionError='',systemMessage='',lastRefresh=0,lastEnvironmentIssue='',environmentEpoch=0;
  let cliData=null,cliFresh=false,cliPending='',cliPromise=null,cliTransportError='',cliActionError='',cliLastRefresh=0,cliUnconfirmedPreference=null,cliEpoch=0;
  function version(value){return typeof value==='string'&&value.trim()?value:t('未检查','Not checked');}
@@ -31,10 +37,18 @@
   const date=new Date(typeof value==='number'&&value<1e12?value*1000:value);
   return Number.isFinite(date.getTime())?date.toLocaleString(window.WujiLocale?.lang==='en'?'en-GB':'zh-CN'):t('时间不可用','Time unavailable');
  }
+ function explainFailure(value,fallback){
+  const localized=window.WujiLocale?.notice?.(value)??value;
+  if(/\[Errno 2\]|no such file or directory|cannot find the file/i.test(localized))return t('未找到组件文件。请重新检查安装。','Component files are missing. Check the installation again.');
+  if(/finish.*session|请.*结束.*会话/i.test(localized))return t('请先结束设备、标定和诊断会话，再重试。','Finish device, calibration and diagnostic sessions, then try again.');
+  if(/(?:^HTTP\s+\d|failed to fetch|network|timed out|timeout)/i.test(localized))return t('服务暂不可用。请重新读取状态。','The service is unavailable. Reload the status.');
+  if(/^\[Errno |(?:Type|Abort|Reference|Request|Permission)Error:/i.test(localized))return fallback;
+  return localized||fallback;
+ }
  function render(){
   const r=data?.runtime||{},check=data?.check||{},target=data?.target||{},busy=!!pending||fresh&&(!!r.busy||!!check.busy);
   const installed=!!r.installed,mismatch=check.status==='ready'&&!check.compatible,selected=['wsl','macvm'].includes(window.WujiInstallation?.snapshot()?.bridge?.mode);
-  const labels={'ot-title':['控制组件','Control components'],'ot-subtitle':['CLI 与遥操作 SDK','CLI and teleoperation SDK'],'ot-environment-title':['控制环境','Controller environment'],
+  const labels={'ot-title':['官方 CLI','Official CLI'],'ot-subtitle':['用于设备识别和手套标定。','Used for device discovery and glove calibration.'],'ot-environment-title':['控制环境','Controller environment'],
    'ot-description':['内置环境用于设备连接、标定与遥操作。','The built-in environment supports connections, calibration and teleoperation.'],
    'ot-component-label':['组件','Component'],'ot-checked-label':['实际检查版本','Checked version'],'ot-target-label':['内置基线','Bundled baseline'],
    'ot-runtime-label':['内置控制组件','Built-in control components'],'ot-system-title':['Windows 系统支持','Windows system support'],
@@ -49,10 +63,15 @@
   $('ot-runtime-state').textContent=!fresh?t('状态待核对','Status unconfirmed'):r.busy?t(...(phaseLabels[r.stage]||['正在准备组件','Preparing components'])):r.ready?t('配套环境已安装','Bundled environment installed'):installed?t('已有环境，待更新','Environment installed; update required'):t('尚未安装','Not installed');
   $('ot-runtime-note').textContent=t('安装状态来自环境记录；上方版本只显示实际软件检查结果。','Installation status comes from environment records. Versions above come only from an actual software check.');
   const status=!fresh?t('状态待核对','Status unconfirmed'):pending==='control_tools_check'||check.busy?t('正在检查','Checking'):check.status==='ready'?(check.compatible?t('配套版本已确认','Bundled versions verified'):t('检查已完成','Check completed')):check.status==='failed'?t('检查未通过','Check failed'):t('尚未检查','Not checked');
-  $('ot-state').textContent=status;card.dataset.status=!fresh?'unknown':pending==='control_tools_check'||check.busy?'checking':check.status||'unchecked';
-  $('ot-state').hidden=fresh&&check.status==='ready'&&check.compatible===true&&!busy;
-  $('ot-status').textContent=!fresh?(data?t('状态暂不可用，请重新读取。','Status unavailable. Reload to retry.'):t('正在读取组件状态。','Loading component status.')):check.busy?t('正在检查软件版本，不连接设备。','Checking software versions without connecting devices.'):check.status==='ready'&&!check.compatible?t('内置环境需要修复。','The built-in environment needs repair.'):'';
-  $('ot-error').textContent=transportError||actionError||check.error||r.error||'';
+  $('ot-state').textContent=status;environment.dataset.status=!fresh?'unknown':pending==='control_tools_check'||check.busy?'checking':check.status||'unchecked';
+  const failure=transportError||actionError||check.error||r.error||'';
+  $('ot-state').hidden=!!failure||fresh&&check.status==='ready'&&check.compatible===true&&!busy;
+  $('ot-status').textContent=!failure&&mismatch?t('内置环境需要修复。','The built-in environment needs repair.'):'';
+  $('ot-error').textContent=failure?explainFailure(failure,t('组件状态待核对。请重新检查。','Review the controller components to confirm their state.')):'';
+  environmentDetails.hidden=!failure;
+  environmentDetails.querySelector('summary').textContent=t('查看错误详情','View error details');
+  environmentDetails.querySelector('pre').textContent=failure;
+  if(!failure)environmentDetails.open=false;
   $('ot-check').textContent=!fresh?t('重新读取状态','Reload status'):check.busy||pending==='control_tools_check'?t('正在检查…','Checking…'):check.status==='failed'?t('重新检查内置组件','Retry component check'):t('检查内置组件','Check built-in components');
   $('ot-check').disabled=busy;
   $('ot-install').hidden=!r.supported||fresh&&r.ready&&!mismatch&&!r.busy;$('ot-install').textContent=r.busy?t('正在准备…','Preparing…'):r.ready&&!mismatch?t('配套组件已安装','Bundled components installed'):installed?t('更新至配套版本','Update to bundled version'):t('安装内置控制组件','Install built-in components');
@@ -62,33 +81,39 @@
   const issueKey=environmentIssue?JSON.stringify([pending,r.busy,r.stage,check.busy,check.status,check.compatible,transportError,actionError,check.error,r.error,r.ready]):'';
   if(issueKey&&issueKey!==lastEnvironmentIssue)environment.open=true;
   lastEnvironmentIssue=issueKey;
-  $('ot-system').hidden=!r.supported||r.mode==='macvm';$('ot-system-install').disabled=busy;$('ot-system-status').textContent=systemMessage;renderCli();
+  $('ot-system').hidden=!r.supported||r.mode==='macvm';$('ot-system-install').disabled=busy;
+  $('ot-system-status').textContent=systemMessage?explainFailure(systemMessage,t('Windows 组件操作未完成，请重试。','Windows component setup did not complete. Try again.')):'';
+  $('ot-system-status').title=systemMessage;renderCli();
  }
  function renderCli(){
   const u=cliData?.update||{},current=cliData?.current||{},previous=cliData?.previous||{},busy=!!cliPending||!!pending||cliFresh&&(!!cliData?.busy||!!u.checking||!!u.preparing);
   const managed=u.update_method==='managed_native',unverified=managed&&current.validated===false,phase=cliPending==='official_cli_check'?'checking':cliPending==='official_cli_update'?'checking':cliPending==='official_cli_rollback'?'verifying':u.phase;
   const bundledUpdate=cliFresh&&u.update_method==='workbench'&&u.newer_cli_available===true;
   const phaseLabels={checking:['正在检查更新','Checking for updates'],downloading:['正在下载更新','Downloading update'],verifying:['正在校验更新','Verifying update'],preparing:['正在准备更新','Preparing update'],waiting_idle:['设备使用中，空闲后更新','Waiting for devices to be idle'],ready:['更新已完成','Update complete']};
-  let label=!cliFresh?t('版本状态暂不可用','Version status unavailable'):phaseLabels[phase]?t(...phaseLabels[phase]):u.checking?t('正在检查更新','Checking for updates'):u.preparing?t('正在准备更新','Preparing update'):u.error?t('更新未完成','Update incomplete'):u.available?t('可更新至 ','Update available: ')+(u.latest_version||'—'):u.checked_at!=null?t('检查已完成','Check completed'):t('尚未检查更新','Updates not checked');
+  let label=!cliFresh?t('版本状态暂不可用','Version status unavailable'):phaseLabels[phase]?t(...phaseLabels[phase]):u.checking?t('正在检查更新','Checking for updates'):u.preparing?t('正在准备更新','Preparing update'):u.error?t('更新未完成','Update incomplete'):u.available?t('有可用更新','Update available'):u.checked_at!=null?t('检查已完成','Check completed'):t('尚未检查更新','Updates not checked');
   if(cliFresh&&phase!=='ready'&&u.checked_at!=null&&!busy&&!u.error&&!u.available&&u.latest_version&&u.latest_version===current.version)label=t('已是最新版本','Up to date');
-  if(bundledUpdate&&!busy&&!u.error)label=t('随工作台更新 · ','Updates with workbench · ')+(u.latest_version||'—');
+  if(bundledUpdate&&!busy&&!u.error)label=t('随工作台更新','Updates with workbench');
   if(cliFresh&&unverified&&!busy)label=t('本地 CLI 待校验','Local CLI unverified');
-  $('ot-cli-release-state').textContent='CLI '+version(current.version)+' · '+label;
-  $('ot-cli-check').textContent=!cliFresh?t('重新读取','Reload status'):phase==='checking'?t('正在检查…','Checking…'):t('检查更新','Check updates');$('ot-cli-update').textContent=busy&&phase!=='checking'?t('正在更新…','Updating…'):bundledUpdate?t('软件更新','Software update'):phase==='error'?t('重试更新','Retry update'):t('更新 CLI','Update CLI');$('ot-cli-rollback').textContent=t('切换至 ','Switch to ')+version(previous.version);
+  $('ot-cli-check').textContent=!cliFresh?t('重新读取状态','Reload status'):t('检查更新','Check updates');$('ot-cli-update').textContent=bundledUpdate?t('查看软件更新','View software update'):phase==='error'?t('重试更新','Retry update'):t('更新 CLI','Update CLI');$('ot-cli-rollback').textContent=t('回滚至 ','Roll back to ')+version(previous.version);
   $('ot-cli-check').disabled=busy;$('ot-cli-update').hidden=!bundledUpdate&&!u.available&&!u.preparing&&cliPending!=='official_cli_update';$('ot-cli-update').disabled=!cliFresh||busy||!bundledUpdate&&u.available!==true;$('ot-cli-rollback').hidden=!previous.version;$('ot-cli-rollback').disabled=!cliFresh||busy||!previous.version;
   $('ot-cli-auto-row').hidden=!managed;$('ot-cli-auto-label').textContent=t('自动更新 CLI','Update CLI automatically');$('ot-cli-auto-note').textContent=cliPending==='official_cli_auto_update'?t('正在保存…','Saving…'):t('使用官方稳定版，设备空闲时安装。','Install official stable releases when devices are idle.');
   $('ot-cli-auto').setAttribute('aria-checked',String(u.auto_update===true));$('ot-cli-auto').disabled=!cliFresh||!!cliPending;
   $('ot-cli-auto').setAttribute('aria-busy',String(cliPending==='official_cli_auto_update'));
   const failure=cliTransportError||cliActionError||(phase!=='waiting_idle'?u.error:'')||(unverified?current.validation_error||'Native CLI integrity is unverified':'');
-  $('ot-cli-release-error').textContent=failure?(cliTransportError?t('暂时无法读取更新状态，请重新读取。','Update status is unavailable. Reload to retry.'):cliActionError?cliActionError:unverified?t('本地 CLI 尚未通过校验，请重新读取或查看版本详情。','The local CLI has not passed verification. Reload or see version details.'):t('更新未完成，当前版本仍可使用。请重试或查看版本详情。','Update did not complete. The current version remains available. Retry or see version details.')):'';
+  const failureText=cliTransportError?t('暂时无法读取更新状态，请重新读取。','Update status is unavailable. Reload to retry.'):unverified?t('本地 CLI 尚未通过校验。请重新读取或查看版本详情。','The local CLI has not passed verification. Reload or see version details.'):explainFailure(failure,t('更新未完成。请重试或查看版本详情。','The update did not finish. Retry or see version details.'));
+  $('ot-cli-release-error').textContent=failure?failureText:'';
   const progress=u.progress||{},showProgress=cliFresh&&['checking','downloading','verifying','preparing'].includes(phase),bar=$('ot-cli-progress'),received=progress.received_bytes,total=progress.total_bytes;
+  $('ot-cli-current-label').textContent=!cliFresh||unverified?t('上次记录','Last recorded'):t('当前版本','Current version');$('ot-cli-current').textContent=version(current.version);
+  $('ot-cli-latest-label').textContent=t('最新版本','Latest version');$('ot-cli-latest').textContent=version(u.latest_version);
+  $('ot-cli-release-state').textContent=label;$('ot-cli-release-state').hidden=!!failure||showProgress;
   $('ot-cli-progress-wrap').hidden=!showProgress;$('ot-cli-progress-label').textContent=phaseLabels[phase]?t(...phaseLabels[phase]):'';
   const known=phase==='downloading'&&Number.isFinite(received)&&Number.isFinite(total)&&total>0&&received>=0&&received<=total,mb=value=>(value/1048576).toFixed(1);
   if(known){const percent=Math.floor(received/total*100);bar.value=percent;$('ot-cli-progress-detail').textContent=percent+'% · '+mb(received)+' / '+mb(total)+' MB';}
   else{bar.removeAttribute('value');$('ot-cli-progress-detail').textContent=phase==='downloading'&&Number.isFinite(received)&&received>=0?mb(received)+' MB':'';}
   releases.dataset.phase=cliFresh?phase||'unchecked':'unknown';
   $('ot-cli-release-details-label').textContent=t('版本详情','Version details');
-  $('ot-cli-release-details').textContent=[t(unverified?'上次记录：':'当前：',unverified?'Last recorded: ':'Current: ')+version(current.version)+(current.commit?' · '+String(current.commit).slice(0,12):''),t('最新：','Latest: ')+version(u.latest_version),t('上次检查：','Last checked: ')+timestamp(u.checked_at),t('上一版：','Previous: ')+version(previous.version),u.update_method==='workbench'?t('原版 CLI 随工作台软件更新，设备与标定共用同一版本。','The original CLI updates with the workbench. Discovery and calibration use the same version.'):u.auto_update===true?t('自动更新已开启','Automatic updates enabled'):t('自动更新未开启','Automatic updates not enabled'),u.error||'',unverified?current.validation_error||'':''].filter(Boolean).join('\n');
+  const errors=[...new Set([cliTransportError,cliActionError,u.error,unverified&&current.validation_error].filter(Boolean))];
+  $('ot-cli-release-details').textContent=[t(!cliFresh||unverified?'上次记录：':'当前：',!cliFresh||unverified?'Last recorded: ':'Current: ')+version(current.version)+(current.commit?' · '+String(current.commit).slice(0,12):''),t('最新：','Latest: ')+version(u.latest_version),t('上次检查：','Last checked: ')+timestamp(u.checked_at),t('上一版：','Previous: ')+version(previous.version),u.update_method==='workbench'?t('原版 CLI 随工作台软件更新，设备与标定共用同一版本。','The original CLI updates with the workbench. Discovery and calibration use the same version.'):u.auto_update===true?t('自动更新已开启','Automatic updates enabled'):t('自动更新未开启','Automatic updates not enabled'),...errors].filter(Boolean).join('\n');
  }
  async function loadCli({afterAction=false}={}){
   if(cliPending&&!afterAction)return;if(cliPromise)return cliPromise;const own=cliEpoch;
@@ -129,10 +154,11 @@
   }catch(error){if(own===environmentEpoch)actionError=error.message||t('操作未完成，请重试','Operation failed; try again');}
   finally{if(own===environmentEpoch){pending='';render();}}
  }
- function open(){location.hash='#settings';ws.showPage();$('settings-tab-devices')?.click();$('ot-title').focus({preventScroll:true});card.scrollIntoView({block:'start'});load();loadCli();}
- window.WujiOfficialTools={open,refresh:()=>Promise.all([load(),loadCli()])};
+ function open(){window.WujiSettings.reveal('updates',$('ot-title'));loadCli();}
+ function openEnvironment(){environment.open=true;window.WujiSettings.reveal('devices',environmentSummary);load();}
+ window.WujiOfficialTools={open,openEnvironment,refresh:()=>Promise.all([load(),loadCli()])};
  $('ot-check').onclick=()=>fresh?act('control_tools_check'):load();
- $('ot-cli-check').onclick=()=>cliFresh?cliAction('official_cli_check'):loadCli();$('ot-cli-update').onclick=()=>{if(cliFresh&&cliData?.update?.update_method==='workbench'&&cliData.update.newer_cli_available===true){window.WujiWorkbenchUpdate?.open();return;}cliAction('official_cli_update');};$('ot-cli-rollback').onclick=()=>cliAction('official_cli_rollback');
+ $('ot-cli-check').onclick=()=>cliFresh?cliAction('official_cli_check'):loadCli();$('ot-cli-update').onclick=()=>{if(cliFresh&&cliData?.update?.update_method==='workbench'&&cliData.update.newer_cli_available===true){window.WujiWorkbenchUpdate?.showInSettings();return;}cliAction('official_cli_update');};$('ot-cli-rollback').onclick=()=>cliAction('official_cli_rollback');
  $('ot-cli-auto').onclick=()=>cliAction('official_cli_auto_update',{enabled:cliData?.update?.auto_update!==true});
  $('ot-install').onclick=()=>act('runtime_install');$('ot-select').onclick=()=>act('runtime_select');
  $('ot-system-install').onclick=async()=>{
@@ -144,6 +170,7 @@
  window.addEventListener('installation-state',render);window.addEventListener('wuji-language',render);
  window.addEventListener('console-offline',()=>{environmentEpoch++;cliEpoch++;pollPromise=null;cliPromise=null;pending='';cliPending='';fresh=false;cliFresh=false;transportError=cliTransportError=t('工作台服务已离线，请重新读取。','Workbench service is offline. Reload the status.');render();});
  window.addEventListener('workspace-page',event=>{if(event.detail==='settings'&&Date.now()-lastRefresh>1000)load();});
- setInterval(()=>{const visible=card.getClientRects().length>0&&!document.hidden;if(data?.runtime?.busy||data?.check?.busy||(visible&&Date.now()-lastRefresh>6000))load();if(cliData?.busy||cliData?.update?.checking||cliData?.update?.preparing||(visible&&Date.now()-cliLastRefresh>6000))loadCli();},2000);
+ const visible=node=>node.getClientRects().length>0&&!document.hidden;
+ setInterval(()=>{if(data?.runtime?.busy||data?.check?.busy||(visible(environment)&&Date.now()-lastRefresh>6000))load();if(cliData?.busy||cliData?.update?.checking||cliData?.update?.preparing||(visible(card)&&Date.now()-cliLastRefresh>6000))loadCli();},2000);
  render();load();loadCli();
 })();

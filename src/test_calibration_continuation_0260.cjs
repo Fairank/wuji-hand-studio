@@ -10,7 +10,7 @@ const ended=(run=RUN,attempt=ATTEMPT)=>({...saved(run).calibrated_teleoperation,
 function environment(){
  const result={children:[],append(...nodes){for(const node of nodes){node.isConnected=true;this.children.push(node);}}};
  const listeners={},requests=[],modes=[],location={hash:'#connection'};
- const element=tag=>({tag,isConnected:false,children:[],classList:{add(){}},setAttribute(){},append(...nodes){this.children.push(...nodes);}});
+ const element=tag=>({tag,isConnected:false,children:[],dataset:{},classList:{add(){}},setAttribute(){},append(...nodes){this.children.push(...nodes);}});
  const document={querySelector:s=>s==='.oc-result'?result:null,createElement:element};
  const window={WujiLocale:{lang:'en'},WujiTeleoperation:{openMode(mode){modes.push(mode);location.hash=mode==='real'?'#glove':'#virtual-glove';}},addEventListener(name,fn){listeners[name]=fn;}};
  const fetch=(url,options)=>new Promise((resolve,reject)=>requests.push({url,command:JSON.parse(options.body),headers:options.headers,resolve(value){resolve({ok:true,json:async()=>clone(value)});},reject}));

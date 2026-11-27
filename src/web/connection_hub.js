@@ -2,6 +2,7 @@
  'use strict';
  const $=id=>document.getElementById(id),ws=window.WujiWorkspace;
  const t=(zh,en)=>window.WujiLocale?.lang==='en'?en:zh;
+ const noticeText=value=>window.WujiLocale?.notice?.(value)??value??'';
  const body=$('page-connection')?.querySelector('.page-body');
  if(!body)return;
  const readingCanvas=document.querySelector('.page-area'),footer=readingCanvas?.querySelector(':scope > footer');
@@ -126,9 +127,10 @@
   const s=consoleState,g=s?.glove||{},c=s?.connection_switch||{},cleanup=g.session_cleanup||{},hw=g.hardware||{},feedback=g.feedback||{};
   // GloveBridge's never-paired preview has an empty hardware object; its
   // snapshot only adds a boolean stale flag to the empty feedback object.
-  // A prepared/unknown hand needs its explicit stop acknowledgement instead.
+   // A paired hand needs a stop acknowledgement or exact read-only ownership.
   const noHand=object(g.hardware)&&!Object.keys(hw).length&&object(g.feedback)&&Object.keys(feedback).every(key=>key==='stale'&&typeof feedback[key]==='boolean');
-  return !!serial&&g.busy===true&&g.connection==='receiving'&&g.glove_serial===serial&&Number.isInteger(g.session_id)&&typeof g.user?.user_id==='string'&&g.profile===s.device_profile?.id&&/^hand[12]_(left|right)$/.test(g.profile||'')&&c.can_switch===true&&/^[a-f0-9]{64}$/.test(c.expected_owner||'')&&!c.busy&&!c.cleanup_error&&!c.user_catalog?.busy&&!cleanup.error&&!g.follow_pending&&!g.follow_unconfirmed&&!g.hand_unpairing&&(noHand||hw.active===false&&hw.stop_confirmed===true);
+   const identity=feedback.identified_device,readonly=g.feedback_release_allowed===true&&hw.enable_attempted===false&&!!feedback.device_id&&identity?.source==='sdk_identity'&&identity.serial===feedback.device_id&&identity.profile===g.profile;
+   return !!serial&&g.busy===true&&g.connection==='receiving'&&g.glove_serial===serial&&Number.isInteger(g.session_id)&&typeof g.user?.user_id==='string'&&g.profile===s.device_profile?.id&&/^hand[12]_(left|right)$/.test(g.profile||'')&&c.can_switch===true&&/^[a-f0-9]{64}$/.test(c.expected_owner||'')&&!c.busy&&!c.cleanup_error&&!c.user_catalog?.busy&&!cleanup.error&&!g.follow_pending&&!g.follow_unconfirmed&&!g.hand_unpairing&&(noHand||hw.active===false&&(hw.stop_confirmed===true||readonly));
  }
  function sessionBlock(ownViewer='',ownGlove=''){
   if(!consoleState)return t('工作台服务离线，恢复后再操作。','Workbench service is offline. Wait for reconnection.');
@@ -282,13 +284,15 @@
   if(successorViewer&&!running&&!cleanup&&typeof run.id==='string'&&run.id&&run.serial===serial)previousResultRunId=run.id;
   const ownResult=!running&&!successorViewer&&typeof run.id==='string'&&!!run.id&&run.id!==previousResultRunId&&run.serial===serial&&run.user===profile&&run.side===side&&(run.id===lastStartedRunId||continuationCurrent);
   calib.dataset.currentResult=String(ownResult);
-  const message=cleanup||!consoleState||!calibrationFresh?reason:running?'':actionError||(ownResult?'':reason);
+  const waitingForSelection=!!window.WujiDeviceUse&&!serial&&!cleanup&&!running&&!calibrationStartPending;
+  const message=waitingForSelection?'':noticeText(cleanup||!consoleState||!calibrationFresh?reason:running?'':actionError||(ownResult?'':reason));
   calib.querySelector('.hub-calib-readiness').dataset.state=running?'running':ready?'ready':'blocked';write('hub-calib-ready-title','');write('hub-calib-ready-note',message);
   nextAction=ownResult?null:next;$('hub-calib-next').hidden=running||ownResult||!nextLabel;$('hub-calib-next').disabled=busy;write('hub-calib-next',nextLabel);$('hub-calib-start').disabled=!ready;
-  officialViz?.setCalibrationState({running,busy:busy||cancelStartPending||cleanup,verified:calibrationFresh,ready,human:terminal,runtime,status,reason:message,terminal:(run.source==='official_tty'||restoring)&&!!run.id,actionLabel:t('开始标定','Start calibration'),guided:true});
+  officialViz?.setCalibrationState({running,busy:busy||cancelStartPending||cleanup,verified:calibrationFresh,ready,human:terminal,runtime,status,terminal:(run.source==='official_tty'||restoring)&&!!run.id,actionLabel:t('开始标定','Start calibration'),guided:true});
   const hasRecord=typeof run.id==='string'&&!!run.id,showCurrent=running||cleanup||ownResult;
+  calibrationPanel.dataset.waitingForSelection=String(waitingForSelection&&!hasRecord&&!run.result&&!run.event&&!busy&&!cancelStartPending&&v.active!==true&&v.reserved!==true&&consoleState?.glove?.busy!==true);
   previous.hidden=showCurrent||!hasRecord;write('hub-calib-previous-label',t('上次标定记录','Previous calibration record'));if(showCurrent){if(guideHost.parentElement!==calib)calib.append(guideHost);}else if(hasRecord){if(guideHost.parentElement!==previous)previous.append(guideHost);}guideHost.hidden=!showCurrent&&!hasRecord;
-  guide?.render(c,{fresh:calibrationFresh,busy:busy||cancelStartPending,error:!consoleState?reason:actionError||refreshError,notice:message,previous:!showCurrent});
+  guide?.render(c,{fresh:calibrationFresh,busy:busy||cancelStartPending,error:!consoleState?reason:actionError||refreshError,details:[actionError,refreshError,c.error,c.devices_error,c.metadata_error].filter(Boolean),previous:!showCurrent});
  }
  function renderCalibration(){
   if(calibration?.guided_native===true)return renderGuidedCalibration(calibration);
@@ -323,7 +327,7 @@
   $('hub-profile-new').hidden=defaultUser;$('hub-profile-new').disabled=mutating||!available||!!block||!!inventoryBlock;
   write('hub-profile-name-hint',userName&&!nameValid?t('名称限 1–32 个字母、数字、_ 或 -，不能以 - 开头。','Use 1–32 letters, digits, _ or -. Do not start with -.'):nameExists?t('此用户已存在，请在上方选择并使用。','This user exists. Select and use it above.'):t('1–32 个字母、数字、_ 或 -','1–32 letters, digits, _ or -'));
   $('hub-new-profile').setAttribute('aria-invalid',String(!!userName&&(!nameValid||nameExists)));
-  write('hub-calib-device-note',scanPending||inventory?.scanning?t('正在查找手套，只读取设备身份。','Finding gloves; reading device identity only.'):c.devices_error||(!devices.length?t('先接好电源与数据线，再点“扫描手套”。无需先连接预览。','Connect power and the data cable, then scan. No preview connection is needed.'):selected?reportedSide?t('设备报告：'+(reportedSide==='left'?'左手':'右手')+'。开始时还会核对设备身份。','Device reports '+(reportedSide==='left'?'left':'right')+'. Its identity is rechecked on start.'):t('扫描未报告左右，请在第 3 步选择；开始时由 SDK 核对实际身份。','Discovery did not report a side. Choose it in step 3; the SDK verifies the device on start.'):t('按序列号选择本次要标定的一只手套。','Select the glove for this calibration by serial number.')));
+  write('hub-calib-device-note',selected&&!c.devices_error?reportedSide?t(reportedSide==='left'?'左手套':'右手套',reportedSide==='left'?'Left glove':'Right glove'):t('请确认这只手套的左右。','Confirm which hand this glove fits.'):'');
   write('hub-calib-models',!side?t('左右手分别保存标定','Left and right models are saved separately'):!metadataFresh||!modelKnown?t('已有标定尚未核对','Existing calibration is unverified'):hasModel?t('此侧已有个人标定','A personal model exists for this side'):t('此侧尚未标定','This side is not calibrated'));
   $('hub-replace').closest('label').hidden=!hasModel;
   for(const id of ['hub-profile','hub-new-profile','hub-calib-device','hub-side','hub-replace'])$(id).disabled=mutating;
@@ -332,7 +336,7 @@
   $('hub-calib-refresh').disabled=busy||refreshPending||scanPending||run.running===true;
   $('hub-calib-scan').disabled=mutating||!!block||inventory?.scanning===true||inventory?.scan_allowed===false;
   write('hub-calib-scan',scanPending||inventory?.scanning?t('扫描中…','Scanning…'):t('扫描手套','Scan gloves'));
-  $('hub-calib-scan').title=block||inventoryBlock||t('只查找设备，不开始预览或标定','Find devices only; does not start preview or calibration');
+  $('hub-calib-scan').title=noticeText(block||inventoryBlock);
   endPreview.hidden=!previewOnly(consoleState);endPreview.disabled=busy||previewEndPending||!previewIntent(consoleState)||refreshPending||scanPending||run.running===true;write('hub-calib-end-preview',t('结束预览，准备标定','End preview to prepare calibration'));
   let reason='',nextLabel='',next=null;
   if(cleanup){reason=c.cleanup_error||t('上次官方终端的退出尚未核对。请先结束并核对该会话。','The previous official terminal exit is unverified. End and verify that session first.');nextLabel=t('核对会话','Review session');next=()=>$('hub-calib-cancel').focus();}
@@ -352,17 +356,20 @@
   else if(!human&&hasModel&&!$('hub-replace').checked){reason=t('此侧已有个人标定。重新标定前，请确认覆盖。','A personal model exists for this side. Confirm replacement to recalibrate.');nextLabel=t('确认覆盖','Review replacement');next=()=>$('hub-replace').focus();}
   const ready=!reason&&!busy&&run.running!==true;
   calib.querySelector('.hub-calib-readiness').dataset.state=run.running?'running':ready?'ready':'blocked';
-  write('hub-calib-ready-title',cleanup?t('等待会话清理核对','Session cleanup needs verification'):run.running?run.source==='official_tty'?t('官方终端会话运行中','Official terminal session running'):run.status==='starting'?t('正在启动并核对身份','Starting and verifying identity'):t('官方标定正在进行','Official calibration in progress'):busy?t('正在提交…','Submitting…'):ready?t('准备完成','Ready to calibrate'):t('开始前还需完成','Before you start'));
-  write('hub-calib-ready-note',cleanup?reason:run.running?run.source==='official_tty'?t('请在下方官方终端按提示操作；结束会话不会被当作标定成功。','Follow the original terminal below. Ending the session does not establish calibration success.'):t('请跟随下方官方当前步骤，取消会结束本次采集。','Follow the current official step below. Cancel ends this capture.'):reason||actionError||t('佩戴好手套后开始。工作台会先核对身份，再进入官方采集流程。','Put on the glove and start. The Workbench verifies identity before official capture.'));
-  nextAction=next;$('hub-calib-next').hidden=run.running===true||!nextLabel;write('hub-calib-next',nextLabel);$('hub-calib-next').disabled=mutating;
+  const waitingForSelection=!!window.WujiDeviceUse&&!shared?.serial&&!cleanup&&run.running!==true;
+  const viewer=officialViz?.snapshot()?.state;
+  calibrationPanel.dataset.waitingForSelection=String(waitingForSelection&&!run.id&&!run.result&&!run.event&&!busy&&!scanPending&&!calibrationStartPending&&!cancelStartPending&&viewer?.active!==true&&viewer?.reserved!==true&&consoleState?.glove?.busy!==true);
+  write('hub-calib-ready-title',cleanup?t('会话结束待核对','Session end unverified'):'');
+  write('hub-calib-ready-note',waitingForSelection||run.running&&!cleanup?'':noticeText(reason));
+  nextAction=next;$('hub-calib-next').hidden=waitingForSelection||run.running===true||!nextLabel;write('hub-calib-next',nextLabel);$('hub-calib-next').disabled=mutating;
   $('hub-calib-start').disabled=!ready;$('hub-calib-cancel').disabled=busy||run.running!==true&&!cleanup;$('hub-calib-cancel').hidden=run.running!==true&&!cleanup;
   $('hub-calib-refresh').hidden=!calibrationVisible();$('hub-calib-doc').hidden=!calibrationVisible();
   write('hub-calib-start',t('开始标定','Start calibration'));write('hub-calib-cancel',cleanup||run.source==='official_tty'?t('结束并核对会话','End and verify session'):t('取消标定','Cancel calibration'));
   calib.dataset.running=String(run.running===true);calibrationPanel.dataset.running=String(run.running===true);
   write('hub-cli-calibration-state',cleanup?t('等待核对','Verification required'):run.running?t('进行中','In progress'):ready?t('已就绪','Ready'):t('准备设备与用户','Prepare device and user'));
   const status=cleanup?t('等待核对','Verification required'):run.running?run.status==='starting'?t('正在核对身份','Verifying identity'):run.status==='cancelling'?t('正在结束会话','Ending session'):t('官方会话运行中','Official session running'):run.id&&run.status==='session_ended'?t('官方会话已结束','Official session ended'):run.id&&run.status==='stopped'?t('会话已停止','Session stopped'):ready?t('标定已就绪','Ready to calibrate'):t('标定待就绪','Calibration unavailable');
-  officialViz?.setCalibrationState({running:run.running===true,busy:busy||scanPending||cleanup,verified:calibrationFresh&&typeof run.running==='boolean',ready,human,runtime,status,reason:reason||actionError||(run.running?t('按下方官方终端提示操作。结束会话不会被当作标定成功。','Follow the official terminal below. Ending the session does not establish calibration success.'):human?t('由官方 CLI 完成用户、左右手与覆盖确认。','The official CLI handles profile, hand side and replacement confirmation.'):t('确认下方准备项后开始。','Review the preparation below, then start.')),terminal:run.source==='official_tty'&&!!run.id});
-  guide?.render(c,{fresh:calibrationFresh,busy:busy||cancelStartPending,error:!consoleState?block:[actionError,refreshError,c.error].filter(Boolean).join(' · '),notice:reason||actionError||(human?t('点击上方“开始标定”，在这里直接使用完整官方流程。','Choose Start calibration above to use the complete official journey here.'):t('开始后，在这里查看官方当前步骤与采集反馈。','Start calibration to see the current official step and capture feedback here.'))});
+  officialViz?.setCalibrationState({running:run.running===true,busy:busy||scanPending||cleanup,verified:calibrationFresh&&typeof run.running==='boolean',ready,human,runtime,status,terminal:run.source==='official_tty'&&!!run.id});
+  guide?.render(c,{fresh:calibrationFresh,busy:busy||cancelStartPending,error:!consoleState?block:actionError||refreshError||c.error,details:[actionError,refreshError,c.error,c.devices_error,c.metadata_error].filter(Boolean)});
  }
  $('hub-calib-refresh').onclick=()=>refresh(true);$('hub-calib-scan').onclick=scanGloves;$('hub-calib-next').onclick=()=>nextAction?.();
  $('hub-profile-new').onclick=()=>{newProfileOpen=!newProfileOpen;renderCalibration();if(newProfileOpen)$('hub-new-profile').focus();};

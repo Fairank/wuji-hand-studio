@@ -11,7 +11,7 @@
     authority: ['停止会作用于当前整组，以设备返回状态为准。', 'Stop applies to this group. Device status confirms the result.'],
     stop: ['停止本组', 'Stop group'], setup: ['编排设置', 'Setup'],
     pause: ['暂停', 'Pause'], resume: ['继续', 'Resume'],
-    mChanging: ['正在切换…', 'Changing playback…'], mChanged: ['切换请求已发送。', 'Playback change requested.'], mControlErr: ['切换未完成：', 'Playback change failed: '],
+    mChanging: ['正在切换…', 'Changing playback…'], mChanged: ['切换请求已发送。', 'Playback change requested.'], mControlErr: ['切换未完成。请核对播放状态后重试。', 'Playback change did not complete. Check playback status before retrying.'],
     runDetails: ['运行详情', 'Run details'],
     members: ['参与的手', 'Participating hands'], count: ['已选 {n} / {t}', '{n} of {t} selected'],
     membersHelp: ['选择本次一起演示的手，设备管理中可添加或调整工作区。', 'Select the hands for this routine. Manage hands to add or organise them.'],
@@ -42,8 +42,11 @@
     mSending: ['正在发送启动请求…', 'Sending start request…'], mStopping: ['正在发送停止请求…', 'Sending stop request…'],
     mStarted: ['启动请求已发送，请以运行状态为准。', 'Start request sent. Rely on the run status for the outcome.'],
     mStopped: ['停止请求已发送，请以运行状态为准。', 'Stop request sent. Rely on the run status for the outcome.'],
-    mStartErr: ['启动未完成：', 'Start not completed: '], mStopErr: ['停止请求失败：', 'Stop request failed: '],
-    mNoHandler: ['未配置指令处理程序。', 'No command handler is configured.'], mUnknown: ['未知错误', 'unknown error'],
+    mStartErr: ['启动未完成。请核对成员状态后重试。', 'Start did not complete. Check the hands in the group before retrying.'],
+    mStopErr: ['停止结果待确认。请核对成员状态。', 'Stop is unconfirmed. Check the hands in the group.'],
+    mRunErr: ['编排未完成。请核对成员状态。', 'The group run did not complete. Check the hands in the group.'],
+    mDetails: ['查看错误详情','View error details'],
+    mNoHandler: ['未配置指令处理程序。', 'No command handler is configured.'],
     left: ['左手', 'Left'], right: ['右手', 'Right'], hand1: ['一代', 'Hand 1'], hand2: ['二代', 'Hand 2'],
     online: ['在线', 'Online'], offline: ['离线', 'Offline'],
     modePreview: ['预览', 'Preview'], modeHardware: ['实机', 'Real hands'], sec: [' 秒', ' s']
@@ -138,6 +141,7 @@
   </fieldset>
   <p class="hg-hint" id="${p}hint" aria-live="polite" aria-atomic="true"></p>
   <p class="hg-msg" aria-live="polite" aria-atomic="true"></p>
+  <details class="hg-error-details" hidden><summary></summary><pre></pre></details>
 </section><p class="hg-src hg-source-note"></p>`;
   }
 
@@ -157,7 +161,7 @@
       count: $('.hg-count'), empty: $('.hg-empty'), members: $('.hg-members'), note: $('.hg-note'),
       action: $('[data-k="action"]'), speed: $('[data-k="speed"]'), cycles: $('[data-k="cycles"]'), amp: $('[data-k="amp"]'),
       clear: $('.hg-clearbox'), preview: $('[data-cmd="preview"]'), hw: $('[data-cmd="hardware"]'),
-      hint: $('.hg-hint'), msg: $('.hg-msg')
+      hint: $('.hg-hint'), msg: $('.hg-msg'), details: $('.hg-error-details')
     };
     const st = { L: 'zh', snap: norm(null), kind: 'same', destination: 'preview', pref: { same: '', pair: '' }, sig: '', sel: new Set(),
       pendStart: false, pendStop: false, pendControl: false, cmd: 0, msg: null, dead: false };
@@ -217,7 +221,7 @@
       setTone(E.phase, toneOf(ph));
       setText(E.mode, run.mode === 'preview' ? t('modePreview') : run.mode === 'hardware' ? t('modeHardware') : run.mode ? String(run.mode) : '—');
       setText(E.elapsed, typeof sec === 'number' && isFinite(sec) ? sec.toFixed(1) + t('sec') : '—');
-      const reason = pickText(run.reason);
+      const reason = ['failed','stop_unconfirmed'].includes(ph) ? '' : pickText(run.reason);
       setText(E.reason, reason);
       E.reasonRow.hidden = !reason;
       const names = new Map(st.snap.members.map(m => [m.key, m.label]));
@@ -289,10 +293,14 @@
       const hint = ['hReady','hActive'].includes(ev.hint)||st.destination==='preview'&&ev.canPreview ? '' : fmt(t(ev.hint), ev.vars);
       setText(E.hint, hint);E.hint.hidden=!hint;
       setTone(E.hint, ev.canHw ? 'ok' : ev.canPreview ? 'warn' : '');
-      const failure=st.snap.run.phase==='failed'?pickText(st.snap.run.reason):'';
+      const phase=st.snap.run.phase,runFailure=['failed','stop_unconfirmed'].includes(phase)&&!st.pendStart&&!st.pendControl&&!st.pendStop;
+      const detail=runFailure?pickText(st.snap.run.reason)||m?.raw:m?.raw;
       const acknowledged=m&&!m.bad&&['mStarted','mStopped','mChanged'].includes(m.key)&&st.snap.run.phase&&st.snap.run.phase!=='idle';
-      setText(E.msg, failure || (m&&!acknowledged ? t(m.key) + (m.bad ? m.raw || t('mUnknown') : '') : ''));
-      setTone(E.msg, failure?'bad':m ? m.tone : '');
+      setText(E.msg,runFailure?t(phase==='stop_unconfirmed'?'mStopErr':'mRunErr'):m&&!acknowledged?t(m.key):'');
+      setTone(E.msg,runFailure?'bad':m?.tone||'');
+      E.details.hidden=!detail;if(!detail)E.details.open=false;
+      setText(E.details.querySelector('summary'),t('mDetails'));
+      setText(E.details.querySelector('pre'),detail||'');
       return ev;
     }
 

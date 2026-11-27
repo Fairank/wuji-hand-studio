@@ -20,6 +20,7 @@ import tempfile
 import time
 import traceback
 import unittest
+from unittest.mock import patch
 
 ROOT=Path(__file__).resolve().parents[1]
 
@@ -51,7 +52,7 @@ def fresh_record_directory(value=None):
 
 def source_hashes(root):
     files={p for folder in ('src','scripts','.github') for p in (root/folder).rglob('*')
-           if p.is_file() and p.suffix in ('.py','.js','.mjs','.cjs','.yml','.yaml','.md','.html','.css','.svg','.json')}
+           if p.is_file() and p.suffix in ('.py','.ps1','.js','.mjs','.cjs','.yml','.yaml','.md','.html','.css','.svg','.json')}
     files.update(p for p in (root/'build.py',root/'requirements.txt',root/'requirements-build.txt',
         root/'AGENTS.md',root/'docs/CODE_REVIEW.md',root/'docs/QA_WORKFLOW.md',root/'docs/ci/code-review.yml') if p.is_file())
     return {p.relative_to(root).as_posix():hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(files)}
@@ -151,16 +152,20 @@ def python_worker(out):
     import runtime_paths
     import studio_component
     import managed_runtime
+    from windows_ethernet import TOPOLOGY
     resolved={'app':runtime_paths.DATA,'cli':cli_coordination.root_folder(),
               'component':studio_component.root_folder(),'runtime':managed_runtime.ROOT}
     for path in resolved.values():
         if not Path(path).resolve().is_relative_to((out/'isolation').resolve()):
             raise RuntimeError('App state escaped review isolation: '+str(path))
-    suite=unittest.defaultTestLoader.discover(str(ROOT/'src'),pattern='test_*.py')
     # The parent already bounds this worker. Avoid an asynchronous watchdog
     # reading frames while other threads are replacing or freeing them.
     faulthandler.enable(all_threads=False)
-    result=unittest.TextTestRunner(verbosity=2).run(suite)
+    # Dock changes are driven by the test fixtures. The host's actual adapters
+    # must not retire a synthetic directory halfway through a software test.
+    with patch.object(TOPOLOGY,'reader',return_value=()):
+        suite=unittest.defaultTestLoader.discover(str(ROOT/'src'),pattern='test_*.py')
+        result=unittest.TextTestRunner(verbosity=2).run(suite)
     report={'tests':result.testsRun,'failures':len(result.failures),'errors':len(result.errors),
             'skipped':len(result.skipped),'successful':result.wasSuccessful() and not blocked,
             'blocked_operations':blocked,'isolated_environment':{k:str(v) for k,v in roots.items()},

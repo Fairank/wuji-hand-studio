@@ -26,6 +26,10 @@
  const field=(v,max)=>typeof v==='string'&&v.length>0&&v.length<=max&&!/[\u0000-\u001f\u007f]/.test(v);
  function valid(value){return value&&typeof value==='object'&&!Array.isArray(value)&&field(value.revision,160)&&Array.isArray(value.items)&&value.items.length<=40&&value.items.every(row=>row&&typeof row==='object'&&!Array.isArray(row)&&field(row.id,160)&&kinds.has(row.kind)&&(row.version==null||field(row.version,80))&&(row.kind!=='firmware'||typeof row.serial==='string'&&/^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/.test(row.serial))&&(row.model==null||field(row.model,100)))&&new Set(value.items.map(row=>row.id)).size===value.items.length;}
  function title(row){return row.kind==='workbench'?t('工作台','Workbench'):row.kind==='sdk'?t('遥操作组件','Teleoperation components'):row.kind==='cli'?t('官方 CLI','Official CLI'):row.model||t('设备固件','Device firmware');}
+ function reminderTitle(row){
+  if(row.kind==='firmware')return row.model?t(row.model+' 固件更新',row.model+' firmware update'):t('设备固件更新','Device firmware update');
+  return t(title(row)+'更新',title(row)+' update');
+ }
  function render(){
   if(destroyed)return;
   sheet.setLabels({title:t('可用更新','Available updates'),triggerLabel:t('可用更新','Available updates'),closeLabel:t('关闭','Close')});
@@ -41,7 +45,12 @@
   if(!online){toast.hidden=true;return;}
   if(toastItem&&!entries.some(row=>row.id===toastItem.id)){toastItem=null;toast.hidden=true;}
   if(!toastItem)toastItem=entries.find(row=>!seen.has(row.id))||null;
-  if(toastItem){toastTitle.textContent=t('发现可用更新','Update available');toastVersion.textContent=title(toastItem)+(toastItem.version?' · '+(toastItem.current_version?toastItem.current_version+' → ':'')+toastItem.version:'');toastOpen.textContent=t('查看','View');toastLater.textContent=t('稍后','Later');toast.hidden=!directory;}
+  if(toastItem){
+   toastTitle.textContent=reminderTitle(toastItem);
+   toastVersion.textContent=toastItem.version?(field(toastItem.current_version,80)?toastItem.current_version+' → ':'')+toastItem.version:'';
+   toastVersion.hidden=!toastVersion.textContent;
+   toastOpen.textContent=t('查看','View');toastLater.textContent=t('稍后','Later');toast.hidden=!directory;
+  }
  }
  function open(row){
   sheet.close();

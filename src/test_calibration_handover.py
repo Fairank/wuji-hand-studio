@@ -91,14 +91,18 @@ class HandoverTests(unittest.TestCase):
             # Exercise the actual host JSONL parser and finalizer. The fake
             # child reports exit zero only after it receives the real cancel
             # command; no fixture grants native_release in advance.
-            viewer.thread=threading.Thread(target=viewer._run_native,args=(SN,'light'),daemon=True)
-            viewer.thread.start();self.assertTrue(reader_waiting.wait(2))
+            reader=threading.Thread(target=viewer._run_native,args=(SN,'light'),daemon=True)
+            viewer.thread=reader
             try:
+                reader.start()
+                self.assertTrue(reader_waiting.wait(10),'Synthetic Viewer did not reach its output reader')
                 yield N(folder=Path(folder),viewer=viewer,job=job,relay=relay,marker=marker,base=base,
                     controller=controller,calibration=calibration,service=service,server=server,recover=recover)
             finally:
-                cancelled.set();viewer.thread.join(3)
-                self.assertFalse(viewer.thread.is_alive(),'Synthetic Viewer reader must exit')
+                cancelled.set()
+                if reader.ident is not None:
+                    reader.join(10)
+                self.assertFalse(reader.is_alive(),'Synthetic Viewer reader must exit before removing its files')
 
     def command(self,**changes):
         return {'name':'calibration_handover','serial':SN,'viewer_token':TOKEN,'interface':'guided',

@@ -24,23 +24,27 @@
     unknown: ['状态未知', 'Status unknown'], inRun: ['组运行中', 'In group run'], noSerial: ['无设备序列号', 'No device serial'],
     running: ['运行中', 'Running'], idle: ['空闲', 'Idle'], starting: ['正在启动…', 'Starting…'], loading: ['加载中…', 'Loading…'],
     left: ['左手', 'Left'], right: ['右手', 'Right'], autoLabel: ['工作区', 'Workspace'], created: ['已创建工作区', 'Workspace created'],
-    addReq: ['已提交加入（只读连接），实际状态以卡片为准', 'Add submitted (read-only connect); the card shows actual status'],
-    createdNoAdd: ['工作区已创建，但加入设备失败：', 'Workspace created, but adding the device failed: '],
-    scanReq: ['已请求扫描', 'Scan requested'], moveReq: ['已提交移动', 'Move submitted'], discReq: ['已提交断开', 'Disconnect submitted'],
-    forgetReq: ['已提交移除', 'Remove submitted'], rmReq: ['已提交删除工作区', 'Workspace removal submitted'], failed: ['失败：', 'Failed: '],
-    prevReq: ['已添加预览手（仅预览，未连接设备）', 'Preview hand added (preview only, no device)'],
+    addReq: ['已请求接入。请在设备卡片核对结果。', 'Connection requested. Check the device card.'],
+    createdNoAdd: ['工作区已创建。请重新添加设备。', 'Workspace created. Try adding the device again.'],
+    scanReq: ['已请求查找', 'Discovery requested'], moveReq: ['已请求移动', 'Move requested'], discReq: ['已请求断开', 'Disconnect requested'],
+    forgetReq: ['已请求移除', 'Removal requested'], rmReq: ['已请求删除工作区', 'Workspace removal requested'],
+    prevReq: ['已添加预览模型', 'Preview model added'],
     cameraWarning: ['初始视角未确认，可复位重试。', 'Initial view unconfirmed. Use Reset view to retry.'],
     connectionWarning: ['连接结果尚未确认，请在现有设备卡片中继续或断开。', 'Connection unconfirmed. Continue or disconnect from the existing device card.'],
     startReq: ['已提交启动', 'Start submitted'], stopReq: ['已提交停止', 'Stop submitted'], needName: ['请输入工作区名称', 'Enter a workspace name'],
     gone: ['设备不在最新发现结果中，请重新发现', 'Device not in latest discovery; discover again'], badSnap: ['快照格式无效', 'Invalid snapshot'],
-    pollFail: ['状态刷新失败：', 'Refresh failed: '], beatFail: ['编排连接中断：', 'Group connection interrupted: '], noLease: ['启动未取得控制连接', 'Start did not establish a control connection'],
+    pollFail: ['工作区状态暂不可用。', 'Workspace status is unavailable.'], beatFail: ['控制连接中断。请核对组运行状态。', 'The control connection was interrupted. Check the group run state.'], noLease: ['启动未取得控制连接', 'Start did not establish a control connection'],
+    persistenceFail: ['工作区记录暂不可用。', 'Workspace records are unavailable.'],
+    operationUnknown: ['结果待核对，请刷新工作区状态。', 'Refresh the workspace state to confirm the outcome.'],
+    scanFail: ['设备查找未完成。请重试。', 'Discovery did not complete. Try again.'],
+    diagnostics: ['查看错误详情', 'View error details'],
     timeout: ['请求超时（8 秒）', 'Request timed out (8 s)'], badCmd: ['未知组命令', 'Unknown group command'],
     noSessions: ['单手会话不可用', 'Hand sessions unavailable'], noId: ['未返回工作区 ID', 'No workspace id returned'],
   };
   const SKELETON = `<header class="wsx-head"><h2 id="wsx-title" class="wsx-title" data-wsx-t="title"></h2>
   <label class="wsx-field wsx-pick"><span data-wsx-t="workspace"></span><select class="wsx-ws"></select></label><span class="wsx-run"></span>
   <button type="button" class="wsx-btn wsx-stopall" data-wsx-t="stopAll"></button><button type="button" class="wsx-btn wsx-danger wsx-rmws" data-wsx-t="removeWs" hidden></button></header>
-<div class="wsx-msgs"><p class="wsx-status" role="status"></p><p class="wsx-err" aria-live="polite"></p></div>
+<div class="wsx-msgs"><p class="wsx-status" role="status"></p><p class="wsx-err" role="status"></p><details class="wsx-diagnostics" hidden><summary></summary><pre></pre></details></div>
 <div class="wsx-grid"><section class="wsx-card"><h3 data-wsx-t="members"></h3><p class="wsx-note wsx-empty" data-wsx-t="emptyWs" hidden></p>
   <div class="wsx-list wsx-members"></div><div class="wsx-row"><label class="wsx-field"><span data-wsx-t="previewModel"></span>
   <select class="wsx-prof"></select></label><button type="button" class="wsx-btn wsx-addprev" data-wsx-t="addPreview"></button></div></section>
@@ -62,7 +66,7 @@
 <button type="button" class="wsx-btn" data-wsx="new"></button></div>`;
 
   let root = null, topBtn = null, panel = null, viewer = null, management = null, panelKey = '', snap = null, csrf = null, forced = null;
-  let sel = 'main', selAt = 0, polling = false, again = false, pollErr = '';
+  let sel = 'main', selAt = 0, polling = false, again = false, pollErr = '', actionDetail = '';
   const leases = new Map(), leaseServices = new Map(), leaseAt = new Map(), beatErr = new Map(), beating = new Map();
   const starting = new Set(), stopAsked = new Set(), inflight = new Set();
   try { sel = taskGroup || localStorage.getItem(STORE) || 'main'; } catch (_) { /* storage blocked */ }
@@ -72,9 +76,14 @@
   const $ = s => root.querySelector(s);
   const tx = (el, s) => { if (el && el.textContent !== s) el.textContent = s; };
   const errMsg = x => (x && x.message) || String(x);
+  const notice = (value, fallback = 'operationUnknown') => {
+    if (!value) return '';
+    const localized = window.WujiLocale?.notice?.(value) ?? value;
+    return /^(?:HTTP\s+\d|\[Errno |Failed to fetch|[A-Za-z]+Error:)/i.test(localized) ? T(fallback) : localized;
+  };
   const model = (generation, side) => { const g = String(generation).replace('hand',''); return [g == null || g === '' ? '' : lang() === 'en' ? `Gen ${g}` : `${'一二三四五'[g - 1] || g}代`,
     side === 'left' || side === 'right' ? T(side) : ''].filter(Boolean).join(' · '); };
-  const phaseLabel = (v,mode) => ({preparing:['准备中','Preparing'],arming:mode==='preview'?['准备预览','Preparing preview']:['使能中','Arming'],waiting:['等待开始','Waiting'],playing:['播放中','Playing'],returning:['返回中','Returning'],completed:['已完成','Completed'],stopped:['已停止','Stopped'],failed:['未完成','Failed']})[v]?.[lang()==='en'?1:0] || v || '';
+  const phaseLabel = (v,mode) => ({preparing:['准备中','Preparing'],arming:mode==='preview'?['准备预览','Preparing preview']:['使能中','Arming'],waiting:['等待开始','Waiting'],playing:['播放中','Playing'],returning:['返回中','Returning'],completed:['已完成','Completed'],stopped:['已停止','Stopped'],failed:['未完成','Failed']})[v]?.[lang()==='en'?1:0] || (v ? T('unknown') : '');
   const clock =
 
 
@@ -121,20 +130,25 @@
       headers: { 'Content-Type': 'application/json', 'X-Console-Token': service },
       body: JSON.stringify({ workspace: ws, name: 'ensemble_stop', lease }) });
   }
-  function say(msg, bad) {
+  function say(msg, bad, detail = '') {
     if (!root) return;
     const el = $('.wsx-status'); tx(el, msg); el.classList.toggle('wsx-bad', !!bad);
-    if(management)tx($('.wsx-sheet-msg'),msg);
+    actionDetail = detail;
+    renderErr();
+  }
+  function sayError(error) {
+    const raw = errMsg(error), msg = notice(raw);
+    say(msg || T('operationUnknown'), true, raw === msg ? '' : raw);
   }
   async function op(key, fn, okKey) {                                   // one in-flight request per button key
     if (inflight.has(key)) return;
     inflight.add(key); render();
-    try { const result=await fn(),message=completionText(result,okKey); if(message)say(message); } catch (e) { say(T('failed') + errMsg(e), true); }
+    try { const result=await fn(),message=completionText(result,okKey); if(message)say(message); } catch (e) { sayError(e); }
     finally { inflight.delete(key); render(); kick(); }
   }
   function completionText(result,okKey) {
     if(result?.warning==='workspace_connection_unconfirmed')return T('connectionWarning');
-    const warning=result?.warning==='preview_camera_unconfirmed'?T('cameraWarning'):typeof result?.warning==='string'?result.warning:'';
+    const warning=result?.warning==='preview_camera_unconfirmed'?T('cameraWarning'):typeof result?.warning==='string'?notice(result.warning):'';
     return [okKey?T(okKey):'',warning].filter(Boolean).join(' · ');
   }
   async function poll(force) {
@@ -153,7 +167,7 @@
         }
       }
       if (t0 > selAt && !wss().some(w => String(w.id) === sel) && cur()) sel = String(cur().id);
-    } catch (e) { pollErr = T('pollFail') + errMsg(e); }
+    } catch (e) { pollErr = errMsg(e); }
     finally { polling = false; render(); if (again) { again = false; poll(true); } }
   }
   const kick = () => poll(true);
@@ -164,7 +178,7 @@
       beating.set(ws, ticket);
       act('ensemble_beat', { workspace: ws, lease }, service)
         .then(() => { if (leases.get(ws) === lease && leaseServices.get(ws) === service) beatErr.delete(ws); },
-          e => { if (leases.get(ws) === lease && leaseServices.get(ws) === service) beatErr.set(ws, T('beatFail') + errMsg(e)); })
+          e => { if (leases.get(ws) === lease && leaseServices.get(ws) === service) beatErr.set(ws, errMsg(e)); })
         .finally(() => { if (beating.get(ws) === ticket) beating.delete(ws); renderErr(); });
     }
   }
@@ -190,8 +204,8 @@
     if (/stop/i.test(name)) {
       leases.delete(ws); leaseServices.delete(ws); leaseAt.delete(ws); beatErr.delete(ws);
       if (starting.has(ws)) stopAsked.add(ws);
-      try { const r = await act('ensemble_stop', { workspace: ws }); say(T('stopReq')); return r; }
-      catch (e) { say(T('failed') + errMsg(e), true); throw e; } finally { renderErr(); kick(); }
+      try { const r = await act('ensemble_stop', { workspace: ws }); say(''); return r; }
+      finally { renderErr(); kick(); }
     }
     if (!/start/i.test(name)) throw new Error(T('badCmd'));
     if (starting.has(ws)) throw new Error(T('starting'));
@@ -205,8 +219,7 @@
       if (!stopAsked.has(ws)) { leases.set(ws, String(lease)); leaseServices.set(ws, service); leaseAt.set(ws, performance.now()); beat(); }
       else await stopOwned(ws, String(lease), service);
       say(''); return r; // the group panel displays actual progress, not a lasting request receipt
-    } catch (e) { say(T('failed') + errMsg(e), true); throw e; }
-    finally { starting.delete(ws); stopAsked.delete(ws); render(); kick(); }
+    } finally { starting.delete(ws); stopAsked.delete(ws); render(); kick(); }
   }
   function syncSel(s, opts, want) {                                     // keeps value; never touches a focused select
     if (document.activeElement === s) return false;
@@ -280,7 +293,7 @@
     wsSel.disabled = !list.length || starting.size > 0;                 // no workspace switching while a start is pending
     tx(rb, !w || stale ? T(stale ? 'unknown' : 'loading') : starting.has(w.id) ? T('starting') : run.active
       ? [T('running'), phaseLabel(run.phase,run.mode), typeof run.elapsed_s === 'number' ? `${Math.round(run.elapsed_s)} s` : ''].filter(Boolean).join(' · ')
-      : [T('idle'), run.reason].filter(Boolean).join(' · '));
+      : [T('idle'), notice(run.reason)].filter(Boolean).join(' · '));
     rb.classList.toggle('wsx-live', !!run.active && !stale);
     rm.hidden = !w || w.id === 'main' || (w.members || []).length > 0;
     rm.disabled = inflight.has('rm');
@@ -289,7 +302,7 @@
     keyed($('.wsx-members'), mem.map(id => {
       const e = byId.get(id) || {}, inRun = !!run.active && (!Array.isArray(run.members) || run.members.some(m => (typeof m === 'string' ? m : m.id) === id));
       return { k: String(id), v: { L, id: String(id), label: e.label ? String(e.label) : '', serial: e.serial == null ? '' : String(e.serial),
-        g: e.generation, side: e.side, on: !!e.connected, busy: !!e.busy, msg: e.message ? String(e.message) : '', stale, others,
+        g: e.generation, side: e.side, on: !!e.connected, busy: !!e.busy, msg: e.message ? notice(String(e.message)) : '', stale, others,
         conn: e.connection==='connecting' ? (L==='en'?'Connecting':'连接中') : '', inRun, phase: inRun ? phaseLabel(run.phase,run.mode) : '',
         fl: ['settings', 'disc', 'forget', 'move'].filter(a => inflight.has(`${a}:${id}`)) } };
     }), MEMBER, updMember);
@@ -305,8 +318,9 @@
       return { k: s, v: { L, s, g: x.generation, side: x.side_hint, addr: x.address ? String(x.address) : '', opts, cur: w ? String(w.id) : '',
         own: eid != null && owner.has(eid) ? owner.get(eid) : '', fl: ['add', 'new'].filter(a => inflight.has(`${a}:${s}`)) } };
     }), DISC, updDisc);
-    tx($('.wsx-dstate'), d.running ? T('scanning') : d.error ? T('failed') + errMsg(d.error)
+    tx($('.wsx-dstate'), d.running ? T('scanning') : d.error ? notice(errMsg(d.error), 'scanFail')
       : d.updated ? `${T('updated')} ${clock(d.updated)} · ${devs.length} ${T('devices')}` : '');
+    $('.wsx-dstate').title = d.error && !d.running ? errMsg(d.error) : '';
     $('.wsx-create button').disabled = inflight.has('create');
     $('.wsx-scan button').disabled = inflight.has('scan') || !!d.running;
     renderPanel(w, byId);
@@ -315,7 +329,7 @@
   function renderPanel(w, byId) {                                       // HandGroupPanel is provided separately; mount once, lazily
     const HGP = window.HandGroupPanel;
     if (panel === null && HGP && typeof HGP.mount === 'function') {
-      try { panel = HGP.mount($('.wsx-panel'), { onCommand }) || false; } catch (e) { panel = false; say(T('failed') + errMsg(e), true); }
+      try { panel = HGP.mount($('.wsx-panel'), { onCommand }) || false; } catch (e) { panel = false; sayError(e); }
     }
     $('.wsx-nopanel').hidden = !!panel;
     if (!panel || !w) return;
@@ -332,14 +346,18 @@
     const key = JSON.stringify(ps) + lang();
     if (key === panelKey) return;
     panelKey = key;
-    try { panel.render(ps, lang()); } catch (e) { say(T('failed') + errMsg(e), true); }
+    try { panel.render(ps, lang()); } catch (e) { sayError(e); }
   }
-  function renderErr() {                                                // concise poll/heartbeat failures only
-    if (root) {
-      const error=[...new Set([pollErr, typeof snap?.persistence_error==='string'?snap.persistence_error:'', ...beatErr.values()])].filter(Boolean).join(' · ');
-      tx($('.wsx-err'),error);
-      if(management)tx($('.wsx-sheet-msg'),error||$('.wsx-status').textContent);
-    }
+  function renderErr() {
+    if (!root) return;
+    const persistence=typeof snap?.persistence_error==='string'?snap.persistence_error:'';
+    const warning=[pollErr&&T('pollFail'),beatErr.size&&T('beatFail'),persistence&&T('persistenceFail')].filter(Boolean).join(' ');
+    tx($('.wsx-err'),warning);
+    const diagnostics=$('.wsx-diagnostics');
+    const detail=[...new Set([actionDetail,pollErr,persistence,...beatErr.values()].filter(Boolean))].join('\n');
+    diagnostics.hidden=!detail;
+    tx(diagnostics.querySelector('summary'),T('diagnostics'));tx(diagnostics.querySelector('pre'),detail);
+    if(!detail)diagnostics.open=false;
   }
   const CARD = {
     settings: k => op(`settings:${k}`, async () => {
@@ -362,7 +380,7 @@
       if (id == null || id === '') throw new Error(T('noId'));
       choose(id);
       try { const result=await act('workspace_add', { workspace: id, serial: d.serial }); say(completionText(result,'addReq')); }
-      catch (e) { say(T('createdNoAdd') + errMsg(e), true); }            // never report "connected" on failure
+      catch (e) { say(T('createdNoAdd'), true, errMsg(e)); }             // never report "connected" on failure
     }),
   };
   function onCard(e) {
@@ -422,8 +440,13 @@
         buttons.push(b);tabs.append(b);
       });
       management.body.append(tabs,...panels);selectTab(0);
-      management.trigger.addEventListener('click',()=>{if(!(cur()?.members||[]).length)selectTab(1);});
-      const message=document.createElement('p');message.className='wsx-sheet-msg';message.setAttribute('role','status');management.body.append(message);
+      const feedback=$('.wsx-msgs'), marker=document.createComment('Workspace feedback');
+      feedback.before(marker);
+      management.trigger.addEventListener('click',()=>{
+        if(!(cur()?.members||[]).length)selectTab(1);
+        if(management.element.open)tabs.after(feedback);
+      });
+      management.element.addEventListener('close',()=>{if(!management.element.open)marker.after(feedback);});
       $('.wsx-head').insertBefore(management.trigger,$('.wsx-stopall'));
     }
     const top = document.querySelector('.top-actions');

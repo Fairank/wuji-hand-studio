@@ -27,7 +27,7 @@
  const controls=el('div','dm-actions dm-main-actions',body),check=el('button','',controls),primary=el('button','primary',controls);check.type=primary.type='button';check.id='dm-check';primary.id='dm-start';
  const terminalHost=el('section','',body),terminal=window.OfficialTerminal?.mount(terminalHost,{endpoint:'/api/firmware-terminal',actionName:'firmware_terminal_input',title:()=>t('官方升级','Official update')});
  const details=el('details','dm-details',body),summary=el('summary','',details),records=el('pre','',details);records.id='dm-records';
- let selected=null,state=null,fresh=false,pending='',loading=null,epoch=0,timer=0,transportError='',actionError='',uncertain=false,openRequest=0,terminalPresentation='',catalogChoice=null;
+ let selected=null,state=null,fresh=false,pending='',loading=null,epoch=0,timer=0,transportError='',actionError='',uncertain=false,openRequest=0,terminalPresentation='',catalogChoice=null,catalogDevice=null;
  const busyPhases=new Set(['checking','preparing','downloading','upgrading','updating','flashing','reconnecting','awaiting_reconnect','verifying']);
  const recoveryPhases=new Set(['unknown','unconfirmed','recovery_required','reconnect_required']);
  function available(row){
@@ -83,6 +83,13 @@
  }
  function byteLabel(value){return value<1048576?(value/1024).toFixed(1)+' KB':(value/1048576).toFixed(1)+' MB';}
  function retainedRecord(){return serialOK(sn(state?.device))&&(state?.locked===true||state?.busy===true||!!state?.run?.id||clock(state?.checked_at)>Date.now()-86400000&&clock(state?.checked_at)<=Date.now()+30000);}
+ function resumeDevice(){
+  const writer=serialOK(sn(state?.device))&&(state.locked===true||state.run?.id||state.busy===true&&state.automatic!==true)?state.device:null;
+  if(writer&&(state.locked===true||state.busy===true||state.run?.running===true))return writer;
+  const value=state?.official_catalog;
+  if(catalogDevice&&value?.serial===sn(catalogDevice)&&(value.busy===true||value.phase==='failed'||value.phase==='package_ready'&&typeof value.package?.token==='string'&&catalogTime(value.package.expires_at)>Date.now()))return catalogDevice;
+  return writer;
+ }
  function active(){return !!pending||fresh&&(state?.busy===true||busyPhases.has(state?.phase)||state?.official_catalog?.busy===true);}
  function syncDiscovery(){
   const hold=sheet.element.open||!!pending||state?.busy===true||state?.locked===true||state?.official_catalog?.busy===true||busyPhases.has(state?.phase);
@@ -97,14 +104,15 @@
   if(/HOME not set; cannot locate firmware cache/i.test(message))return t('升级工具找不到固件保存目录。','The update tool could not locate its firmware download folder.');
   if(/User home must be an absolute path|用户目录必须是有效绝对路径/i.test(message))return t('用户目录配置无效，需要使用绝对路径。','The user home setting must be an absolute path.');
   const official=same()&&state?.result?.sn===sn(selected)&&Number.isInteger(state?.result?.returncode)&&state.result.returncode!==0&&state?.result?.official_error;
-  if(typeof official==='string'&&official&&message===official)return t('官方升级失败：','Official update failed: ')+official;
+  if(typeof official==='string'&&official&&message===official)return t('固件安装未完成。请先核对设备版本。','Firmware installation did not finish. Check the device version first.');
   if(/firmware completion is unconfirmed|固件升级结束状态未确认/i.test(message))return t('本次升级的结束状态尚未确认。请先核对设备，勿重复启动升级。','This update’s completion is unconfirmed. Check the device before starting another update.');
   if(/official flow ended|device version was read|未能读回设备版本|未匹配本次更新目标/i.test(message))return t('官方流程已结束，设备版本回读尚未确认。请重新核对设备。','The official flow ended; device-version readback is unverified. Check the device again.');
   if(/idle|session|会话|disconnect|断开|workspace|工作区/i.test(message))return t('请先结束设备会话，再检查更新。','End device sessions before checking updates.');
   if(/expired|过期|token|preview/i.test(message))return t('更新方案已过期，请重新检查。','The update plan expired. Check again.');
   if(/unsupported|不支持|not supported|match|匹配|incompat/i.test(message))return t('暂不支持此设备的更新，请查看详细记录。','An update is unavailable for this device. See details.');
   if(/network|fetch|timeout|abort|offline|离线|网络|connect.*service/i.test(message))return t('暂时无法读取更新状态，请重试。','Update status is unavailable. Try again.');
-  return t('操作未完成，请查看详细记录后重试。','The operation did not complete. Review details and retry.');
+  if(state?.operation==='upgrade')return t('固件安装未完成。请先核对设备版本。','Firmware installation did not finish. Check the device version first.');
+  return t('无法完成固件检查。请查看详情后重试。','The firmware check did not finish. Review the details and try again.');
  }
  function renderOfficialCatalog(){
   const value=officialCatalog(),metadata=listedMetadata(value),current=currentObservation(value),pkg=preparedPackage(value),token=catalogToken(value);
@@ -151,18 +159,18 @@
   sheet.setLabels({title:t('设备更新','Device update'),triggerLabel:t('设备更新','Device update'),closeLabel:t('关闭','Close')});
   const row=inventory.selection(),retained=retainedRecord(),resumeSelected=retained&&sn(row)===sn(state.device);
   trigger.disabled=state?.supported===false&&!retained||!available(row)&&!resumeSelected;trigger.title=trigger.disabled?t('先选择刚发现的设备','Select a freshly discovered device'):'';
-  const resumable=state?.locked===true||!!state?.run?.id||state?.busy===true&&state?.automatic!==true;
-  resume.hidden=!resumable||!!row&&sn(row)===sn(state.device);text(resume,t('返回设备更新','Return to device update'));
+  const resumable=resumeDevice();
+  resume.hidden=!resumable||!trigger.disabled&&sn(row)===sn(resumable);text(resume,t('返回设备更新','Return to device update'));
   const failure=failedCatalog(),release=catalog(),current=state?.current_version||failure?.current||(state?.result?.verdict==='recovery_verified'&&state.result.sn===sn(selected)?state.result.firmware_version:null);
   const target=state?.operation==='upgrade'?(state.target_version||(state.result?.sn===sn(selected)?state.result.expected_version:null)):null,latest=release?.latest||null,shownTarget=!latest&&!!target;
   text(name,label(selected));text(serial,sn(selected));text(fromLabel,t('当前版本','Current version'));text(toLabel,shownTarget?t('本次更新目标','Target for this update'):t('可用版本','Available version'));
   versions.hidden=!same()||(!current&&!target&&!latest&&!failure&&!clock(state?.checked_at)&&!recoveryPhases.has(state?.phase));from.hidden=!same();to.hidden=!same()||!!latest&&current===latest;arrow.hidden=from.hidden||to.hidden||!current||!latest;
   text(fromValue,same()&&current||t('尚未读取','Not read'));text(toValue,same()&&(latest||target)||t('尚未确认','Unverified'));versions.dataset.layout=to.hidden?'single':arrow.hidden?'comparison':'arrow';
-  text(versionNote,!fresh?t('版本显示上次记录，恢复连接后再核对。','Version values are from the previous status. Reconnect to verify.'):!latest?t('可用版本尚未确认。','The available version is unverified.'):'');versionNote.hidden=versions.hidden||!versionNote.textContent;
+  text(versionNote,!fresh?t('显示上次读取的版本。','Showing the last observed version.'):'');versionNote.hidden=versions.hidden||!versionNote.textContent;
   const phase=fresh&&same()?state.phase:'idle',busy=active(),other=fresh&&!same()&&(state?.busy===true||state?.locked===true||state?.recovery_required===true||recoveryPhases.has(state?.phase));
   const fileReadback=state?.mode==='official_file_confirmation'&&state.result?.source==='official_resource_readback';
-  const fileRecovered=fileReadback&&phase==='verified'&&state.result?.verdict==='recovery_verified'&&state.result.sn===sn(selected)&&firmwareVersion(state.result.firmware_version)&&state.result.firmware_version===current;
-  const verified=fileRecovered||(!failure||fileReadback)&&phase==='verified'&&state.result?.verdict==='target_version_verified'&&state.result.version_verified===true&&state.result.sn===sn(selected)&&state.result.firmware_version===state.result.expected_version&&state.result.firmware_version===current;
+  const recovered=phase==='verified'&&state.result?.verdict==='recovery_verified'&&state.result.sn===sn(selected)&&firmwareVersion(state.result.firmware_version)&&state.result.firmware_version===current;
+  const verified=(!failure||fileReadback)&&phase==='verified'&&state.result?.verdict==='target_version_verified'&&state.result.version_verified===true&&state.result.sn===sn(selected)&&state.result.firmware_version===state.result.expected_version&&state.result.firmware_version===current;
   const notStarted=state?.mode==='official_file_confirmation'&&phase==='completed'&&state.result?.verdict==='official_write_not_started'&&state.result.sn===sn(selected)&&state.result.version_verified!==true;
   const fileMismatch=fileReadback&&phase==='completed'&&state.result?.verdict==='version_not_matched'&&state.result.version_verified===false&&state.result.sn===sn(selected)&&firmwareVersion(state.result.firmware_version)&&firmwareVersion(state.result.expected_version)&&state.result.firmware_version!==state.result.expected_version;
   if(state?.mode==='official_file_confirmation')versionNote.hidden=true;
@@ -172,11 +180,14 @@
   const problem=transportError||actionError||(same()&&state.error)||'';
   const viewer=state?.viewer,ownedPreview=viewer?.active===true&&viewer.phase==='running'&&viewer.serial===sn(selected)&&/^[0-9a-f]{32}$/.test(viewer.session_id||'');
   const checkFailure=['failed','check_failed'].includes(phase)&&state?.operation!=='upgrade';
-  const reportMessage=notStarted?t('官方安装尚未启动，可以重新准备。','Official installation did not start. You can prepare again.'):fileMismatch?t('设备当前版本未匹配本次安装目标。','The device version does not match this installation target.'):verified?(fileReadback?t('已核对设备版本。','Device version verified.'):t('更新已确认。','Update confirmed.')):state?.mode==='official_file_confirmation'&&phase==='verified'?t('设备版本尚未核对，请重新检查。','The device version is unverified. Check again.'):unchanged?t('设备版本未变化，可重新检查。','The device version is unchanged. You can check again.'):checkFailure?t('版本检查未完成，可以重新检查。','Version check incomplete. Try again.'):phase==='available'?(release?t('有适用于这台设备的新固件。','New firmware is available for this device.'):t('可用版本尚未确认，请重新检查。','The available version is unverified. Check again.')):phase==='checked'?t('官方检查已结束，可打开官方流程查看详情。','Official check finished. Open the official flow for details.'):phase==='up_to_date'?(release?t('固件已是最新版本。','Firmware is up to date.'):t('可用版本尚未确认，请重新检查。','The available version is unverified. Check again.')):phase==='unknown'&&state?.operation==='check'?t('检查进程退出尚未确认，请先核对检查。','The check process exit is unconfirmed. Verify the check first.'):message;
+  const reportMessage=notStarted?t('官方安装尚未启动，可以重新准备。','Official installation did not start. You can prepare again.'):fileMismatch?t('设备当前版本未匹配本次安装目标。','The device version does not match this installation target.'):recovered||verified&&fileReadback?t('已核对设备版本。','Device version verified.'):verified?t('更新已确认。','Update confirmed.'):phase==='verified'?t('设备版本尚未核对，请重新检查。','The device version is unverified. Check again.'):unchanged?t('设备版本未变化，可重新检查。','The device version is unchanged. You can check again.'):checkFailure?t('版本检查未完成，可以重新检查。','Version check incomplete. Try again.'):phase==='available'?(release?t('有适用于这台设备的新固件。','New firmware is available for this device.'):t('可用版本尚未确认，请重新检查。','The available version is unverified. Check again.')):phase==='checked'?t('官方检查已结束，可打开官方流程查看详情。','Official check finished. Open the official flow for details.'):phase==='up_to_date'?(release?t('固件已是最新版本。','Firmware is up to date.'):t('可用版本尚未确认，请重新检查。','The available version is unverified. Check again.')):phase==='unknown'&&state?.operation==='check'?t('检查进程退出尚未确认，请先核对检查。','The check process exit is unconfirmed. Verify the check first.'):message;
   const recover=fresh&&same()&&(recoveryPhases.has(phase)||state.locked===true||state.recovery_required===true);
-  const recoveryMessage=recover?(state.operation==='check'?t('检查会话的退出或释放尚未确认，请先核对检查。','The check session exit or release is unconfirmed. Verify the check first.'):t('官方升级会话的退出或释放尚未确认，请先核对设备，不要再次升级。','The official update session exit or release is unconfirmed. Verify the device before another update.')):'';
-  const catalogMessage=failure&&!fileReadback&&!recover&&!transportError&&!actionError?(/(?:\bHTTP\s*404\b|\b404\b)/i.test(failure.error)&&/hardware version.*not found/i.test(failure.error)?t('兼容固件列表查询失败；官方服务未找到对应硬件版本（404）。可用版本尚未确认，可稍后重新检查。','Compatible firmware list lookup failed; the official service did not find this hardware version (404). The available version is unverified. Check again later.'):t('兼容固件列表查询失败，可用版本尚未确认。可稍后重新检查。','Compatible firmware list lookup failed. The available version is unverified. Check again later.')):'';
-  text(status,recoveryMessage||(notStarted||fileMismatch?reportMessage:catalogMessage||(problem?humanError(problem):ownedPreview&&!active()?t('更新前需要结束这台设备的预览；仅在你继续后执行。','This device’s preview must end before an update. It ends only when you continue.'):reportMessage)));status.classList.toggle('dm-status-error',!!problem&&!notStarted||!!failure&&!fileReadback);error.hidden=true;
+  const recovering=recover&&(pending==='firmware_recovery_check'||state.busy===true);
+  const recoveryMessage=!recover?'':state.operation==='check'
+   ?recovering?t('正在核对版本检查会话…','Verifying the version-check session…'):t('检查会话的退出或释放尚未确认，请先核对检查。','The check session exit or release is unconfirmed. Verify the check first.')
+   :recovering?t('正在核对设备版本…','Checking the device version…'):t('官方升级会话的退出或释放尚未确认，请先核对设备，不要再次升级。','The official update session exit or release is unconfirmed. Verify the device before another update.');
+  const catalogMessage=failure&&!fileReadback&&!recover&&!transportError&&!actionError?(/(?:\bHTTP\s*404\b|\b404\b)/i.test(failure.error)&&/hardware version.*not found/i.test(failure.error)?t('官方目录未找到此硬件版本。请稍后重新检查。','This hardware version was not found in the official catalog. Check again later.'):t('暂时无法读取兼容固件。请稍后重新检查。','Compatible firmware could not be checked. Try again later.')):'';
+  text(status,recoveryMessage||(notStarted||fileMismatch?reportMessage:catalogMessage||(problem?humanError(problem):ownedPreview&&!active()?t('更新前需要结束这台设备的预览；仅在你继续后执行。','This device’s preview must end before an update. It ends only when you continue.'):reportMessage)));status.classList.toggle('dm-status-error',!recovering&&(!!problem&&!notStarted||!!failure&&!fileReadback));error.hidden=true;
   sheet.element.dataset.phase=phase;delete sheet.element.dataset.catalogPhase;sheet.element.setAttribute('aria-busy',String(busy));progress.hidden=!busy;progress.removeAttribute('value');progress.removeAttribute('max');
   text(check,!fresh||uncertain||state?.supported===false?t('重新读取','Reload status'):t('重新检查','Check again'));check.hidden=true;check.disabled=!!pending||busy;
   text(primary,recover?t('核对设备','Check device'):preview()?t('打开官方升级','Open official update'):t('检查设备','Check device'));
@@ -199,21 +210,22 @@
   if(useOfficialCatalog())renderOfficialCatalog();
  }
  async function load(){
-  if(loading)return loading;const version=epoch;
-  loading=(async()=>{try{const response=await fetch('/api/device-maintenance',{cache:'no-store',signal:AbortSignal.timeout(6000)});if(!response.ok)throw Error('Update status unavailable');const value=await response.json();if(version!==epoch)return;accept(value);}catch(failure){if(version!==epoch)return;fresh=false;transportError=failure.message||'Update status unavailable';}finally{loading=null;render();schedule();}})();return loading;
+  if(pending||loading)return loading;const version=epoch;
+  const read=(async()=>{try{const response=await fetch('/api/device-maintenance',{cache:'no-store',signal:AbortSignal.timeout(6000)});if(!response.ok)throw Error('Update status unavailable');const value=await response.json();if(version!==epoch)return;accept(value);}catch(failure){if(version!==epoch)return;fresh=false;transportError=failure.message||'Update status unavailable';}finally{if(loading===read)loading=null;if(version===epoch){render();schedule();}}})();loading=read;return read;
  }
  async function request(command){
   if(pending)return;
+  if(command.name==='firmware_catalog_check'||command.name==='firmware_package_prepare')catalogDevice=selected;
   if(command.name==='firmware_catalog_check')catalogChoice={serial:command.serial,generation:state?.operation_generation,writer:writerMarker()};
   else if(command.name==='firmware_package_upgrade')catalogChoice=null;
-  pending=command.name;const version=++epoch;actionError='';transportError='';syncDiscovery();render();
+  pending=command.name;const version=++epoch;loading=null;actionError='';transportError='';syncDiscovery();render();
   try{
    const session=await fetch('/api/state',{cache:'no-store',signal:AbortSignal.timeout(6000)});if(!session.ok)throw Error('Session unavailable');const token=(await session.json()).csrf;if(version!==epoch)return;if(typeof token!=='string'||!token)throw Error('Session unavailable');
    const response=await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json','X-Console-Token':token},body:JSON.stringify(command),signal:AbortSignal.timeout(command.name==='firmware_check'?60000:15000)}),result=await response.json();
    if(version!==epoch)return;if(!response.ok||result.ok===false)throw Error(result.error||'Device update did not complete');
    const value=result.device_maintenance||result.maintenance;if(value)accept(value);else fresh=false;
   }catch(failure){if(version===epoch){fresh=false;actionError=failure.message||'Device update did not complete';if(command.name==='firmware_upgrade')uncertain=true;}}
-  finally{pending='';syncDiscovery();render();if(version===epoch)await load();syncDiscovery();}
+  finally{pending='';render();if(version===epoch)await load();else schedule();syncDiscovery();}
  }
  async function checkSelected(){
   const number=sn(selected);
@@ -223,7 +235,14 @@
   await request({name:'firmware_check',serial:number});
  }
  function schedule(){clearTimeout(timer);if(sheet.element.open||pending||state?.busy===true||state?.locked===true||state?.official_catalog?.busy===true||busyPhases.has(state?.phase))timer=setTimeout(()=>{if(!pending)load();else schedule();},active()?1000:5000);}
- function openSelection(show=true,saved=false){const row=inventory.selection(),previous=state?.device,retained=retainedRecord();if(saved&&retained)selected=previous;else if(available(row))selected=row;else if(retained&&(!row||sn(row)===sn(previous)))selected=previous;else return false;actionError='';transportError='';epoch++;fresh=false;if(show)sheet.open();render();load();return true;}
+ function openSelection(show=true,saved=false){
+  const row=inventory.selection(),previous=state?.device,retained=retainedRecord(),resumeRow=saved&&resumeDevice();
+  if(resumeRow)selected=resumeRow;else if(saved&&retained)selected=previous;else if(available(row))selected=row;else if(retained&&(!row||sn(row)===sn(previous)))selected=previous;else return false;
+  // This changes presentation only. An accepted write still owns its response
+  // after the operator closes or reopens the dialog.
+  actionError='';transportError='';if(!pending)fresh=false;
+  if(show)sheet.open();render();load();return true;
+ }
  check.onclick=()=>!fresh||uncertain||state?.supported===false?load():checkSelected();
  primary.onclick=()=>{
   if(!fresh||uncertain||transportError||actionError){actionError='';load();return;}
@@ -244,7 +263,7 @@
  sheet.element.addEventListener('close',()=>{syncDiscovery();schedule();});
  window.addEventListener('device-inventory-selection',render);window.addEventListener('device-inventory-update',render);window.addEventListener('wuji-language',render);
  window.addEventListener('device-inventory-use',()=>{openRequest++;sheet.close();document.getElementById('di-device-more')?.removeAttribute('open');});
- window.addEventListener('console-offline',()=>{epoch++;fresh=false;transportError=t('工作台服务已离线。','Workbench service is offline.');render();});
+ window.addEventListener('console-offline',()=>{epoch++;loading=null;fresh=false;transportError=t('工作台服务已离线。','Workbench service is offline.');render();schedule();});
  async function openBySerial(number){
   const request=++openRequest;await load();if(request!==openRequest)return;
   const discovered=inventory.snapshot?.()?.devices?.some(row=>sn(row)===number&&available(row));
@@ -256,7 +275,7 @@
    // It is deliberately absent from discovery and never selects/connects a
    // device. Installation repeats the host's fresh exact-device checks.
    selected={sn:number,serial:number,kind:'glove',generation:'glove1',side:history.side,model:'Wuji Glove 1',history_only:true};
-   actionError='';transportError='';epoch++;fresh=false;sheet.open();render();load();return;
+   actionError='';transportError='';if(!pending)fresh=false;sheet.open();render();load();return;
   }
   inventory.show();
  }

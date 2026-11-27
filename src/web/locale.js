@@ -51,6 +51,20 @@
     });
   }
 
+  /* Show one language for notices supplied as a bilingual pair. */
+  function notice(value) {
+    if (typeof value !== 'string') return '';
+    var message = value.trim();
+    var pair = message.split(' / ');
+    if (pair.length !== 2 || /[\r\n]/.test(message)) return message;
+    var han = /\p{Script=Han}/u;
+    var firstIsChinese = han.test(pair[0]);
+    if (firstIsChinese === han.test(pair[1])) return message;
+    var english = pair[firstIsChinese ? 1 : 0].trim();
+    if (!/[a-z]/i.test(english)) return message;
+    return current === 'en' ? english : pair[firstIsChinese ? 0 : 1].trim();
+  }
+
   /* Text is only written to leaf elements whose text is not a form value. */
   function canSetText(el) {
     var tag = String(el.tagName || '').toUpperCase();
@@ -92,7 +106,7 @@
     return true;
   }
 
-  var api = { setLanguage: setLanguage, text: text, apply: apply, dictionary: DICT };
+  var api = { setLanguage: setLanguage, text: text, notice: notice, apply: apply, dictionary: DICT };
   Object.defineProperty(api, 'lang', { enumerable: true, get: function () { return current; } });
   global.WujiLocale = api;
 })(typeof window !== 'undefined' ? window : this);

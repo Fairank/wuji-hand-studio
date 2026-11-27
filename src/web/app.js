@@ -12,6 +12,7 @@
   const labelOf=value=>Object.hasOwn(labels,value)?t(...labels[value]):String(value??'');
   const reasonOf=value=>Object.hasOwn(reasons,value)?t(...reasons[value]):String(value??'');
   let state=null,pending=false,service=false,logsKey='',sessionsKey='',serviceRevision=0;
+  const reportDownloads=new Map();
   // Reviewed adaptation of the delegated Fable UI: conservative state parsing
   // and a single polling lane with a post-action freshness barrier.
   let inFlight=false,pollTimer=0,pollId=0,waiter=null;
@@ -31,12 +32,56 @@
     for(const option of el('annotation').options)if(Object.hasOwn(labels,option.value))option.textContent=labelOf(option.value);
     for(const option of el('duration').options)option.textContent=option.value+' '+t('秒','s');
   }
+  function reportControls(item,unavailable){
+    const box=document.createElement('div'),link=document.createElement('a'),status=document.createElement('p'),details=document.createElement('details');
+    const summary=document.createElement('summary'),raw=document.createElement('pre');
+    status.className='record-export-status';status.setAttribute('role','status');
+    details.className='record-export-details';details.append(summary,raw);
+    link.href='/api/report?id='+encodeURIComponent(item.id);link.download='hand-report.json';link.textContent=t('导出报告','Export report');link.hidden=unavailable;
+    box.append(link,status,details);
+    const task=reportDownloads.get(item.id)||{busy:false,error:''};
+    reportDownloads.set(item.id,task);
+    task.render=()=>{
+      link.setAttribute('aria-busy',String(task.busy));
+      link.setAttribute('aria-disabled',String(task.busy));
+      status.hidden=unavailable||!task.busy&&!task.error;
+      status.textContent=task.busy?t('正在下载报告…','Downloading report…'):task.error?t('报告暂不可用。请点击导出报告重试。','The report is unavailable. Select Export report to retry.'):'';
+      details.hidden=unavailable||!task.error;if(details.hidden)details.open=false;
+      summary.textContent=t('查看错误详情','View error details');raw.textContent=task.error;
+    };
+    task.render();
+    link.addEventListener('click',async event=>{
+      event.preventDefault();
+      if(unavailable||task.busy)return;
+      const revision=serviceRevision,current=()=>serviceRevision===revision&&reportDownloads.get(item.id)===task;
+      task.busy=true;task.error='';task.render();
+      try {
+        const response=await fetch(link.href,{cache:'no-store',redirect:'error',signal:AbortSignal.timeout(30000)});
+        if(!response.ok){
+          const body=await response.json().catch(()=>null);
+          throw Error('HTTP '+response.status+(typeof body?.error==='string'?' · '+body.error:''));
+        }
+        const file=await response.blob();
+        if(!file.size)throw Error('Empty report');
+        if(!current())return;
+        const download=document.createElement('a'),url=URL.createObjectURL(file);
+        const filename=response.headers.get('Content-Disposition')?.match(/filename="([a-z0-9-]+\.json)"/i)?.[1];
+        download.href=url;download.download=filename||link.download;document.body.append(download);
+        try{download.click();}
+        finally{download.remove();setTimeout(()=>URL.revokeObjectURL(url),30000);}
+      }catch(error){if(current())task.error=error.message||error.name;}
+      finally{if(current()){task.busy=false;task.render();}}
+    });
+    return box;
+  }
   function renderSessions(sessions){
     const key=JSON.stringify([window.WujiLocale?.lang,sessions]);if(key===sessionsKey)return;sessionsKey=key;
+    const reports=new Set(sessions.map(item=>item.id));
+    for(const id of reportDownloads.keys())if(!reports.has(id))reportDownloads.delete(id);
     const rows=sessions.map(item=>{const row=document.createElement('div');row.className='session-row';const p=document.createElement('p'),storage=item.workbench_storage,unsaved=storage?.saved===false,memory=storage?.memory_available===true;
       const saving=unsaved?' '+(memory?t('报告未保存到本机，可从内存导出。','Report not saved locally; export the in-memory report.'):t('报告未保存到本机，内存副本不可用。','Report not saved locally; the in-memory copy is unavailable.')):'';
       p.textContent=t(`${labelOf(item.label)} · ${item.frames} 帧 · ${fmt(item.seconds,1)} 秒 · ${reasonOf(item.reason)}`,`${labelOf(item.label)} · ${item.frames} frames · ${fmt(item.seconds,1)} s · ${reasonOf(item.reason)}`)+(rawUnconfirmed(item)?' '+rawWarning():'')+saving;
-      const a=document.createElement('a');a.href='/api/report?id='+encodeURIComponent(item.id);a.textContent=t('导出报告','Export report');a.download='hand-report.json';a.hidden=unsaved&&!memory;row.append(p,a);return row;});el('sessions').replaceChildren(...rows);if(!rows.length)el('sessions').textContent=t('尚无采集记录','No capture records yet');
+      row.append(p,reportControls(item,unsaved&&!memory));return row;});el('sessions').replaceChildren(...rows);if(!rows.length)el('sessions').textContent=t('尚无采集记录','No capture records yet');
   }
   function controls(){
     const connected=service&&state?.connection==='connected',connecting=service&&state?.connection==='connecting';
@@ -50,7 +95,7 @@
     el('duration').disabled=!!state?.recording.active||pending;
   }
   function showError(text){el('service-error').textContent=text;el('service-error').hidden=!text;}
-  function offline(){serviceRevision++;service=false;state=null;controls();el('connection-state').textContent='本机服务未连接';el('connection-message').textContent='请通过“打开手部工作台”重新打开本机服务。';for(const id of ['joint-count','device-hz','host-hz','data-age'])el(id).textContent='—';el('record-progress').textContent=t('采集状态未知，请恢复连接后核对','Recording state is unknown. Reconnect to verify it.');window.dispatchEvent(new Event('console-offline'));}
+  function offline(){serviceRevision++;service=false;state=null;for(const task of reportDownloads.values()){task.busy=false;task.error='';task.render();}controls();el('connection-state').textContent='本机服务未连接';el('connection-message').textContent='请通过“打开手部工作台”重新打开本机服务。';for(const id of ['joint-count','device-hz','host-hz','data-age'])el(id).textContent='—';el('record-progress').textContent=t('采集状态未知，请恢复连接后核对','Recording state is unknown. Reconnect to verify it.');window.dispatchEvent(new Event('console-offline'));}
   function render(next){
     if(state?.csrf&&next.csrf&&state.csrf!==next.csrf)offline();
     state=next;service=true;

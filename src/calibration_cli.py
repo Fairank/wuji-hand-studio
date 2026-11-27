@@ -244,6 +244,11 @@ class CalibrationCLI:
                 cache.update(metadata_current=False,available=False,metadata_error='用户档案在读取期间已改变，请刷新 / Wearer profile changed during this read; refresh its current state')
             run=copy.deepcopy(self.run)
             native_token=getattr(self.native,'token',None)
+        if run['running'] and run.get('source')=='official_jsonl_native':
+            # Starting a new wearer invalidates metadata while the official
+            # capture owns the device. The running adapter still identifies
+            # its guide, independently of any cached wearer information.
+            cache.update(guided_native=True,guide='official_jsonl',human_tty=False,metadata_current=False)
         from cli_coordination import reservation,identity
         marker=reservation()
         cleanup=bool(marker.get('kind')=='calibration' and (identity(marker.get('pid'))!=marker.get('start')

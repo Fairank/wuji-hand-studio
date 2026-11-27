@@ -15,7 +15,7 @@
  try{const data=JSON.parse(localStorage.getItem(key)||'[]');if(Array.isArray(data)){const unique=new Map();for(const row of data.map(clean).filter(Boolean).sort((a,b)=>b.recorded_at-a.recorded_at))if(!unique.has(id(row)))unique.set(id(row),row);records=[...unique.values()].slice(0,12);}}catch{storageFailed=true;}
  const setText=(node,value)=>{if(node.textContent!==value)node.textContent=value;};
  function detected(row){
-  const found=inventory?.devices?.find(d=>d.kind===row.kind&&(d.sn||d.serial)===row.serial);if(!found||found.stale===true||found.selectable!==true||inventory?.scanning||inventory?.error)return null;
+  const found=inventory?.devices?.find(d=>d.kind===row.kind&&(d.sn||d.serial)===row.serial);if(!found||found.stale===true||found.selectable!==true||inventory?.error)return null;
   const time=typeof found.last_seen==='number'?(found.last_seen<1e12?found.last_seen*1000:found.last_seen):Date.parse(found.last_seen||'');
   const age=Date.now()-time,ttl=Number(inventory.ttl_s)||30;return Number.isFinite(age)&&age>=0&&age<ttl*1000?found:null;
  }
@@ -28,8 +28,9 @@
    if(!card){const button=document.createElement('button');button.type='button';button.className='dh-device';const heading=document.createElement('strong'),sn=document.createElement('span'),meta=document.createElement('small');button.append(heading,sn,meta);button.onclick=()=>{const current=records.find(item=>id(item)===identity);if(current&&detected(current))window.WujiDeviceInventory?.select(current.serial);else if(catalogOnly(current))window.WujiDeviceMaintenance?.open(current.serial);};card={button,heading,sn,meta};cards.set(identity,card);}
    const present=!!detected(row),s=consoleState||{},v=s.official_viz||{},g=s.glove||{},viewerSN=serial((v.reported_device||v.device)?.sn||(v.reported_device||v.device)?.serial),sessionRetained=viewerSN===row.serial&&(v.active===true||v.reserved===true)||s.device_id===row.serial&&s.connection!=='disconnected'||g.glove_serial===row.serial&&(g.busy===true||g.connection==='receiving');
    const readonlyCatalog=!present&&catalogOnly(row);
+   const canSelect=present&&(inventory.scanning!==true||inventory.discovery_interruptible===true);
    setText(card.heading,name(row));setText(card.sn,row.serial);setText(card.meta,present?t('本次已检测到','Detected now'):readonlyCatalog?t('检查官方固件目录','Check official firmware catalog'):sessionRetained?t('会话保留在设备任务中','Session retained in Device tasks'):t('等待再次发现','Awaiting rediscovery'));
-   card.button.disabled=!present&&!readonlyCatalog;card.button.title=t('本机记录时间：','Recorded locally: ')+new Date(row.recorded_at).toLocaleString(window.WujiLocale?.lang==='en'?'en-US':'zh-CN');card.button.dataset.present=String(present);card.button.dataset.catalogOnly=String(readonlyCatalog);if(list.children[index]!==card.button)list.insertBefore(card.button,list.children[index]||null);
+   card.button.disabled=!canSelect&&!readonlyCatalog;card.button.title=t('本机记录时间：','Recorded locally: ')+new Date(row.recorded_at).toLocaleString(window.WujiLocale?.lang==='en'?'en-US':'zh-CN');card.button.dataset.present=String(present);card.button.dataset.catalogOnly=String(readonlyCatalog);if(list.children[index]!==card.button)list.insertBefore(card.button,list.children[index]||null);
   }
   for(const [identity,card]of cards)if(!retained.has(identity)){card.button.remove();cards.delete(identity);}
   empty.hidden=records.length>0;setText(empty,t('成功接入设备后，记录会显示在这里。','Successfully connected devices appear here.'));

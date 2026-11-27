@@ -2,7 +2,7 @@
 (()=>{
  'use strict';
  const $=id=>document.getElementById(id),L=window.WujiLocale,t=(zh,en)=>L.lang==='en'?en:zh;
- const body=$('page-settings')?.querySelector('.page-body');if(!body)return;
+ const page=$('page-settings'),body=page?.querySelector('.page-body');if(!body)return;
  const directory=document.querySelector('.directory'),advanced=directory.querySelector('.nav-advanced');
  const devicesLink=directory.querySelector('[data-page=devices]');if(devicesLink)directory.insertBefore(devicesLink,advanced);
  directory.insertBefore(directory.querySelector('[data-page=settings]'),directory.querySelector('.nav-brand-note'));
@@ -11,20 +11,33 @@
  function el(tag,zh,en,className){const node=document.createElement(tag);if(className)node.className=className;if(zh!==undefined)text(node,zh,en);return node;}
  const appearance=$('wb-appearance-title').closest('.wb-card');
  const tabs=el('div',undefined,undefined,'hub-tabs settings-tabs');tabs.setAttribute('role','tablist');
- const sections={},definitions=[['appearance','外观','Appearance'],['devices','连接与设备','Connections'],['tools','关于与工具','About & tools']];
+ const sections={},definitions=[['appearance','外观','Appearance'],['devices','连接与设备','Connections'],['updates','更新','Updates'],['tools','关于与工具','About & tools']];
  for(const [key,zh,en] of definitions){
   const button=el('button',zh,en);button.type='button';button.id='settings-tab-'+key;button.setAttribute('role','tab');button.setAttribute('aria-controls','settings-'+key);tabs.append(button);
   const section=el('section',undefined,undefined,'settings-section');section.id='settings-'+key;section.setAttribute('role','tabpanel');section.setAttribute('aria-labelledby',button.id);sections[key]=section;
   button.onclick=()=>show(key);
  }
  function show(key,focus=false){for(const [name,node] of Object.entries(sections)){node.hidden=name!==key;const tab=$('settings-tab-'+name);tab.setAttribute('aria-selected',String(name===key));tab.tabIndex=name===key?0:-1;if(focus&&name===key)tab.focus();}}
+ let pendingReveal=null;
+ function reveal(key,target){
+  if(!sections[key])return;
+  if(location.hash!=='#settings'||page.hidden){pendingReveal={key,target};location.hash='#settings';return;}
+  pendingReveal=null;show(key,!target);
+  if(target?.isConnected){target.focus({preventScroll:true});target.scrollIntoView({block:'nearest'});}
+ }
+ // The workspace first shows the page and resets its scroll on navigation.
+ window.addEventListener('hashchange',()=>{
+  const request=pendingReveal;pendingReveal=null;
+  if(request&&location.hash==='#settings')reveal(request.key,request.target);
+ });
+ window.WujiSettings={reveal};
  tabs.addEventListener('keydown',event=>{const keys=definitions.map(x=>x[0]),i=keys.findIndex(key=>$('settings-tab-'+key)===event.target);if(i<0)return;
   let next;if(event.key==='ArrowRight')next=(i+1)%keys.length;else if(event.key==='ArrowLeft')next=(i+keys.length-1)%keys.length;else if(event.key==='Home')next=0;else if(event.key==='End')next=keys.length-1;else return;
   event.preventDefault();show(keys[next],true);
  });
  body.replaceChildren(tabs,...Object.values(sections));sections.appearance.append(appearance);
  function card(parent,zh,en,noteZh,noteEn){const node=el('div',undefined,undefined,'wb-card');node.append(el('h3',zh,en));if(noteZh)node.append(el('p',noteZh,noteEn));parent.append(node);return node;}
- const discovery=card(sections.devices,'设备连接','Device connections','在设备页选择并连接。自动查找每 5 秒运行，接入后暂停；添加设备时继续查找。','Choose and connect on Devices. Discovery runs every 5 seconds and pauses after connection; Add device resumes it.');
+ const discovery=card(sections.devices,'设备连接','Device connections','空闲时每 5 秒查找设备。请在设备页选择接入。','Discovery runs every five seconds while idle. Choose a device on Devices to connect.');
  discovery.id='settings-device-discovery';
  const appearanceRow=$('wb-theme').closest('.wb-row');appearanceRow.classList.add('settings-row');
  const languageRow=el('div',undefined,undefined,'wb-row settings-row'),languageLabel=el('label','语言','Language'),language=el('select');language.id='settings-language';languageLabel.htmlFor=language.id;
@@ -38,7 +51,7 @@
  oldPreferenceSection.remove();
  const menuLink=el('button','设置…','Settings…','desktop-menu-row');menuLink.id='desktop-settings';menuLink.type='button';
  menuLink.onclick=()=>{$('desktop-menu').close();location.hash='#settings';window.WujiWorkspace.showPage();};$('desktop-viewer').before(menuLink);
- appearance.append(el('p','系统不支持透明材质时使用实色背景。减少动态效果会关闭界面过渡。','A solid background is used when native transparency is unavailable. Reduce motion disables interface transitions.','settings-footnote'));
+ appearance.append(el('p','不支持透明效果时使用实色背景。','Uses a solid background when transparency is unavailable.','settings-footnote'));
  function route(parent,zh,en,noteZh,noteEn,callback){const button=el('button',undefined,undefined,'settings-route');button.type='button';const copy=el('span');copy.append(el('strong',zh,en),el('small',noteZh,noteEn));const arrow=document.createElementNS('http://www.w3.org/2000/svg','svg');arrow.setAttribute('viewBox','0 0 16 16');arrow.setAttribute('aria-hidden','true');arrow.innerHTML='<path d="m6 3 5 5-5 5"/>';button.append(copy,arrow);button.onclick=callback;parent.append(button);return button;}
  const openPage=key=>{location.hash='#'+key;window.WujiWorkspace.showPage();};
  const connections=el('details',undefined,undefined,'settings-workflow');connections.append(el('summary','设备快捷入口','Device shortcuts'));discovery.append(connections);
@@ -54,11 +67,11 @@
  route(controls,'运行记录','Session records','查看记录与导出数据','Review records and export data',()=>openPage('records'));
  const research=el('details',undefined,undefined,'settings-research');
  research.append(el('summary','触碰实验','Touch research'));
- research.append(el('p','用于采集与离线识别研究；自动轻扣尚未通过实机验收。','For data collection and offline recognition research. Automatic grasp response has not passed hardware acceptance.','settings-footnote'));
+ research.append(el('p','用于采集和离线识别。自动轻扣仍待实机验证。','Data capture and offline recognition. Automatic grasp response still requires hardware validation.','settings-footnote'));
  route(research,'触碰采集','Touch capture','按手指标注并保存反馈','Label a finger and record feedback',()=>openPage('capture'));
  route(research,'触碰识别研究','Touch recognition research','查看模型状态与流程预览','Model status and workflow preview',()=>openPage('interaction'));
  sections.tools.append(research);
- const tools=card(sections.tools,'本机数据','Local data','设置和私人模型保存在本机；公开程序不包含私人训练权重。','Preferences and private models stay on this computer. The public app contains no private weights.');
+ const tools=card(sections.tools,'本机数据','Local data');
  // Existing desktop actions retain their native availability and status handling.
  for(const [target,zh,en,noteZh,noteEn] of [
   ['desktop-folder','打开数据文件夹','Open data folder','配置、运行记录和模型包','Configuration, records and model packs'],

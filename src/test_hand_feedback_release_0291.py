@@ -113,6 +113,78 @@ class HandFeedbackReleaseTests(unittest.TestCase):
         for generation in ('hand1','hand2'):
             with self.subTest(generation=generation):self.run_readonly_worker(generation,direct=True)
 
+    def test_direct_worker_proves_release_only_for_a_hand_that_was_never_opened(self):
+        from console_agent import worker_auto
+        from device_discovery import candidates
+        serial='WH2JA00000000000';address='192.0.2.40:7447'
+        advertisement=N(sn=serial,address='udp/'+address,device_type='DeviceType.WujiHand2')
+        self.assertEqual(candidates([advertisement])[0]['serial'],serial)
+        for fault in ('absent','route_cleanup','sdk_open'):
+            with self.subTest(fault=fault):
+                route=N(open=Mock(),close=Mock(return_value=fault!='route_cleanup'))
+                manager=N(scan=Mock(return_value=[advertisement] if fault=='sdk_open' else []),
+                    connect=Mock(side_effect=RuntimeError('SDK connect did not return a hand')))
+                sdk=N(SdkManager=N(instance=lambda:manager));events=queue.Queue()
+                with (patch.dict(sys.modules,wuji_sdk=sdk),
+                    patch('device_discovery.managed_wsl',return_value=True),
+                    patch('device_discovery.DeviceRoute',return_value=route),
+                    patch('device_discovery.time.monotonic',side_effect=[0.,4.])):
+                    worker_auto(address,serial,queue.Queue(),events)
+                rows=list(events.queue);closed=[row for row in rows if row['type']=='closed']
+                self.assertEqual(rows[0]['type'],'error')
+                self.assertEqual(manager.connect.call_count,int(fault=='sdk_open'))
+                route.close.assert_called_once()
+                if fault!='absent':
+                    self.assertEqual(closed,[])
+                    continue
+                self.assertEqual(len(closed),1);record=self.record();record.pop('identity')
+                record.update(serial=serial,hardware=closed[0]['hardware'],feedback_cleanup=closed[0]['feedback_cleanup'])
+                self.assertTrue(self.helper()(record))
+                for changes in (dict(serial='OTHER'),dict(resources_released=False),dict(enable_attempted=0),dict(version=True)):
+                    forged=copy.deepcopy(record);forged['feedback_cleanup'].update(changes)
+                    self.assertFalse(self.helper()(forged),forged)
+                record['identity']=dict(serial=serial,profile='hand2_left')
+                self.assertFalse(self.helper()(record),'An observed identity requires the corresponding exact stop or release')
+
+    def test_paired_worker_checks_actual_side_for_an_unknown_directory_side(self):
+        from device_discovery import candidates
+        from device_profiles import profile
+        from glove_agent import paired_hand_worker
+        serial='WH2-LEGACY-FIXTURE'
+        row=N(sn=serial,address='zenoh://'+serial,device_type='DeviceType.WujiHand2')
+        self.assertIsNone(candidates([row])[0]['side_hint'])
+        for side in ('right','left'):
+            with self.subTest(side=side):
+                hand=N(serial_number=serial,handedness=lambda:N(get=lambda:side),disconnect=Mock(return_value=True),
+                    enable=Mock(side_effect=AssertionError('Read-only preparation cannot enable')))
+                manager=N(scan=Mock(return_value=[row]),connect=Mock(return_value=hand))
+                sdk=N(SdkManager=N(instance=lambda:manager))
+                def prepared_driver(_address,_requests,events,_factory,*,prepared):
+                    device,route=prepared
+                    self.assertIs(device,hand);device.disconnect();route.close()
+                    events.put(dict(type='closed',hardware=dict(active=False,enable_attempted=False,stop_confirmed=False),
+                        feedback_cleanup=dict(version=1,kind='readonly_feedback',serial=serial,profile='hand2_right',
+                            enable_attempted=False,resources_released=True)))
+                events=queue.Queue()
+                with (patch.dict(sys.modules,wuji_sdk=sdk),
+                    patch('device_discovery.managed_wsl',return_value=False),
+                    patch('device_ownership.DeviceOwnership',return_value=N(close=lambda:True)),
+                    patch('console_agent.worker',side_effect=prepared_driver) as driver):
+                    paired_hand_worker('',serial,profile('hand2_right'),queue.Queue(),events,Mock())
+                manager.connect.assert_called_once_with(sn=serial,device_name='wuji_hand_2')
+                hand.disconnect.assert_called_once();hand.enable.assert_not_called()
+                records=list(events.queue)
+                self.assertTrue(records[-1]['cleanup_confirmed'])
+                if side=='right':
+                    driver.assert_called_once()
+                    self.assertEqual(records[0],dict(type='identity',profile='hand2_right',device_id=serial))
+                    self.assertEqual(records[-1]['feedback_cleanup']['kind'],'readonly_feedback')
+                else:
+                    driver.assert_not_called()
+                    self.assertEqual(records[0]['type'],'error')
+                    self.assertIn('side differs',records[0]['message'])
+                    self.assertEqual(records[-1]['hand_driver_cleanup']['kind'],'hand_driver_not_created')
+
     def test_actual_readonly_worker_proof_flows_through_host_release_cli_switch_and_fresh_discovery(self):
         import test_connection_switch as fixtures
         from device_profiles import profile
@@ -164,6 +236,30 @@ class HandFeedbackReleaseTests(unittest.TestCase):
                 patch.object(console_agent,'emit'),patch('sdk_runtime.probe_runtime',return_value={}):
             console_agent.main()
         self.assertEqual(terminated,[]);self.assertTrue(joins);self.assertGreaterEqual(joins[0],2)
+
+    def test_main_delivers_terminal_receipt_when_worker_exits_after_queue_looks_empty(self):
+        import console_agent
+        terminal=dict(type='closed',hardware=dict(active=False,stop_confirmed=False),feedback_cleanup={'test':'exact receipt'})
+        alive=[True];first_poll=[True]
+        class LateEventQueue(queue.Queue):
+            def get_nowait(self):
+                if first_poll[0]:
+                    first_poll[0]=False;alive[0]=False;self.put(terminal);raise queue.Empty
+                return super().get_nowait()
+        events=LateEventQueue()
+        process=N(start=Mock(),is_alive=lambda:alive[0],join=Mock(),
+            terminate=Mock(side_effect=AssertionError('This worker has already exited')))
+        context=N(Queue=Mock(side_effect=[queue.Queue(),events]),Process=Mock(return_value=process))
+        source=io.StringIO('{"name":"connect","auto_detect":true,"serial":"HAND-SYNTHETIC"}\n')
+        reads=iter(([source],[],[]))
+        with (patch.object(console_agent.mp,'get_context',return_value=context),
+            patch.object(console_agent.sys,'stdin',source),
+            patch.object(console_agent.select,'select',side_effect=lambda *_:(next(reads),[],[])),
+            patch.object(console_agent,'emit') as emit,patch('sdk_runtime.probe_runtime',return_value={}),
+            patch('calibration_portability.prepare_transfer_directory')):
+            console_agent.main()
+        self.assertIn(terminal,[call.args[0] for call in emit.call_args_list])
+        process.terminate.assert_not_called()
 
 
 if __name__=='__main__':unittest.main()

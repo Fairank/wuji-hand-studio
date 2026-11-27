@@ -64,7 +64,7 @@
   if(!state)return t('正在读取工作台状态。','Reading workbench status.');
   if(state.hardware?.active!==false||state.glove?.busy)return t('请先结束当前实机动作或手套会话。','Finish the current hand action or glove session first.');
   if(mode==='preview')return '';
-  if(state?.connection!=='connected')return t('灵巧手未连接。请先使用右上角的「连接」。','Hand disconnected. Use Connect in the top bar first.');
+  if(state?.connection!=='connected')return t('关闭节目单后，在展示页选择实机目标，再点「连接灵巧手」。','Close the playlist, choose a physical hand on Hand demonstrations, then select Connect hand.');
   if(state?.stale)return t('正在等待最新设备反馈。','Waiting for fresh device feedback.');
   if(state?.device_profile?.generation!=='hand2')return t('当前节目单实机播放支持二代手。','Playlist playback on hardware supports Hand 2.');
   if(!$('pe-clear').checked)return t('确认工作区已清空后，即可开始。','Confirm that the workspace is clear to start.');

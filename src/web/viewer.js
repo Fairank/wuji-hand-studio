@@ -1,5 +1,6 @@
 import {cameraGesture} from './camera_gesture.mjs';
-const $=id=>document.getElementById(id);let state=null,camera=null,pointer=null,dirty=false,busy=false,lastImageMode=null,lastImageScope=null,sourceScope=null,decodedImage=null;
+const $=id=>document.getElementById(id);let state=null,camera=null,pointer=null,dirty=false,lastImageMode=null,lastImageScope=null,sourceScope=null,decodedImage=null;
+let cameraEnabled=false,cameraRequest=null,cameraTimer=0;
 const text=(zh,en)=>window.WujiLocale?.lang==='en'?en:zh;
 const sourceKind=mode=>mode==='glove_constrained_unavailable'?'glove_constrained':mode;
 function stateScope(value){
@@ -10,7 +11,17 @@ function stateScope(value){
   value.view_source==='glove'?g.connection==='disconnected':value.view_source!=='preview'&&value.connection==='disconnected']);
 }
 function discardImage(){lastImageMode=null;lastImageScope=null;$('image').hidden=true;$('image').style.display='none';$('image').removeAttribute('src');}
-function syncSource(next){const key=stateScope(next);state=next;if(key===sourceScope)return;sourceScope=key;discardImage();if(decodedImage)decodedImage.src='';$('notice').textContent=text('正在准备画面','Preparing view');}
+function setCameraEnabled(enabled){
+ if(cameraEnabled===enabled)return;
+ cameraEnabled=enabled;
+ if(!enabled){dirty=false;clearTimeout(cameraTimer);cameraTimer=0;cameraRequest?.abort();cameraRequest=null;}
+ for(const button of document.querySelectorAll('[data-view]'))button.disabled=!enabled;
+}
+function syncSource(next){
+ if(state&&state.csrf!==next?.csrf){setCameraEnabled(false);camera=null;pointer=null;}
+ const key=stateScope(next);state=next;if(key===sourceScope)return;
+ sourceScope=key;discardImage();if(decodedImage)decodedImage.src='';$('notice').textContent=text('正在准备画面','Preparing view');
+}
 function payloadMatches(meta){
  if(!state)return false;const g=state.glove||{},target=meta.target_frame,proof=target||meta.collision_preview||{},kind=sourceKind(meta.mode);
  if(kind==='glove_preview'&&meta.ready===true||target!=null){
@@ -36,15 +47,51 @@ function imageScope(meta){const proof=meta?.target_frame||meta?.collision_previe
  meta?.device_profile??null,meta?.view_source??null,proof.profile??null,proof.bridge_session_id??null,proof.glove_serial??null,
  proof.sdk_user_id??null,proof.source_context_sha256??null,meta?.feedback?.device_id??null]);}
 const fallback=()=>({azimuth:90,elevation:-5,distance:.38,lookat:[0,0,.115]});
-async function flush(){if(busy||!dirty||!state?.csrf)return;busy=true;dirty=false;try{const r=await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json','X-Console-Token':state.csrf},body:JSON.stringify({name:'view_camera',camera}),signal:AbortSignal.timeout(2000)});if(!r.ok)throw Error('Camera request failed');}catch(e){$('notice').textContent=e.message;}finally{busy=false;if(dirty)setTimeout(flush,50);}}
-function move(kind,dx,dy){const r=$('screen').getBoundingClientRect();camera=cameraGesture(camera||fallback(),kind,kind==='zoom'?0:dx/Math.max(1,r.width),kind==='zoom'?dy*.001:dy/Math.max(1,r.height));dirty=true;setTimeout(flush,40);}
+function queueCamera(delay){
+ if(!cameraTimer)cameraTimer=setTimeout(()=>{cameraTimer=0;flush();},delay);
+}
+async function flush(){
+ if(!cameraEnabled||cameraRequest||!dirty||!state?.csrf)return;
+ const request=new AbortController();cameraRequest=request;dirty=false;
+ try{
+  const response=await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json','X-Console-Token':state.csrf},
+   body:JSON.stringify({name:'view_camera',camera}),signal:AbortSignal.any([request.signal,AbortSignal.timeout(2000)])});
+  if(!response.ok)throw Error(text('视角调整未完成，请重试。','Could not change the view. Try again.'));
+ }catch(error){if(cameraRequest===request)$('notice').textContent=error.message;}
+ finally{if(cameraRequest===request){cameraRequest=null;if(dirty)queueCamera(50);}}
+}
+function move(kind,dx,dy){
+ if(!cameraEnabled)return;
+ const r=$('screen').getBoundingClientRect();camera=cameraGesture(camera||fallback(),kind,kind==='zoom'?0:dx/Math.max(1,r.width),kind==='zoom'?dy*.001:dy/Math.max(1,r.height));
+ dirty=true;queueCamera(40);
+}
 const screen=$('screen');screen.addEventListener('contextmenu',e=>e.preventDefault());
-screen.addEventListener('pointerdown',e=>{if(pointer)return;pointer={id:e.pointerId,x:e.clientX,y:e.clientY,pan:e.shiftKey||e.button===2};screen.setPointerCapture(e.pointerId);});
+screen.addEventListener('pointerdown',e=>{if(!cameraEnabled||pointer)return;pointer={id:e.pointerId,x:e.clientX,y:e.clientY,pan:e.shiftKey||e.button===2};screen.setPointerCapture(e.pointerId);});
 screen.addEventListener('pointermove',e=>{if(pointer?.id!==e.pointerId)return;const dx=e.clientX-pointer.x,dy=e.clientY-pointer.y;pointer.x=e.clientX;pointer.y=e.clientY;move(pointer.pan?'pan':'orbit',dx,dy);});
 for(const type of ['pointerup','pointercancel','lostpointercapture'])screen.addEventListener(type,e=>{if(pointer?.id===e.pointerId)pointer=null;});
-screen.addEventListener('wheel',e=>{e.preventDefault();move('zoom',0,e.deltaY);},{passive:false});
-screen.addEventListener('keydown',e=>{if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.key)){e.preventDefault();move('orbit',e.key==='ArrowLeft'?-15:e.key==='ArrowRight'?15:0,e.key==='ArrowUp'?-15:e.key==='ArrowDown'?15:0);}});
-document.querySelectorAll('[data-view]').forEach(b=>b.addEventListener('click',()=>{camera=fallback();if(b.dataset.view==='side')camera.azimuth=0;dirty=true;flush();}));
+screen.addEventListener('wheel',e=>{if(cameraEnabled){e.preventDefault();move('zoom',0,e.deltaY);}},{passive:false});
+screen.addEventListener('keydown',e=>{if(cameraEnabled&&['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.key)){e.preventDefault();move('orbit',e.key==='ArrowLeft'?-15:e.key==='ArrowRight'?15:0,e.key==='ArrowUp'?-15:e.key==='ArrowDown'?15:0);}});
+const viewButtons=document.querySelectorAll('[data-view]');
+const viewLabels={front:['正面','Front'],side:['侧面','Side'],reset:['复位','Reset']};
+function renderLabels(){
+ document.documentElement.lang=text('zh-CN','en');
+ document.title=$('viewer-title').textContent=text('手部画面 · MuJoCo','Hand view · MuJoCo');
+ screen.setAttribute('aria-label',text('手部画面','Hand view'));
+ $('image').alt=text('手部姿态','Hand pose');
+ $('viewer-help').textContent=text('拖动旋转 · 滚轮缩放 · Shift 拖动平移','Drag to orbit · Scroll to zoom · Shift-drag to pan');
+ viewButtons.forEach(button=>{button.textContent=text(...viewLabels[button.dataset.view]);});
+}
+for(const button of viewButtons){
+ button.disabled=true;
+ button.addEventListener('click',()=>{
+  if(!cameraEnabled)return;
+  camera=fallback();if(button.dataset.view==='side')camera.azimuth=0;
+  dirty=true;clearTimeout(cameraTimer);cameraTimer=0;flush();
+ });
+}
+window.addEventListener('wuji-language',renderLabels);
+window.addEventListener('storage',event=>{if(event.key==='wuji-language')window.WujiLocale.setLanguage(event.newValue==='en'?'en':'zh');});
+renderLabels();
 function frameDeadline(meta,started,deadline){
  if(!Object.hasOwn(meta,'frame_age_ms')&&!Object.hasOwn(meta,'frame_timeout_ms'))return deadline;
  const age=meta.frame_age_ms,timeout=meta.frame_timeout_ms;
@@ -63,31 +110,48 @@ function decodeFrame(image,signal,deadline){
   Promise.resolve().then(()=>image.decode()).then(()=>finish(resolve),error=>finish(reject,error));
  }).catch(error=>{image.src='';throw error;});
 }
-async function poll(){const started=performance.now(),controller=new AbortController();let timeout=setTimeout(()=>controller.abort(),2500);try{
+const serviceUnavailable=()=>Error(text('正在等待工作台服务','Waiting for the workbench service'));
+async function readState(response){
+ if(!response.ok)throw serviceUnavailable();
+ const next=await response.json();
+ if(typeof next?.csrf!=='string'||!next.csrf)throw serviceUnavailable();
+ syncSource(next);
+}
+async function poll(){const started=performance.now(),controller=new AbortController();let timeout=setTimeout(()=>controller.abort(),2500),stateRead=false;try{
  const [s,v]=await Promise.all([fetch('/api/state',{cache:'no-store',signal:controller.signal}),fetch('/api/view',{cache:'no-store',signal:controller.signal})]);
- if(!s.ok||!v.ok)throw Error('Local service unavailable / 本机服务未连接');syncSource(await s.json());const data=await v.json();if(!pointer&&!busy&&!dirty)camera=state.camera;
- const service=typeof state.csrf==='string'&&state.csrf?state.csrf:null;
- if(!service||data.service_token!==service){discardImage();throw Error(text('设备已切换，等待新画面','Device changed; waiting for a new view'));}
+ if(!v.ok)throw serviceUnavailable();
+ await readState(s);stateRead=true;
+ const data=await v.json();if(!pointer&&!cameraRequest&&!dirty)camera=state.camera;
+ const service=state.csrf;
+ if(data.service_token!==service)throw Error(text('设备已切换，等待新画面','Device changed; waiting for a new view'));
  const scope=imageScope(data.meta);
  if(!payloadMatches(data.meta)){discardImage();throw Error(text('设备已切换，等待新画面','Device changed; waiting for a new view'));}
  if(lastImageScope!==scope)discardImage();
- const mode=data.meta.mode,constrained=['glove_constrained','glove_constrained_unavailable'].includes(mode),glove=constrained||mode==='glove_preview'||mode==='glove_live';
- const source=constrained?text('映射预览 · 碰撞约束','Mapping preview · Collision constrained'):mode==='glove_preview'?text('映射预览','Mapping preview'):mode==='glove_live'?text('实机反馈','Hand feedback'):mode==='demo'?'SCRIPTED PREVIEW / 编排预览':data.meta.source_seq==null?'MODEL PREVIEW / 模型预览':`MEASURED FRAME / 实测帧 ${data.meta.source_seq}`;
+ const mode=data.meta.mode,constrained=['glove_constrained','glove_constrained_unavailable'].includes(mode);
+ const source=constrained?text('映射预览 · 碰撞约束','Mapping preview · Collision constrained'):mode==='glove_preview'?text('映射预览','Mapping preview'):mode==='glove_live'?text('实机反馈','Hand feedback'):mode==='demo'?text('动作预览','Action preview'):data.meta.source_seq==null?text('模型预览','Model preview'):text('实测画面','Measured pose');
  $('notice').title=constrained?text('显示姿态经过官方模型的几何约束；SDK 原始目标与实机指令未修改，不代表实物避碰。','The displayed pose uses geometry constraints from the official model. Original SDK targets and hardware commands are unchanged; this does not establish collision avoidance on hardware.') : '';
  if(!data.meta.ready||!data.image||mode==='glove_live'&&(data.meta.feedback?.stale!==false||data.meta.source_seq==null)){
-  $('notice').textContent=source+' · '+text('暂不可用','Unavailable');throw Error(data.meta.message||text('画面暂不可用','View unavailable'));
+  throw Object.assign(Error(text('等待新的手部画面','Waiting for a new hand pose')),{detail:data.meta.message});
  }
  const expires=frameDeadline(data.meta,started,started+2500);if(performance.now()>=expires)throw frameExpired();
  clearTimeout(timeout);timeout=setTimeout(()=>controller.abort(),expires-performance.now());
  const im=new Image();decodedImage=im;im.src=data.image;try{await decodeFrame(im,controller.signal,expires);}finally{if(decodedImage===im)decodedImage=null;}
  // This independent page has no console-state event stream. Re-read the
  // source after decoding so a late A frame cannot land in a new B session.
- const confirmed=await fetch('/api/state',{cache:'no-store',signal:controller.signal});
- if(!confirmed.ok)throw Error('Local service unavailable / 本机服务未连接');syncSource(await confirmed.json());
+ stateRead=false;
+ await readState(await fetch('/api/state',{cache:'no-store',signal:controller.signal}));
+ stateRead=true;
  if(state.csrf!==service||scope!==imageScope(data.meta)||!payloadMatches(data.meta)){discardImage();throw Error(text('设备已切换，等待新画面','Device changed; waiting for a new view'));}
  if(performance.now()>=expires)throw frameExpired();
  $('image').src=data.image;$('image').hidden=false;$('image').style.removeProperty('display');$('stale').hidden=true;lastImageMode=mode;lastImageScope=scope;
- $('notice').textContent=`${source} · ${Number(data.meta.render_hz||0).toFixed(1)} fps`+(glove?'':` · ${data.meta.message||''}`);
- }catch(e){$('stale').hidden=false;$('stale').textContent=e.name==='AbortError'?text('画面请求超时，等待新画面','View request timed out; waiting for a fresh view'):e.message;}
+ setCameraEnabled(true);
+ $('stale').title='';
+ if($('notice').textContent!==source)$('notice').textContent=source;
+ }catch(e){
+  if(!stateRead)syncSource(null);
+  setCameraEnabled(false);discardImage();
+  $('notice').textContent='';$('notice').title='';$('stale').hidden=false;
+  $('stale').title=e.detail||'';$('stale').textContent=e.name==='AbortError'?text('正在等待新画面','Waiting for a new view'):e.message;
+ }
  finally{clearTimeout(timeout);setTimeout(poll,Math.max(0,100-(performance.now()-started)));}}
 poll();

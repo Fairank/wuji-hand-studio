@@ -15,7 +15,7 @@ function fixture(){
  const person={name:PROFILE,right_hand:{calibrated:true},left_hand:{calibrated:false}};
  const data={available:true,calibration_supported:true,guided_native:true,metadata_current:true,current:person,users:[person],run:{id:ID,serial:SN,user:PROFILE,side:'right',running:false,status:'completed',source:'official_jsonl_native',interface:'guided',exit_code:0,cleanup_confirmed:true}};
  const ctx={consoleState:{csrf:'A',calibrated_teleoperation:{run_id:ID,can_continue:true}},calibrationFresh:true,busy:false,cancelStartPending:false,calibrationStartPending:false,startCancelRequested:false,refreshPending:false,actionError:'',refreshError:'',replacementContext:'',lastStartedRunId:ID,lastStartedContext:null,previousResultRunId:'',nextAction:null,
-  object:v=>!!v&&typeof v==='object'&&!Array.isArray(v),t:(zh,en)=>en,$:field,calib,previous,guideHost,advanced,calibrationPanel,
+  object:v=>!!v&&typeof v==='object'&&!Array.isArray(v),t:(zh,en)=>en,noticeText:value=>value??'',window:{WujiDeviceUse:{}},$:field,calib,previous,guideHost,advanced,calibrationPanel,
   officialViz:{snapshot:()=>viewer,selection:()=>({serial:SN,device}),setCalibrationState:value=>lastMeta=value},
   sideOf:row=>row?.side||row?.handedness||'',calibrationSdkOwner:()=>false,gloveFresh:()=>true,sessionBlock:()=>'',calibrationVisible:()=>true,
   write:(id,value)=>field(id).textContent=value,options:(element,items,value)=>element.value=value,
@@ -50,6 +50,36 @@ test('a successor Viewer closing or becoming unknown cannot revive the prior com
  const f=fixture();f.newViewer();f.render();assert.equal(f.guide().context.previous,true);
  for(const viewer of [{fresh:true,state:{active:false,phase:'idle',session_id:null}},{fresh:false,state:{active:true,phase:'running',session_id:'b'.repeat(32)}},{fresh:true,state:{active:false,phase:'error',session_id:null}}]){f.viewer(viewer);f.render();assert.equal(f.calib.dataset.currentResult,'false');assert.equal(f.previous.hidden,false);assert.equal(f.guide().context.previous,true);}
  f.newViewer();f.render();assert.equal(f.guide().context.previous,true);assert.equal(f.field('hub-profile').value,PROFILE);
+});
+test('missing shared selection presents one entry point, while cleanup remains visible',()=>{
+ const f=fixture();
+ f.ctx.officialViz.selection=()=>({serial:'',device:null});
+ f.ctx.calibrationFresh=false;
+ f.ctx.refreshError='Synthetic metadata unavailable';
+ f.render();
+ assert.equal(f.field('hub-calib-ready-note').textContent,'');
+ assert.equal(f.field('hub-calib-next').hidden,true);
+ assert.equal(f.field('hub-calib-start').disabled,true);
+ assert.equal(f.ctx.calibrationPanel.dataset.waitingForSelection,'false','previous result still has a stage');
+ f.data.cleanup_required=true;
+ f.render();
+ assert.match(f.field('hub-calib-ready-note').textContent,/End and verify/);
+ assert.equal(f.guideHost.hidden,false);
+});
+test('the empty calibration stage is suppressed only until selection, history or a session appears',()=>{
+ const f=fixture(),select=f.ctx.officialViz.selection,absent=()=>({serial:'',device:null});
+ f.data.run={status:'idle',running:false};f.ctx.officialViz.selection=absent;
+ f.render();assert.equal(f.ctx.calibrationPanel.dataset.waitingForSelection,'true');
+ f.ctx.officialViz.selection=select;
+ f.render();assert.equal(f.ctx.calibrationPanel.dataset.waitingForSelection,'false');
+ f.ctx.officialViz.selection=absent;f.ctx.calibrationStartPending=true;
+ f.render();assert.equal(f.ctx.calibrationPanel.dataset.waitingForSelection,'false');
+ f.ctx.calibrationStartPending=false;f.data.run={status:'running',running:true};
+ f.render();assert.equal(f.ctx.calibrationPanel.dataset.waitingForSelection,'false');
+ f.data.run={status:'idle',running:false};f.data.cleanup_required=true;
+ f.render();assert.equal(f.ctx.calibrationPanel.dataset.waitingForSelection,'false');
+ f.data.cleanup_required=false;f.data.run={status:'completed',running:false,result:{type:'result'}};
+ f.render();assert.equal(f.ctx.calibrationPanel.dataset.waitingForSelection,'false');
 });
 test('retiring an old result does not retire a different new run or hide its cleanup',()=>{
  const f=fixture();f.newViewer();f.render();f.viewer({fresh:true,state:{active:false,phase:'idle',session_id:null}});

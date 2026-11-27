@@ -2,19 +2,42 @@
 (()=>{
  'use strict';
  const ws=window.WujiWorkspace,$=id=>document.getElementById(id),t=(zh,en)=>window.WujiLocale?.lang==='en'?en:zh;
+ const noticeText=value=>window.WujiLocale?.notice?.(value)??value??'';
  const page=document.createElement('section');page.id='page-glove';page.className='workspace-page';page.hidden=true;
  page.innerHTML=`<header class="page-heading"><h2 id="glove-title" tabindex="-1"></h2><p id="glove-subtitle" hidden></p></header>
- <div class="glove-modes hub-tabs" role="tablist"><button id="glove-mode-virtual" type="button" role="tab" aria-controls="glove-mode-panel"></button><button id="glove-mode-real" type="button" role="tab" aria-controls="glove-mode-panel"></button></div>
+ <div class="glove-mode-bar"><div class="glove-modes hub-tabs" role="tablist"><button id="glove-mode-virtual" type="button" role="tab" aria-controls="glove-mode-panel"></button><button id="glove-mode-real" type="button" role="tab" aria-controls="glove-mode-panel"></button></div><button id="glove-system-terminal" type="button" hidden></button><span id="glove-terminal-notice" role="status" hidden></span></div>
  <div id="glove-mode-panel" class="page-body" role="tabpanel"><div class="glove-layout">
  <section class="glove-controls" aria-labelledby="glove-receive-title"><div class="glove-source-heading"><h3 id="glove-receive-title"></h3><div class="glove-model-field"><label for="glove-model" id="glove-model-label"></label><select id="glove-model"><option value="hand2_left"></option><option value="hand2_right"></option><option value="hand1_left"></option><option value="hand1_right"></option></select></div><button id="glove-scan" type="button"></button></div>
  <div class="glove-source-fields"><div><label for="glove-device" id="glove-device-label"></label><select id="glove-device"></select></div><div><label for="glove-user" id="glove-user-label"></label><select id="glove-user"></select></div><div class="glove-target-field"><label for="glove-hand-device" id="glove-hand-device-label"></label><div class="glove-target-control"><select id="glove-hand-device"></select><button id="glove-hand-scan" type="button"></button><button id="glove-prepare" type="button"></button></div></div></div></section>
- <section class="glove-display" aria-labelledby="glove-preview-title"><h3 id="glove-preview-title" class="glove-sr-only"></h3><div id="glove-viewer-dock" class="viewer-dock"></div></section>
- <section class="glove-actionbar" aria-labelledby="glove-phase"><strong id="glove-phase" hidden></strong><div class="glove-status-copy"><p id="glove-status" role="status" aria-live="polite"></p></div><label class="glove-confirm"><input type="checkbox" id="glove-clear"><span id="glove-clear-label"></span></label><div class="glove-main-actions"><button id="glove-start" class="primary" type="button" hidden></button><button id="glove-open-viewer" type="button"></button><button id="glove-handover" class="primary" type="button"></button><button id="glove-handover-cancel" type="button"></button><button id="glove-open" class="primary" type="button"></button><button id="glove-switch-source" class="primary" type="button" hidden></button><button id="glove-switch-cli" type="button" hidden></button><button id="glove-follow" class="primary" type="button"></button><button id="glove-stop" class="danger" type="button"></button><button id="glove-disconnect" type="button"></button></div></section>
+ <section class="glove-display" aria-labelledby="glove-preview-title"><h3 id="glove-preview-title" class="glove-sr-only"></h3>
+ <div id="glove-viewer-dock" class="viewer-dock"></div></section>
+ <section class="glove-actionbar" aria-labelledby="glove-phase"><div class="glove-status-copy" role="status" aria-live="polite"><strong id="glove-phase"></strong><p id="glove-status"></p></div><label class="glove-confirm"><input type="checkbox" id="glove-clear"><span id="glove-clear-label"></span></label><div class="glove-main-actions"><button id="glove-start" class="primary" type="button" hidden></button><button id="glove-open-viewer" type="button"></button><button id="glove-handover" class="primary" type="button"></button><button id="glove-handover-cancel" type="button"></button><button id="glove-open" class="primary" type="button"></button><button id="glove-switch-source" class="primary" type="button" hidden></button><button id="glove-switch-cli" type="button" hidden></button><button id="glove-follow" class="primary" type="button"></button><button id="glove-stop" class="danger" type="button"></button><button id="glove-disconnect" type="button"></button></div></section>
  </div><details id="glove-details" class="glove-details"><summary id="glove-details-title"></summary><div class="glove-details-body"><section><h3 id="glove-options-title"></h3><div class="glove-detail-fields"><label><span id="glove-timeout-label"></span><span class="glove-input-unit"><input id="glove-timeout" type="number" min="100" max="2000" step="50" value="250"><span>ms</span></span></label><label><span id="glove-address-label"></span><input id="glove-hand-address" autocomplete="off" spellcheck="false"></label></div><p id="glove-profile"></p><p id="glove-pair-note"></p><p id="glove-user-note"></p><a href="#connection" id="glove-config"></a></section>
  <section><h3 id="glove-parameters-title"></h3><p id="glove-parameters"></p><a href="#parameters" id="glove-parameters-link"></a><div class="glove-metrics"><div><span id="glove-rate-label"></span><strong id="glove-rate">—</strong></div><div><span id="glove-age-label"></span><strong id="glove-age">—</strong></div><div><span id="glove-send-label"></span><strong id="glove-send">—</strong></div></div><p id="glove-rate-note"></p></section>
  <section><h3 id="glove-platform-title"></h3><p id="glove-platform-text"></p><p id="glove-cli-note"></p><p id="glove-follow-note"></p><p id="glove-runtime-note"></p><p id="glove-command-status" role="alert"></p><div class="glove-detail-links"><a id="glove-sdk-doc" href="https://github.com/wuji-technology/wuji-sdk/blob/main/examples/python/retargeting/1.teleop_real.py" target="_blank" rel="noopener">SDK ↗</a><a id="glove-calib-doc" href="https://docs.wuji.tech/docs/en/wuji-glove/latest/sdk-data-reference/calibration/" target="_blank" rel="noopener"></a></div></section>
  <section class="glove-joints"><h3 id="glove-joints-title"></h3><div class="glove-table-wrap"><table><thead><tr><th id="glove-joint-label"></th><th id="glove-sdk-target-label"></th><th id="glove-target-label"></th><th id="glove-applied-label"></th><th id="glove-measured-label"></th></tr></thead><tbody id="glove-joint-rows"></tbody></table></div></section></div></details></div>`;
  document.querySelector('.page-area').append(page);ws.views.glove=page.querySelector('.page-body');
+ const terminalButton=$('glove-system-terminal'),terminalNotice=$('glove-terminal-notice');
+ function showTerminalButton(){
+  terminalButton.hidden=navigator.platform!=='Win32'||typeof window.pywebview?.api?.open_teleoperation_terminal!=='function';
+ }
+ window.addEventListener('pywebviewready',showTerminalButton);showTerminalButton();
+ async function openSystemTerminal(automatic=false){
+  if(terminalButton.hidden||terminalButton.disabled)return;
+  terminalButton.disabled=true;terminalNotice.hidden=true;
+  try{
+   const result=await window.pywebview.api.open_teleoperation_terminal();
+   if(result?.ok!==true)throw Error('system terminal');
+   if(result.already_open&&!automatic){
+    terminalNotice.textContent=t('终端已打开，可从任务栏切回。','The terminal is already open. Switch to it from the taskbar.');
+    terminalNotice.hidden=false;
+   }
+  }catch{
+   terminalNotice.textContent=t('无法打开系统终端，请重试。','Couldn’t open the system terminal. Try again.');
+   terminalNotice.hidden=false;
+  }finally{terminalButton.disabled=false;}
+ }
+ terminalButton.addEventListener('click',()=>void openSystemTerminal());
  const link=document.createElement('a');link.href='#glove';link.dataset.page='glove';link.innerHTML='<svg viewBox="0 0 26 24" aria-hidden="true"><path d="M4 8h4l3 4-3 4H4M22 8h-4l-3 4 3 4h4M11 4h4M11 20h4"/></svg><span></span>';document.querySelector('.directory').insertBefore(link,document.querySelector('[data-page="feedback"]'));
  const virtualMode=()=>location.hash==='#virtual-glove';
  const modeTabs=page.querySelector('.glove-modes');
@@ -24,6 +47,9 @@
  const attempt=value=>value&&/^[a-f0-9]{32}$/.test(value.viewer_token||'')&&/^[a-f0-9]{32}$/.test(value.attempt_id||'')?{viewer_token:value.viewer_token,attempt_id:value.attempt_id}:null;
  const sameAttempt=(a,b)=>!!a&&!!b&&a.viewer_token===b.viewer_token&&a.attempt_id===b.attempt_id;
  let state=null,online=false,pending=false,pendingName='',requestEpoch=0,operationVersion=0,selectionVersion=0,lease=null,leaseSession=null,leaseRevision=null,leaseAt=0,leaseEpoch=0,seen=false,optionsKey='',lastMessage='',savedBinding=null,wantedGlove='',wantedUser=null,wantedProfile='',consentKey='',connectionEpoch=0,previousConnection='disconnected',pendingEndSession=null,pendingEndRevision=null,controllerScope='',sdkSessionFloor=0;
+ let terminalFollow=null;
+ const mainWindow=window.parent===window&&new URLSearchParams(location.search).get('task_view')!=='1';
+ const realTerminalView=()=>mainWindow&&!terminalButton.hidden&&!page.hidden&&!document.hidden&&location.hash==='#glove';
  const validSession=value=>Number.isSafeInteger(value)&&value>0;
  const validRevision=value=>Number.isSafeInteger(value)&&value>=0;
  const releaseLease=()=>{leaseSession=null;leaseRevision=null;if(lease!==null){lease=null;leaseEpoch++;}};
@@ -36,6 +62,7 @@
   'glove-receive-title':['设备与映射','Devices and mapping'],'glove-model-label':['映射型号','Hand model'],'glove-scan':['查找设备','Find devices'],
   'glove-device-label':['手套来源','Glove source'],'glove-user-label':['遥操作档案','Teleoperation profile'],'glove-hand-device-label':['实体灵巧手','Physical hand'],'glove-hand-scan':['查找灵巧手','Find hands'],
   'glove-preview-title':['遥操作画面','Teleoperation view'],
+  'glove-system-terminal':['打开系统终端','Open system terminal'],
   'glove-open':['连接手套','Connect glove'],'glove-prepare':['连接灵巧手','Connect hand'],'glove-follow':['开始实机跟随','Start real following'],'glove-stop':['暂停跟随','Pause following'],'glove-disconnect':['断开','Disconnect'],
   'glove-open-viewer':['查看原会话','Review original session'],'glove-handover':['使用这只手套','Use this glove'],'glove-handover-cancel':['取消切换','Cancel switch'],'glove-clear-label':['底座已固定，活动空间已清空','Base secured and motion area clear'],
   'glove-switch-source':['切换设备','Switch device'],'glove-switch-cli':['切换到 CLI','Switch to CLI'],
@@ -68,9 +95,31 @@
   else{gloveLayout.insertBefore(operationBar,next);if(focused&&operationBar.contains(focused)&&document.activeElement!==focused)focused.focus({preventScroll:true});}
  }
  window.addEventListener('resize',syncOperationOrder);
+ const compatibleHand=(hand,profile)=>['hand1','hand2'].includes(profile.generation)&&['left','right'].includes(profile.side)
+   &&hand.generation===profile.generation&&(hand.side_hint==null||hand.side_hint===''||hand.side_hint===profile.side);
+  function targetHands(glove){
+   const inventory=window.WujiDeviceInventory?.snapshot();
+   const blocked=new Set(array(inventory?.conflicts).map(serial));
+   const hands=new Map(),now=Date.now()/1000;
+   for(const row of array(inventory?.devices)){
+    const number=serial(row);
+    if(row?.kind!=='hand'||typeof number!=='string'||!number)continue;
+    if(row.conflict||array(row.workspace_owners).length||row.in_use&&number!==glove.feedback?.device_id)blocked.add(number);
+    if(blocked.has(number)||row.stale!==false||row.selectable!==true||typeof row.expires_at==='number'&&row.expires_at<=now)continue;
+    hands.set(number,{serial:number,generation:row.generation,side_hint:row.side});
+   }
+   const seen=glove.hands_at??glove.devices_at;
+   if(typeof seen==='number'&&seen<=now&&seen+30>now){
+    for(const row of array(glove.hands)){
+     const number=serial(row);
+     if(typeof number==='string'&&number&&!blocked.has(number)&&!hands.has(number))hands.set(number,row);
+    }
+   }
+   return [...hands.values()];
+  }
  function renderSharedStart(controllerBusy,transferBusy){
   const shared=window.WujiDeviceUse,button=$('glove-start'),selected=shared?.selected?.('teleoperation'),selectedSerial=selected?.serial||selected?.sn,calibration=state?.calibration||{},run=calibration.run||calibration,g=state?.glove||{},hw=g.hardware||{},feedback=g.feedback||{},identity=feedback.identified_device||{},owner=shared?.current?.();
-  const noHand=!feedback.device_id&&Object.keys(hw).length===0,inactive=noHand||hw.active===false&&hw.stop_confirmed===true,knownHand=!feedback.device_id||identity.source==='sdk_identity'&&identity.serial===feedback.device_id&&identity.profile===g.profile;
+   const noHand=!feedback.device_id&&Object.keys(hw).length===0,inactive=noHand||hw.active===false&&(hw.stop_confirmed===true||g.feedback_release_allowed===true),knownHand=!feedback.device_id||identity.source==='sdk_identity'&&identity.serial===feedback.device_id&&identity.profile===g.profile;
   const retry=online&&controllerBusy&&!transferBusy&&!pending&&g.connection==='receiving'&&g.stream?.fresh===false&&owner?.mode==='teleoperation'&&owner.kind==='glove'&&owner.serial===g.glove_serial&&owner.session===g.session_id&&Number.isSafeInteger(g.session_id)&&g.session_id>0&&typeof g.user?.user_id==='string'&&owner.user_id===g.user.user_id&&owner.profile===g.profile&&g.profile===state?.device_profile?.id&&/^hand[12]_(left|right)$/.test(g.profile||'')&&state?.connection_switch?.can_switch===true&&/^[a-f0-9]{64}$/.test(state.connection_switch.expected_owner||'')&&inactive&&knownHand&&lease===null&&!g.follow_pending&&!g.follow_unconfirmed&&!(state.unconfirmed_devices||[]).length;
   button._retry=retry?{owner:{...owner},context:state.connection_switch.expected_owner,hand:feedback.device_id||null}:null;
   button.hidden=!shared||controllerBusy&&!retry||transferBusy;
@@ -81,6 +130,31 @@
   const button=$('glove-start');if(event?.detail>1||button.hidden||button.disabled||!window.WujiDeviceUse)return;
   const retry=button._retry;if(retry){const owner=window.WujiDeviceUse.current?.();if(!owner||['mode','kind','serial','session','user_id','profile'].some(key=>owner[key]!==retry.owner[key]))return;const target={mode:'teleoperation',kind:'glove',serial:owner.serial,user_id:owner.user_id,profile:owner.profile,...retry.hand?{hand_serial:retry.hand}:{}};window.WujiDeviceUse.open('teleoperation',target,{navigate:false,retryOwner:retry.owner,expectedContext:retry.context}).catch(()=>{});return;}
   window.WujiDeviceUse.open('teleoperation',null,{navigate:false}).catch(()=>{});
+ }
+ function visibleStopWarnings(rows,glove){
+  const target=glove.feedback?.device_id;
+  if(glove.hardware?.active!==true||glove.busy!==true||glove.connection!=='receiving'||glove.follow_unconfirmed!==false||!target||!validSession(glove.session_id))return rows;
+  // The safety ledger also tracks a confirmed running session for later cleanup.
+  return rows.filter(row=>row.source!=='glove'||row.device_id!==target||row.session!==glove.session_id);
+ }
+ function maybeOpenFollowingTerminal(g,blocked,feedbackMatches){
+  const intent=terminalFollow;
+  if(!intent)return;
+  if(!realTerminalView()||!online||intent.operation!==operationVersion||intent.choice!==selectionVersion||
+     intent.csrf!==state?.csrf||intent.source!==sourceIdentity()||intent.hand!==g.feedback?.device_id){
+   terminalFollow=null;return;
+  }
+  if(!intent.lease)return;
+  if(lease!==intent.lease||g.session_id!==leaseSession||g.action_revision!==leaseRevision||g.follow_unconfirmed===true){
+   terminalFollow=null;return;
+  }
+  // A pending start appears as unknown motor state and an exact stop record
+  // until the worker acknowledges this lease. Wait through that snapshot.
+  if(blocked||g.busy!==true||g.connection!=='receiving'||g.hardware?.active!==true||g.follow_pending!==false||
+     g.follow_unconfirmed!==false||!feedbackMatches||g.stream?.fresh!==true||
+     g.feedback?.connection!=='connected'||g.feedback?.stale!==false)return;
+  terminalFollow=null;
+  void openSystemTerminal(true);
  }
  function render(){
   const virtual=virtualMode();page.dataset.teleopMode=virtual?'virtual':'real';
@@ -95,12 +169,12 @@
   const modelProof=model.source_kind==='saved_profile'?model.source_run_id===null&&typeof model.imported==='boolean'&&/^[a-f0-9]{32}$/.test(model.transfer_id||''):/^[a-f0-9]{32}$/.test(model.source_run_id||'');
   const modelApplied=online&&receiving&&g.busy===true&&Number.isSafeInteger(g.session_id)&&g.session_id>0&&stream.fresh===true&&solver.engine==='sdk'&&solver.applied===true&&finitePose(stream.sdk_q)&&finitePose(stream.q)&&modelProof&&/^[a-f0-9]{64}$/.test(model.model_sha256||'')&&typeof model.source_profile==='string'&&!!model.source_profile&&typeof g.user?.user_id==='string'&&!!g.user.user_id&&model.owner_user_id===g.user.user_id&&model.serial===g.glove_serial&&model.side===profile.side&&g.profile===profile.id&&/^hand[12]_(left|right)$/.test(g.profile||'');
   appliedModel.hidden=!modelApplied;appliedModel.textContent=modelApplied?t('已应用：','Applied: ')+(g.user.display_name||g.user.name||model.source_profile)+' · '+t(model.side==='left'?'左手':'右手',model.side==='left'?'Left hand':'Right hand'):'';
-  const devices=array(g.devices).filter(d=>typeof serial(d)==='string'&&serial(d)),users=array(g.users).filter(u=>u&&typeof u.user_id==='string'),hands=array(g.hands).filter(d=>d&&typeof serial(d)==='string'&&serial(d));
+   const devices=array(g.devices).filter(d=>typeof serial(d)==='string'&&serial(d)),users=array(g.users).filter(u=>u&&typeof u.user_id==='string'),hands=targetHands(g);
   const key=JSON.stringify([devices,hands,users,profile.id,window.WujiLocale?.lang,g.connection,g.glove_serial,g.user?.user_id,savedBinding,feedback.device_id,wantedGlove,wantedUser]);
   if(key!==optionsKey){optionsKey=key;const selectedGlove=wantedGlove||(receiving&&g.glove_serial?g.glove_serial:$('glove-device').value);const gloveItems=[[t('选择手套','Choose a glove'),''],...devices.map(d=>[serial(d),serial(d)])];if(selectedGlove&&!devices.some(d=>serial(d)===selectedGlove))gloveItems.push([selectedGlove+t(' · 待控制端查找',' · Pending controller discovery'),selectedGlove,true]);setOptions($('glove-device'),gloveItems,selectedGlove);
    const selectedUser=wantedUser!==null?wantedUser:receiving&&g.user&&typeof g.user.user_id==='string'?g.user.user_id:$('glove-user').value;setOptions($('glove-user'),[[t('选择档案','Choose a profile'),userNone],...users.map(u=>[u.display_name||u.name||t('Default · 内置手型','Default · Built-in model'),u.user_id])],selectedUser);
    const activeBinding=receiving&&savedBinding?.glove_serial===g.glove_serial&&savedBinding.sdk_user===g.user?.user_id&&savedBinding.generation===profile.generation&&savedBinding.side===profile.side?savedBinding:null;const handChoice=$('glove-hand-device').value||activeBinding?.hand_serial||feedback.device_id||'';
-   const handItems=[[t('选择灵巧手','Choose a hand'),''],...hands.map(d=>{const compatible=d.generation===profile.generation&&(!d.side_hint||d.side_hint===profile.side);return[serial(d)+(compatible?'':t(' · 型号或侧别不匹配',' · Model or side mismatch')),serial(d),!compatible];})];if(handChoice&&!hands.some(d=>serial(d)===handChoice))handItems.push([handChoice+t(' · 当前配对',' · Current pairing'),handChoice,true]);setOptions($('glove-hand-device'),handItems,handChoice);
+   const handItems=[[t('选择灵巧手','Choose a hand'),''],...hands.map(d=>{const compatible=compatibleHand(d,profile);const note=!compatible?t(' · 型号或侧别不匹配',' · Model or side mismatch'):!d.side_hint?t(' · 接入后核对左右手',' · Side checked on connect'):'';return[serial(d)+note,serial(d),!compatible];})];if(handChoice&&!hands.some(d=>serial(d)===handChoice))handItems.push([handChoice+t(' · 当前配对',' · Current pairing'),handChoice,true]);setOptions($('glove-hand-device'),handItems,handChoice);
   }
   $('glove-model').value=wantedProfile||profile.id||'';
   const selectedGlove=devices.find(d=>serial(d)===$('glove-device').value),selectedUser=users.find(u=>u.user_id===$('glove-user').value),target=$('glove-hand-device').value;
@@ -108,7 +182,8 @@
   const identity=[g.glove_serial||$('glove-device').value,$('glove-device').value,target,profile.id,wantedProfile,profile.side,g.profile,$('glove-user').value,g.user?.user_id,g.session_id??connectionEpoch,feedback.device_id,actualIdentity.serial,actualIdentity.source,actualProfile];const context=JSON.stringify(identity);if(context!==consentKey||!online||stream.fresh!==true||feedback.device_id&&feedback.stale!==false||hw.active===null){$('glove-clear').checked=false;consentKey=context;}
   const knownSession=online&&validSession(g.session_id)&&validRevision(g.action_revision);
   const controllerBusy=g.busy===true,transferBusy=window.WujiDeviceUse?.snapshot()?.pending===true||window.WujiConnectionSwitch?.busy()===true||transition.busy===true||pendingName==='teleoperation_handover'||state?.connection_switch?.busy===true||pendingName==='connection_switch',calibration=state?.calibration||{};
-  const otherOwner=state?.connection!=='disconnected'||state?.hardware?.active!==false||calibration.running===true||calibration.cleanup_required===true||(state?.unconfirmed_devices||[]).length>0;
+  const otherSession=state?.connection!=='disconnected'||state?.hardware?.active!==false||calibration.running===true||calibration.cleanup_required===true;
+  const otherOwner=otherSession||(state?.unconfirmed_devices||[]).length>0;
   const currentUnconfirmed=(state?.unconfirmed_devices||[]).some(item=>item.device_id&&item.device_id===feedback.device_id),disableUnconfirmed=hw.active===null||currentUnconfirmed||g.follow_unconfirmed===true;
   const official=state?.official_viz||{},scanInProgress=official.scanning===true&&official.active!==true&&!['starting','running','stopping'].includes(official.phase);
   const viewerOwned=!scanInProgress&&(official.active===true||official.reserved===true||official.busy===true);
@@ -126,13 +201,14 @@
   const canOpen=knownSession&&!g.open_pending&&!pending&&controllerBusy&&g.connection==='ready'&&!!selectedGlove&&!!selectedUser&&$('glove-user').value!==userNone&&!viewerOwned&&!scanInProgress&&!otherOwner;
   const bindingCurrent=sameSource(savedBinding,bindingFor(target));
   const canHandScan=online&&!pending&&!lease&&controllerBusy&&!otherOwner&&!viewerOwned&&!transferBusy&&receiving&&stream.fresh===true&&!feedback.device_id&&g.can_prepare===true;
-  const canPrepare=!virtual&&switchReady&&!lease&&controllerBusy&&!otherOwner&&!viewerOwned&&receiving&&stream.fresh===true&&!!target&&bindingCurrent&&g.can_prepare===true;
+   const availableTarget=hands.some(hand=>serial(hand)===target&&compatibleHand(hand,profile));
+   const canPrepare=!virtual&&switchReady&&!lease&&controllerBusy&&!otherOwner&&!viewerOwned&&receiving&&stream.fresh===true&&availableTarget&&bindingCurrent&&g.can_prepare===true;
   const sessionMatches=receiving&&g.profile===profile.id&&g.glove_serial===savedBinding?.glove_serial&&typeof g.user?.user_id==='string'&&g.user.user_id===savedBinding?.sdk_user;
   const feedbackMatches=!!target&&feedback.device_id===target&&actualIdentity.serial===target&&actualIdentity.source==='sdk_identity'&&actualIdentity.profile===profile.id&&bindingCurrent&&savedBinding.hand_serial===target&&sessionMatches;
   const canFollow=!virtual&&knownSession&&!pending&&!lease&&controllerBusy&&!otherOwner&&!viewerOwned&&!transferBusy&&!sourceChanged&&receiving&&stream.fresh===true&&feedback.stale===false&&feedbackMatches&&hw.probe_ready===true&&hw.active===false&&$('glove-clear').checked;
   $('glove-open').disabled=!canOpen;$('glove-prepare').disabled=!canPrepare;$('glove-follow').disabled=!canFollow;
   $('glove-hand-scan').disabled=!canHandScan;$('glove-hand-scan').hidden=!!feedback.device_id;
-  $('glove-prepare').title=canPrepare?'':!receiving?t('先连接手套，再选择灵巧手。','Connect the glove, then choose a hand.'):!target?t('选择要连接的灵巧手。','Choose the hand to connect.'):g.prepare_blocked_reason||t('当前会话尚不能连接灵巧手，请核对运行状态。','This session cannot connect a hand yet. Review its status.');
+  $('glove-prepare').title=canPrepare?'':!receiving?t('先连接手套，再选择灵巧手。','Connect the glove, then choose a hand.'):!target?t('选择要连接的灵巧手。','Choose the hand to connect.'):noticeText(g.prepare_blocked_reason)||t('请检查连接详情后重试。','Review connection details and try again.');
   $('glove-stop').disabled=!knownSession||transferBusy||!controllerBusy||pendingName==='glove_stop'||(hw.active===false&&!lease&&hw.stop_confirmed===true&&!currentUnconfirmed&&!g.follow_unconfirmed&&!g.follow_pending);
   $('glove-disconnect').disabled=!knownSession||transferBusy||pendingName==='glove_disconnect'||(!controllerBusy&&!transferBusy);
   $('glove-handover').disabled=!switchReady||!viewer||controllerBusy||otherOwner;
@@ -149,41 +225,50 @@
   if(virtual){$('glove-prepare').hidden=true;$('glove-follow').hidden=true;$('glove-hand-scan').hidden=true;}
   $('glove-stop').textContent=virtual?t('暂停实机跟随','Pause real following'):t('暂停跟随','Pause following');
   const confirmVisible=!virtual&&phase==='prepared'&&hw.active===false&&feedback.stale===false&&feedbackMatches&&hw.probe_ready===true&&!disableUnconfirmed;page.querySelector('.glove-confirm').hidden=!confirmVisible;$('glove-clear').disabled=!online||pending||!confirmVisible;
-  let phaseTitle='',reason='';
-  if(!online){phaseTitle=t('服务未连接','Service offline');reason=t('连接恢复后可继续；设备状态尚未核对。','Continue when the service returns. Device state is unverified.');}
+  const visibleWarnings=visibleStopWarnings(state?.unconfirmed_devices||[],g);
+  const displayDisableUnconfirmed=hw.active===null||g.follow_unconfirmed===true||visibleWarnings.some(row=>row.device_id&&row.device_id===feedback.device_id);
+  const displayOtherOwner=otherSession||visibleWarnings.length>0;
+  const streamInterrupted=phase==='following'&&(stream.fresh!==true||feedback.stale!==false);
+  let phaseTitle='',reason='',tone='info';
+  if(!online){phaseTitle=t('服务离线','Service offline');reason=t('连接恢复后核对设备状态。','Verify device status when the service returns.');tone='warning';}
   else if(phase==='handover'){phaseTitle=t('正在切换连接','Switching connection');const switching=state?.connection_switch;if(switching?.busy===true||pendingName==='connection_switch'){reason=switching?.busy!==true?t('正在准备本次切换，请稍候。','Preparing this switch. Please wait.'):switching.phase==='stopping'?t('正在结束原连接。','Ending the original connection.'):switching.phase==='connecting'?t('正在接入所选设备。','Connecting the selected device.'):t('正在检查所选设备，原连接保持。','Checking the selected device. The original connection is retained.');}else reason=t('正在结束本次官方画面并准备遥操作，可取消。','Ending this Viewer and preparing teleoperation. You can cancel.');}
   else if(pending){phaseTitle=t('正在处理','Working');reason=t('正在提交本次操作，请稍候。','Submitting this operation. Please wait.');}
   else if(phase==='viewer'){phaseTitle=t('从官方画面继续','Continue from the official Viewer');reason=t('切换后直接接入遥操作，保留已保存的档案。','Switch directly to teleoperation, retaining saved profiles.');}
   else if(phase==='viewer_other'){phaseTitle=t('官方画面会话仍在运行','A Viewer session is active');reason=t('请先查看并结束原会话，再查找遥操作设备。','Review and end the original session before discovering teleoperation devices.');}
-  else if(disableUnconfirmed){phaseTitle=t('停用尚未确认','Disable is unconfirmed');reason=t('当前目标的停用结果尚未确认；请请求暂停并检查当前会话。','Disable for this target is unconfirmed. Request a pause and review this session.');}
-  else if(otherOwner){phaseTitle=t('当前有其他会话','Another session is active');reason=t('先在原工作区结束设备会话，再准备遥操作。','End the device session in its workspace before preparing teleoperation.');}
-  else if(lastMessage){phaseTitle=t('本次操作未完成','This action did not complete');reason=lastMessage+(phase==='following'?t(' 当前仍在跟随。',' Following is still active.'):'');}
-  else if(phase==='following'){phaseTitle=t('正在跟随','Following');reason=t('正在跟随，可随时暂停。','Following. You can pause at any time.');}
+  else if(displayDisableUnconfirmed){phaseTitle=t('停用待确认','Stop unconfirmed');reason=t('点击暂停跟随，再核对当前会话。','Choose Pause following, then check the current session.');tone='warning';}
+  else if(streamInterrupted){phaseTitle=t('反馈中断','Feedback interrupted');reason=t('请暂停跟随，再检查设备连接。','Pause following, then check the device connection.');tone='warning';}
+  else if(displayOtherOwner){phaseTitle=t('设备被其他会话使用','Device in use');reason=t('请在原工作区结束会话后继续。','End the session in its workspace to continue.');tone='warning';}
+  else if(lastMessage){phaseTitle=t('操作未完成','Action incomplete');reason=noticeText(lastMessage)+(phase==='following'?t(' 实机仍在跟随，可在此暂停。',' The physical hand is still following. You can pause it here.'):'');tone='warning';}
+  else if(phase==='following'){phaseTitle=t('正在跟随','Following');reason=t('可随时暂停。','You can pause at any time.');tone='success';}
   else if(phase==='starting'){phaseTitle=t('正在启动跟随','Starting follow');reason=t('等待控制端返回启动状态。','Waiting for the controller to report its start state.');}
   else if(phase==='connecting'){phaseTitle=g.open_pending===true?t('正在连接手套','Connecting glove'):t('正在连接控制端','Connecting controller');reason=g.open_pending===true?t('正在接入所选手套，收到数据后显示映射。','Connecting the selected glove. The mapping appears when data arrives.'):t('控制端就绪后，选择手套与遥操作档案。','Choose the glove and teleoperation profile when the controller is ready.');}
   else if(receiving&&stream.fresh!==true){phaseTitle=t('等待手套数据','Waiting for glove data');reason=t('手套数据已过期，等待新数据后才能继续。','Glove data is stale. Wait for new data before continuing.');}
   else if(scanInProgress){phaseTitle=t('设备查找尚未完成','Discovery is finishing');reason=t('当前查找结束后，可准备遥操作来源。','Prepare the teleoperation source when discovery finishes.');}
-  else if(receiving&&!feedback.device_id&&g.hand_scan_error){phaseTitle=t('灵巧手查找未完成','Hand search did not complete');reason=g.hand_scan_error;}
+  else if(receiving&&!feedback.device_id&&g.hand_scan_error){phaseTitle=t('灵巧手查找未完成','Hand discovery incomplete');reason=noticeText(g.hand_scan_error);tone='warning';}
   else if(transition.error&&transition.viewer_released&&!controllerBusy){phaseTitle=t('需要重新准备控制端','Prepare the controller again');reason=t('官方画面已结束，控制端尚未就绪；可重新查找或检查连接选项。','The Viewer ended but the controller is not ready. Find devices again or review connection options.');}
   else if(sourceChanged){phaseTitle=t('已选择新的连接','New connection selected');reason=t('点击“切换设备”后接入，当前连接在此之前保持。','Choose Switch device to connect. The current connection is retained until then.');}
   else if(phase==='preview'||phase==='prepared'){
    phaseTitle=phase==='preview'?t('映射预览','Mapping preview'):hw.phase==='stopped'&&hw.stop_confirmed===true?t('跟随已暂停','Following paused'):t('目标反馈已连接','Hand feedback connected');
-   reason=stream.fresh!==true?t('手套数据已过期，等待新数据后才能继续。','Glove data is stale. Wait for new data before continuing.'):!target?'':phase==='preview'?(!bindingCurrent?t('当前配对尚未载入或与预览不一致，请查看连接详情。','Pairing is not loaded or differs from this preview. Review connection details.'):g.can_prepare===true?'':g.prepare_blocked_reason||t('目标连接暂不可用，请查看运行详情。','The target is not ready to connect. See running details.')):!feedbackMatches?t('所选目标与实际反馈身份不一致；请结束本会话后重新选择。','The selected target differs from the actual feedback identity. End this session and select it again.'):feedback.stale!==false?t('目标反馈已过期，等待新反馈后才能跟随。','Hand feedback is stale. Wait for new feedback before following.'):hw.active!==false?t('目标尚未返回明确停用状态，请检查当前会话。','The target has not reported a confirmed inactive state. Review this session.'):hw.probe_ready!==true?t('正在等待完整目标反馈。','Waiting for complete hand feedback.'):'';
+   reason=stream.fresh!==true?t('手套数据已过期，等待新数据后才能继续。','Glove data is stale. Wait for new data before continuing.'):!target?'':phase==='preview'?(!bindingCurrent?t('请在连接详情核对当前配对。','Check the current pairing in connection details.'):g.can_prepare===true?'':noticeText(g.prepare_blocked_reason)||t('请在运行详情核对目标连接。','Check the target connection in running details.')):!feedbackMatches?t('目标身份有变化，请结束会话后重新选择。','The target identity changed. End this session and select it again.'):feedback.stale!==false?t('等待新反馈后可开始跟随。','Wait for new feedback before following.'):hw.active!==false?t('请核对目标的停用状态。','Verify the target’s stopped state.'):hw.probe_ready!==true?t('正在等待完整目标反馈。','Waiting for complete hand feedback.'):'';
   }else if(phase==='ready'){phaseTitle=t('遥操作控制','Teleoperation controls');reason=!selectedGlove?t('选择这次使用的手套。','Choose the glove for this session.'):!selectedUser||$('glove-user').value===userNone?t('选择这次使用的遥操作档案。','Choose a teleoperation profile for this session.'):'';}
-  else{phaseTitle=t('遥操作控制','Teleoperation controls');reason=g.connection==='error'?g.message||t('控制端连接未完成，请检查连接选项。','The controller did not connect. Review connection options.'):'';}
-  if(virtual&&online&&!pending&&!transferBusy&&!lastMessage&&!otherOwner&&!disableUnconfirmed){
+  else{phaseTitle=t('遥操作控制','Teleoperation controls');reason=g.connection==='error'?noticeText(g.message)||t('控制端连接未完成，请检查连接选项。','The controller did not connect. Review connection options.'):'';}
+  if(virtual&&online&&!pending&&!transferBusy&&!lastMessage&&!displayOtherOwner&&!displayDisableUnconfirmed&&!streamInterrupted){
    if(phase==='following')reason=t('实体灵巧手仍在跟随，可在此暂停。','The physical hand is still following. You can pause it here.');
    else if(phase==='starting')reason=t('实机跟随正在启动，可在此暂停。','Real following is starting. You can pause it here.');
    else if(receiving&&stream.fresh===true)reason='';
    else if(phase==='idle')reason=t('连接手套，使用已标定的手型驱动虚拟手。','Connect a glove to control the virtual hand with its calibrated model.');
   }
-  $('glove-phase').textContent=reason?phaseTitle:'';$('glove-status').textContent=reason;page.querySelector('.glove-status-copy').hidden=!reason;page.querySelector('.glove-actionbar').dataset.quiet=String(!reason);
+  const phaseLabel=reason?phaseTitle:'',statusLabel=$('glove-phase'),statusCopy=$('glove-status');
+  if(statusLabel.textContent!==phaseLabel)statusLabel.textContent=phaseLabel;
+  if(statusCopy.textContent!==reason)statusCopy.textContent=reason;
+  page.querySelector('.glove-status-copy').hidden=!reason;operationBar.dataset.quiet=String(!reason);operationBar.dataset.tone=tone;
   $('glove-rate').textContent=(online?f(stream.retarget_hz):'—')+' Hz';$('glove-age').textContent=(online?f(stream.age_ms,0):'—')+' ms';$('glove-send').textContent=(online?f(hw.active?hw.command_timing?.host_publish_hz:null):'—')+' Hz';
   $('glove-profile').textContent=profile.id?t('当前映射：','Current mapping: ')+(profile[window.WujiLocale?.lang==='en'?'en':'zh']||profile.id):'';
   const parameters=g.parameters;$('glove-parameters').textContent=parameters?`Kp ${f(parameters.kp,3)} · Kd ${f(parameters.kd,3)} · ${f(parameters.current_limit_A,2)} A · ${parameters.editable_parameters?.COMMAND_RATE_HZ??'—'} Hz`:t('连接后显示控制端实际参数，不替你更换增益。','Actual controller parameters appear after connection; gains are not changed for you.');
   if(profile.generation==='hand1')$('glove-parameters').textContent=`LowPass ${f(hw.lowpass_cutoff_hz)} Hz · ${f(hw.current_limit_A,2)} A · ${hw.command_timing?.requested_hz??'—'} Hz`;
-  const runtime=transition.runtime;$('glove-runtime-note').textContent=runtime?.label||'';$('glove-command-status').textContent=lastMessage||transition.error||g.message||hw.reason||'';
+  const runtime=transition.runtime;$('glove-runtime-note').textContent=runtime?.label||'';$('glove-command-status').textContent=lastMessage||transition.error||g.hand_scan_error||g.prepare_blocked_reason||g.message||hw.reason||'';
   if(lease){if(hw.active===true)seen=true;else if(hw.active===false&&(seen||Date.now()-leaseAt>5000))releaseLease();}
+  maybeOpenFollowingTerminal(g,transferBusy||displayOtherOwner||viewerOwned,feedbackMatches);
   syncOperationOrder();
   if($('glove-details').open){const tbody=$('glove-joint-rows');tbody.replaceChildren();const readings=new Map(array(feedback.latest?.joints).map(j=>[j.nid,j.position_rad]));for(let i=0;i<20;i++){const tr=document.createElement('tr'),nid=profile.generation==='hand1'?i:Math.floor(i/4)*5+i%4+1;for(const text of [String(i+1),f(online&&stream.fresh?stream.sdk_q?.[i]:null,3),f(online&&stream.fresh?stream.q?.[i]:null,3),...virtual?[]:[f(online&&hw.active?hw.applied_target_rad?.[i]:null,3),f(online&&feedback.stale===false?readings.get(nid):null,3)]]){const td=document.createElement('td');td.textContent=text;tr.append(td);}tbody.append(tr);}}
  }
@@ -204,6 +289,8 @@
     if(!sameBinding(bindingFor($('glove-hand-device').value),binding))return false;
     epoch=++requestEpoch;pending=true;pendingName=command.name;render();
    }bindingRevision++;savedBinding=binding;window.dispatchEvent(new Event('retarget-binding-changed'));return true;}
+  const terminalIntent=command.name==='glove_follow'&&realTerminalView()?{operation,choice,csrf,source,hand:pairedHand,lease:null}:null;
+  if(terminalIntent)terminalFollow=terminalIntent;
   pending=true;pendingName=command.name;pendingEndSession=localEnd?command.expected_session:null;pendingEndRevision=localEnd?command.expected_revision:null;lastMessage='';render();try{
    if(command.name==='glove_open'&&!await saveBinding(bindingFor(virtualMode()?'':$('glove-hand-device').value)))return;
    if(command.name==='glove_prepare'){const binding=bindingFor(command.serial);if(!sameSource(savedBinding,binding))throw Error(t('当前配对尚未载入或与预览不一致，请重新检查连接详情。','Pairing is not loaded or differs from this preview. Review connection details.'));if(savedBinding.hand_serial!==command.serial&&!await saveBinding(binding))return;}
@@ -223,10 +310,22 @@
     epoch=++requestEpoch;pending=true;pendingName=command.name;
    }
    if(!stillCurrent(result))return;
+   if(command.name==='glove_disconnect'){
+    releaseLease();$('glove-clear').checked=false;
+    await window.WujiConnection.refresh();
+    return;
+   }
    if(result.device_profile){state={...state,device_profile:result.device_profile};wantedGlove='';$('glove-device').value='';$('glove-hand-device').value='';$('glove-user').value=userNone;optionsKey='';}
    if(command.name==='glove_open'&&state?.glove?.session_id===result.session_id){const opening=result.open_pending===true&&state.glove.connection==='ready'&&state.glove.action_revision===command.expected_revision;state={...state,glove:{...state.glove,action_revision:result.action_revision,...(opening?{connection:'connecting',open_pending:true}:{})}};}if(result.glove)state={...state,glove:result.glove};if(switchCancel&&result.connection_switch)state={...state,connection_switch:result.connection_switch};if(result.teleoperation_connection)state={...state,teleoperation_connection:result.teleoperation_connection};
-   if(result.lease&&validSession(sdkSession)&&state?.glove?.session_id===sdkSession){state={...state,glove:{...state.glove,action_revision:result.lease_revision}};lease=result.lease;leaseSession=result.lease_session;leaseRevision=result.lease_revision;leaseEpoch++;leaseAt=Date.now();seen=false;}if(['glove_stop','glove_disconnect','teleoperation_handover_cancel'].includes(command.name)){releaseLease();$('glove-clear').checked=false;}if(command.name==='teleoperation_handover'){wantedGlove=command.serial;optionsKey='';}
-  }catch(error){if(stillCurrent())lastMessage=actionError(error);}finally{if(epoch===requestEpoch){pending=false;pendingName='';pendingEndSession=null;pendingEndRevision=null;render();}}}
+   if(result.lease&&validSession(sdkSession)&&state?.glove?.session_id===sdkSession){
+    state={...state,glove:{...state.glove,action_revision:result.lease_revision}};lease=result.lease;leaseSession=result.lease_session;leaseRevision=result.lease_revision;leaseEpoch++;leaseAt=Date.now();seen=false;
+    if(terminalIntent&&terminalFollow===terminalIntent&&/^[a-f0-9]{32}$/.test(lease))terminalIntent.lease=lease;
+   }
+   if(['glove_stop','teleoperation_handover_cancel'].includes(command.name)){releaseLease();$('glove-clear').checked=false;}if(command.name==='teleoperation_handover'){wantedGlove=command.serial;optionsKey='';}
+  }catch(error){if(stillCurrent())lastMessage=actionError(error);}finally{
+   if(terminalIntent&&terminalFollow===terminalIntent&&!terminalIntent.lease)terminalFollow=null;
+   if(epoch===requestEpoch){pending=false;pendingName='';pendingEndSession=null;pendingEndRevision=null;render();}
+  }}
  async function switchConnection(target){
   if(virtualMode()&&target.hand_serial)return;if(pending)return;const operation=++operationVersion,scope=controllerScope;++requestEpoch;pending=true;pendingName='connection_switch';lastMessage='';$('glove-clear').checked=false;render();
   try{if(!window.WujiConnectionSwitch)throw Error(t('切换入口尚未就绪，请稍后重试。','Connection switching is not ready. Retry shortly.'));const result=await (window.WujiDeviceUse?window.WujiDeviceUse.open(target.mode,{...target,kind:'glove'}):window.WujiConnectionSwitch.run(target));if(!result)return;if(operation!==operationVersion||result.routed||!online||scope!==controllerScope||state?.csrf!==result.state?.csrf)return;const incoming=result.state?.glove,current=state?.glove;if(validSession(incoming?.session_id)&&(incoming.session_id<sdkSessionFloor||incoming.session_id===current?.session_id&&validRevision(incoming.action_revision)&&validRevision(current.action_revision)&&incoming.action_revision<current.action_revision))return;state=result.state;releaseLease();wantedProfile='';wantedUser=null;wantedGlove=result.state.glove?.glove_serial||'';const binding=state.retarget_binding,g=state.glove||{},profile=state.device_profile||{};if(binding&&binding.glove_serial===g.glove_serial&&binding.sdk_user===g.user?.user_id&&binding.generation===profile.generation&&binding.side===profile.side){bindingRevision++;savedBinding=binding;}optionsKey='';if(target.mode==='official'){window.WujiConnectionHub?.show('official');await window.WujiOfficialViz?.selectDevice(target.serial);}}
@@ -253,12 +352,14 @@
  window.addEventListener('console-state',event=>{let incoming=event.detail;const scope=typeof incoming?.csrf==='string'?incoming.csrf:'',sameController=!!scope&&scope===controllerScope;if(sameController&&validSession(incoming?.glove?.session_id)&&incoming.glove.session_id<sdkSessionFloor)return;if(controllerScope&&!sameController){requestEpoch++;operationVersion++;selectionVersion++;savedBinding=null;bindingIdentity='';optionsKey='';lastMessage='';wantedGlove='';wantedUser=null;wantedProfile='';pending=false;pendingName='';pendingEndSession=null;pendingEndRevision=null;releaseLease();sdkSessionFloor=0;}controllerScope=scope;if(validSession(incoming?.glove?.session_id)&&scope)sdkSessionFloor=Math.max(sdkSessionFloor,incoming.glove.session_id);const priorGlove=state?.glove,next=incoming?.glove;if(sameController&&validSession(priorGlove?.session_id)&&priorGlove.session_id===next?.session_id&&validRevision(priorGlove.action_revision)&&validRevision(next.action_revision)&&next.action_revision<priorGlove.action_revision)incoming={...incoming,glove:priorGlove};const nextSession=incoming?.glove?.session_id,nextRevision=incoming?.glove?.action_revision;if(pendingEndSession!==null&&(nextSession!==pendingEndSession||nextRevision!==pendingEndRevision)){requestEpoch++;pending=false;pendingName='';pendingEndSession=null;pendingEndRevision=null;}if(lease!==null&&(leaseSession!==nextSession||leaseRevision!==nextRevision))releaseLease();state=incoming;online=true;const g=state.glove||{},identity=bindingScope();if(identity!==bindingIdentity){bindingIdentity=identity;if(g.connection==='receiving')refreshBinding();}const current=state.glove?.connection||'disconnected';if(current==='disconnected'&&previousConnection!=='disconnected'&&g.busy===false&&!g.feedback?.device_id&&g.hardware?.active!==null&&!g.follow_unconfirmed&&!(state.unconfirmed_devices||[]).length&&!lease){selectionVersion++;wantedGlove='';$('glove-device').value='';$('glove-user').value=userNone;$('glove-hand-device').value='';optionsKey='';}if(current!==previousConnection&&['connecting','disconnected','error'].includes(current)){connectionEpoch++;$('glove-clear').checked=false;}previousConnection=current;render();});
  window.addEventListener('console-offline',event=>{requestEpoch++;if(event.detail?.task_scope!==true){operationVersion++;selectionVersion++;}savedBinding=null;bindingIdentity='';optionsKey='';controllerScope='';sdkSessionFloor=0;state=null;online=false;pending=false;pendingName='';pendingEndSession=null;pendingEndRevision=null;releaseLease();lastMessage='';$('glove-clear').checked=false;consentKey='';render();});window.addEventListener('wuji-language',translate);
  window.addEventListener('device-use-update',render);
+  window.addEventListener('device-inventory-update',render);
  window.addEventListener('connection-switch-update',event=>{const progress=event.detail;if(progress?.request_id&&progress.attempt_id&&['stopping','connecting','connected'].includes(progress.phase)){releaseLease();$('glove-clear').checked=false;}render();});
  setInterval(async()=>{if(!lease||!online)return;if(!validSession(leaseSession)||!validRevision(leaseRevision)||state?.glove?.session_id!==leaseSession||state?.glove?.action_revision!==leaseRevision){releaseLease();render();return;}const held=lease,version=leaseEpoch,session=state?.glove?.session_id;try{await post({name:'glove_keepalive',lease:held});}catch(error){if(lease!==held||leaseEpoch!==version||state?.glove?.session_id!==session||pendingName==='connection_switch')return;releaseLease();lastMessage=actionError(error);render();}},250);
  window.addEventListener('pagehide',()=>{const session=state?.glove?.session_id,revision=state?.glove?.action_revision;if(lease&&state?.csrf&&validSession(session)&&validRevision(revision)&&leaseSession===session&&leaseRevision===revision&&!state?.connection_switch?.busy&&!state?.teleoperation_connection?.busy)fetch('/api/action',{method:'POST',keepalive:true,headers:{'Content-Type':'application/json','X-Console-Token':state.csrf},body:JSON.stringify({name:'glove_stop',expected_session:session,expected_revision:revision})}).catch(()=>{});});
  for(const [mode,id] of [['virtual','glove-mode-virtual'],['real','glove-mode-real']])$(id).onclick=()=>window.WujiTeleoperation.openMode(mode);
  modeTabs.addEventListener('keydown',event=>{const tabs=[$('glove-mode-virtual'),$('glove-mode-real')],index=tabs.indexOf(event.target);if(index<0||!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;event.preventDefault();const next=event.key==='Home'?0:event.key==='End'?1:(index+(event.key==='ArrowRight'?1:tabs.length-1))%tabs.length;window.WujiTeleoperation.openMode(next===0?'virtual':'real');tabs[next].focus();});
  window.WujiTeleoperation={openMode(mode){if(!['virtual','real'].includes(mode))return false;location.hash=mode==='virtual'?'#virtual-glove':'#glove';ws.showPage();return true;},mode:()=>virtualMode()?'virtual':'real'};
- window.addEventListener('workspace-page',()=>{if(document.body.dataset.page==='glove')render();});
+ window.addEventListener('workspace-page',()=>{if(!realTerminalView())terminalFollow=null;if(document.body.dataset.page==='glove')render();});
+ document.addEventListener('visibilitychange',()=>{if(document.hidden)terminalFollow=null;});
  translate();ws.showPage();
 })();

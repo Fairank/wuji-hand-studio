@@ -83,7 +83,7 @@
     $('mode-hardware').textContent=text('真实手','Real hand');$('mode-preview').textContent=text('画面预览','Preview only');
     setMode(mode);
   }
-  interaction.innerHTML='<div class="studio-info"><strong id="touch-heading"></strong><span id="touch-description"></span></div><div id="touch-grid" class="touch-grid"></div><p class="studio-status" id="touch-status"></p><p class="studio-small" id="touch-limit"></p><div class="button-row"><a class="connection-shortcut" href="#capture" id="touch-capture"></a><button id="touch-flow"></button></div><p class="studio-small" id="touch-flow-note"></p>';
+  interaction.innerHTML='<div class="studio-info"><strong id="touch-heading"></strong><span id="touch-description"></span></div><div id="touch-grid" class="touch-grid"></div><p class="studio-status" id="touch-status"></p><p class="studio-small" id="touch-limit"></p><div class="button-row"><a class="connection-shortcut" href="#capture" id="touch-capture"></a><button id="touch-flow"></button></div><p class="studio-small" id="touch-flow-result" role="status" hidden></p><details id="touch-flow-details" hidden><summary></summary><pre></pre></details><p class="studio-small" id="touch-flow-note"></p>';
   const node=(tag,value)=>{const n=document.createElement(tag);n.textContent=value;return n;};
   async function post(body){
     if(!state?.csrf)throw Error(text('控制服务未连接','Console is not connected'));
@@ -133,6 +133,7 @@
     $('touch-limit').textContent=text('下方是实测关节电流，不是接触力或识别概率。需要完成电流与负载标定、关节对应核对及抽离验收，才能将现有仿真识别器接入自动轻扣。','The readings are measured joint currents, not contact force or probabilities. Current/load calibration, joint mapping and withdrawal validation are needed before connecting the simulation recognizer to an automatic grasp.');
     $('touch-capture').textContent=text('进入触碰采集','Open touch capture');$('touch-flow').textContent=text('预览反应流程','Preview reaction sequence');
     $('touch-flow-note').textContent=text('流程预览仅为编排姿态：没有探棒碰撞、没有模型判断，不驱动实机。','Sequence preview is scripted kinematics: no probe collision, no model decision, no hardware movement.');
+    renderTouchFailure();
     for(const [id,isPreview] of [['trial-action',false],['play-action',true]]){
       const select=$(id),value=select.value;if(!catalog)continue;
       const items=isPreview?catalog.actions:catalog.actions.filter(item=>item.hardware!==false);
@@ -143,21 +144,29 @@
     if(catalog){$('official-list').replaceChildren(...catalog.official_inventory.map(item=>{const li=document.createElement('li');const a=node('a',item.name);a.href=item.url;a.target='_blank';a.rel='noopener';li.append(a,node('p',item.detail));return li;}));}
     staticEnglish();
   }
-  let touchPending=null,touchServiceRevision=0,touchNavigationRevision=0,touchServiceToken=null;
+  let touchPending=null,touchServiceRevision=0,touchNavigationRevision=0,touchServiceToken=null,touchFailure='';
+  function renderTouchFailure(){
+    const status=$('touch-flow-result'),details=$('touch-flow-details');
+    status.hidden=details.hidden=!touchFailure;
+    status.textContent=touchFailure?text('预览未完成。请重试。','Preview did not complete. Try again.'):'';
+    details.querySelector('summary').textContent=text('查看错误详情','View error details');
+    details.querySelector('pre').textContent=touchFailure;
+    if(!touchFailure)details.open=false;
+  }
   function retireTouchPreview(){touchPending=null;$('touch-flow').disabled=false;}
   function currentTouchPreview(ticket){return touchPending===ticket&&ticket.service===touchServiceRevision&&ticket.navigation===touchNavigationRevision&&ticket.intent===intentRevision&&ticket.token===state?.csrf&&ticket.entry===location.hash;}
   async function startTouchPreview(){
     if(touchPending)return;
     const ticket={service:touchServiceRevision,navigation:touchNavigationRevision,intent:intentRevision,token:state?.csrf,entry:location.hash};
-    touchPending=ticket;$('touch-flow').disabled=true;
+    touchPending=ticket;touchFailure='';renderTouchFailure();$('touch-flow').disabled=true;
     try{await post({name:'demo_start',action:'touch_flow',speed:1,cycles:1});if(currentTouchPreview(ticket))location.hash='feedback';}
-    catch(e){if(currentTouchPreview(ticket))notice(e);}
+    catch(e){if(currentTouchPreview(ticket)){touchFailure=e.message||e.name;renderTouchFailure();}}
     finally{if(touchPending===ticket)retireTouchPreview();}
   }
   $('touch-flow').addEventListener('click',startTouchPreview);
   window.addEventListener('hashchange',()=>{touchNavigationRevision++;retireTouchPreview();});
-  window.addEventListener('console-offline',()=>{touchServiceRevision++;touchServiceToken=null;retireTouchPreview();});
-  window.addEventListener('console-state',e=>{const token=typeof e.detail?.csrf==='string'?e.detail.csrf:null;if(token!==touchServiceToken){touchServiceRevision++;touchServiceToken=token;retireTouchPreview();}});
+  window.addEventListener('console-offline',()=>{touchServiceRevision++;touchServiceToken=null;touchFailure='';renderTouchFailure();retireTouchPreview();});
+  window.addEventListener('console-state',e=>{const token=typeof e.detail?.csrf==='string'?e.detail.csrf:null;if(token!==touchServiceToken){touchServiceRevision++;touchServiceToken=token;touchFailure='';renderTouchFailure();retireTouchPreview();}});
   const pose=$('pose-console'),actions=document.createElement('div');actions.className='viewer-actions';
   const float=node('button',''),pop=node('button','');actions.append(float,pop);pose.prepend(actions);
   window.wujiFloating=window.FloatingPanel.create({panel:pose,home:ws.viewerHome(),title:'MuJoCo · Hand Studio',storageKey:'wuji-viewer-layout-v12',initialRect:{x:20,y:150,width:440,height:360},minHeight:240,onChange:()=>{if(!window.wujiFloating?.isFloating())ws.showPage();}});

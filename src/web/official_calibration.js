@@ -34,6 +34,7 @@
   const diagnostics=document.createElement('ul');diagnostics.id='oc-diagnostics';diagnostics.hidden=true;host.querySelector('.oc-feedback').after(diagnostics);
   const terminalHost=document.createElement('section');host.querySelector('.oc-result').before(terminalHost);
   const terminal=window.OfficialTerminal?.mount(terminalHost,{language});
+  const noticeText=value=>window.WujiLocale?.notice?.(value)??value??'';
   const $=id=>host.querySelector('#'+id),details=host.querySelector('details');let data={},context={},imageKey='',hintsKey='',visualKey='',restoreTicket=null;
   $('oc-guide-image').onload=()=>{$('oc-guide-image').hidden=false;$('oc-guide-unavailable').hidden=true;};$('oc-guide-image').onerror=()=>{$('oc-guide-image').hidden=true;$('oc-guide-unavailable').hidden=false;};
   const write=(id,value)=>{if($(id).textContent!==value)$(id).textContent=value;};
@@ -59,7 +60,7 @@
   function raw(){
    if(!details.open)return;
    const run=data.run||{};let output;
-   try{output=JSON.stringify({status_verified:context.fresh===true,status:run.status,running:run.running,step:run.step,step_total:run.step_total,step_name:run.step_name,progress:run.progress,phase:run.phase,checks:run.checks,timing:run.timing,user:run.user,side:run.side,serial:run.serial,exit_code:run.exit_code,event:run.event,result:run.result,error:run.error,backup:run.backup,restore_verified:run.restore_verified},null,2);}
+   try{output=JSON.stringify({status_verified:context.fresh===true,status:run.status,running:run.running,step:run.step,step_total:run.step_total,step_name:run.step_name,progress:run.progress,phase:run.phase,checks:run.checks,timing:run.timing,user:run.user,side:run.side,serial:run.serial,exit_code:run.exit_code,event:run.event,result:run.result,error:run.error,request_error:context.error,request_details:context.details,cleanup_error:data.cleanup_error,backup:run.backup,restore_verified:run.restore_verified},null,2);}
    catch{output=language()==='en'?'Event details unavailable':'事件详情不可用';}
    write('oc-details',output.length>16000?output.slice(0,16000)+'\n…':output);
   }
@@ -70,21 +71,22 @@
    const native=restoring||run.source==='official_tty'||data.human_tty===true&&!data.guided_native,guided=data.guided_native===true&&!native;host.dataset.source=native?'official_tty':'official_jsonl';host.dataset.humanTty=String(native);host.dataset.guided=String(guided);host.dataset.previous=String(context.previous===true);terminal?.render(restoring?{...run,source:'official_tty'}:run,{fresh});
    const eventError=run.event?.schema_version===2&&run.event?.calibration==='hand_model'&&(run.event.event==='error'||run.event.type==='error')?run.event.error:null;
    const cleanup=data.cleanup_required===true,done=!cleanup&&!native&&completed(run),error=errorText(context.error)||errorText(eventError)||errorText(run.error),status=typeof run.status==='string'?run.status:'idle';host.dataset.cleanupRequired=String(cleanup);
-   let label=t('尚未开始','Not started'),message=context.notice||t('选择用户和手套，再开始标定。','Select a user and glove, then start calibration.'),tone='idle';
-   if(cleanup){label=t('待结束核对','Session end unverified');message=[text(data.cleanup_error)||t('上次会话尚未完整退出，请结束并核对。','The previous session has not fully exited. End and verify it.'),error].filter((value,index,all)=>value&&all.indexOf(value)===index).join(' · ');tone='unknown';}
-   else if(!fresh){label=t('状态未核对','Status unverified');message=error||t('无法读取当前状态。上次事件仍保留，刷新后再核对。','Current status is unavailable. Previous events remain; refresh to verify.');tone='unknown';}
-   else if(context.error){label=t('操作未完成','Operation incomplete');message=error;tone='error';}
-   else if(error||status==='error'||Number.isInteger(run.exit_code)&&run.exit_code!==0&&status!=='cancelled'){label=t('标定失败','Calibration failed');message=/EMF data stream closed|0x4102/.test(error)?t('手套采集数据中断，请检查连接后重试。','Glove capture was interrupted. Check the connection and retry.'):error||t('标定未完成，请查看详细记录。','Calibration did not finish. Review the detailed log.');tone='error';}
+   const localizedError=noticeText(error),friendlyError=localizedError&&localizedError!==error?localizedError:'';
+   let label=t('尚未开始','Not started'),message=noticeText(context.notice),tone='idle';
+   if(cleanup){label=t('会话结束待核对','Session end unverified');message=t('结束并核对上次会话后可继续。','End and verify the previous session to continue.');tone='unknown';}
+   else if(!fresh){label=t('状态待核对','Status unverified');message=t('刷新官方状态后继续。','Refresh the official status to continue.');tone='unknown';}
+   else if(context.error){label=t('操作未完成','Operation incomplete');message=friendlyError||t('请查看详细记录，再刷新重试。','Review the detailed log, then refresh and try again.');tone='error';}
+   else if(error||status==='error'||Number.isInteger(run.exit_code)&&run.exit_code!==0&&status!=='cancelled'){label=t('标定失败','Calibration failed');message=/EMF data stream closed|0x4102/.test(error)?t('手套采集数据中断，请检查连接后重试。','Glove capture was interrupted. Check the connection and retry.'):friendlyError||t('请查看详细记录，再开始标定。','Review the detailed log before starting calibration again.');tone='error';}
    else if(done){label=t('标定完成','Calibration completed');message=t('手型已保存，可以进入遥操作。','Hand model saved. You can continue to teleoperation.');tone='completed';}
-   else if(status==='completed'||status==='unconfirmed'){label=t('结果未确认','Result unconfirmed');message=t('等待官方 result 与正常退出结果，尚不能确认完成。','Completion requires the official result and a normal CLI exit.');tone='unknown';}
+   else if(status==='completed'||status==='unconfirmed'){label=t('结果待核对','Result unconfirmed');message=t('请刷新状态，核对手型是否已保存。','Refresh the status to confirm the hand model was saved.');tone='unknown';}
    else if(native&&status==='session_ended'){label=t('原版会话已结束','Official session ended');message=t('CLI 已正常退出。标定结果请查看下方原版界面与刷新后的用户模型状态。','The CLI exited normally. Review the original output below and refresh the user model status for calibration results.');}
    else if(native&&status==='stopped'){label=t('会话已停止','Session stopped');message=t('本次终端会话已停止，不代表标定完成。','The terminal session has stopped. This does not confirm a completed calibration.');}
-   else if(status==='cancelled'){label=t('已取消','Cancelled');message=t('标定已取消。','Calibration was cancelled.');}
+   else if(status==='cancelled'){label=t('已取消','Cancelled');message='';}
    else if(run.running===true){
     const labels={starting:['正在核对身份','Verifying device identity'],terminal:['原版 CLI 运行中','Official CLI running'],collecting:['采集中','Collecting'],solving:['求解中','Solving'],cancelling:['正在取消','Cancelling']};
     label=labels[status]?t(...labels[status]):t('运行中','Running');message=status==='starting'?(data.human_tty===true?t('正在核对所选手套并打开官方流程，尚未开始采集。','Verifying the selected glove and opening the official journey. Capture has not started.'):t('正在核对所选手套、用户和左右手，尚未开始采集。','Verifying the selected glove, user and hand side. Capture has not started.')):status==='solving'?t('官方正在求解手型，请等待结果。','The official solver is fitting the hand model. Wait for its result.'):status==='cancelling'?t('正在结束本次采集，请等待官方进程退出。','Ending this capture. Wait for the official process to exit.'):t('跟随下方官方当前动作，采集条件由 CLI 判断。','Follow the official step below. Capture conditions are evaluated by the CLI.');tone='running';
    }else if(status!=='idle'&&status!==''){label=t('状态未知','Status unknown');message=t('当前状态未识别，请查看详细记录。','The current status is unrecognized. Review the detailed log.');tone='unknown';}
-   else if(data.available!==true){label=t('CLI 未就绪','CLI unavailable');message=error||t('刷新状态后重试。','Refresh status and retry.');tone='unknown';}
+   else if(data.available!==true){label=t('CLI 未就绪','CLI unavailable');message=t('刷新状态后重试。','Refresh status and retry.');tone='unknown';}
    if(restoring&&fresh&&!cleanup&&!error){label=restoreVerified?t('档案已恢复','Profile restored'):run.running?t('正在恢复档案','Restoring profile'):t('恢复结果待核对','Restore unverified');message=restoreVerified?t('官方导入已完成，档案内容已重新核对。','Official import completed and the profile contents were verified.'):run.running?t('在下方官方界面核对整份档案；默认选择 No，由你确认是否导入。','Review the full profile in the official interface below. No is selected by default; you decide whether to import.'):t('尚未核对恢复结果，请查看官方记录并刷新。','The restore result is unverified. Review the official record and refresh.');}
    if(native&&!restoring&&fresh&&run.running&&status==='terminal')message=t('按原版界面完成用户确认与动作采集；动作图示和结果均由官方 CLI 显示。','Follow the original interface for profile confirmation and capture. Pose guidance and results are displayed by the official CLI.');
    if(guided&&fresh&&!error&&tone==='running'&&run.running===true&&run.status!=='starting'&&run.status!=='solving'&&run.status!=='cancelling'){

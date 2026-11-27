@@ -94,7 +94,7 @@
   }
   const fmt=(v,d=0)=>typeof v==='number'&&Number.isFinite(v)?v.toFixed(d):'—';
   function messageText(message){
-    const value=String(message||'');if(!english())return value;
+    const raw=String(message||''),value=window.WujiLocale?.notice?.(raw)??raw;if(!english())return value;
     const known={'正在载入原生手部模型':'Loading the native hand model','正在载入原生左手模型':'Loading the native left-hand model','正在载入原生右手模型':'Loading the native right-hand model',
       '三维画面暂不可用':'3D view unavailable','画面尚未就绪':'Waiting for a rendered frame','本机服务连接中断':'Local service disconnected',
       '画面请求超时，请检查本机控制服务':'View request timed out; check the local service','画面连接中断，请检查本机控制服务':'View connection interrupted; check the local service',
@@ -114,7 +114,7 @@
     screen.dataset.viewEmpty=String(!hasImage);screen.dataset.viewStatus=viewStatus.kind;
     const message=messageText(ready?meta.message:viewStatus.message);
     byId('pose-message').textContent=message;
-    notice.hidden=ready;notice.textContent=viewStatus.kind==='unavailable'?text('画面暂不可用','View unavailable')+(message?' · '+message:''):message;
+    notice.hidden=ready;notice.textContent=message||(!ready?text('等待手部画面','Waiting for the hand view'):'');
     byId('render-rate').textContent=ready?(english()?`MuJoCo rendering ${fmt(meta.render_hz,1)} fps`:`MuJoCo 渲染 ${fmt(meta.render_hz,1)} 帧/秒`):text('画面刷新 —','Rendering —');
     const source=meta?.mode||lastImageMode,constrained=source==='glove_constrained'||source==='glove_constrained_unavailable',glove=constrained||source==='glove_preview'||source==='glove_live';
     byId('pose-frame').title=constrained?text('显示姿态经过官方模型的几何约束；SDK 原始目标与实机指令未修改，不代表实物避碰。','The displayed pose uses geometry constraints from the official model. Original SDK targets and hardware commands are unchanged; this does not establish collision avoidance on hardware.') : '';

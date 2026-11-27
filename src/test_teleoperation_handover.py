@@ -188,7 +188,11 @@ class TeleoperationTests(unittest.TestCase):
                         return_value=(hand,route,{'id':'hand2_right'})):
                     paired_hand_worker('','HAND',{'id':'hand2_left','generation':'hand2'},queue.Queue(),events,Mock())
                 values=list(events.queue)
-                self.assertEqual(values[-1],{'type':'hand_session_closed','cleanup_confirmed':not fail})
+                expected={'type':'hand_session_closed','cleanup_confirmed':not fail}
+                if not fail:
+                    expected['hand_driver_cleanup']=dict(version=1,kind='hand_driver_not_created',requested_serial='HAND',
+                        profile='hand2_left',enable_attempted=False,resources_released=True)
+                self.assertEqual(values[-1],expected)
                 close.assert_called_once();route.close.assert_called_once()
 
     def test_closed_ack_is_not_trusted_if_delegated_worker_raises_afterward(self):

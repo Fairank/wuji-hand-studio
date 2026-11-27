@@ -6,6 +6,33 @@ const SN='WG_SYNTHETIC_RETRY_0271',USER='synthetic-user',CONTEXT='a'.repeat(64);
 function fixture(){const owner={mode:'teleoperation',kind:'glove',serial:SN,session:8,user_id:USER,profile:'hand2_right'},button={hidden:true,disabled:true,textContent:''},calls=[],state={connection:'disconnected',hardware:{active:false},device_profile:{id:'hand2_right'},connection_switch:{can_switch:true,expected_owner:CONTEXT},calibration:{},unconfirmed_devices:[],glove:{busy:true,connection:'receiving',glove_serial:SN,session_id:8,action_revision:2,user:{user_id:USER},profile:'hand2_right',stream:{fresh:false},hardware:{},feedback:{}}};const c={window:{WujiDeviceUse:{current:()=>owner,selected:()=>({kind:'glove',serial:SN}),snapshot:()=>({error:''}),open:async(...args)=>calls.push(JSON.parse(JSON.stringify(args)))}},state,online:true,pending:false,lease:null,$:()=>button,t:(zh,en)=>en};vm.runInNewContext(fn('renderSharedStart')+'\n'+fn('beginSharedTeleoperation')+'\nthis.render=renderSharedStart;this.begin=beginSharedTeleoperation;',c);return{c,button,calls,owner,state,render:()=>c.render(true,false)};}
 test('exact current inactive stale SDK offers explicit Retry without any render-time request',async()=>{const f=fixture();f.render();f.render();assert.equal(f.button.hidden,false);assert.equal(f.button.disabled,false);assert.equal(f.button.textContent,'Retry teleoperation');assert.equal(f.calls.length,0);f.c.begin({detail:1});await Promise.resolve();assert.equal(f.calls.length,1);const [purpose,target,options]=f.calls[0];assert.equal(purpose,'teleoperation');assert.equal(target.serial,SN);assert.equal(target.user_id,USER);assert.equal(target.profile,'hand2_right');assert.equal(options.navigate,false);assert.equal(options.retryOwner.session,8);assert.equal(options.expectedContext,CONTEXT);});
 test('fresh SDK and any follow/disable uncertainty keep duplicate Start unavailable',()=>{for(const mutate of [f=>f.state.glove.stream.fresh=true,f=>f.state.glove.follow_pending=true,f=>f.state.glove.follow_unconfirmed=true,f=>f.c.lease='active-lease',f=>f.state.glove.hardware={active:true},f=>f.state.glove.hardware={active:null},f=>f.state.glove.hardware={active:false,stop_confirmed:false},f=>f.state.connection_switch.can_switch=false,f=>f.state.unconfirmed_devices=[{device_id:'unknown'}]]){const f=fixture();mutate(f);f.render();assert.equal(f.button.hidden,true);f.c.begin({detail:1});assert.equal(f.calls.length,0);}});
+test('backend-verified readonly hand can retry a stale glove using the same exact pair',async()=>{
+  const f=fixture(),hand='WH_SYNTHETIC_READONLY',g=f.state.glove;
+  g.hardware={active:false,stop_confirmed:false,enable_attempted:false};
+  g.feedback={device_id:hand,identified_device:{serial:hand,source:'sdk_identity',profile:g.profile}};
+  g.feedback_release_allowed=true;
+  f.render();assert.equal(f.button.hidden,false);assert.equal(f.calls.length,0);
+  f.c.begin({detail:1});await Promise.resolve();assert.equal(f.calls[0][1].hand_serial,hand);
+  g.feedback.identified_device.serial='WH_OTHER';f.render();assert.equal(f.button.hidden,true);
+});
+test('physical pairing can select canonical fresh inventory without a separate glove scan',()=>{
+  const now=Date.now()/1000;
+  const valid={kind:'hand',generation:'hand2',side:'right',stale:false,selectable:true,expires_at:now+20};
+  const inventory={devices:[
+    {...valid,sn:'WH_SHARED'},{...valid,sn:'WH_CONFLICT'}, {...valid,sn:'WH_OLD',stale:true},
+    {...valid,sn:'WH_IN_USE',in_use:true},{...valid,sn:'WH_FOREIGN',workspace_owners:['elsewhere']},
+    {...valid,sn:'WH_EXPIRED',expires_at:now-1}
+  ],conflicts:[{serial:'WH_CONFLICT'}]};
+  const c={window:{WujiDeviceInventory:{snapshot:()=>inventory}},array:x=>Array.isArray(x)?x:[],serial:x=>x?.serial||x?.sn||''};
+  vm.runInNewContext(fn('targetHands')+'\nthis.hands=targetHands;',c);
+  const snapshot={feedback:{},hands:[]};
+  assert.deepEqual(JSON.parse(JSON.stringify(c.hands(snapshot))),[{serial:'WH_SHARED',generation:'hand2',side_hint:'right'}]);
+  snapshot.hands=[{serial:'WH_CONFLICT',generation:'hand2',side_hint:'right'},{serial:'WH_LOCAL',generation:'hand2',side_hint:'left'}];
+  snapshot.hands_at=now;
+  assert.deepEqual(Array.from(c.hands(snapshot),row=>row.serial),['WH_SHARED','WH_LOCAL']);
+  snapshot.hands_at=now-60;
+  assert.deepEqual(Array.from(c.hands(snapshot),row=>row.serial),['WH_SHARED']);
+});
 test('retry presentation requires the exact observed SDK serial/session/wearer/profile and valid owner context',()=>{for(const mutate of [f=>f.owner.session=9,f=>f.owner.user_id='other',f=>f.owner.profile='hand2_left',f=>f.owner.serial='WG_OTHER',f=>f.state.device_profile.id='hand2_left',f=>f.state.connection_switch.expected_owner='unknown']){const f=fixture();mutate(f);f.render();assert.equal(f.button.hidden,true);}});
 test('an owner replacement after render cannot use the old retry button',()=>{const f=fixture();f.render();f.owner.session=9;f.state.glove.session_id=9;f.c.begin({detail:1});assert.equal(f.calls.length,0);});
 

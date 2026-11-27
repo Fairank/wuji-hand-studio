@@ -65,6 +65,7 @@ class OfficialVisualization:
     def __init__(self,folder=None,idle_check=None,scan_check=None):
         self.folder=Path(folder or root_folder());self.idle_check=idle_check or (lambda:None)
         self.scan_check=scan_check
+        self.before_discovery=None
         self.supplement_scan=None
         self.lock=threading.RLock();self.process=None;self.thread=None;self.token=None;self.config=None
         self.native_job=None;self.native_stop=threading.Event();self.native_cancel_sent=False
@@ -73,11 +74,32 @@ class OfficialVisualization:
         self.scan_finished=threading.Event();self.scan_finished.set()
         self.scan_token=None;self.scan_job=None;self.scan_needs_close=False
         self.observation_config=None
+        self.observation_network=self.scan_network=None
         self.scan_pauses=0
-        self.state=dict(supported=sys.platform=='win32' or sys.platform.startswith('linux'),busy=False,active=False,phase='idle',device=None,devices=[],scanning=False,scan_cleanup_required=False,scanned_at=None,scan_completed_at=None,sdk_devices=[],sdk_scanned_at=None,sdk_error=None,viewer_url=None,cli_version=None,error=None,logs=[],started_at=None,stream_freshness='not_reported',zero_on_start=False)
+        self.state=dict(supported=sys.platform=='win32' or sys.platform.startswith('linux'),busy=False,active=False,phase='idle',device=None,devices=[],scanning=False,scan_cleanup_required=False,scanned_at=None,scan_completed_at=None,network_revision=None,sdk_devices=[],sdk_scanned_at=None,sdk_error=None,viewer_url=None,cli_version=None,error=None,logs=[],started_at=None,stream_freshness='not_reported',zero_on_start=False)
+        self.state['network_notice']=None
+
+    def _network_revision(self,config,*,refresh=False):
+        if not config or not native_network(config):return None
+        from windows_ethernet import TOPOLOGY
+        return TOPOLOGY.read(refresh=refresh)
+
+    def _retire_directory(self):
+        self.state.update(devices=[],scanned_at=None,sdk_devices=[],sdk_scanned_at=None,
+                          sdk_error=None,scan_completed_at=None,network_notice=None)
+        self.observation_config=self.observation_network=None
+
+    def _recheck_observations(self,*,refresh=False):
+        if self.observation_network is not None:
+            network=self._network_revision(self.observation_config,refresh=refresh)
+            if network!=self.observation_network:
+                self._retire_directory()
+                self.state['network_revision']=network
 
     def snapshot(self,theme=None):
-        with self.lock:row=copy.deepcopy(self.state)
+        with self.lock:
+            self._recheck_observations()
+            row=copy.deepcopy(self.state)
         lease=reservation(self.folder)
         blocked=bool(lease) and lease.get('token')!=self.token
         scanned=row.get('scanned_at')
@@ -117,10 +139,10 @@ class OfficialVisualization:
             if closed:self.transport=None;self.state['loopback_forwarding']=False
             return closed
 
-    def scan(self,*,supplement=False):
+    def scan(self,*,supplement=False,retry_network=False):
         token=self._begin_scan()
         try:
-            args=(token,True,True) if supplement else (token,True)
+            args=(token,True,True,retry_network) if retry_network else (token,True,True) if supplement else (token,True)
             threading.Thread(target=self._collect_scan,args=args,name='Official CLI device discovery',daemon=True).start()
         except Exception as error:
             self._set(devices=[],scanned_at=None,sdk_devices=[],sdk_scanned_at=None,sdk_error=None,error=str(error)[:700])
@@ -162,20 +184,21 @@ class OfficialVisualization:
             (self.scan_check or self.idle_check)()
             from bridge_config import load_config
             config=load_config()
+            network=self._network_revision(config,refresh=True)
             token=reserve('scan',self.folder)
             with self.lock:
-                if self.observation_config!=config:
-                    self.state.update(devices=[],scanned_at=None,sdk_devices=[],sdk_scanned_at=None,
-                                      sdk_error=None,scan_completed_at=None)
-                    self.observation_config=None
+                if self.observation_config!=config or self.observation_network!=network:
+                    self._retire_directory()
                 self.scan_token=token;self.scan_job=None;self.scan_needs_close=False
+                self.scan_network=network
                 # Keep the last complete observations while refreshing. Their
                 # original timestamps still expire; a refresh never renews them.
-                self.state.update(busy=True,scanning=True,scan_cleanup_required=False,error=None,phase='idle')
+                self.state.update(busy=True,scanning=True,scan_cleanup_required=False,error=None,phase='idle',
+                                  network_revision=network)
                 self.scan_cancel.clear();self.scan_done.clear();self.scan_finished=threading.Event()
         return token
 
-    def _finish_scan(self,token,*,observations=None,config=None):
+    def _finish_scan(self,token,*,observations=None,config=None,network_changed=False):
         """Publish idle only after the exact discovery marker was released."""
         try:
             with gate(self.folder):
@@ -187,12 +210,20 @@ class OfficialVisualization:
                 release(token,self.folder)
                 if reservation(self.folder):raise ValueError('Device discovery ownership release is unconfirmed')
                 with self.lock:
+                    if observations is not None and self._network_revision(config,refresh=True)!=self.scan_network:
+                        observations=None;network_changed=True
+                    if network_changed:
+                        self._retire_directory()
+                        self.state['network_revision']=self._network_revision(config)
                     if observations is not None:
                         self.state.update(copy.deepcopy(observations))
                         self.observation_config=copy.deepcopy(config)
+                        self.observation_network=self.scan_network
                     self.scan_finished.set()
                     self.scan_token=None;self.scan_job=None;self.scan_needs_close=False
-                    self.state.update(busy=False,scanning=False,scan_cleanup_required=False,scan_completed_at=time.time())
+                    self.scan_network=None
+                    self.state.update(busy=False,scanning=False,scan_cleanup_required=False,
+                                      scan_completed_at=None if network_changed else time.time())
                 self.scan_done.set()
             return True
         except Exception as error:
@@ -203,30 +234,50 @@ class OfficialVisualization:
                         error='设备查找退出未确认，请重试结束查找 / Device discovery cleanup unconfirmed; retry Stop: '+str(error)[:400])
             return False
 
-    def _collect_scan(self,token,cancellable=False,supplement=False):
+    def _collect_scan(self,token,cancellable=False,supplement=False,retry_network=False):
         clean=True;devices=None;finished=False;publication=None;config=None
-        sdk_rows=[];sdk_seen=None;sdk_error=None
+        network_changed=False
+        sdk_rows=[];sdk_seen=None;sdk_error=None;network_notice=None
         try:
             from bridge_config import load_config
             from calibration_cli import cli_json
             from official_device_discovery import DiscoveryDeferred,DiscoveryCleanupUnconfirmed,_sdk_rows
             config=load_config()
-            value=cli_json(config,'devices',cancelled=self.scan_cancel.is_set) if cancellable else cli_json(config,'devices')
+            with self.lock:network=self.scan_network
+            def check_network():
+                nonlocal network_changed
+                if self._network_revision(config,refresh=True)!=network:
+                    network_changed=True
+                    raise DiscoveryDeferred('Ethernet interfaces changed during discovery')
+            def cancelled():
+                nonlocal network_changed
+                if self.scan_cancel.is_set():
+                    return True
+                network_changed=self._network_revision(config)!=network
+                return network_changed
+            check_network()
+            if supplement and callable(self.before_discovery):
+                network_notice=self.before_discovery(config,cancelled,token,network,retry_network)
+                if cancelled():raise DiscoveryDeferred('Discovery changed during device network recovery')
+            value=cli_json(config,'devices',cancelled=cancelled) if cancellable else cli_json(config,'devices')
             devices=value.get('devices')
             if not isinstance(devices,list):raise ValueError('Invalid official device list')
             devices=[copy.deepcopy(x) for x in devices if isinstance(x,dict)]
             with self.lock:
                 if self.scan_token!=token or self.scan_cancel.is_set() or config!=load_config():
                     raise DiscoveryDeferred('Device discovery scope changed')
+                check_network()
                 native_seen=time.time()
                 # Each source is an independent completed observation. Publish
                 # the fresh native result before slow SDK preparation can age it.
                 self.state.update(devices=copy.deepcopy(devices),scanned_at=native_seen,
+                                  network_notice=network_notice,
                                   backend='windows_native' if native_network(config) else 'linux_controller')
                 self.observation_config=copy.deepcopy(config)
+                self.observation_network=network
             if supplement and callable(self.supplement_scan):
                 try:
-                    result=self.supplement_scan(config,self.scan_cancel.is_set,token)
+                    result=self.supplement_scan(config,cancelled,token)
                     with self.lock:
                         if self.scan_token!=token or self.scan_cancel.is_set() or config!=load_config():
                             raise DiscoveryDeferred('SDK discovery scope changed')
@@ -245,8 +296,9 @@ class OfficialVisualization:
             with self.lock:
                 if self.scan_token!=token or self.scan_cancel.is_set() or config!=load_config():
                     raise DiscoveryDeferred('Device discovery scope changed')
+                check_network()
                 publication=dict(devices=devices,scanned_at=native_seen,sdk_devices=sdk_rows,
-                                 sdk_scanned_at=sdk_seen,sdk_error=sdk_error,
+                                 sdk_scanned_at=sdk_seen,sdk_error=sdk_error,network_notice=network_notice,
                                  backend='windows_native' if native_network(config) else 'linux_controller')
         except Exception as error:
             from official_device_discovery import DiscoveryDeferred,DiscoveryCleanupUnconfirmed
@@ -259,22 +311,25 @@ class OfficialVisualization:
                 if self.scan_token==token:
                     cancelled=(isinstance(error,DiscoveryDeferred) or isinstance(error,DiscoveryCleanupUnconfirmed)
                                and self.scan_cancel.is_set())
-                    preserve=(cancelled and self.scan_pauses>0
+                    preserve=(cancelled and not network_changed and self.scan_pauses>0
                               and config is not None and self.observation_config==config)
                     if preserve:
                         try:preserve=config==load_config()
                         except Exception:preserve=False
                     if not preserve:
                         self.state.update(devices=[],scanned_at=None,sdk_devices=[],sdk_scanned_at=None,sdk_error=None)
-                        self.observation_config=None
+                        self.observation_config=self.observation_network=None
                     self.state['error']=None if isinstance(error,DiscoveryDeferred) else str(error)[:700]
             devices=None
         finally:
-            if clean:finished=self._finish_scan(token,observations=publication,config=config)
+            if clean:finished=self._finish_scan(token,observations=publication,config=config,network_changed=network_changed)
             else:
                 with self.lock:
                     if self.scan_token==token:self.scan_finished.set()
-        return devices if finished else None
+        if finished and publication is not None:
+            with self.lock:
+                if self.state.get('scanned_at')==publication['scanned_at']:return devices
+        return None
 
     def _stop_scan(self,*,expected_scan=None,cleanup_timeout=2):
         """Retry only this instance's original finite discovery read."""
@@ -335,6 +390,7 @@ class OfficialVisualization:
                 self.idle_check()
                 with self.lock:
                     if self.process or self.state['busy'] or self.state['active'] or self.thread and self.thread.is_alive():raise ValueError('Official visualization already active')
+                    self._recheck_observations(refresh=True)
                     scanned=self.state.get('scanned_at')
                     if (type(scanned) not in (int,float) or not 0<=time.time()-scanned<=30 or self.state.get('error')):
                         raise ValueError('请重新查找设备后再打开画面 / Find devices again before starting the Viewer')

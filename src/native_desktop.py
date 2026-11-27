@@ -13,6 +13,7 @@ import time
 from urllib.parse import urlsplit
 from runtime_paths import DATA, RESOURCE, EDITION
 from desktop_lifecycle import needs_confirmation, close_sessions, close_block_reason
+from teleoperation_terminal import Terminal
 
 class Instance:
     def __init__(self,name,title):
@@ -48,6 +49,7 @@ class NativeDesktop:
         self.material=dict(mode='opaque',external_backdrop=False,refraction=False,desktop_capture=False)
         self.material_lifecycle=None
         self.task_windows=None
+        self.teleoperation_terminal=Terminal()
 
     def start_service(self):
         from console_server import ConsoleHTTPServer,Handler,Controller
@@ -98,13 +100,16 @@ class NativeDesktop:
         if not code or int(code)<=32:raise RuntimeError('System component setup was cancelled or unavailable')
         return dict(requested=True,restart_may_be_required=True,no_automatic_restart=True)
 
-    def network_status(self,address=''):
-        from device_network import snapshot
+    def network_status(self,address='',target='hand'):
+        from device_network import snapshot,GLOVE_ENDPOINTS
         selected=self.server.controller.snapshot()['device_profile']
-        if selected['generation']!='hand2':return dict(code='usb_device',can_configure=False)
-        return snapshot(address,selected['side'])
+        if target=='hand' and selected['generation']!='hand2':
+            result=dict(code='usb_device',can_configure=False)
+        else:
+            result=snapshot(address,selected['side'],target=target)
+        return {**result,'network_targets':['hand',*GLOVE_ENDPOINTS]}
 
-    def configure_device_network(self,adapter_id,address=''):
+    def configure_device_network(self,adapter_id,address='',target='hand'):
         from device_network import configure
         from device_termination import unconfirmed
         from connection_switch import unsettled
@@ -115,8 +120,10 @@ class NativeDesktop:
                 or any(state.get('official_studio',{}).get(k) for k in ('active','busy','reserved'))
                 or state.get('calibration',{}).get('running') or state.get('calibration',{}).get('cleanup_required')):
             raise ValueError('Disconnect the device before network setup / 先断开设备再配置网络')
-        if state['device_profile']['generation']!='hand2':raise ValueError('Hand 1 uses USB')
-        return configure(adapter_id,address,state['device_profile']['side'])
+        if target=='hand':
+            if state['device_profile']['generation']!='hand2':raise ValueError('Hand 1 uses USB')
+            return configure(adapter_id,address,state['device_profile']['side'])
+        return configure(adapter_id,address,state['device_profile']['side'],target=target)
 
     def set_window_material(self,enabled):
         if type(enabled) is not bool:raise ValueError('Expected boolean material preference')
@@ -222,6 +229,18 @@ class NativeDesktop:
 
     def open_data_folder(self):
         os.startfile(str(DATA));return dict(ok=True)
+
+    def open_teleoperation_terminal(self):
+        if not self.server or self.closing or self.allow_close:
+            return dict(ok=False)
+        try:
+            return self.teleoperation_terminal.open(self.origin)
+        except OSError:
+            logging.exception('Could not open the system teleoperation terminal')
+            return dict(ok=False)
+
+    def teleoperation_terminal_snapshot(self,key):
+        return self.teleoperation_terminal.read(key,self.server.controller.glove.snapshot,self.language)
 
     def select_key_file(self):
         import webview
@@ -384,6 +403,7 @@ class NativeDesktop:
         self.window.events.loaded+=lambda:self.secure_window(self.window)
         self.window.events.resized+=self.save_bounds
         def closed():
+            self.teleoperation_terminal.close()
             self.task_windows.shutdown()
             if self.viewer is not None:self.viewer.destroy()
             self.server.shutdown()
@@ -395,6 +415,7 @@ class NativeDesktop:
             webview.start(gui='edgechromium',private_mode=False,storage_path=str(DATA/'webview'),
                           icon=str(RESOURCE/'web/favicon.ico'))
         finally:
+            self.teleoperation_terminal.close()
             self.server.shutdown();self.server.server_close()
 
 class DesktopAPI:
@@ -402,6 +423,8 @@ class DesktopAPI:
     def __init__(self,host):self._host=host
     def info(self):return self._host.info()
     def open_viewer(self):return self._host.open_viewer()
+    def open_teleoperation_terminal(self):
+        return self._host.open_teleoperation_terminal() if sys.platform=='win32' else dict(ok=False)
     def open_task_window(self,task_id):return self._host.open_task_window(task_id)
     def close_task_window(self,task_id):return self._host.close_task_window(task_id)
     def task_window_state(self):return self._host.task_window_state()
@@ -410,8 +433,8 @@ class DesktopAPI:
     def set_language(self,lang):return self._host.set_language(lang)
     def set_window_material(self,enabled):return self._host.set_window_material(enabled)
     def install_runtime_components(self):return self._host.install_runtime_components()
-    def network_status(self,address=''):return self._host.network_status(address)
-    def configure_device_network(self,adapter_id,address=''):return self._host.configure_device_network(adapter_id,address)
+    def network_status(self,address='',target='hand'):return self._host.network_status(address,target)
+    def configure_device_network(self,adapter_id,address='',target='hand'):return self._host.configure_device_network(adapter_id,address,target)
     def import_model_dialog(self):return self._host.import_model_dialog()
     def request_close(self):return self._host.request_close()
     def stop_and_close(self):return self._host.stop_and_close()
